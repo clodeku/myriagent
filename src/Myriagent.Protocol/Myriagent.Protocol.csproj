@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    桌面與伺服器（MyriagentHub）共用的模型與純函式規則（設計 docs/plans/2026-10-10-multi-device-sync.md 2.5）。
+    目標框架是 net10.0（不是 net10.0-windows）：WinForms、WebView2、System.Drawing 在這裡一律用不到，
+    Win32 互通與啟動程序的程式（AgentProcess、CliRunner）也不放這裡——伺服器只參考這個專案。
+    檔案由 src/Myriagent 以 git mv 搬入，命名空間維持原樣（Myriagent.Agents、Myriagent.Hub、Myriagent.UI）。
+    AgentHubRules 原本經 ClaudeStreamRules.FirstLine 牽進整串啟動 CLI 的程式：一行摘要的規則改放 Agents/TextRules.cs，
+    ClaudeStreamRules.FirstLine 轉呼叫它。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Myriagent</RootNamespace>
+    <AssemblyName>Myriagent.Protocol</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Markdig" Version="1.3.2" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 型別都是 internal：只開放給桌面、伺服器、兩者的測試、無頭的假裝置（tools/fake-device）、
+         模擬被攻破的伺服器（tools/fake-server，WP4.4）、app 自我更新的端到端（tools/update-e2e）
+         與桌面版的發佈工具（tools/release-tool 的 myriagent-release）；後兩者與 app 用同一份 manifest、簽章與版本規則 -->
+    <InternalsVisibleTo Include="Myriagent" />
+    <InternalsVisibleTo Include="Myriagent.Tests" />
+    <InternalsVisibleTo Include="MyriagentHub" />
+    <InternalsVisibleTo Include="MyriagentHub.Tests" />
+    <InternalsVisibleTo Include="FakeDevice" />
+    <InternalsVisibleTo Include="FakeServer" />
+    <InternalsVisibleTo Include="update-e2e" />
+    <InternalsVisibleTo Include="myriagent-release" />
+  </ItemGroup>
+
+</Project>

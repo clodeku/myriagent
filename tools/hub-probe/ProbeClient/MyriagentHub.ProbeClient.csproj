@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Myriagent Hub 的實驗用戶端（WP2.5，設計 11.3；移植研究原型 MyriagentHub.ProbeClient）。
+    tls、conc、load（WP4.9 步 9，S9）對正式的 MyriagentHub 就能跑；原型的模式要原型的測試端點（說明見 ../README.md）。
+    不進 Myriagent.slnx：dotnet build tools/hub-probe -c Release
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MyriagentHub.ProbeClient</RootNamespace>
+    <AssemblyName>MyriagentHub.ProbeClient</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 與桌面 app 同一個 .NET SignalR 用戶端與版本（10.0.12 有 CVE-2026-70159，設計:2739） -->
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 正式站守門與時間標記和 fake-device 共用同一份（WP4.9 計畫 D18、D8；只用 BCL） -->
+    <Compile Include="..\..\fake-device\Runtime\LocalHubTargetRules.cs" Link="Shared\LocalHubTargetRules.cs" />
+    <Compile Include="..\..\fake-device\Runtime\StampRules.cs" Link="Shared\StampRules.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MyriagentHub.ProbeClient.Tests" />
+  </ItemGroup>
+
+</Project>

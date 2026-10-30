@@ -1,0 +1,28 @@
+# 建置輸出
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+TestResults/
+
+# 探針與量測的輸出（可由 tools/ 重新產生）
+tools/ui-probe/node_modules/
+tools/ui-probe/out/
+tools/ui-probe/out-remote/
+tools/ui-probe/out-conv/
+tools/hub-e2e/node_modules/
+tools/**/out/
+*.log
+.playwright-mcp/
+# Python 的位元組碼（tools/ 的 unittest 匯入量測腳本時產生）
+__pycache__/
+
+# 工具建立的 git worktree
+.claude/worktrees/
+
+# 桌面發佈與 Hub 更新腳本的輸出（tools/release/New-DesktopRelease.ps1）
+/out/

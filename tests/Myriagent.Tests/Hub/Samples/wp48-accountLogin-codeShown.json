@@ -1,0 +1,12 @@
+{
+  "type": "accountLogin",
+  "accountId": "acc-codex",
+  "message": "請在手機或其他電腦打開 https://auth.openai.com/codex/device，輸入驗證碼 QWER-TY12Z（15 分鐘內有效）",
+  "done": false,
+  "success": null,
+  "deviceCode": {
+    "userCode": "QWER-TY12Z",
+    "verificationUrl": "https://auth.openai.com/codex/device",
+    "expiresAt": 1792487700000
+  }
+}

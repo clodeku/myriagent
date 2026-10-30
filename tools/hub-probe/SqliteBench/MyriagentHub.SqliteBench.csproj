@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    SQLite 負載量測（WP2.5，設計 11.4；移植研究原型 MyriagentHub.SqliteBench）：固定亂數種子 42，結果印成 JSON 行。
+    不進 Myriagent.slnx：dotnet build tools/hub-probe -c Release（說明見 ../README.md）
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MyriagentHub.SqliteBench</RootNamespace>
+    <AssemblyName>MyriagentHub.SqliteBench</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 與 src/MyriagentHub（EF Core Sqlite 10.0.12）同一版的 SQLite 用戶端 -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      B6（WP4.2 步 15）：合成的 sync.db 用伺服器真正的結構（v3）建，備份連線的命令逾時照伺服器的規則算；
+      只連結這兩個純檔（不參考 MyriagentHub 專案）。SyncSchema 用到的 Protocol 型別在 ServerInstanceShim.cs 補上
+    -->
+    <Compile Include="..\..\..\src\MyriagentHub\Data\SyncSchema.cs" Link="Linked\SyncSchema.cs" />
+    <Compile Include="..\..\..\src\MyriagentHub\Ops\BackupTimeoutRules.cs" Link="Linked\BackupTimeoutRules.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 資料根守門的測試（ProbeClient.Tests 的 SqliteBenchGuardTests 直接呼叫 Program.Main） -->
+    <InternalsVisibleTo Include="MyriagentHub.ProbeClient.Tests" />
+  </ItemGroup>
+
+</Project>

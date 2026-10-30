@@ -1,0 +1,23 @@
+<Project>
+  <!-- WebView2 套件會連 WPF 版控制項一起參考（本方案只用 WinForms），造成 WindowsBase 版本衝突警告 MSB3277；
+       主程式與測試專案都在建置前移除 WPF 參考 -->
+  <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+
+  <!-- 版號前面的日期時間（品牌名旁的版號、設定頁；CommitTimeRules）：設了 MyriagentStampCommitTime 的專案（桌面、MyriagentHub）建置時
+       以 git 讀 HEAD 的提交時間（committer date，ISO 8601）寫進組件中繼資料 MyriagentCommitTime；也可用 -p:MyriagentCommitTime=… 指定。
+       沒有 git 或不是 repo（git archive 的基準建置）時不寫，介面就不顯示時間。同一個提交的時間固定，換提交才重新產生 AssemblyInfo。
+       Exec 經批次檔執行：格式的 % 要寫兩次（%25%25 → %%） -->
+  <Target Name="MyriagentStampCommitTime" BeforeTargets="GetAssemblyAttributes" Condition="'$(MyriagentStampCommitTime)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <Exec Condition="'$(MyriagentCommitTime)' == ''" Command="git -C &quot;$(MSBuildProjectDirectory)&quot; log -1 --format=%25%25cI HEAD 2&gt;nul"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" EchoOff="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="MyriagentCommitTime" />
+    </Exec>
+    <ItemGroup Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(MyriagentCommitTime)', '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(Z|[+-]\d\d:\d\d)$'))">
+      <AssemblyMetadata Include="MyriagentCommitTime" Value="$(MyriagentCommitTime)" />
+    </ItemGroup>
+  </Target>
+</Project>

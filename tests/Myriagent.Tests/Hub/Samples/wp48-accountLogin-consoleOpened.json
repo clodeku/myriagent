@@ -1,0 +1,7 @@
+{
+  "type": "accountLogin",
+  "accountId": "acc-claude2",
+  "message": "已在那台電腦開啟 Claude 登入視窗，要有人在那台電腦前完成登入",
+  "done": false,
+  "success": null
+}

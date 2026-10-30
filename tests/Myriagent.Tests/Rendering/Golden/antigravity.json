@@ -1,0 +1,226 @@
+{
+  "corpus": "antigravity",
+  "description": "Antigravity（agy stream-json）對話：工具卡照實錄經 AntigravityStreamParser 與中樞建的（被自動拒絕的指令、讀檔、執行、帶紅綠差異的寫檔、搜尋、只報 DONE 的被拒指令、程序結束時還在跑的指令），檔案工具的細節不重複列路徑；被拒的操作提示可改用「自動（沙箱）」或「完全自動」",
+  "workingDirectory": "C:\\w",
+  "items": [
+    {
+      "id": "antigravity-01-user",
+      "kind": "User",
+      "status": "Done",
+      "html": "列出資料夾裡的檔案",
+      "time": 1784077260000,
+      "seq": 1
+    },
+    {
+      "id": "antigravity-02-command-denied",
+      "kind": "Tool",
+      "status": "Failed",
+      "html": "",
+      "time": 1784077320000,
+      "seq": 2,
+      "toolKind": "bash",
+      "toolName": "執行指令",
+      "title": "Get-ChildItem",
+      "detail": "Get-ChildItem",
+      "output": "permission check failed for command \"Get-ChildItem\": user denied permission to run command:\nGet-ChildItem\nDo not attempt to circumvent this denial.",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "antigravity-03-notice-denied",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>agy 自動拒絕了需要核准的操作（RunCommand）：Antigravity 在這裡無法於對話中詢問。要讓代理執行指令，請把權限模式改成「自動（沙箱）」或「完全自動」。</p>\n",
+      "time": 1784077380000,
+      "seq": 3
+    },
+    {
+      "id": "antigravity-04-user-2",
+      "kind": "User",
+      "status": "Done",
+      "html": "第 2 輪",
+      "time": 1784077440000,
+      "seq": 4
+    },
+    {
+      "id": "antigravity-05-view-file",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077500000,
+      "seq": 5,
+      "toolKind": "read",
+      "toolName": "讀取檔案",
+      "title": "C:\\w\\hello.txt",
+      "detail": null,
+      "output": "2 lines, 17 bytes",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\w\\hello.txt"
+    },
+    {
+      "id": "antigravity-06-command",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077560000,
+      "seq": 6,
+      "toolKind": "bash",
+      "toolName": "執行指令",
+      "title": "Write-Output agy-probe",
+      "detail": "Write-Output agy-probe",
+      "output": "agy-probe\n",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "antigravity-07-write-to-file",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077620000,
+      "seq": 7,
+      "toolKind": "write",
+      "toolName": "寫入檔案",
+      "title": "C:\\w\\a.txt",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\w\\a.txt",
+      "diff": [
+        {
+          "t": "add",
+          "s": "hello"
+        }
+      ],
+      "diffStats": {
+        "add": 1,
+        "del": 0
+      }
+    },
+    {
+      "id": "antigravity-08-grep-search",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077680000,
+      "seq": 8,
+      "toolKind": "search",
+      "toolName": "搜尋內容",
+      "title": "TODO",
+      "detail": "{\r\n  \"Query\": \"TODO\",\r\n  \"SearchPath\": \"C:\\\\w\"\r\n}",
+      "output": "Found 2 results",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "antigravity-09-command-denied-silently",
+      "kind": "Tool",
+      "status": "Failed",
+      "html": "",
+      "time": 1784077740000,
+      "seq": 9,
+      "toolKind": "bash",
+      "toolName": "執行指令",
+      "title": "npm test",
+      "detail": "npm test",
+      "output": "agy 自動拒絕了這個指令（需要核准，但在這裡無法詢問），沒有執行",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "antigravity-10-edit-file-v146",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077800000,
+      "seq": 10,
+      "toolKind": "edit",
+      "toolName": "修改檔案",
+      "title": "C:/w/b.txt",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:/w/b.txt"
+    },
+    {
+      "id": "antigravity-11-write-file-v146",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077860000,
+      "seq": 11,
+      "toolKind": "write",
+      "toolName": "寫入檔案",
+      "title": "C:\\w\\c.txt",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\w\\c.txt"
+    },
+    {
+      "id": "antigravity-12-assistant",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "<p>Hello from probe</p>\n",
+      "time": 1784077920000,
+      "seq": 12
+    },
+    {
+      "id": "antigravity-13-user-3",
+      "kind": "User",
+      "status": "Done",
+      "html": "第 3 輪",
+      "time": 1784077980000,
+      "seq": 13
+    },
+    {
+      "id": "antigravity-14-command-aborted",
+      "kind": "Tool",
+      "status": "Cancelled",
+      "html": "",
+      "time": 1784078040000,
+      "seq": 14,
+      "toolKind": "bash",
+      "toolName": "執行指令",
+      "title": "npm run dev",
+      "detail": "npm run dev",
+      "output": "agy 程序已結束，這個工具被中斷，結果未知",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "antigravity-15-error-exit",
+      "kind": "Error",
+      "status": "Done",
+      "html": "<p>agy 程序意外結束（結束碼 1）</p>\n",
+      "time": 1784078100000,
+      "seq": 15
+    },
+    {
+      "id": "antigravity-16-notice-conversation-lost",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>agy 找不到這個對話先前的紀錄，已改開新對話並附上前文節錄</p>\n",
+      "time": 1784078160000,
+      "seq": 16
+    },
+    {
+      "id": "antigravity-17-error-result",
+      "kind": "Error",
+      "status": "Done",
+      "html": "<p>agy 回報這一輪失敗（ERROR）</p>\n",
+      "time": 1784078220000,
+      "seq": 17
+    }
+  ],
+  "whitelist": []
+}

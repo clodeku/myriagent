@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    app 自我更新的端到端（設計第 11 節）：以這次產生的測試金鑰建出三個版本，安裝到暫存的受管理位置，
+    從本機資料夾來源依序跑竄改、錯誤金鑰、成功換版、降版、新版閃退回滾。說明見 README.md。
+    不進 Myriagent.slnx：dotnet build tools/update-e2e -c Release
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MyriagentTools.UpdateE2e</RootNamespace>
+    <AssemblyName>update-e2e</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- Job Object（共用 acme-e2e 的 ChildProcessJob）用 LibraryImport -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- manifest、簽章、版本規則與 app 同一份（Protocol 的 InternalsVisibleTo 有 update-e2e） -->
+    <ProjectReference Include="..\..\src\Myriagent.Protocol\Myriagent.Protocol.csproj" />
+    <!-- 子程序隨本程式結束、逐步重寫的結果檔：與 acme-e2e 共用同一份原始碼 -->
+    <Compile Include="..\acme-e2e\ChildProcessJob.cs" Link="Shared\ChildProcessJob.cs" />
+    <Compile Include="..\acme-e2e\ResultLog.cs" Link="Shared\ResultLog.cs" />
+  </ItemGroup>
+
+</Project>

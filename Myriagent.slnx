@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Myriagent.Protocol/Myriagent.Protocol.csproj" />
+    <Project Path="src/Myriagent/Myriagent.csproj" />
+    <Project Path="src/MyriagentHub/MyriagentHub.csproj" />
+    <Project Path="src/MyriagentRemote/MyriagentRemote.csproj" />
+    <Project Path="src/MyriagentSchedule/MyriagentSchedule.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Myriagent.Tests/Myriagent.Tests.csproj" />
+    <Project Path="tests/MyriagentHub.Tests/MyriagentHub.Tests.csproj" />
+  </Folder>
+</Solution>

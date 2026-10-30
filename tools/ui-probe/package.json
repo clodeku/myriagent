@@ -1,0 +1,12 @@
+{
+  "name": "myriagent-ui-probe",
+  "private": true,
+  "description": "Clode Myriagent 介面探針：以 Playwright 模擬 WebView2 宿主，截圖並檢查網頁↔宿主協定（瀏覽器用本機 Chrome，不必下載）",
+  "type": "module",
+  "scripts": {
+    "probe": "node probe.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.64.0"
+  }
+}

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    myriagent-remote：對話裡的代理在其他配對的電腦執行主控台指令（docs/sync-protocol.md 14.11）。只經本機具名管道和這台的 Clode Myriagent 說話
+    （管道名稱與權杖在對話 CLI 的環境變數），不碰同步、不連網路。桌面專案以專案參考把它帶進建置與發佈的輸出（和 Myriagent.exe 同一個資料夾）
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MyriagentRemote</RootNamespace>
+    <AssemblyName>myriagent-remote</AssemblyName>
+    <Product>Clode Myriagent</Product>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Myriagent.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <RootNamespace>MyriagentHub.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="FluentAssertions" Version="7.2.2" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.12" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.13" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.NewtonsoftJson" Version="10.0.13" />
+    <!-- EF 設計階段工具（dotnet ef migrations add）以本測試專案為啟動專案：設計套件不會進伺服器的發佈內容（見 src/MyriagentHub/README.md） -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MyriagentHub\MyriagentHub.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 桌面的項目渲染語料（只讀連結，WP4.3 擁有；WP4.2 計畫 F47）：伺服器的淨化與渲染以它比對桌面的輸出 -->
+    <Compile Include="..\Myriagent.Tests\Rendering\ItemRendererCorpus.cs" Link="Rendering\Desktop\ItemRendererCorpus.cs" />
+    <!-- 伺服器渲染的黃金檔（HubItemRendererTests 從輸出資料夾讀取、逐位元組比對） -->
+    <None Update="Rendering\Golden\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="FluentAssertions" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="ProbeClient/MyriagentHub.ProbeClient.csproj" />
+  <Project Path="ProbeClient.Tests/ProbeClient.Tests.csproj" />
+  <Project Path="SqliteBench/MyriagentHub.SqliteBench.csproj" />
+</Solution>

@@ -1,0 +1,350 @@
+{
+  "corpus": "text",
+  "description": "文字類項目（使用者〔含從 claude.ai 或 Claude App 送來的〕、思考、回覆、待辦、提示、錯誤）與 Markdown 的各種寫法：表格、程式碼、本機與外部連結、危險連結、中文標點的自動連結",
+  "workingDirectory": "C:\\repo\\myriagent",
+  "items": [
+    {
+      "id": "text-01-user-plain",
+      "kind": "User",
+      "status": "Done",
+      "html": "帳戶沒有登入時，按「登入」之後畫面就卡住不動。幫我找出原因、修好，並補上單元測試。附上截圖、錄影和記錄檔。",
+      "time": 1784077260000,
+      "seq": 1
+    },
+    {
+      "id": "text-02-user-html-chars",
+      "kind": "User",
+      "status": "Done",
+      "html": "a &lt; b &amp;&amp; c &gt; d，&quot;雙引號&quot; 與 &#39;single&#39;<br>第二行（CRLF）<br>第三行 &lt;script&gt;alert(1)&lt;/script&gt; **不是粗體** &amp;amp; [不是連結](https://example.com)",
+      "time": 1784077320000,
+      "seq": 2
+    },
+    {
+      "id": "text-03-user-whitespace",
+      "kind": "User",
+      "status": "Done",
+      "html": "   ",
+      "time": 1784077380000,
+      "seq": 3
+    },
+    {
+      "id": "text-04-thinking",
+      "kind": "Thinking",
+      "status": "Done",
+      "html": "<p>截圖顯示登入視窗關閉後主畫面仍是「登入中」。先看 <code>AccountManager.LoginAsync</code> 怎麼等登入結果，再看視窗關閉時有沒有通知中樞。</p>\n<p>錄影裡第二次按登入沒有反應，可能是第一次的等待還沒結束、<code>loginBusy</code> 一直是 true。</p>\n",
+      "time": 1784077440000,
+      "seq": 4
+    },
+    {
+      "id": "text-05-thinking-running",
+      "kind": "Thinking",
+      "status": "Running",
+      "html": "<p>使用者要我</p>\n",
+      "time": 1784077500000,
+      "seq": 5
+    },
+    {
+      "id": "text-06-assistant-short",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "<p>這張圖是純紅色。</p>\n",
+      "time": 1784077560000,
+      "seq": 6
+    },
+    {
+      "id": "text-07-assistant-rich",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "<h3>找到原因了</h3>\n<p>帳戶沒有登入時，<code>WaitForLoginAsync</code> 沒有逾時；登入視窗被關掉後，它就一直等下去，<code>loginBusy</code> 也不會清掉。我做了三件事：</p>\n<ol>\n<li>加上 <strong>3 分鐘</strong>逾時，逾時回傳 <code>LoginResult.TimedOut</code></li>\n<li>登入視窗關閉時立即重新檢查狀態</li>\n<li>補上 4 個單元測試，涵蓋逾時、關閉視窗與成功三種情況</li>\n</ol>\n<table>\n<thead>\n<tr>\n<th>情境</th>\n<th>修改前</th>\n<th>修改後</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>關掉登入視窗</td>\n<td>一直顯示「登入中」</td>\n<td>立即回報「登入沒有完成」</td>\n</tr>\n<tr>\n<td>3 分鐘沒有完成</td>\n<td>一直等待</td>\n<td>逾時並可以重新登入</td>\n</tr>\n<tr>\n<td>正常登入</td>\n<td>正常</td>\n<td>正常</td>\n</tr>\n</tbody>\n</table>\n<pre><code class=\"language-csharp\">using var cts = new CancellationTokenSource(LoginTimeout);\nvar ok = await WaitForLoginAsync(account, cts.Token);\nif (!ok)\n{\n    return LoginResult.TimedOut(account.Id);\n}\n</code></pre>\n<p>參考：<a href=\"https://learn.microsoft.com/dotnet/standard/threading/cancellation-in-managed-threads\">受控執行緒的取消</a>。修改的檔案：<a href=\"https://myriagent.local/open?path=C%3A%5Crepo%5Cmyriagent%5Csrc%5CMyriagent%5CAccounts%5CAccountManager.cs\">AccountManager.cs</a></p>\n<blockquote>\n<p>逾時時間之後可以在設定檔調整。</p>\n</blockquote>\n<ul>\n<li>巢狀清單\n<ul>\n<li>第二層 <em>斜體</em> 與 <del>刪除</del></li>\n</ul>\n</li>\n</ul>\n",
+      "time": 1784077620000,
+      "seq": 7
+    },
+    {
+      "id": "text-08-assistant-local-files",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "<p>圖表與截圖：</p>\n<p><img src=\"https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E7%94%A8%E9%87%8F%E5%9C%96%E8%A1%A8-%E6%9C%AC%E9%80%B1.png\" alt=\"圖表\" /><br />\n<img src=\"https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cdocs%5C%E5%A0%B1%E5%91%8A.pdf\" alt=\"報告\" /><br />\n<img src=\"https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E7%99%BB%E5%85%A5%E7%95%AB%E9%9D%A2-%E4%BF%AE%E6%AD%A3%E5%BE%8C.png\" alt=\"修正後\" /><br />\n<img src=\"https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E7%99%BB%E5%85%A5%E6%B5%81%E7%A8%8B%E7%A4%BA%E7%AF%84.mp4\" alt=\"示範影片\" /><br />\n<img src=\"https://myriagent.local/media?path=C%3A%5Crepo%5Capp%5C.screenshots%5Chome.png\" alt=\"shot\" /><br />\n<img src=\"https://myriagent.local/media?path=C%3A%5Cmy%20files%5C.cache%5Ca%20b.png\" alt=\"含空白\" /><br />\n<img src=\"https://myriagent.local/media?path=C%3A%5Cout%5Ca%20b.png\" alt=\"file 網址\" /><br />\n<img src=\"https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E7%94%A8%E9%87%8F%E5%9C%96%E8%A1%A8-%E6%9C%AC%E9%80%B1.png\" alt=\"再一次圖表\" /><br />\n<a href=\"#\">網路共用</a><br />\n<img src=\"https://myriagent.local/media?path=C%3A%5Crepo%5Cshared%5Clogo.png\" alt=\"上一層\" /></p>\n<p>連結：<a href=\"https://myriagent.local/open?path=C%3A%5Crepo%5Cmyriagent%5Csrc%5CWeb%5Capp.js\">app.js:42</a>、<a href=\"https://myriagent.local/open?path=C%3A%5Crepo%5CREADME.md\">上層 README</a>、<a href=\"https://myriagent.local/open?path=C%3A%5Crepo%5Ca.cs\">a.cs:12</a>、<a href=\"https://myriagent.local/open?path=C%3A%5Crepo%5Capp%5C.github%5Cworkflows%5Cci.yml\">ci.yml</a>、<a href=\"https://myriagent.local/open?path=C%3A%5Crepo%5Cmyriagent%5Cdocs%5Ca%20b.md\">同層</a>、<a href=\"#\">資料流</a>、<a href=\"#\">章節</a>、<a href=\"#\">根目錄</a></p>\n<p>文字裡的路徑：截圖存在 <a href=\"https://myriagent.local/open?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E7%94%A8%E9%87%8F%E5%9C%96%E8%A1%A8-%E6%9C%AC%E9%80%B1.png\">C:\\repo\\myriagent\\assets\\用量圖表-本週.png</a>，設定在 <a href=\"https://myriagent.local/open?path=C%3A%5Crepo%5Capp%5C.github%5Cworkflows%5Cci.yml\">C:\\repo\\app\\.github\\workflows\\ci.yml</a>、錯誤在 <a href=\"https://myriagent.local/open?path=C%3A%5Crepo%5Ca.cs\">C:/repo/a.cs:42:7</a>。<br />\n行內程式碼 <a href=\"https://myriagent.local/open?path=C%3A%5Cmy%20files%5C%E5%A0%B1%E8%A1%A8%20v2.xlsx\"><code>C:\\my files\\報表 v2.xlsx</code></a> 與指令 <code>C:\\tools\\x.exe --help</code>；<strong><a href=\"https://myriagent.local/open?path=C%3A%5Cout%5Cmy_file_name.txt\">C:\\out\\my_file_name.txt</a></strong>、網址 <a href=\"https://example.com/C:/x\">https://example.com/C:/x</a> 與 <a href=\"https://myriagent.local/open?path=C%3A%5Cout%5Ca.txt\">C:\\out\\a.txt</a> 不重複</p>\n",
+      "time": 1784077680000,
+      "seq": 8
+    },
+    {
+      "id": "text-09-assistant-unsafe",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "<p>外部圖片：<a href=\"https://evil.example/x.png?d=secret\">秘密</a> <a href=\"https://evil.example/y.png\">外部圖片：https://evil.example/y.png</a></p>\n<p>危險連結：<a href=\"#\">點我</a> <a href=\"#\">資料</a> <a href=\"#\">#</a> <a href=\"#\">x</a></p>\n<p>原始 HTML：&lt;script&gt;alert(1)&lt;/script&gt; &lt;img src=x onerror=alert(1)&gt; &lt;b&gt;粗體？&lt;/b&gt;</p>\n<p>本頁來源：<a href=\"#\">x</a> <a href=\"#\">y</a></p>\n<p>其他：<a href=\"https://example.com\">官網</a> <a href=\"mailto:a@b.c\">信</a> <a href=\"https://example.org/autolink\">https://example.org/autolink</a> <a href=\"mailto:a@b.c\">a@b.c</a> <a href=\"#\">協定相對</a></p>\n",
+      "time": 1784077740000,
+      "seq": 9
+    },
+    {
+      "id": "text-10-assistant-cjk-autolinks",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "<p>詳見 <a href=\"https://example.com/docs\">https://example.com/docs</a>，請參考。<br />\n官方文件：<a href=\"https://example.com/docs\">https://example.com/docs</a>。<br />\n「<a href=\"https://example.com/q\">https://example.com/q</a>」與 <a href=\"https://zh.wikipedia.org/wiki/%E8%87%BA%E7%81%A3\">https://zh.wikipedia.org/wiki/臺灣</a> 很好；也可以看 <a href=\"http://www.example.com/a\">www.example.com/a</a></p>\n<p>大約需要 3~5 天，O(n^2) 降到 O(n^1.5)，C++20 與 a==b，這是 <del>刪除線</del></p>\n<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input disabled=\"disabled\" type=\"checkbox\" checked=\"checked\" /> 已完成的待辦</li>\n<li class=\"task-list-item\"><input disabled=\"disabled\" type=\"checkbox\" /> 還沒做的待辦</li>\n</ul>\n",
+      "time": 1784077800000,
+      "seq": 10
+    },
+    {
+      "id": "text-11-assistant-crlf",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "<p>第一行<br />\n第二行（軟換行照樣換行）</p>\n<p>新段落：<a href=\"https://myriagent.local/open?path=C%3A%5Crepo%5Cmyriagent%5CREADME.md\"><code>C:\\repo\\myriagent\\README.md</code></a></p>\n",
+      "time": 1784077860000,
+      "seq": 11
+    },
+    {
+      "id": "text-12-assistant-streaming",
+      "kind": "Assistant",
+      "status": "Running",
+      "html": "<p>我會把縮圖產生搬到專用的 STA 背景執行緒：</p>\n<pre><code class=\"language-cs\">var queue = new BlockingCollection&lt;Job&gt;();\n</code></pre>\n",
+      "time": 1784077920000,
+      "seq": 12
+    },
+    {
+      "id": "text-13-assistant-empty",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "",
+      "time": 1784077980000,
+      "seq": 13
+    },
+    {
+      "id": "text-14-plan-running",
+      "kind": "Plan",
+      "status": "Running",
+      "html": "",
+      "time": 1784078040000,
+      "seq": 14,
+      "plan": [
+        {
+          "text": "找出登入卡住的原因",
+          "status": "completed"
+        },
+        {
+          "text": "在 LoginAsync 加上逾時與取消",
+          "status": "completed"
+        },
+        {
+          "text": "登入視窗關閉時立即重新檢查",
+          "status": "inProgress"
+        },
+        {
+          "text": "補上 4 個單元測試",
+          "status": "pending"
+        },
+        {
+          "text": "跑完整的 dotnet test",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "text-15-plan-done-explained",
+      "kind": "Plan",
+      "status": "Done",
+      "html": "<p>先修 <strong>逾時</strong>，再補測試（Codex turn/plan 的說明）</p>\n",
+      "time": 1784078100000,
+      "seq": 15,
+      "plan": [
+        {
+          "text": "修正逾時",
+          "status": "completed"
+        },
+        {
+          "text": "補測試",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "id": "text-16-notice",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>已自動壓縮較早的對話內容，保留最近 80 則</p>\n",
+      "time": 1784078160000,
+      "seq": 16
+    },
+    {
+      "id": "text-17-notice-stopped",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>已停止這一輪（排隊的訊息暫停，按送出繼續）</p>\n",
+      "time": 1784078220000,
+      "seq": 17
+    },
+    {
+      "id": "text-18-notice-cli-continued",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>已用 Claude Code 2.1.297 自動接續（中斷時正在執行：npm test，已執行 42 秒）</p>\n",
+      "time": 1784078280000,
+      "seq": 18,
+      "noticeKind": "cliUpdate"
+    },
+    {
+      "id": "text-19-notice-cli-not-continued",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>CLI 已更新到 2.1.297；這一輪沒有自動接續，原因：上一個操作〈git push〉結果未知，請確認後按「繼續」或送出新訊息</p>\n",
+      "time": 1784078340000,
+      "seq": 19,
+      "noticeKind": "cliUpdate"
+    },
+    {
+      "id": "text-20-notice-cli-failed",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>以新版 CLI 重新啟動失敗：找不到 <code>claude.exe</code>（系統找不到指定的檔案）；按送出繼續</p>\n",
+      "time": 1784078400000,
+      "seq": 20,
+      "noticeKind": "cliUpdate"
+    },
+    {
+      "id": "text-21-error",
+      "kind": "Error",
+      "status": "Done",
+      "html": "<p>Claude 程序意外結束（結束碼 1）：<code>ECONNRESET</code>。已用前文自動重新連線。</p>\n",
+      "time": 1784078460000,
+      "seq": 21
+    },
+    {
+      "id": "text-22-error-quota",
+      "kind": "Error",
+      "status": "Done",
+      "html": "<p>Claude 訂閱額度已用完，10/15 18:10 重置；可以把這個對話換到其他帳戶繼續</p>\n",
+      "time": 1784078520000,
+      "seq": 22
+    },
+    {
+      "id": "text-23-notice-app-continued",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>Clode Myriagent 已由 0.2.1523 更新為 0.2.1530；已請代理從中斷處繼續</p>\n",
+      "time": 1784078580000,
+      "seq": 23,
+      "noticeKind": "appUpdate"
+    },
+    {
+      "id": "text-24-user-remote",
+      "kind": "User",
+      "status": "Done",
+      "html": "從手機問：報表做好了嗎？<br><br>（附 1 張圖片，請在 claude.ai 或 Claude App 查看）",
+      "time": 1784078640000,
+      "seq": 24,
+      "source": "remote"
+    },
+    {
+      "id": "text-25-notice-clear",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>已清除對話：代理看不到這之前的內容，接下來的訊息從新的工作階段開始。</p>\n",
+      "time": 1784078700000,
+      "seq": 25,
+      "noticeKind": "clear"
+    },
+    {
+      "id": "text-26-notice-account-switch",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>「Claude 主帳戶」的額度已用完（10/24 06:10 重置），已自動改用「Claude 副帳戶」（2 小時 5 分後重置）繼續這個對話；新帳戶會收到先前對話的節錄，從中斷處接著做。</p>\n",
+      "time": 1784078760000,
+      "seq": 26,
+      "noticeKind": "accountSwitch"
+    },
+    {
+      "id": "text-27-notice-handoff",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>已從 OFFICE-PC 交接到 HOME-PC：這台以完整的 CLI 紀錄續接，下一則訊息會先附換機說明。</p>\n",
+      "time": 1784078820000,
+      "seq": 27,
+      "noticeKind": "handoff"
+    },
+    {
+      "id": "text-28-notice-fork",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>離線期間在 OFFICE-PC 的 3 輪另存成這個分支（原對話已在 HOME-PC 被接手）。</p>\n",
+      "time": 1784078880000,
+      "seq": 28,
+      "noticeKind": "fork"
+    },
+    {
+      "id": "text-29-notice-background-task",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>背景指令已結束：<code>npm test</code>（結束碼 1，執行了 27 秒），代理接著處理。</p>\n",
+      "time": 1784078940000,
+      "seq": 29,
+      "noticeKind": "backgroundTask"
+    },
+    {
+      "id": "text-30-notice-background-program",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>代理另開的程式「python worker6.py」已結束（結束碼 1，執行了 12 分鐘）</p>\n",
+      "time": 1784079000000,
+      "seq": 30,
+      "noticeKind": "backgroundProgram"
+    },
+    {
+      "id": "text-31-notice-overload-retry",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>API 伺服器過載（529 Overloaded），60 秒後自動重試（第 1 次，最多 10 次）；在這之前送出訊息就改送你的訊息</p>\n",
+      "time": 1784079060000,
+      "seq": 31,
+      "noticeKind": "overloadRetry"
+    },
+    {
+      "id": "text-32-notice-side-question",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<blockquote>\n<p>剛才改了哪些檔案？</p>\n</blockquote>\n<p>改了 <code>ClaudeStreamRules.cs</code> 與兩個測試檔。</p>\n",
+      "time": 1784079120000,
+      "seq": 32,
+      "noticeKind": "sideQuestion"
+    }
+  ],
+  "whitelist": [
+    {
+      "path": "C:\\repo\\myriagent\\assets\\用量圖表-本週.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\docs\\報告.pdf",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\登入畫面-修正後.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\登入流程示範.mp4",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\app\\.screenshots\\home.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\my files\\.cache\\a b.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\out\\a b.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\shared\\logo.png",
+      "media": true,
+      "thumb": true
+    }
+  ]
+}

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-Hant-TW" data-page="myriagenthub-auth">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="myriagenthub-page" content="auth">
+  <title>Myriagent Hub 登入</title>
+  <!-- 與網頁版同一個圖示（桌面 app 圖示；/app/ 匿名也能取）；明確指定也讓瀏覽器不去要 /favicon.ico（未對應路徑一律 404） -->
+  <link rel="icon" href="/app/favicon.ico">
+  <link rel="stylesheet" href="/auth.css">
+  <script type="module" src="/auth.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="brand">
+      <!-- 品牌圖示「對話波形」（同網頁版標題列 Web/icons.js 的 BRAND_SVG）：C 形的對話框＋末端一顆青綠點，裡面是 AI 說話時的聲波；
+           外圈虛線環慢轉、聲波柱各自伸縮（auth.css 第十批，只動 transform） -->
+      <span class="mark" aria-hidden="true">
+        <span class="mk-ring"><svg viewBox="0 0 120 120" focusable="false"><circle class="mk-dash" cx="60" cy="60" r="57" fill="none" stroke-width="1.6" stroke-dasharray="2 5"/><circle cx="60" cy="60" r="57" fill="none" stroke="#D97757" stroke-width="3" stroke-linecap="round" pathLength="100" stroke-dasharray="7 43"/></svg></span>
+        <svg class="mk-c" viewBox="0 0 120 120" focusable="false"><defs><linearGradient id="mk-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F2A182"/><stop offset="1" stop-color="#C85E3C"/></linearGradient></defs><circle cx="60" cy="60" r="42" fill="none" stroke="url(#mk-grad)" stroke-width="8" stroke-linecap="round" pathLength="100" stroke-dasharray="76 100" transform="rotate(43 60 60)"/><circle cx="90.5" cy="31.1" r="4.4" fill="#3FD3AE"/></svg>
+        <span class="mk-wave"><i></i><i></i><i></i><i></i><i></i></span>
+      </span>
+      <div class="brand-text">
+        <h1>Clode Myriagent <span class="brand-tag">Hub</span></h1>
+        <p class="sub" id="domain">多電腦同步與網頁版</p>
+      </div>
+    </header>
+
+    <p id="status" class="status" role="status" aria-live="polite">載入中…</p>
+
+    <section id="view-login" class="card" hidden>
+      <h2>登入</h2>
+      <p id="login-pair-hint" class="hint" hidden>登入後核准這台電腦的配對</p>
+      <form id="form-login" class="form" novalidate>
+        <label class="field">
+          <span>帳號</span>
+          <input id="login-user" class="input" name="username" autocomplete="username" spellcheck="false" autocapitalize="off" required>
+        </label>
+        <label class="field">
+          <span>密碼</span>
+          <input id="login-password" class="input" name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button id="btn-login" type="submit" class="btn acc">登入</button>
+      </form>
+    </section>
+
+    <section id="view-account" hidden>
+      <div class="card">
+        <div class="row-head">
+          <h2>帳戶</h2>
+          <button id="btn-logout" type="button" class="btn ghost">登出</button>
+        </div>
+        <dl class="facts">
+          <dt>帳號</dt><dd id="fact-user">—</dd>
+          <dt>這次登入</dt><dd id="fact-created">—</dd>
+          <dt>近期驗證</dt><dd id="fact-recent">—</dd>
+          <dt>登入期限</dt><dd id="fact-expires">—</dd>
+        </dl>
+        <div class="card-actions">
+          <a id="link-app" href="/app/" class="btn">開啟網頁版</a>
+          <a id="link-pair" href="/#pair" class="btn ghost">核准電腦的配對</a>
+          <a id="link-releases" href="/#releases" class="btn ghost">版本與更新</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-head">
+          <h2>改密碼</h2>
+        </div>
+        <p class="hint">至少 8 個字。改好之後，其他已登入的瀏覽器都會登出。</p>
+        <form id="form-password" class="form" novalidate>
+          <input class="visually-hidden" name="username" autocomplete="username" value="admin" tabindex="-1" aria-hidden="true" readonly>
+          <label class="field">
+            <span>目前的密碼</span>
+            <input id="pw-current" class="input" name="current-password" type="password" autocomplete="current-password" required>
+          </label>
+          <label class="field">
+            <span>新密碼</span>
+            <input id="pw-new" class="input" name="new-password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+          </label>
+          <label class="field">
+            <span>再輸入一次新密碼</span>
+            <input id="pw-confirm" class="input" name="confirm-password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+          </label>
+          <button id="btn-password" type="submit" class="btn">改密碼</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="row-head">
+          <h2>已登入的瀏覽器</h2>
+        </div>
+        <p class="hint">閒置 12 小時或登入滿 7 天要重新登入。看到不認得的就撤銷，並改密碼。</p>
+        <ul id="sessions" class="list"></ul>
+      </div>
+    </section>
+
+    <section id="view-pair" class="card" hidden>
+      <div class="row-head">
+        <h2>核准電腦的配對</h2>
+        <a href="/" class="btn sm ghost">回到帳戶</a>
+      </div>
+      <p class="hint">在要加入的電腦上打開 Clode Myriagent：設定 → 多電腦同步 → 連接，畫面上會出現配對碼與網址。</p>
+      <form id="form-pair" class="form" novalidate>
+        <div class="field">
+          <label for="pair-code">配對碼</label>
+          <div class="pair-row">
+            <input id="pair-code" class="input pair-input" name="pair-code" autocomplete="off" spellcheck="false" autocapitalize="characters" maxlength="40" placeholder="XXXX-XXXX" required>
+            <button id="btn-pair-lookup" type="submit" class="btn">查詢</button>
+          </div>
+        </div>
+      </form>
+      <div id="pair-detail" class="pair-detail" hidden>
+        <div class="pair-fp-box">
+          <span class="pair-fp-label">裝置指紋</span>
+          <span id="pair-fp" class="pair-fp"></span>
+          <p class="hint pair-fp-hint">請和那台電腦「設定 → 多電腦同步」顯示的指紋對照</p>
+        </div>
+        <dl class="facts pair-facts">
+          <dt>裝置名稱</dt><dd id="pair-device">—</dd>
+          <dt>電腦名稱</dt><dd id="pair-machine">—</dd>
+          <dt>Windows 使用者</dt><dd id="pair-user">—</dd>
+          <dt>金鑰位置</dt><dd id="pair-key">—</dd>
+          <dt>版本</dt><dd id="pair-version">—</dd>
+          <dt>來源 IP</dt><dd id="pair-ip">—</dd>
+          <dt>建立時間</dt><dd id="pair-created">—</dd>
+          <dt>到期時間</dt><dd id="pair-expires">—</dd>
+        </dl>
+        <div class="actions pair-actions">
+          <button id="btn-pair-deny" type="button" class="btn danger">拒絕</button>
+          <button id="btn-pair-approve" type="button" class="btn acc" aria-disabled="true">核准</button>
+        </div>
+      </div>
+      <p id="pair-result" class="pair-result" role="status" aria-live="polite" hidden></p>
+      <div id="pair-done" class="card-actions" hidden>
+        <a href="/app/" class="btn acc">開啟網頁版</a>
+      </div>
+    </section>
+
+    <section id="view-releases" hidden>
+      <div class="card">
+        <div class="row-head">
+          <h2>桌面版</h2>
+          <div class="row-actions">
+            <button id="btn-releases-reload" type="button" class="btn sm ghost">重新整理</button>
+            <a href="/" class="btn sm ghost">回到帳戶</a>
+          </div>
+        </div>
+        <p class="hint">發佈工具送來的版本。電腦只下載標示「目前提供」的那一版；撤回目前提供的版本時改提供前一個可用的版本。撤回之後不能復原，同名的版本也永遠不能再收。</p>
+        <p id="releases-message" class="releases-message" role="status" aria-live="polite" hidden></p>
+        <p id="releases-empty" class="empty" hidden>還沒有收到任何版本</p>
+        <div class="table-wrap">
+          <table id="releases-table" class="table" hidden>
+            <thead>
+              <tr>
+                <th scope="col">版本</th>
+                <th scope="col">build</th>
+                <th scope="col">提交</th>
+                <th scope="col">大小</th>
+                <th scope="col">收件時間</th>
+                <th scope="col">狀態</th>
+                <th scope="col">簽章 kid</th>
+                <th scope="col">動作</th>
+              </tr>
+            </thead>
+            <tbody id="releases-rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-head">
+          <h2>電腦</h2>
+        </div>
+        <p class="hint">已配對的電腦（不含已撤銷的）。app 版本是那台電腦最近一次連線時回報的。</p>
+        <p id="devices-empty" class="empty" hidden>還沒有配對任何電腦</p>
+        <div class="table-wrap">
+          <table id="devices-table" class="table" hidden>
+            <thead>
+              <tr>
+                <th scope="col">電腦</th>
+                <th scope="col">app 版本</th>
+                <th scope="col">最後連線</th>
+                <th scope="col">連線</th>
+                <th scope="col">更新狀態</th>
+              </tr>
+            </thead>
+            <tbody id="devices-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <dialog id="dlg-stepup" class="dialog" aria-labelledby="stepup-title">
+      <form id="form-stepup" class="form" method="dialog" novalidate>
+        <h2 id="stepup-title">再輸入一次密碼</h2>
+        <p class="hint">這個操作要先確認是你本人。</p>
+        <input class="visually-hidden" name="username" autocomplete="username" value="admin" tabindex="-1" aria-hidden="true" readonly>
+        <label class="field">
+          <span>密碼</span>
+          <input id="stepup-password" class="input" name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <div class="actions">
+          <button id="btn-stepup-cancel" type="button" class="btn ghost">取消</button>
+          <button id="btn-stepup" type="submit" class="btn acc">確認</button>
+        </div>
+      </form>
+    </dialog>
+
+    <footer class="foot"><span id="build"></span></footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>Myriagent</RootNamespace>
+    <AssemblyName>Myriagent</AssemblyName>
+    <Product>Clode Myriagent</Product>
+    <Version>0.2.0</Version>
+    <!-- 提交時間寫進組件中繼資料 MyriagentCommitTime（Directory.Build.targets）：網頁在版號前面顯示日期時間 -->
+    <MyriagentStampCommitTime>true</MyriagentStampCommitTime>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <TieredPGO>true</TieredPGO>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <!-- 電腦狀態的 CPU 溫度：讀 LibreHardwareMonitor／OpenHardwareMonitor 的 WMI（SystemStatus/CpuTemperatureReader.cs；只在讀溫度時載入） -->
+    <PackageReference Include="System.Management" Version="10.0.13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      多電腦同步（WP3.3，src/Myriagent/Sync/）：裝置 hub 的 SignalR 用戶端與 Newtonsoft 協定（10.0.12 有 CVE-2026-70159，與 MyriagentHub.Tests 同版 10.0.13），
+      本機 sync.db（與 MyriagentHub 同版；一律 Pooling=False，見 SyncStore.ConnectionString）。
+      未配對時不得載入這些組件（S6）：只能經 SyncEngineLoader 的載入邊界碰到，Sync.Isolation 的靜態掃描與子程序探針把關。
+    -->
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.13" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.NewtonsoftJson" Version="10.0.13" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 與伺服器共用的模型與純函式規則；Markdig 只有那裡的 AgentMarkdownRenderer 用到，隨專案參考帶進來 -->
+    <ProjectReference Include="..\Myriagent.Protocol\Myriagent.Protocol.csproj" />
+    <!-- myriagent-remote.exe（對話裡的代理在其他配對的電腦執行指令，sync-protocol 14.11）：參考可執行專案，它的 exe、dll、runtimeconfig 跟著進建置與發佈的輸出 -->
+    <ProjectReference Include="..\MyriagentRemote\MyriagentRemote.csproj" />
+    <!-- myriagent-schedule.exe（對話裡的代理建立 Myriagent 的定時訊息，排程頁的 S4）：同上，跟著進建置與發佈的輸出 -->
+    <ProjectReference Include="..\MyriagentSchedule\MyriagentSchedule.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 介面網頁（WebView2 經 https://myriagent.local/ 載入，見 UI/WebAssets.cs）；資料夾內所有檔案都嵌入 -->
+    <EmbeddedResource Include="Web\**\*">
+      <LogicalName>Web/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="app.ico">
+      <LogicalName>app.ico</LogicalName>
+    </EmbeddedResource>
+    <InternalsVisibleTo Include="Myriagent.Tests" />
+    <!-- 無頭的假裝置（tools/fake-device）：直接使用桌面的同步引擎 -->
+    <InternalsVisibleTo Include="FakeDevice" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 換版端到端（tools/update-e2e）以 -p:MyriagentUpdateTestKeySpki=<spki> 注入測試金鑰；app 只在 MYRIAGENT_UPDATE_E2E=1 時認它（ReleaseKeys），一般建置沒有這筆 -->
+    <AssemblyMetadata Include="MyriagentUpdateTestKeySpki" Value="$(MyriagentUpdateTestKeySpki)" Condition="'$(MyriagentUpdateTestKeySpki)' != ''" />
+  </ItemGroup>
+
+  <!-- 移除 WebView2 的 WPF 參考（避免 MSB3277）寫在根目錄的 Directory.Build.targets，測試專案也適用 -->
+
+</Project>

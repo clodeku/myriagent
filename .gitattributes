@@ -1,0 +1,9 @@
+# 文字檔一律以 LF 存進 repo，簽出也維持 LF（避免 Windows autocrlf 讓逐位元組比對、嵌入資源雜湊不一致）
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.gif binary
+*.webp binary
+*.mp4 binary
+*.woff2 binary

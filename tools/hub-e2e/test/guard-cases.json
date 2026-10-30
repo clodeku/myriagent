@@ -1,0 +1,46 @@
+{
+  "comment": "正式站守門（計畫 D18）的共用測試表：tools/hub-e2e/lib/guard-rules.mjs（test/guard-rules.test.mjs）與 tools/fake-device/Runtime/LocalHubTargetRules.cs（LocalHubTargetRulesTests）都讀這一份。productionTarget 每一列的 why 寫出只有哪一條規則擋得住它：拿掉那一條，那一列就會紅。externalBase 只有 guard-rules.mjs 的 checkExternalBase（hub-e2e.mjs 的 --base）讀。",
+  "allowedServerUrl": [
+    { "url": "https://hub.example.com", "allowed": false, "why": "正式站" },
+    { "url": "https://hub.example.com:443", "allowed": false, "why": "正式站（帶埠）" },
+    { "url": "https://HUB.EXAMPLE.COM/app/", "allowed": false, "why": "正式站（大寫）" },
+    { "url": "https://localhost.hub.example.com", "allowed": false, "why": "看起來像 localhost 的正式站子網域" },
+    { "url": "https://example.com", "allowed": false, "why": "正式網域" },
+    { "url": "http://127.0.0.1:1", "allowed": false, "why": "不是 https" },
+    { "url": "https://10.0.0.5:1", "allowed": false, "why": "不是迴路" },
+    { "url": "https://127.0.0.2:1", "allowed": false, "why": "迴路網段但不是這三個名稱" },
+    { "url": "https://[::ffff:127.0.0.1]:1", "allowed": false, "why": "IPv4 對應的 IPv6" },
+    { "url": "https://user:pw@127.0.0.1:1", "allowed": false, "why": "帶帳號密碼" },
+    { "url": "https://127.0.0.1.nip.io:1", "allowed": false, "why": "解析成迴路的外部名稱" },
+    { "url": "not a url", "allowed": false, "why": "不是網址" },
+    { "url": "", "allowed": false, "why": "空字串" },
+    { "url": "https://127.0.0.1:1", "allowed": true, "why": "迴路 IPv4" },
+    { "url": "https://127.0.0.1:5443/app/?x=1", "allowed": true, "why": "迴路 IPv4（帶路徑與查詢）" },
+    { "url": "https://localhost:5443", "allowed": true, "why": "localhost" },
+    { "url": "https://LOCALHOST:5443", "allowed": true, "why": "localhost（大寫）" },
+    { "url": "https://[::1]:2", "allowed": true, "why": "迴路 IPv6" }
+  ],
+  "productionTarget": [
+    { "readyz": { "environment": "service" }, "tls": null, "production": true, "why": "environment 是 service（Windows 服務）" },
+    { "readyz": { "environment": "console" }, "tls": { "subject": "CN=hub.example.com" }, "production": true, "why": "連線看到的憑證主體是正式站" },
+    { "readyz": { "environment": "console" }, "tls": { "dnsNames": ["localhost", "hub.example.com"] }, "production": true, "why": "連線看到的憑證 SAN 含正式站" },
+    { "readyz": { "environment": "console", "tls": { "name": "hub.example.com", "subject": "CN=hub.example.com" } }, "tls": { "subject": "CN=localhost" }, "production": true, "why": "/readyz 的 tls 名稱是正式站（ssh 轉送時連線的憑證可能另有一張）" },
+    { "readyz": { "environment": "console" }, "tls": { "subject": "CN=localhost", "issuer": "CN=R11, O=Let's Encrypt, C=US" }, "production": true, "why": "簽發者是公開 CA" },
+    { "readyz": { "environment": "console", "tls": { "issuer": "CN=E7, O=Let's Encrypt, C=US" } }, "tls": { "subject": "CN=localhost" }, "production": true, "why": "/readyz 的簽發者是公開 CA" },
+    { "readyz": { "environment": "console" }, "tls": { "subject": "CN=localhost" }, "production": false, "why": "本機主控台＋自簽 localhost" },
+    { "readyz": { "environment": "console", "tls": { "name": "localhost", "subject": "CN=localhost", "dnsNames": ["localhost"], "issuer": "CN=localhost" } }, "tls": { "subject": "CN=localhost", "issuer": "CN=localhost" }, "production": false, "why": "/readyz 與連線都是自簽 localhost" },
+    { "readyz": { "environment": "console" }, "tls": { "subject": "CN=localhost", "issuer": "CN=Pebble Intermediate CA 3f6a2c" }, "production": false, "why": "Pebble（acme-e2e）不是公開 CA" },
+    { "readyz": null, "tls": null, "production": false, "why": "什麼都沒有（呼叫端另外要求 /readyz 讀得到）" }
+  ],
+  "externalBase": [
+    { "url": "https://hub.example.com", "readyz": null, "tls": null, "ok": false, "why": "--base 是正式站（連線之前就拒絕）" },
+    { "url": "https://x.example.com.evil", "readyz": null, "tls": null, "ok": false, "why": "--base 的主機含 example.com" },
+    { "url": "http://localhost:1", "readyz": null, "tls": null, "ok": false, "why": "--base 不是 https" },
+    { "url": "https://127.0.0.1:8443", "readyz": { "status": 200, "json": { "environment": "service" } }, "tls": { "subject": { "CN": "localhost" } }, "ok": false, "why": "ssh 轉送：迴路網址但 /readyz 的 environment 是 service" },
+    { "url": "https://127.0.0.1:8443", "readyz": { "status": 200, "json": { "environment": "console" } }, "tls": { "subject": { "CN": "hub.example.com" }, "issuer": { "CN": "R11", "O": "Let's Encrypt" } }, "ok": false, "why": "ssh 轉送：迴路網址但憑證是 hub.example.com" },
+    { "url": "https://localhost:5443", "readyz": { "status": 404, "json": null }, "tls": null, "ok": false, "why": "/readyz 讀不到（不知道對方是誰）" },
+    { "url": "https://localhost:5443", "readyz": { "status": 200, "json": {} }, "tls": { "subject": { "CN": "localhost" } }, "ok": false, "why": "/readyz 沒有 environment" },
+    { "url": "https://localhost:5443", "readyz": null, "tls": null, "ok": true, "why": "連線之前：本機迴路網址先放行" },
+    { "url": "https://localhost:5443", "readyz": { "status": 200, "json": { "environment": "console" } }, "tls": { "subject": { "CN": "localhost" }, "issuer": { "CN": "localhost" } }, "ok": true, "why": "正常的本機主控台＋自簽 localhost" }
+  ]
+}

@@ -1,0 +1,685 @@
+{
+  "corpus": "tools",
+  "description": "工具卡：各種工具種類（bash、read、write、edit、search、web、agent、mcp、todo、image、plan、other、未指定）、各種狀態、差異（LCS、多段、筆記本、unified、新增與刪除檔案、截斷提示）與產出的媒體",
+  "workingDirectory": "C:\\repo\\myriagent",
+  "items": [
+    {
+      "id": "tools-01-bash-running",
+      "kind": "Tool",
+      "status": "Running",
+      "html": "",
+      "time": 1784077260000,
+      "seq": 1,
+      "toolKind": "bash",
+      "toolName": "執行指令",
+      "title": "dotnet test Myriagent.slnx -c Release",
+      "detail": "dotnet test Myriagent.slnx -c Release",
+      "output": "  正在判斷要還原的專案...\n  已還原 C:\\repo\\myriagent\\tests\\Myriagent.Tests\\Myriagent.Tests.csproj\n  Myriagent -> C:\\repo\\myriagent\\src\\Myriagent\\bin\\Release\\net10.0-windows\\win-x64\\Myriagent.dll\n  測試回合 Myriagent.Tests.dll (.NETCoreApp,Version=v10.0)\n  正在啟動測試執行，請稍候...",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-02-bash-failed",
+      "kind": "Tool",
+      "status": "Failed",
+      "html": "",
+      "time": 1784077320000,
+      "seq": 2,
+      "toolKind": "bash",
+      "toolName": "執行指令",
+      "title": "dotnet build Myriagent.slnx -c Release",
+      "detail": "dotnet build Myriagent.slnx -c Release",
+      "output": "  正在判斷要還原的專案...\n  所有專案都在最新狀態，可進行還原。\nC:\\repo\\myriagent\\src\\Myriagent\\Accounts\\AccountManager.cs(147,58): error CS0103: 名稱 'LoginTimeout' 不存在於目前的內容中\n\n建置失敗。\n    0 個警告\n    1 個錯誤",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-03-bash-ansi-trimmed",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077380000,
+      "seq": 3,
+      "toolKind": "bash",
+      "toolName": "執行指令",
+      "title": "npm test",
+      "detail": "npm test",
+      "output": "…（前 1,234 字省略）\n\u001b[32m✓\u001b[0m 42 個測試通過\n\u001b[31m✗\u001b[0m 1 個失敗：<LoginTimeout> & \"逾時\"\n✅ 完成 🎉",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-04-powershell",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077440000,
+      "seq": 4,
+      "toolKind": "bash",
+      "toolName": "執行 PowerShell",
+      "title": "Get-ChildItem -Recurse -Filter *.cs | Measure-Object",
+      "detail": "Get-ChildItem -Recurse -Filter *.cs | Measure-Object\n# 第二行說明",
+      "output": "Count    : 142\nAverage  :\nSum      :",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-05-read",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077500000,
+      "seq": 5,
+      "toolKind": "read",
+      "toolName": "讀取檔案",
+      "title": "src\\Myriagent\\Accounts\\AccountManager.cs",
+      "detail": "第 120～220 行",
+      "output": "",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\repo\\myriagent\\src\\Myriagent\\Accounts\\AccountManager.cs"
+    },
+    {
+      "id": "tools-06-read-image",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077560000,
+      "seq": 6,
+      "toolKind": "image",
+      "toolName": "讀取檔案",
+      "title": "C:\\repo\\myriagent\\assets\\登入畫面-修正後.png",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\repo\\myriagent\\assets\\登入畫面-修正後.png"
+    },
+    {
+      "id": "tools-07-write-new-file",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077620000,
+      "seq": 7,
+      "toolKind": "write",
+      "toolName": "寫入檔案",
+      "title": "C:\\work\\chart.png",
+      "detail": null,
+      "output": "File created",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\work\\chart.png",
+      "diff": [
+        {
+          "t": "add",
+          "s": "..."
+        }
+      ],
+      "diffStats": {
+        "add": 1,
+        "del": 0
+      }
+    },
+    {
+      "id": "tools-08-edit",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077680000,
+      "seq": 8,
+      "toolKind": "edit",
+      "toolName": "修改檔案",
+      "title": "src\\Myriagent\\Accounts\\AccountManager.cs",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\repo\\myriagent\\src\\Myriagent\\Accounts\\AccountManager.cs",
+      "diff": [
+        {
+          "t": "ctx",
+          "s": "        var status = await CheckStatusAsync(account);"
+        },
+        {
+          "t": "ctx",
+          "s": "        if (status == AccountStatus.NotLoggedIn)"
+        },
+        {
+          "t": "del",
+          "s": "            await WaitForLoginAsync(account);"
+        },
+        {
+          "t": "add",
+          "s": "        {"
+        },
+        {
+          "t": "add",
+          "s": "            using var cts = new CancellationTokenSource(LoginTimeout);"
+        },
+        {
+          "t": "add",
+          "s": "            var ok = await WaitForLoginAsync(account, cts.Token);"
+        },
+        {
+          "t": "add",
+          "s": "            if (!ok)"
+        },
+        {
+          "t": "add",
+          "s": "            {"
+        },
+        {
+          "t": "add",
+          "s": "                return LoginResult.TimedOut(account.Id);"
+        },
+        {
+          "t": "add",
+          "s": "            }"
+        },
+        {
+          "t": "add",
+          "s": "        }"
+        },
+        {
+          "t": "add",
+          "s": ""
+        },
+        {
+          "t": "add",
+          "s": "        account.LoginBusy = false;"
+        },
+        {
+          "t": "ctx",
+          "s": "        return LoginResult.Ok(account.Id);"
+        },
+        {
+          "t": "ctx",
+          "s": "    }"
+        }
+      ],
+      "diffStats": {
+        "add": 10,
+        "del": 1
+      }
+    },
+    {
+      "id": "tools-09-multi-edit",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077740000,
+      "seq": 9,
+      "toolKind": "edit",
+      "toolName": "修改檔案",
+      "title": "src\\Myriagent\\Hub\\AgentHub.Accounts.cs",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\repo\\myriagent\\src\\Myriagent\\Hub\\AgentHub.Accounts.cs",
+      "diff": [
+        {
+          "t": "hunk",
+          "s": "編輯 1／2"
+        },
+        {
+          "t": "ctx",
+          "s": "        store.Save(accounts);"
+        },
+        {
+          "t": "add",
+          "s": "        PushAccounts();"
+        },
+        {
+          "t": "ctx",
+          "s": "        return account;"
+        },
+        {
+          "t": "hunk",
+          "s": "編輯 2／2"
+        },
+        {
+          "t": "del",
+          "s": "// TODO: 通知側欄"
+        },
+        {
+          "t": "add",
+          "s": "// 新增帳戶後立即送出 accounts 訊息"
+        }
+      ],
+      "diffStats": {
+        "add": 2,
+        "del": 1
+      }
+    },
+    {
+      "id": "tools-10-notebook-edit",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077800000,
+      "seq": 10,
+      "toolKind": "edit",
+      "toolName": "修改筆記本",
+      "title": "C:\\repo\\myriagent\\notebooks\\分析.ipynb",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\repo\\myriagent\\notebooks\\分析.ipynb",
+      "diff": [
+        {
+          "t": "add",
+          "s": "print('hello')"
+        },
+        {
+          "t": "add",
+          "s": "print('世界')"
+        }
+      ],
+      "diffStats": {
+        "add": 2,
+        "del": 0
+      }
+    },
+    {
+      "id": "tools-11-codex-unified",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077860000,
+      "seq": 11,
+      "toolKind": "edit",
+      "toolName": "修改檔案",
+      "title": "C:\\repo\\myriagent\\src\\a.cs",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\repo\\myriagent\\src\\a.cs",
+      "diff": [
+        {
+          "t": "hunk",
+          "s": "@@ -1,3 +1,3 @@"
+        },
+        {
+          "t": "ctx",
+          "s": "using System;"
+        },
+        {
+          "t": "del",
+          "s": "int a = 1;"
+        },
+        {
+          "t": "add",
+          "s": "int a = 2;"
+        },
+        {
+          "t": "ctx",
+          "s": "沒有前置空白的行"
+        },
+        {
+          "t": "hunk",
+          "s": "@@ -10,2 +10,3 @@"
+        },
+        {
+          "t": "del",
+          "s": "-- 註解（刪掉的「-- 註解」）"
+        },
+        {
+          "t": "add",
+          "s": "++i;"
+        },
+        {
+          "t": "ctx",
+          "s": "}"
+        }
+      ],
+      "diffStats": {
+        "add": 2,
+        "del": 2
+      }
+    },
+    {
+      "id": "tools-12-codex-add-file",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077920000,
+      "seq": 12,
+      "toolKind": "edit",
+      "toolName": "新增檔案",
+      "title": "C:\\repo\\myriagent\\docs\\新檔案.md",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\repo\\myriagent\\docs\\新檔案.md",
+      "diff": [
+        {
+          "t": "add",
+          "s": "# 標題"
+        },
+        {
+          "t": "add",
+          "s": "- 清單"
+        },
+        {
+          "t": "add",
+          "s": "---"
+        },
+        {
+          "t": "add",
+          "s": "+原文就是加號開頭"
+        }
+      ],
+      "diffStats": {
+        "add": 4,
+        "del": 0
+      }
+    },
+    {
+      "id": "tools-13-codex-delete-file",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784077980000,
+      "seq": 13,
+      "toolKind": "edit",
+      "toolName": "刪除檔案",
+      "title": "C:\\repo\\myriagent\\docs\\舊檔案.md",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\repo\\myriagent\\docs\\舊檔案.md",
+      "diff": [
+        {
+          "t": "del",
+          "s": "bye"
+        }
+      ],
+      "diffStats": {
+        "add": 0,
+        "del": 1
+      }
+    },
+    {
+      "id": "tools-14-diff-truncated",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784078040000,
+      "seq": 14,
+      "toolKind": "edit",
+      "toolName": "修改檔案",
+      "title": "C:\\repo\\myriagent\\data\\大檔案.csv",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\repo\\myriagent\\data\\大檔案.csv",
+      "diff": [
+        {
+          "t": "hunk",
+          "s": "@@ -1,3 +1,3 @@"
+        },
+        {
+          "t": "ctx",
+          "s": "id,name"
+        },
+        {
+          "t": "del",
+          "s": "1,舊名稱"
+        },
+        {
+          "t": "add",
+          "s": "1,新名稱"
+        },
+        {
+          "t": "hunk",
+          "s": "⋯ 還有 1,234 行未顯示（+1,000 −234）"
+        }
+      ],
+      "diffStats": {
+        "add": 1001,
+        "del": 235
+      }
+    },
+    {
+      "id": "tools-15-search",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784078100000,
+      "seq": 15,
+      "toolKind": "search",
+      "toolName": "搜尋",
+      "title": "LoginAsync|WaitForLoginAsync",
+      "detail": "pattern: LoginAsync|WaitForLoginAsync\npath: src",
+      "output": "src\\Myriagent\\Accounts\\AccountManager.cs:142:    public async Task<LoginResult> LoginAsync(AgentAccount account)\nsrc\\Myriagent\\Accounts\\AccountManager.cs:188:    private async Task<bool> WaitForLoginAsync(AgentAccount account)\nsrc\\Myriagent\\Hub\\AgentHub.Accounts.cs:57:        var result = await accounts.LoginAsync(account);",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-16-web-declined",
+      "kind": "Tool",
+      "status": "Declined",
+      "html": "",
+      "time": 1784078160000,
+      "seq": 16,
+      "toolKind": "web",
+      "toolName": "讀取網頁",
+      "title": "https://learn.microsoft.com/dotnet/api/system.threading.cancellationtokensource",
+      "detail": "整理 CancellationTokenSource 的逾時用法",
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-17-web-search",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784078220000,
+      "seq": 17,
+      "toolKind": "web",
+      "toolName": "網路搜尋",
+      "title": "CancellationTokenSource 逾時 用法",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-18-agent-cancelled",
+      "kind": "Tool",
+      "status": "Cancelled",
+      "html": "",
+      "time": 1784078280000,
+      "seq": 18,
+      "toolKind": "agent",
+      "toolName": "子代理",
+      "title": "檢查其他呼叫 LoginAsync 的地方",
+      "detail": "找出所有呼叫 LoginAsync 的地方，確認逾時回傳不會讓呼叫端出錯。",
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-19-mcp",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784078340000,
+      "seq": 19,
+      "toolKind": "mcp",
+      "toolName": "MCP：github",
+      "title": "search_issues",
+      "detail": "{\n  \"query\": \"login hang repo:example-user/myriagent\"\n}",
+      "output": "找到 1 個相關議題：#12 登入視窗關掉後卡在登入中",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-20-todo",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784078400000,
+      "seq": 20,
+      "toolKind": "todo",
+      "toolName": "更新待辦",
+      "title": "2/5 完成，進行中：登入視窗關閉時立即重新檢查",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-21-image-generated",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784078460000,
+      "seq": 21,
+      "toolKind": "image",
+      "toolName": "產生圖片",
+      "title": "儀表板示意圖 ×3",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null,
+      "media": [
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E5%84%80%E8%A1%A8%E6%9D%BF%E8%8D%89%E7%A8%BF-A.png",
+          "kind": "image",
+          "path": "C:\\repo\\myriagent\\assets\\儀表板草稿-A.png",
+          "name": "儀表板草稿-A.png"
+        },
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E5%84%80%E8%A1%A8%E6%9D%BF%E8%8D%89%E7%A8%BF-B.png",
+          "kind": "image",
+          "path": "C:\\repo\\myriagent\\assets\\儀表板草稿-B.png",
+          "name": "儀表板草稿-B.png"
+        },
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E5%84%80%E8%A1%A8%E6%9D%BF%E8%8D%89%E7%A8%BF-C.png",
+          "kind": "image",
+          "path": "C:\\repo\\myriagent\\assets\\儀表板草稿-C.png",
+          "name": "儀表板草稿-C.png"
+        }
+      ]
+    },
+    {
+      "id": "tools-22-plan-tool",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784078520000,
+      "seq": 22,
+      "toolKind": "plan",
+      "toolName": "確認執行計畫",
+      "title": "代理已規劃好做法，請確認是否照計畫執行",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-23-other-json",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784078580000,
+      "seq": 23,
+      "toolKind": "other",
+      "toolName": "SomeNewTool",
+      "title": "第一個字串參數",
+      "detail": "{\n  \"value\": \"第一個字串參數\",\n  \"count\": 3\n}",
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-24-null-fields",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784078640000,
+      "seq": 24,
+      "toolKind": "other",
+      "toolName": null,
+      "title": null,
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "tools-25-empty-diff",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784078700000,
+      "seq": 25,
+      "toolKind": "edit",
+      "toolName": "修改檔案",
+      "title": "C:\\repo\\myriagent\\same.txt",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": "C:\\repo\\myriagent\\same.txt"
+    },
+    {
+      "id": "tools-26-extra-fields",
+      "kind": "Tool",
+      "status": "Done",
+      "html": "",
+      "time": 1784078760000,
+      "seq": 26,
+      "toolKind": "bash",
+      "toolName": "執行指令",
+      "title": "npm test",
+      "detail": null,
+      "output": null,
+      "decision": "allow",
+      "canAllowForSession": false,
+      "allowSessionLabel": "本對話都允許 Bash(npm test:*)",
+      "filePath": null
+    }
+  ],
+  "whitelist": [
+    {
+      "path": "C:\\repo\\myriagent\\assets\\儀表板草稿-A.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\儀表板草稿-B.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\儀表板草稿-C.png",
+      "media": true,
+      "thumb": true
+    }
+  ]
+}

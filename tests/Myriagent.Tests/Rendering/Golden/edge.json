@@ -1,0 +1,231 @@
+{
+  "corpus": "edge",
+  "description": "病態與邊界：巢狀過深的 Markdown 退回純文字（其中的本機圖片不登記）、控制字元、清單裡的 null（整筆改成錯誤說明）、轉換不了的時間、未定義的列舉值",
+  "workingDirectory": "C:\\repo\\myriagent",
+  "items": [
+    {
+      "id": "edge-01-deep-nesting",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt; 引用",
+      "time": 1784077260000,
+      "seq": 1
+    },
+    {
+      "id": "edge-02-deep-nesting-image",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt; ![巢狀](C:\\repo\\myriagent\\out\\巢狀.png)",
+      "time": 1784077320000,
+      "seq": 2
+    },
+    {
+      "id": "edge-03-deep-nesting-thinking",
+      "kind": "Thinking",
+      "status": "Done",
+      "html": "&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt; 思考",
+      "time": 1784077380000,
+      "seq": 3
+    },
+    {
+      "id": "edge-04-deep-nesting-plan-approval",
+      "kind": "PlanApproval",
+      "status": "Waiting",
+      "html": "",
+      "time": 1784077440000,
+      "seq": 4,
+      "toolKind": "plan",
+      "toolName": "確認執行計畫",
+      "title": "代理已規劃好做法，請確認是否照計畫執行",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": false,
+      "filePath": null,
+      "detailHtml": "&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt; ![計畫圖](C:\\repo\\myriagent\\out\\計畫圖.png)"
+    },
+    {
+      "id": "edge-05-deep-nesting-with-media",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt;&gt; 下面的圖照樣顯示",
+      "time": 1784077500000,
+      "seq": 5,
+      "media": [
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cout%5C%E7%85%A7%E6%A8%A3%E9%A1%AF%E7%A4%BA.png",
+          "kind": "image",
+          "path": "C:\\repo\\myriagent\\out\\照樣顯示.png",
+          "name": "照樣顯示.png"
+        }
+      ]
+    },
+    {
+      "id": "edge-06-whitespace-markdown",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "",
+      "time": 1784077560000,
+      "seq": 6
+    },
+    {
+      "id": "edge-07-html-entities",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "<p>R&amp;D &lt;tag&gt; © 😀  結尾 *不是斜體*</p>\n",
+      "time": 1784077620000,
+      "seq": 7
+    },
+    {
+      "id": "edge-08-control-chars",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "<p>控制字元：�\u0001\u001b[1m粗\u001b[0m\u0007\f 定位\t字元、表情 ✅🎉</p>\n",
+      "time": 1784077680000,
+      "seq": 8
+    },
+    {
+      "id": "edge-09-attachments-null-element",
+      "kind": "Error",
+      "status": "Done",
+      "html": "這一筆內容無法顯示：Object reference not set to an instance of an object.",
+      "time": 1784077740000,
+      "seq": 9
+    },
+    {
+      "id": "edge-10-diff-null-text",
+      "kind": "Error",
+      "status": "Done",
+      "html": "這一筆內容無法顯示：Value cannot be null. (Parameter &#39;input&#39;)",
+      "time": 1784077800000,
+      "seq": 10
+    },
+    {
+      "id": "edge-11-media-null-element",
+      "kind": "Error",
+      "status": "Done",
+      "html": "這一筆內容無法顯示：Value cannot be null. (Parameter &#39;key&#39;)",
+      "time": 1784077860000,
+      "seq": 11
+    },
+    {
+      "id": "edge-12-time-min",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>建立時間是 0001-01-01（壞檔）</p>\n",
+      "time": null,
+      "seq": 12
+    },
+    {
+      "id": "edge-13-time-max",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>建立時間是 9999-12-31</p>\n",
+      "time": null,
+      "seq": 13
+    },
+    {
+      "id": "edge-14-time-1970",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>1971 年以前視為無效</p>\n",
+      "time": null,
+      "seq": 14
+    },
+    {
+      "id": "edge-15-time-1971",
+      "kind": "Notice",
+      "status": "Done",
+      "html": "<p>1971 年（任何時區都是）</p>\n",
+      "time": 31586400000,
+      "seq": 15
+    },
+    {
+      "id": "edge-16-undefined-enums",
+      "kind": "99",
+      "status": "42",
+      "html": "<p>未知的種類照樣以 <strong>Markdown</strong> 顯示</p>\n",
+      "time": 1784078160000,
+      "seq": 16,
+      "noticeKind": "5"
+    },
+    {
+      "id": "edge-17-notice-kind-on-error",
+      "kind": "Error",
+      "status": "Done",
+      "html": "<p>其他種類的項目也照樣帶 noticeKind</p>\n",
+      "time": 1784078220000,
+      "seq": 17,
+      "noticeKind": "cliUpdate"
+    },
+    {
+      "id": "edge-18-undefined-attachment-kind",
+      "kind": "User",
+      "status": "Done",
+      "html": "未知的附件種類",
+      "time": 1784078280000,
+      "seq": 18,
+      "attachments": [
+        {
+          "id": "u1",
+          "name": "未知種類.png",
+          "kind": "7",
+          "size": "4 KB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\未知種類.png",
+          "thumbUrl": null,
+          "url": "https://myriagent.local/media?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C%E6%9C%AA%E7%9F%A5%E7%A8%AE%E9%A1%9E.png",
+          "videoInfo": null
+        }
+      ]
+    },
+    {
+      "id": "edge-19-question-empty",
+      "kind": "Question",
+      "status": "Waiting",
+      "html": "",
+      "time": 1784078340000,
+      "seq": 19,
+      "questions": [],
+      "answers": {},
+      "decision": null,
+      "answerAsMessage": false
+    }
+  ],
+  "whitelist": [
+    {
+      "path": "C:\\repo\\myriagent\\out\\照樣顯示.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\前面的圖.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\out\\null之前.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\out\\null之後.mp4",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\未知種類.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\out\\巢狀.png",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\repo\\myriagent\\out\\計畫圖.png",
+      "media": false,
+      "thumb": false
+    }
+  ]
+}

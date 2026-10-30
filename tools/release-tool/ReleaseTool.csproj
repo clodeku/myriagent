@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    桌面版的發佈工具 myriagent-release（app 自我更新 U2 設計 T10、D2）：算版本、檢查發佈出的組件、打包、簽章、驗證、產生金鑰、自我測試。
+    manifest、zip、簽章與版本的規則和桌面、伺服器收件同一份（Protocol 的 InternalsVisibleTo 有 myriagent-release），不另寫 PowerShell 版本。
+    不進 Myriagent.slnx：dotnet build tools/release-tool -c Release；用法見 README.md。
+    bin、obj 留在 tools/release-tool 底下，不可搬進 tools/release（Test-Hub 主機Scripts.ps1 會掃那整個資料夾、不分副檔名）。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MyriagentTools.ReleaseTool</RootNamespace>
+    <AssemblyName>myriagent-release</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- manifest、簽章、版本規則與 app、伺服器同一份 -->
+    <ProjectReference Include="..\..\src\Myriagent.Protocol\Myriagent.Protocol.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 開發機的發佈私鑰檔（keygen 的 dpapi-file、sign 的 key-file 選項）以 DPAPI 加密：LocalKeyFile.cs -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,555 @@
+{
+  "corpus": "cards",
+  "description": "等你回應的卡片：核准（各種決定、本對話都允許的說明、拒絕說明、CLI 重開後失效）、問卷（單選、多選、密碼、非同步提問、略過）與計畫確認（含計畫內容的 Markdown 與本機圖片）",
+  "workingDirectory": "C:\\repo\\myriagent",
+  "items": [
+    {
+      "id": "cards-01-approval-bash-waiting",
+      "kind": "Approval",
+      "status": "Waiting",
+      "html": "",
+      "time": 1784077260000,
+      "seq": 1,
+      "toolKind": "bash",
+      "toolName": "執行指令",
+      "title": "dotnet test tests/Myriagent.Tests -c Release --filter \"FullyQualifiedName~Login\"",
+      "detail": "在 tests/Myriagent.Tests 執行登入相關的單元測試（約 20 秒），不會連線到外部服務。",
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "allowSessionLabel": "本對話同樣的指令都允許",
+      "filePath": null
+    },
+    {
+      "id": "cards-02-approval-write-waiting",
+      "kind": "Approval",
+      "status": "Waiting",
+      "html": "",
+      "time": 1784077320000,
+      "seq": 2,
+      "toolKind": "write",
+      "toolName": "寫入檔案",
+      "title": "C:\\work\\chart.png",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": true,
+      "allowSessionLabel": "本對話改為自動接受編輯（檔案修改與 mkdir、rm、mv 等檔案指令不再詢問）",
+      "filePath": "C:\\work\\chart.png",
+      "diff": [
+        {
+          "t": "add",
+          "s": "..."
+        }
+      ],
+      "diffStats": {
+        "add": 1,
+        "del": 0
+      }
+    },
+    {
+      "id": "cards-03-approval-allow",
+      "kind": "Approval",
+      "status": "Done",
+      "html": "",
+      "time": 1784077380000,
+      "seq": 3,
+      "toolKind": "edit",
+      "toolName": "修改檔案",
+      "title": "tests\\Myriagent.Tests\\AccountRulesTests.cs",
+      "detail": null,
+      "output": null,
+      "decision": "allow",
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "cards-04-approval-allow-session",
+      "kind": "Approval",
+      "status": "Done",
+      "html": "",
+      "time": 1784077440000,
+      "seq": 4,
+      "toolKind": "edit",
+      "toolName": "修改檔案",
+      "title": "tests\\Myriagent.Tests\\AccountRulesTests.cs",
+      "detail": null,
+      "output": null,
+      "decision": "allowSession",
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "cards-05-approval-deny-feedback",
+      "kind": "Approval",
+      "status": "Declined",
+      "html": "",
+      "time": 1784077500000,
+      "seq": 5,
+      "toolKind": "edit",
+      "toolName": "修改檔案",
+      "title": "C:\\repo\\myriagent\\src\\A.cs",
+      "detail": null,
+      "output": "你的說明：不要改 A 的公開介面",
+      "decision": "deny",
+      "canAllowForSession": true,
+      "filePath": "C:\\repo\\myriagent\\src\\A.cs",
+      "diff": [
+        {
+          "t": "del",
+          "s": "public int Count;"
+        },
+        {
+          "t": "add",
+          "s": "public long Count;"
+        }
+      ],
+      "diffStats": {
+        "add": 1,
+        "del": 1
+      }
+    },
+    {
+      "id": "cards-06-approval-invalidated",
+      "kind": "Approval",
+      "status": "Cancelled",
+      "html": "",
+      "time": 1784077560000,
+      "seq": 6,
+      "toolKind": "bash",
+      "toolName": "執行指令",
+      "title": "git push origin main",
+      "detail": null,
+      "output": "CLI 已重新啟動，這張卡已失效；代理會視需要重新提出",
+      "decision": null,
+      "canAllowForSession": true,
+      "filePath": null
+    },
+    {
+      "id": "cards-07-approval-mcp-no-session",
+      "kind": "Approval",
+      "status": "Waiting",
+      "html": "",
+      "time": 1784077620000,
+      "seq": 7,
+      "toolKind": "mcp",
+      "toolName": "MCP：github",
+      "title": "create_issue",
+      "detail": "{\n  \"title\": \"登入逾時\"\n}",
+      "output": null,
+      "decision": null,
+      "canAllowForSession": false,
+      "filePath": null
+    },
+    {
+      "id": "cards-08-question-waiting",
+      "kind": "Question",
+      "status": "Waiting",
+      "html": "",
+      "time": 1784077680000,
+      "seq": 8,
+      "questions": [
+        {
+          "id": "q1",
+          "header": "逾時",
+          "text": "登入要等多久才算逾時？",
+          "multi": false,
+          "allowOther": true,
+          "secret": false,
+          "options": [
+            {
+              "label": "3 分鐘（建議）",
+              "description": "和 CLI 預設的登入等待時間一致",
+              "preview": null
+            },
+            {
+              "label": "5 分鐘",
+              "description": "給需要兩步驟驗證的帳戶多一點時間",
+              "preview": null
+            },
+            {
+              "label": "不要逾時",
+              "description": "維持現在的行為，只修正關閉視窗的情況",
+              "preview": null
+            }
+          ]
+        },
+        {
+          "id": "q2",
+          "header": "測試",
+          "text": "要補哪些測試？",
+          "multi": true,
+          "allowOther": false,
+          "secret": false,
+          "options": [
+            {
+              "label": "逾時回報",
+              "description": null,
+              "preview": null
+            },
+            {
+              "label": "關閉視窗後重新檢查",
+              "description": null,
+              "preview": null
+            },
+            {
+              "label": "多個帳戶同時登入",
+              "description": "需要模擬兩個設定資料夾",
+              "preview": "AccountManagerTests.LoginTwoAccountsAtOnce()"
+            }
+          ]
+        },
+        {
+          "id": "q3",
+          "header": "金鑰",
+          "text": "整合測試用的測試帳號 API 金鑰（只存在這台電腦）",
+          "multi": false,
+          "allowOther": true,
+          "secret": true,
+          "options": []
+        }
+      ],
+      "answers": {},
+      "decision": null,
+      "answerAsMessage": false
+    },
+    {
+      "id": "cards-09-question-answered",
+      "kind": "Question",
+      "status": "Done",
+      "html": "",
+      "time": 1784077740000,
+      "seq": 9,
+      "questions": [
+        {
+          "id": "qa",
+          "header": "分支",
+          "text": "修改要放在哪個分支？",
+          "multi": false,
+          "allowOther": true,
+          "secret": false,
+          "options": [
+            {
+              "label": "直接改 main",
+              "description": null,
+              "preview": null
+            },
+            {
+              "label": "開新分支 fix/login-timeout",
+              "description": null,
+              "preview": null
+            }
+          ]
+        }
+      ],
+      "answers": {
+        "qa": [
+          "開新分支 fix/login-timeout"
+        ]
+      },
+      "decision": "answered",
+      "answerAsMessage": false
+    },
+    {
+      "id": "cards-10-question-recorded-turn",
+      "kind": "Question",
+      "status": "Done",
+      "html": "",
+      "time": 1784077800000,
+      "seq": 10,
+      "questions": [
+        {
+          "id": "你想喝哪種飲料？",
+          "header": "飲料選擇",
+          "text": "你想喝哪種飲料？",
+          "multi": false,
+          "allowOther": true,
+          "secret": false,
+          "options": [
+            {
+              "label": "咖啡",
+              "description": "選擇咖啡",
+              "preview": null
+            },
+            {
+              "label": "紅茶",
+              "description": "選擇紅茶",
+              "preview": null
+            }
+          ]
+        }
+      ],
+      "answers": {
+        "你想喝哪種飲料？": [
+          "紅茶"
+        ]
+      },
+      "decision": "answered",
+      "answerAsMessage": false
+    },
+    {
+      "id": "cards-11-question-skipped",
+      "kind": "Question",
+      "status": "Declined",
+      "html": "",
+      "time": 1784077860000,
+      "seq": 11,
+      "questions": [
+        {
+          "id": "q1",
+          "header": null,
+          "text": "要不要順便更新 README？",
+          "multi": false,
+          "allowOther": true,
+          "secret": false,
+          "options": [
+            {
+              "label": "要",
+              "description": null,
+              "preview": null
+            },
+            {
+              "label": "不要",
+              "description": null,
+              "preview": null
+            }
+          ]
+        }
+      ],
+      "answers": {},
+      "decision": "skip",
+      "answerAsMessage": false
+    },
+    {
+      "id": "cards-12-question-async-codex",
+      "kind": "Question",
+      "status": "Waiting",
+      "html": "",
+      "time": 1784077920000,
+      "seq": 12,
+      "questions": [
+        {
+          "id": "m1:0",
+          "header": "格式",
+          "text": "要哪種格式？",
+          "multi": false,
+          "allowOther": true,
+          "secret": false,
+          "options": [
+            {
+              "label": "CSV",
+              "description": null,
+              "preview": null
+            },
+            {
+              "label": "Excel",
+              "description": null,
+              "preview": null
+            }
+          ]
+        }
+      ],
+      "answers": {},
+      "decision": null,
+      "answerAsMessage": true
+    },
+    {
+      "id": "cards-13-question-secret-answered",
+      "kind": "Question",
+      "status": "Done",
+      "html": "",
+      "time": 1784077980000,
+      "seq": 13,
+      "questions": [
+        {
+          "id": "token",
+          "header": "權杖",
+          "text": "請輸入部署權杖",
+          "multi": false,
+          "allowOther": true,
+          "secret": true,
+          "options": []
+        }
+      ],
+      "answers": {
+        "token": [
+          "（已隱藏）"
+        ]
+      },
+      "decision": "answered",
+      "answerAsMessage": false
+    },
+    {
+      "id": "cards-14-question-multi-answers",
+      "kind": "Question",
+      "status": "Done",
+      "html": "",
+      "time": 1784078040000,
+      "seq": 14,
+      "questions": [
+        {
+          "id": "q2",
+          "header": "測試",
+          "text": "要補哪些測試？",
+          "multi": true,
+          "allowOther": true,
+          "secret": false,
+          "options": [
+            {
+              "label": "逾時回報",
+              "description": null,
+              "preview": null
+            },
+            {
+              "label": "關閉視窗後重新檢查",
+              "description": null,
+              "preview": null
+            },
+            {
+              "label": "多個帳戶同時登入",
+              "description": null,
+              "preview": null
+            }
+          ]
+        }
+      ],
+      "answers": {
+        "q2": [
+          "逾時回報",
+          "多個帳戶同時登入",
+          "另外：網路斷線時的重試"
+        ],
+        "已不在題目裡的鍵": []
+      },
+      "decision": "answered",
+      "answerAsMessage": false
+    },
+    {
+      "id": "cards-15-plan-approval-waiting",
+      "kind": "PlanApproval",
+      "status": "Waiting",
+      "html": "",
+      "time": 1784078100000,
+      "seq": 15,
+      "toolKind": "plan",
+      "toolName": "確認執行計畫",
+      "title": "代理已規劃好做法，請確認是否照計畫執行",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": false,
+      "filePath": null,
+      "detailHtml": "<h4>補測試與收尾的計畫</h4>\n<ol>\n<li>在 <code>AccountRulesTests</code> 新增逾時、視窗關閉、成功三組測試</li>\n<li>把 <code>LoginTimeout</code> 移到設定，預設 3 分鐘</li>\n<li>跑 <code>dotnet test</code> 確認全部通過</li>\n</ol>\n<p><img src=\"https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cdocs%5Cimages%5Clogin-flow.png\" alt=\"流程圖\" /></p>\n<p>預計修改 3 個檔案（見<a href=\"https://myriagent.local/open?path=C%3A%5Crepo%5Cmyriagent%5Cdocs%5C%E7%99%BB%E5%85%A5%E6%B5%81%E7%A8%8B%E8%A6%8F%E6%A0%BC.md\">規格</a>），不會動到其他帳戶的設定資料夾。</p>\n"
+    },
+    {
+      "id": "cards-16-plan-approval-accepted",
+      "kind": "PlanApproval",
+      "status": "Done",
+      "html": "",
+      "time": 1784078160000,
+      "seq": 16,
+      "toolKind": "plan",
+      "toolName": "確認執行計畫",
+      "title": "代理已規劃好做法，請確認是否照計畫執行",
+      "detail": null,
+      "output": null,
+      "decision": "acceptEdits",
+      "canAllowForSession": false,
+      "filePath": null,
+      "detailHtml": "<ol>\n<li>修正逾時</li>\n<li>補測試</li>\n</ol>\n"
+    },
+    {
+      "id": "cards-17-plan-approval-manual",
+      "kind": "PlanApproval",
+      "status": "Done",
+      "html": "",
+      "time": 1784078220000,
+      "seq": 17,
+      "toolKind": "plan",
+      "toolName": "確認執行計畫",
+      "title": "代理已規劃好做法，請確認是否照計畫執行",
+      "detail": null,
+      "output": null,
+      "decision": "manual",
+      "canAllowForSession": false,
+      "filePath": null,
+      "detailHtml": "<p>照計畫執行，每次改檔案仍詢問</p>\n"
+    },
+    {
+      "id": "cards-18-plan-approval-keep-planning",
+      "kind": "PlanApproval",
+      "status": "Declined",
+      "html": "",
+      "time": 1784078280000,
+      "seq": 18,
+      "toolKind": "plan",
+      "toolName": "確認執行計畫",
+      "title": "代理已規劃好做法，請確認是否照計畫執行",
+      "detail": null,
+      "output": "你的說明：先不要動設定檔",
+      "decision": "keepPlanning",
+      "canAllowForSession": false,
+      "filePath": null,
+      "detailHtml": "<p>把 <code>LoginTimeout</code> 移到設定</p>\n"
+    },
+    {
+      "id": "cards-19-plan-approval-no-detail",
+      "kind": "PlanApproval",
+      "status": "Waiting",
+      "html": "",
+      "time": 1784078340000,
+      "seq": 19,
+      "toolKind": "plan",
+      "toolName": "確認執行計畫",
+      "title": "代理已規劃好做法，請確認是否照計畫執行",
+      "detail": null,
+      "output": null,
+      "decision": null,
+      "canAllowForSession": false,
+      "filePath": null,
+      "detailHtml": ""
+    },
+    {
+      "id": "cards-20-question-mcp-elicitation",
+      "kind": "Question",
+      "status": "Waiting",
+      "html": "",
+      "time": 1784078400000,
+      "seq": 20,
+      "detailHtml": "<p>MCP 伺服器「probe」要你開啟網址：</p>\n<p>請完成授權</p>\n<p><a href=\"https://example.test/authorize?x=1\">https://example.test/authorize?x=1</a></p>\n",
+      "toolName": "MCP：probe",
+      "questions": [
+        {
+          "id": "__url",
+          "header": "網址",
+          "text": "在瀏覽器開啟上面的網址、照網頁的指示完成後，按「已完成」",
+          "multi": false,
+          "allowOther": false,
+          "secret": false,
+          "options": [
+            {
+              "label": "已完成",
+              "description": "已經在網頁上完成",
+              "preview": null
+            },
+            {
+              "label": "不要",
+              "description": "不開這個網址（婉拒）",
+              "preview": null
+            }
+          ]
+        }
+      ],
+      "answers": {},
+      "decision": null,
+      "answerAsMessage": false
+    }
+  ],
+  "whitelist": [
+    {
+      "path": "C:\\repo\\myriagent\\docs\\images\\login-flow.png",
+      "media": true,
+      "thumb": true
+    }
+  ]
+}

@@ -1,0 +1,1509 @@
+{
+  "description": "伺服器渲染給瀏覽器的 Item（HubItemCorpus）。production：WP4.2 的網址（媒體參照一律沒有網址，D15 的轉換）；withMediaUrls：WP4.7 形狀的測試網址（有參照就有 /m/、/t/）",
+  "production": [
+    {
+      "name": "user-attachments",
+      "item": {
+        "id": "hub-01-user-attachments",
+        "kind": "User",
+        "status": "Done",
+        "html": "幫我看這些檔案：a &lt; b &amp; &quot;引號&quot;",
+        "time": 1784077260000,
+        "seq": 101,
+        "attachments": [
+          {
+            "id": "att-image",
+            "name": "截圖.png",
+            "kind": "Image",
+            "size": "182 KB",
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          },
+          {
+            "id": "att-video",
+            "name": "重現步驟.mp4",
+            "kind": "Document",
+            "size": "1.2 MB",
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          },
+          {
+            "id": "att-avi",
+            "name": "螢幕錄影.avi",
+            "kind": "Document",
+            "size": "2 GB",
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          },
+          {
+            "id": "att-video-noref",
+            "name": "沒有參照.mp4",
+            "kind": "Document",
+            "size": "1.5 KB",
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          },
+          {
+            "id": "att-doc",
+            "name": "agent.log",
+            "kind": "Document",
+            "size": "12 KB",
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          },
+          {
+            "id": "att-image-noref",
+            "name": "沒有參照.png",
+            "kind": "Image",
+            "size": "1023 B",
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "assistant-markdown",
+      "item": {
+        "id": "hub-02-assistant-markdown",
+        "kind": "Assistant",
+        "status": "Done",
+        "html": "<h3>結果</h3>\n<table>\n<thead>\n<tr>\n<th style=\"text-align: left;\">情境</th>\n<th style=\"text-align: right;\">結果</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td style=\"text-align: left;\">關閉視窗</td>\n<td style=\"text-align: right;\">立即回報</td>\n</tr>\n</tbody>\n</table>\n<pre><code class=\"language-C#\">var ok = a &lt; b &amp;&amp; c &gt; d;\n</code></pre>\n<p>本機圖片：圖表 本機檔案：<a href=\"#local-file=C%3A%5Crepo%5Cmyriagent%5Csrc%5Ca.cs\" rel=\"noopener noreferrer\" target=\"_blank\">a.cs</a><br />\n外站：<a href=\"https://example.com/?a=1&amp;b=2\" rel=\"noopener noreferrer\" target=\"_blank\">官網</a> 危險：<a href=\"#\" rel=\"noopener noreferrer\" target=\"_blank\">點我</a> 原始 HTML：&lt;img src=x onerror=alert(1)&gt;</p>\n<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input disabled=\"disabled\" type=\"checkbox\" checked=\"checked\" /> 已完成</li>\n<li class=\"task-list-item\"><input disabled=\"disabled\" type=\"checkbox\" /> 還沒做</li>\n</ul>\n",
+        "time": 1784077320000,
+        "seq": 102
+      }
+    },
+    {
+      "name": "thinking",
+      "item": {
+        "id": "hub-03-thinking",
+        "kind": "Thinking",
+        "status": "Running",
+        "html": "<p>先看 <code>LoginAsync</code> 怎麼等登入結果</p>\n",
+        "time": 1784077380000,
+        "seq": 103
+      }
+    },
+    {
+      "name": "tool-bash",
+      "item": {
+        "id": "hub-04-tool-bash",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784077440000,
+        "seq": 104,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "dotnet test",
+        "detail": "dotnet test -c Release",
+        "output": "…（前 1,234 字省略）\n已通過! - 失敗: 0 <ok> & \"done\"",
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": null
+      }
+    },
+    {
+      "name": "tool-edit-diff",
+      "item": {
+        "id": "hub-05-tool-edit-diff",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784077500000,
+        "seq": 105,
+        "toolKind": "edit",
+        "toolName": "修改檔案",
+        "title": "src\\a.cs",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": "C:\\repo\\myriagent\\src\\a.cs",
+        "diff": [
+          {
+            "t": "ctx",
+            "s": "int a = 1;"
+          },
+          {
+            "t": "del",
+            "s": "int b = 2;"
+          },
+          {
+            "t": "add",
+            "s": "long b = 2;"
+          }
+        ],
+        "diffStats": {
+          "add": 1,
+          "del": 1
+        }
+      }
+    },
+    {
+      "name": "approval-high",
+      "item": {
+        "id": "hub-06-approval-high",
+        "kind": "Approval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784077560000,
+        "seq": 106,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "git push origin main",
+        "detail": "推送到遠端",
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "allowSessionLabel": "本對話同樣的指令都允許",
+        "filePath": null,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "high"
+      }
+    },
+    {
+      "name": "approval-normal",
+      "item": {
+        "id": "hub-07-approval-normal",
+        "kind": "Approval",
+        "status": "Done",
+        "html": "",
+        "time": 1784077620000,
+        "seq": 107,
+        "toolKind": "edit",
+        "toolName": "修改檔案",
+        "title": "src\\b.cs",
+        "detail": null,
+        "output": null,
+        "decision": "allow",
+        "canAllowForSession": true,
+        "filePath": null,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "normal"
+      }
+    },
+    {
+      "name": "approval-unknown-risk",
+      "item": {
+        "id": "hub-08-approval-unknown-risk",
+        "kind": "Approval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784077680000,
+        "seq": 108,
+        "toolKind": "mcp",
+        "toolName": "MCP：github",
+        "title": "create_issue",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": false,
+        "filePath": null,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA"
+      }
+    },
+    {
+      "name": "approval-no-digest",
+      "item": {
+        "id": "hub-09-approval-no-digest",
+        "kind": "Approval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784077740000,
+        "seq": 109,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "npm test",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": null
+      }
+    },
+    {
+      "name": "question-answers",
+      "item": {
+        "id": "hub-10-question-answers",
+        "kind": "Question",
+        "status": "Done",
+        "html": "",
+        "time": 1784077800000,
+        "seq": 110,
+        "questions": [
+          {
+            "id": "q1",
+            "header": "分支",
+            "text": "放在哪個分支？",
+            "multi": false,
+            "allowOther": true,
+            "secret": false,
+            "options": [
+              {
+                "label": "直接改 main",
+                "description": null,
+                "preview": null
+              },
+              {
+                "label": "開新分支",
+                "description": null,
+                "preview": null
+              }
+            ]
+          },
+          {
+            "id": "token",
+            "header": "權杖",
+            "text": "請輸入部署權杖",
+            "multi": false,
+            "allowOther": true,
+            "secret": true,
+            "options": []
+          },
+          {
+            "id": "q3",
+            "header": null,
+            "text": "要補哪些測試？",
+            "multi": true,
+            "allowOther": true,
+            "secret": false,
+            "options": [
+              {
+                "label": "逾時",
+                "description": null,
+                "preview": null
+              },
+              {
+                "label": "關閉視窗",
+                "description": null,
+                "preview": null
+              }
+            ]
+          }
+        ],
+        "answers": {
+          "q1": [
+            "開新分支"
+          ],
+          "token": [
+            "（已隱藏）"
+          ],
+          "q3": [
+            "逾時",
+            "關閉視窗",
+            "另外：斷線重試"
+          ]
+        },
+        "decision": "answered",
+        "answerAsMessage": false,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA"
+      }
+    },
+    {
+      "name": "question-id-path",
+      "item": {
+        "id": "hub-11-question-id-path",
+        "kind": "Question",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784077860000,
+        "seq": 111,
+        "questions": [
+          {
+            "id": "path",
+            "header": "路徑",
+            "text": "要放在哪個資料夾？",
+            "multi": false,
+            "allowOther": true,
+            "secret": false,
+            "options": [
+              {
+                "label": "src",
+                "description": null,
+                "preview": null
+              },
+              {
+                "label": "docs",
+                "description": null,
+                "preview": null
+              }
+            ]
+          }
+        ],
+        "answers": {
+          "path": [
+            "docs"
+          ]
+        },
+        "decision": null,
+        "answerAsMessage": true,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "normal"
+      }
+    },
+    {
+      "name": "plan-approval",
+      "item": {
+        "id": "hub-12-plan-approval",
+        "kind": "PlanApproval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784077920000,
+        "seq": 112,
+        "toolKind": "plan",
+        "toolName": "確認執行計畫",
+        "title": "代理已規劃好做法，請確認是否照計畫執行",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": false,
+        "filePath": null,
+        "detailHtml": "<h4>計畫</h4>\n<ol>\n<li>修正逾時</li>\n<li>補測試</li>\n</ol>\n<p>流程圖 見<a href=\"#local-file=C%3A%5Crepo%5Cmyriagent%5Cdocs%5Cspec.md\" rel=\"noopener noreferrer\" target=\"_blank\">規格</a></p>\n",
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "high"
+      }
+    },
+    {
+      "name": "plan",
+      "item": {
+        "id": "hub-13-plan",
+        "kind": "Plan",
+        "status": "Running",
+        "html": "<p>先修 <strong>逾時</strong></p>\n",
+        "time": 1784077980000,
+        "seq": 113,
+        "plan": [
+          {
+            "text": "找出原因",
+            "status": "completed"
+          },
+          {
+            "text": "修正",
+            "status": "inProgress"
+          },
+          {
+            "text": "補測試",
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "name": "notice-cli",
+      "item": {
+        "id": "hub-14-notice-cli",
+        "kind": "Notice",
+        "status": "Done",
+        "html": "<p>已用 Claude Code 2.1.297 自動接續</p>\n",
+        "time": 1784078040000,
+        "seq": 114,
+        "noticeKind": "cliUpdate"
+      }
+    },
+    {
+      "name": "notice-unknown-kind",
+      "item": {
+        "id": "hub-15-notice-unknown-kind",
+        "kind": "Notice",
+        "status": "Done",
+        "html": "<p>新版的提示種類</p>\n",
+        "time": 1784078100000,
+        "seq": 115
+      }
+    },
+    {
+      "name": "error",
+      "item": {
+        "id": "hub-16-error",
+        "kind": "Error",
+        "status": "Done",
+        "html": "<p>Claude 程序意外結束（結束碼 1）：<code>ECONNRESET</code></p>\n",
+        "time": 1784078160000,
+        "seq": 116
+      }
+    },
+    {
+      "name": "assistant-media",
+      "item": {
+        "id": "hub-17-assistant-media",
+        "kind": "Assistant",
+        "status": "Done",
+        "html": "<p>產出的圖與影片：</p>\n",
+        "time": 1784078220000,
+        "seq": 117,
+        "attachments": [
+          {
+            "id": "media-1",
+            "name": "圖表.png",
+            "kind": "Document",
+            "size": null,
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          },
+          {
+            "id": "media-2",
+            "name": "示範.mp4",
+            "kind": "Document",
+            "size": null,
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          },
+          {
+            "id": "media-3",
+            "name": "沒有參照.png",
+            "kind": "Document",
+            "size": null,
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "tool-with-card-fields",
+      "item": {
+        "id": "hub-18-tool-with-card-fields",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784078280000,
+        "seq": 118,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "ls",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": null
+      }
+    },
+    {
+      "name": "no-created-at",
+      "item": {
+        "id": "hub-19-no-created-at",
+        "kind": "Notice",
+        "status": "Done",
+        "html": "<p>沒有建立時間的項目</p>\n",
+        "time": 1784080000000,
+        "seq": 119
+      }
+    },
+    {
+      "name": "created-at-overflow",
+      "item": {
+        "id": "hub-20-created-at-overflow",
+        "kind": "Notice",
+        "status": "Done",
+        "html": "<p>轉換不了的建立時間</p>\n",
+        "time": null,
+        "seq": 120
+      }
+    },
+    {
+      "name": "device-extra-keys",
+      "item": {
+        "id": "hub-21-device-extra-keys",
+        "kind": "User",
+        "status": "Done",
+        "html": "裝置多送了欄位",
+        "time": 1784078460000,
+        "seq": 121,
+        "attachments": [
+          {
+            "id": "att-extra",
+            "name": "多送.png",
+            "kind": "Image",
+            "size": "4 KB",
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          },
+          {
+            "id": "media-1",
+            "name": "多送.png",
+            "kind": "Document",
+            "size": null,
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "user-html",
+      "item": {
+        "id": "hub-22-user-html",
+        "kind": "User",
+        "status": "Done",
+        "html": "&lt;script&gt;alert(1)&lt;/script&gt;<br>第二行 **不是粗體** &amp;amp; [不是連結](javascript:alert(1))",
+        "time": 1784078520000,
+        "seq": 122
+      }
+    },
+    {
+      "name": "blob-text",
+      "item": {
+        "id": "hub-23-blob-text",
+        "kind": "Assistant",
+        "status": "Done",
+        "html": "<p>blob 換回的 <strong>Markdown</strong> 內容：<code>ok</code></p>\n",
+        "time": 1784078580000,
+        "seq": 123
+      }
+    },
+    {
+      "name": "blob-diff",
+      "item": {
+        "id": "hub-24-blob-diff",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784078640000,
+        "seq": 124,
+        "toolKind": "edit",
+        "toolName": "修改檔案",
+        "title": "src\\c.cs",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": "C:\\repo\\myriagent\\src\\c.cs",
+        "diff": [
+          {
+            "t": "del",
+            "s": "舊的一行"
+          },
+          {
+            "t": "add",
+            "s": "新的一行"
+          }
+        ],
+        "diffStats": {
+          "add": 1,
+          "del": 1
+        }
+      }
+    },
+    {
+      "name": "blob-missing",
+      "item": {
+        "id": "hub-25-blob-missing",
+        "kind": "Assistant",
+        "status": "Done",
+        "html": "內容太大，暫時無法在瀏覽器顯示",
+        "time": 1784078700000,
+        "seq": 125
+      }
+    },
+    {
+      "name": "grok-search",
+      "item": {
+        "id": "hub-26-grok-search",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784078760000,
+        "seq": 126,
+        "toolKind": "search",
+        "toolName": "搜尋內容",
+        "title": "TODO　src",
+        "detail": "{\n  \"pattern\": \"TODO\",\n  \"path\": \"src\"\n}",
+        "output": "src\\a.cs:3:// TODO 補測試\n",
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": null
+      }
+    },
+    {
+      "name": "grok-approval-exec",
+      "item": {
+        "id": "hub-27-grok-approval-exec",
+        "kind": "Approval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784078820000,
+        "seq": 127,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "Write-Output hi",
+        "detail": "Print hi\n\nWrite-Output hi",
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "allowSessionLabel": "本對話的指令都不再詢問",
+        "filePath": null,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "normal"
+      }
+    },
+    {
+      "name": "grok-plan-approval",
+      "item": {
+        "id": "hub-28-grok-plan-approval",
+        "kind": "PlanApproval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784078880000,
+        "seq": 128,
+        "toolKind": "plan",
+        "toolName": "計畫",
+        "title": "照這個計畫執行？",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": false,
+        "filePath": null,
+        "detailHtml": "<h1>計畫</h1>\n<ol>\n<li>改 <code>a.cs</code> 的逾時</li>\n<li>補測試</li>\n</ol>\n",
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "high"
+      }
+    },
+    {
+      "name": "grok-question",
+      "item": {
+        "id": "hub-29-grok-question",
+        "kind": "Question",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784078940000,
+        "seq": 129,
+        "questions": [
+          {
+            "id": "你偏好哪個顏色？",
+            "header": null,
+            "text": "你偏好哪個顏色？",
+            "multi": false,
+            "allowOther": true,
+            "secret": false,
+            "options": [
+              {
+                "label": "藍色",
+                "description": null,
+                "preview": null
+              },
+              {
+                "label": "紅色",
+                "description": null,
+                "preview": null
+              }
+            ]
+          }
+        ],
+        "answers": {},
+        "decision": null,
+        "answerAsMessage": false,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA"
+      }
+    },
+    {
+      "name": "agy-write",
+      "item": {
+        "id": "hub-30-agy-write",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784079000000,
+        "seq": 130,
+        "toolKind": "write",
+        "toolName": "寫入檔案",
+        "title": "C:\\w\\a.txt",
+        "detail": "{\n  \"CodeContent\": \"hello\"\n}",
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": "C:\\w\\a.txt"
+      }
+    },
+    {
+      "name": "agy-command-aborted",
+      "item": {
+        "id": "hub-31-agy-command-aborted",
+        "kind": "Tool",
+        "status": "Cancelled",
+        "html": "",
+        "time": 1784079060000,
+        "seq": 131,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "npm run dev",
+        "detail": "npm run dev",
+        "output": "agy 程序已結束，這個工具被中斷，結果未知",
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": null
+      }
+    },
+    {
+      "name": "agy-notice-denied",
+      "item": {
+        "id": "hub-32-agy-notice-denied",
+        "kind": "Notice",
+        "status": "Done",
+        "html": "<p>agy 自動拒絕了需要核准的操作（RunCommand）：Antigravity 在這裡無法於對話中詢問。要讓代理執行指令，請把權限模式改成「完全自動」。</p>\n",
+        "time": 1784079120000,
+        "seq": 132
+      }
+    }
+  ],
+  "withMediaUrls": [
+    {
+      "name": "user-attachments",
+      "item": {
+        "id": "hub-01-user-attachments",
+        "kind": "User",
+        "status": "Done",
+        "html": "幫我看這些檔案：a &lt; b &amp; &quot;引號&quot;",
+        "time": 1784077260000,
+        "seq": 101,
+        "attachments": [
+          {
+            "id": "att-image",
+            "name": "截圖.png",
+            "kind": "Image",
+            "size": "182 KB",
+            "thumbUrl": "/t/0123456789ABCDEFGHJKMNPQ01?s=320",
+            "url": "/m/0123456789ABCDEFGHJKMNPQ01",
+            "videoInfo": null
+          },
+          {
+            "id": "att-video",
+            "name": "重現步驟.mp4",
+            "kind": "Video",
+            "size": "1.2 MB",
+            "thumbUrl": "/t/0123456789ABCDEFGHJKMNPQ02?s=320",
+            "url": "/m/0123456789ABCDEFGHJKMNPQ02",
+            "videoInfo": "0:03・6 張畫面"
+          },
+          {
+            "id": "att-avi",
+            "name": "螢幕錄影.avi",
+            "kind": "Document",
+            "size": "2 GB",
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          },
+          {
+            "id": "att-video-noref",
+            "name": "沒有參照.mp4",
+            "kind": "Document",
+            "size": "1.5 KB",
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          },
+          {
+            "id": "att-doc",
+            "name": "agent.log",
+            "kind": "Document",
+            "size": "12 KB",
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          },
+          {
+            "id": "att-image-noref",
+            "name": "沒有參照.png",
+            "kind": "Image",
+            "size": "1023 B",
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "assistant-markdown",
+      "item": {
+        "id": "hub-02-assistant-markdown",
+        "kind": "Assistant",
+        "status": "Done",
+        "html": "<h3>結果</h3>\n<table>\n<thead>\n<tr>\n<th style=\"text-align: left;\">情境</th>\n<th style=\"text-align: right;\">結果</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td style=\"text-align: left;\">關閉視窗</td>\n<td style=\"text-align: right;\">立即回報</td>\n</tr>\n</tbody>\n</table>\n<pre><code class=\"language-C#\">var ok = a &lt; b &amp;&amp; c &gt; d;\n</code></pre>\n<p>本機圖片：圖表 本機檔案：<a href=\"#local-file=C%3A%5Crepo%5Cmyriagent%5Csrc%5Ca.cs\" rel=\"noopener noreferrer\" target=\"_blank\">a.cs</a><br />\n外站：<a href=\"https://example.com/?a=1&amp;b=2\" rel=\"noopener noreferrer\" target=\"_blank\">官網</a> 危險：<a href=\"#\" rel=\"noopener noreferrer\" target=\"_blank\">點我</a> 原始 HTML：&lt;img src=x onerror=alert(1)&gt;</p>\n<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input disabled=\"disabled\" type=\"checkbox\" checked=\"checked\" /> 已完成</li>\n<li class=\"task-list-item\"><input disabled=\"disabled\" type=\"checkbox\" /> 還沒做</li>\n</ul>\n",
+        "time": 1784077320000,
+        "seq": 102
+      }
+    },
+    {
+      "name": "thinking",
+      "item": {
+        "id": "hub-03-thinking",
+        "kind": "Thinking",
+        "status": "Running",
+        "html": "<p>先看 <code>LoginAsync</code> 怎麼等登入結果</p>\n",
+        "time": 1784077380000,
+        "seq": 103
+      }
+    },
+    {
+      "name": "tool-bash",
+      "item": {
+        "id": "hub-04-tool-bash",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784077440000,
+        "seq": 104,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "dotnet test",
+        "detail": "dotnet test -c Release",
+        "output": "…（前 1,234 字省略）\n已通過! - 失敗: 0 <ok> & \"done\"",
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": null
+      }
+    },
+    {
+      "name": "tool-edit-diff",
+      "item": {
+        "id": "hub-05-tool-edit-diff",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784077500000,
+        "seq": 105,
+        "toolKind": "edit",
+        "toolName": "修改檔案",
+        "title": "src\\a.cs",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": "C:\\repo\\myriagent\\src\\a.cs",
+        "diff": [
+          {
+            "t": "ctx",
+            "s": "int a = 1;"
+          },
+          {
+            "t": "del",
+            "s": "int b = 2;"
+          },
+          {
+            "t": "add",
+            "s": "long b = 2;"
+          }
+        ],
+        "diffStats": {
+          "add": 1,
+          "del": 1
+        }
+      }
+    },
+    {
+      "name": "approval-high",
+      "item": {
+        "id": "hub-06-approval-high",
+        "kind": "Approval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784077560000,
+        "seq": 106,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "git push origin main",
+        "detail": "推送到遠端",
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "allowSessionLabel": "本對話同樣的指令都允許",
+        "filePath": null,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "high"
+      }
+    },
+    {
+      "name": "approval-normal",
+      "item": {
+        "id": "hub-07-approval-normal",
+        "kind": "Approval",
+        "status": "Done",
+        "html": "",
+        "time": 1784077620000,
+        "seq": 107,
+        "toolKind": "edit",
+        "toolName": "修改檔案",
+        "title": "src\\b.cs",
+        "detail": null,
+        "output": null,
+        "decision": "allow",
+        "canAllowForSession": true,
+        "filePath": null,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "normal"
+      }
+    },
+    {
+      "name": "approval-unknown-risk",
+      "item": {
+        "id": "hub-08-approval-unknown-risk",
+        "kind": "Approval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784077680000,
+        "seq": 108,
+        "toolKind": "mcp",
+        "toolName": "MCP：github",
+        "title": "create_issue",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": false,
+        "filePath": null,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA"
+      }
+    },
+    {
+      "name": "approval-no-digest",
+      "item": {
+        "id": "hub-09-approval-no-digest",
+        "kind": "Approval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784077740000,
+        "seq": 109,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "npm test",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": null
+      }
+    },
+    {
+      "name": "question-answers",
+      "item": {
+        "id": "hub-10-question-answers",
+        "kind": "Question",
+        "status": "Done",
+        "html": "",
+        "time": 1784077800000,
+        "seq": 110,
+        "questions": [
+          {
+            "id": "q1",
+            "header": "分支",
+            "text": "放在哪個分支？",
+            "multi": false,
+            "allowOther": true,
+            "secret": false,
+            "options": [
+              {
+                "label": "直接改 main",
+                "description": null,
+                "preview": null
+              },
+              {
+                "label": "開新分支",
+                "description": null,
+                "preview": null
+              }
+            ]
+          },
+          {
+            "id": "token",
+            "header": "權杖",
+            "text": "請輸入部署權杖",
+            "multi": false,
+            "allowOther": true,
+            "secret": true,
+            "options": []
+          },
+          {
+            "id": "q3",
+            "header": null,
+            "text": "要補哪些測試？",
+            "multi": true,
+            "allowOther": true,
+            "secret": false,
+            "options": [
+              {
+                "label": "逾時",
+                "description": null,
+                "preview": null
+              },
+              {
+                "label": "關閉視窗",
+                "description": null,
+                "preview": null
+              }
+            ]
+          }
+        ],
+        "answers": {
+          "q1": [
+            "開新分支"
+          ],
+          "token": [
+            "（已隱藏）"
+          ],
+          "q3": [
+            "逾時",
+            "關閉視窗",
+            "另外：斷線重試"
+          ]
+        },
+        "decision": "answered",
+        "answerAsMessage": false,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA"
+      }
+    },
+    {
+      "name": "question-id-path",
+      "item": {
+        "id": "hub-11-question-id-path",
+        "kind": "Question",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784077860000,
+        "seq": 111,
+        "questions": [
+          {
+            "id": "path",
+            "header": "路徑",
+            "text": "要放在哪個資料夾？",
+            "multi": false,
+            "allowOther": true,
+            "secret": false,
+            "options": [
+              {
+                "label": "src",
+                "description": null,
+                "preview": null
+              },
+              {
+                "label": "docs",
+                "description": null,
+                "preview": null
+              }
+            ]
+          }
+        ],
+        "answers": {
+          "path": [
+            "docs"
+          ]
+        },
+        "decision": null,
+        "answerAsMessage": true,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "normal"
+      }
+    },
+    {
+      "name": "plan-approval",
+      "item": {
+        "id": "hub-12-plan-approval",
+        "kind": "PlanApproval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784077920000,
+        "seq": 112,
+        "toolKind": "plan",
+        "toolName": "確認執行計畫",
+        "title": "代理已規劃好做法，請確認是否照計畫執行",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": false,
+        "filePath": null,
+        "detailHtml": "<h4>計畫</h4>\n<ol>\n<li>修正逾時</li>\n<li>補測試</li>\n</ol>\n<p>流程圖 見<a href=\"#local-file=C%3A%5Crepo%5Cmyriagent%5Cdocs%5Cspec.md\" rel=\"noopener noreferrer\" target=\"_blank\">規格</a></p>\n",
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "high"
+      }
+    },
+    {
+      "name": "plan",
+      "item": {
+        "id": "hub-13-plan",
+        "kind": "Plan",
+        "status": "Running",
+        "html": "<p>先修 <strong>逾時</strong></p>\n",
+        "time": 1784077980000,
+        "seq": 113,
+        "plan": [
+          {
+            "text": "找出原因",
+            "status": "completed"
+          },
+          {
+            "text": "修正",
+            "status": "inProgress"
+          },
+          {
+            "text": "補測試",
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "name": "notice-cli",
+      "item": {
+        "id": "hub-14-notice-cli",
+        "kind": "Notice",
+        "status": "Done",
+        "html": "<p>已用 Claude Code 2.1.297 自動接續</p>\n",
+        "time": 1784078040000,
+        "seq": 114,
+        "noticeKind": "cliUpdate"
+      }
+    },
+    {
+      "name": "notice-unknown-kind",
+      "item": {
+        "id": "hub-15-notice-unknown-kind",
+        "kind": "Notice",
+        "status": "Done",
+        "html": "<p>新版的提示種類</p>\n",
+        "time": 1784078100000,
+        "seq": 115
+      }
+    },
+    {
+      "name": "error",
+      "item": {
+        "id": "hub-16-error",
+        "kind": "Error",
+        "status": "Done",
+        "html": "<p>Claude 程序意外結束（結束碼 1）：<code>ECONNRESET</code></p>\n",
+        "time": 1784078160000,
+        "seq": 116
+      }
+    },
+    {
+      "name": "assistant-media",
+      "item": {
+        "id": "hub-17-assistant-media",
+        "kind": "Assistant",
+        "status": "Done",
+        "html": "<p>產出的圖與影片：</p>\n",
+        "time": 1784078220000,
+        "seq": 117,
+        "attachments": [
+          {
+            "id": "media-3",
+            "name": "沒有參照.png",
+            "kind": "Document",
+            "size": null,
+            "thumbUrl": null,
+            "url": null,
+            "videoInfo": null
+          }
+        ],
+        "media": [
+          {
+            "url": "/m/0123456789ABCDEFGHJKMNPQ0B",
+            "kind": "image",
+            "name": "圖表.png"
+          },
+          {
+            "url": "/m/0123456789ABCDEFGHJKMNPQ0C",
+            "kind": "video",
+            "name": "示範.mp4"
+          }
+        ]
+      }
+    },
+    {
+      "name": "tool-with-card-fields",
+      "item": {
+        "id": "hub-18-tool-with-card-fields",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784078280000,
+        "seq": 118,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "ls",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": null
+      }
+    },
+    {
+      "name": "no-created-at",
+      "item": {
+        "id": "hub-19-no-created-at",
+        "kind": "Notice",
+        "status": "Done",
+        "html": "<p>沒有建立時間的項目</p>\n",
+        "time": 1784080000000,
+        "seq": 119
+      }
+    },
+    {
+      "name": "created-at-overflow",
+      "item": {
+        "id": "hub-20-created-at-overflow",
+        "kind": "Notice",
+        "status": "Done",
+        "html": "<p>轉換不了的建立時間</p>\n",
+        "time": null,
+        "seq": 120
+      }
+    },
+    {
+      "name": "device-extra-keys",
+      "item": {
+        "id": "hub-21-device-extra-keys",
+        "kind": "User",
+        "status": "Done",
+        "html": "裝置多送了欄位",
+        "time": 1784078460000,
+        "seq": 121,
+        "attachments": [
+          {
+            "id": "att-extra",
+            "name": "多送.png",
+            "kind": "Image",
+            "size": "4 KB",
+            "thumbUrl": "/t/0123456789ABCDEFGHJKMNPQ0N?s=320",
+            "url": "/m/0123456789ABCDEFGHJKMNPQ0N",
+            "videoInfo": null
+          }
+        ],
+        "media": [
+          {
+            "url": "/m/0123456789ABCDEFGHJKMNPQ0P",
+            "kind": "image",
+            "name": "多送.png"
+          }
+        ]
+      }
+    },
+    {
+      "name": "user-html",
+      "item": {
+        "id": "hub-22-user-html",
+        "kind": "User",
+        "status": "Done",
+        "html": "&lt;script&gt;alert(1)&lt;/script&gt;<br>第二行 **不是粗體** &amp;amp; [不是連結](javascript:alert(1))",
+        "time": 1784078520000,
+        "seq": 122
+      }
+    },
+    {
+      "name": "blob-text",
+      "item": {
+        "id": "hub-23-blob-text",
+        "kind": "Assistant",
+        "status": "Done",
+        "html": "<p>blob 換回的 <strong>Markdown</strong> 內容：<code>ok</code></p>\n",
+        "time": 1784078580000,
+        "seq": 123
+      }
+    },
+    {
+      "name": "blob-diff",
+      "item": {
+        "id": "hub-24-blob-diff",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784078640000,
+        "seq": 124,
+        "toolKind": "edit",
+        "toolName": "修改檔案",
+        "title": "src\\c.cs",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": "C:\\repo\\myriagent\\src\\c.cs",
+        "diff": [
+          {
+            "t": "del",
+            "s": "舊的一行"
+          },
+          {
+            "t": "add",
+            "s": "新的一行"
+          }
+        ],
+        "diffStats": {
+          "add": 1,
+          "del": 1
+        }
+      }
+    },
+    {
+      "name": "blob-missing",
+      "item": {
+        "id": "hub-25-blob-missing",
+        "kind": "Assistant",
+        "status": "Done",
+        "html": "內容太大，暫時無法在瀏覽器顯示",
+        "time": 1784078700000,
+        "seq": 125
+      }
+    },
+    {
+      "name": "grok-search",
+      "item": {
+        "id": "hub-26-grok-search",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784078760000,
+        "seq": 126,
+        "toolKind": "search",
+        "toolName": "搜尋內容",
+        "title": "TODO　src",
+        "detail": "{\n  \"pattern\": \"TODO\",\n  \"path\": \"src\"\n}",
+        "output": "src\\a.cs:3:// TODO 補測試\n",
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": null
+      }
+    },
+    {
+      "name": "grok-approval-exec",
+      "item": {
+        "id": "hub-27-grok-approval-exec",
+        "kind": "Approval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784078820000,
+        "seq": 127,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "Write-Output hi",
+        "detail": "Print hi\n\nWrite-Output hi",
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "allowSessionLabel": "本對話的指令都不再詢問",
+        "filePath": null,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "normal"
+      }
+    },
+    {
+      "name": "grok-plan-approval",
+      "item": {
+        "id": "hub-28-grok-plan-approval",
+        "kind": "PlanApproval",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784078880000,
+        "seq": 128,
+        "toolKind": "plan",
+        "toolName": "計畫",
+        "title": "照這個計畫執行？",
+        "detail": null,
+        "output": null,
+        "decision": null,
+        "canAllowForSession": false,
+        "filePath": null,
+        "detailHtml": "<h1>計畫</h1>\n<ol>\n<li>改 <code>a.cs</code> 的逾時</li>\n<li>補測試</li>\n</ol>\n",
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA",
+        "risk": "high"
+      }
+    },
+    {
+      "name": "grok-question",
+      "item": {
+        "id": "hub-29-grok-question",
+        "kind": "Question",
+        "status": "Waiting",
+        "html": "",
+        "time": 1784078940000,
+        "seq": 129,
+        "questions": [
+          {
+            "id": "你偏好哪個顏色？",
+            "header": null,
+            "text": "你偏好哪個顏色？",
+            "multi": false,
+            "allowOther": true,
+            "secret": false,
+            "options": [
+              {
+                "label": "藍色",
+                "description": null,
+                "preview": null
+              },
+              {
+                "label": "紅色",
+                "description": null,
+                "preview": null
+              }
+            ]
+          }
+        ],
+        "answers": {},
+        "decision": null,
+        "answerAsMessage": false,
+        "requestDigest": "rd1:Q2xvZGVIdWItZ29sZGVuLWRpZ2VzdC0wMDAwMDAwMDA"
+      }
+    },
+    {
+      "name": "agy-write",
+      "item": {
+        "id": "hub-30-agy-write",
+        "kind": "Tool",
+        "status": "Done",
+        "html": "",
+        "time": 1784079000000,
+        "seq": 130,
+        "toolKind": "write",
+        "toolName": "寫入檔案",
+        "title": "C:\\w\\a.txt",
+        "detail": "{\n  \"CodeContent\": \"hello\"\n}",
+        "output": null,
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": "C:\\w\\a.txt"
+      }
+    },
+    {
+      "name": "agy-command-aborted",
+      "item": {
+        "id": "hub-31-agy-command-aborted",
+        "kind": "Tool",
+        "status": "Cancelled",
+        "html": "",
+        "time": 1784079060000,
+        "seq": 131,
+        "toolKind": "bash",
+        "toolName": "執行指令",
+        "title": "npm run dev",
+        "detail": "npm run dev",
+        "output": "agy 程序已結束，這個工具被中斷，結果未知",
+        "decision": null,
+        "canAllowForSession": true,
+        "filePath": null
+      }
+    },
+    {
+      "name": "agy-notice-denied",
+      "item": {
+        "id": "hub-32-agy-notice-denied",
+        "kind": "Notice",
+        "status": "Done",
+        "html": "<p>agy 自動拒絕了需要核准的操作（RunCommand）：Antigravity 在這裡無法於對話中詢問。要讓代理執行指令，請把權限模式改成「完全自動」。</p>\n",
+        "time": 1784079120000,
+        "seq": 132
+      }
+    }
+  ]
+}

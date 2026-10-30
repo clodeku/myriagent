@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    myriagent-schedule：對話裡的代理建立 Myriagent 的定時訊息（排程頁的 S4，docs/plans/2026-10-26-schedule-manager.md 第 8 節）。
+    和 myriagent-remote 走同一條本機管道、同一個對話權杖（MYRIAGENT_REMOTE_PIPE、MYRIAGENT_REMOTE_TOKEN、MYRIAGENT_AGENT_CONVERSATION），不連網路、不需要配對。
+    桌面專案以專案參考把它帶進建置與發佈的輸出（和 Myriagent.exe 同一個資料夾，對話的 PATH 最前面）
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MyriagentSchedule</RootNamespace>
+    <AssemblyName>myriagent-schedule</AssemblyName>
+    <Product>Clode Myriagent</Product>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Myriagent.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,162 @@
+/* 排程頁（schedules.js）：和儀表板同位階的整頁。左邊是摘要、篩選、接下來 24 小時、清單；右邊是選到的那個排程的明細。
+   沒有無限循環的動畫（燈號是靜態的顏色）；深淺色都只用主題的變數 */
+.sched { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 420px; background: var(--bg-pane); }
+.sched[hidden] { display: none; }
+@media (max-width: 1100px) { .sched { grid-template-columns: minmax(0, 1fr) 340px; } }
+@media (max-width: 860px) { .sched { grid-template-columns: 1fr; } .sch-side { border-left: 0; border-top: 1px solid var(--border); } }
+.sch-main { min-width: 0; overflow-y: auto; padding: 20px 24px 40px; }
+.sch-side { min-width: 0; overflow-y: auto; border-left: 1px solid var(--border); background: var(--bg-app); padding: 16px 18px 40px; }
+
+/* 頂端「排程」鈕右上角的失敗數 */
+#viewSwitch .seg-btn[data-view="schedules"] { position: relative; }
+.vs-badge {
+  position: absolute; top: -5px; right: -5px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px;
+  background: var(--red); color: #fff; font: 600 10px/15px var(--font); font-style: normal; text-align: center; pointer-events: none;
+}
+.vs-badge[hidden] { display: none; }
+
+.sch-head { display: flex; align-items: center; gap: 10px; }
+.sch-head h1 { margin: 0; font-size: 20px; font-weight: 600; color: var(--text-hi); }
+.sch-head .grow { flex: 1; }
+.sch-sub { color: var(--text-3); font-size: 12px; }
+
+.sch-pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 12px; }
+.sch-pill { display: inline-flex; align-items: baseline; gap: 4px; padding: 3px 11px; border-radius: 999px; font-size: 12.5px; color: var(--text-2);
+  background: var(--bg-raised); border: 1px solid var(--border); }
+.sch-pill b { color: var(--text-hi); font-weight: 600; }
+.sch-pill.run b { color: var(--tone-auto); }
+.sch-pill.fail b { color: var(--red); }
+.sch-pill.warn b { color: var(--amber); }
+
+.sch-filters { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-bottom: 14px; }
+.sch-fgroup { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.sch-flabel { color: var(--text-3); font-size: 12px; margin-right: 4px; }
+.sch-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 6px; font-size: 12px;
+  color: var(--text-2); border: 1px solid var(--border-2); background: transparent; }
+.sch-chip:hover { color: var(--text-hi); border-color: var(--border-3); }
+.sch-chip.on { color: var(--text-hi); background: var(--bg-active); border-color: var(--text-3); }
+.sch-chip .n { color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* 燈號（清單、時間軸、明細共用） */
+.led { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; background: var(--text-3); }
+.led-ok { background: var(--green); }
+.led-fail { background: var(--red); box-shadow: 0 0 6px color-mix(in srgb, var(--red) 70%, transparent); }
+.led-run { background: var(--tone-auto); box-shadow: 0 0 6px color-mix(in srgb, var(--tone-auto) 70%, transparent); }
+.led-warn { background: var(--amber); }
+.led-dis { background: color-mix(in srgb, var(--text-3) 60%, transparent); }
+.led-info { background: transparent; border: 1px solid var(--text-3); }
+.lvl-ok { color: var(--text-2); }
+.lvl-fail { color: var(--red); }
+.lvl-warn { color: var(--amber); }
+.lvl-info { color: var(--text-3); }
+
+/* 接下來 24 小時 */
+.sch-tl { background: var(--bg-app); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px 8px; margin-bottom: 16px; }
+.sch-tl-cap { display: flex; justify-content: space-between; color: var(--text-3); font-size: 12px; }
+.sch-tl-body { position: relative; height: 26px; margin: 6px 0 2px; border-bottom: 1px dashed var(--border-2); }
+.sch-tl-body .now { position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--acc); border-radius: 1px; }
+.sch-track { position: absolute; inset: 0; }
+.sch-track .dot { position: absolute; top: 8px; width: 9px; height: 9px; margin-left: -4px; border-radius: 50%; cursor: pointer; }
+.sch-track .dot.sel { outline: 2px solid var(--text-hi); outline-offset: 1px; }
+.sch-track .band { position: absolute; top: 10px; height: 5px; border-radius: 3px; opacity: .7; }
+/* 時間軸上的點是「預定的執行」：照它上次的結果上色，還沒有結果的、成功的都是綠色 */
+.sch-track .led-ok, .sch-track .led-info { background: var(--green); border: 0; }
+.sch-track .led-fail { background: var(--red); }
+.sch-track .led-warn { background: var(--amber); }
+.sch-track .led-run { background: var(--tone-auto); }
+.sch-tl-axis { position: relative; height: 16px; color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sch-tl-axis .tick { position: absolute; transform: translateX(-50%); }
+
+/* 清單 */
+.sch-group { margin-bottom: 16px; }
+.sch-gh { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; color: var(--text-hi); }
+.sch-gh .gdot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.sch-table { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg-app); }
+.sch-row {
+  display: grid; grid-template-columns: 22px minmax(150px, 1.4fr) minmax(110px, 1fr) minmax(110px, .9fr) 92px 80px minmax(110px, 1fr) auto;
+  align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12.5px; cursor: pointer;
+}
+.sch-row:last-child { border-bottom: 0; }
+.sch-row:hover:not(.sch-th) { background: var(--bg-hover); }
+.sch-row.sel { background: var(--bg-active); box-shadow: inset 2px 0 0 var(--acc); }
+.sch-row.off .sch-name b { color: var(--text-2); }
+.sch-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.sch-th { cursor: default; color: var(--text-3); font-size: 11.5px; padding-top: 6px; padding-bottom: 6px; }
+.sch-name { display: flex; flex-direction: column; min-width: 0; }
+.sch-name b { color: var(--text-hi); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-path, .sch-at { color: var(--text-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-when, .sch-next { color: var(--text); }
+.sch-last { display: flex; flex-direction: column; min-width: 0; }
+.sch-last .res { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-hist { display: inline-flex; gap: 2px; align-items: center; }
+.sch-hist i { width: 5px; height: 14px; border-radius: 1.5px; background: color-mix(in srgb, var(--text-3) 50%, transparent); }
+.sch-hist i.lvl-ok { background: color-mix(in srgb, var(--green) 75%, var(--bg-app)); }
+.sch-hist i.lvl-fail { background: var(--red); }
+.sch-hist i.lvl-warn { background: var(--amber); }
+.sch-hist i.gap { box-shadow: -2px 0 0 color-mix(in srgb, var(--text-3) 60%, transparent); }
+.sch-prov { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-2); }
+.sch-prov span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-prov.guess { color: var(--text-3); }
+.sch-pm { width: 14px; height: 14px; flex: none; }
+.sch-pm.none { display: inline-block; border: 1px dashed var(--text-3); border-radius: 4px; }
+.sch-acts { display: inline-flex; align-items: center; gap: 4px; }
+.sch-acts .ibtn { width: 26px; height: 26px; }
+.sch-agent .ic:last-child { width: 12px; height: 12px; opacity: .7; }
+.sch-empty { display: flex; align-items: center; gap: 8px; padding: 18px 4px; color: var(--text-3); font-size: 13px; }
+.sch-empty.err { color: var(--red); }
+@media (max-width: 1280px) {
+  .sch-row { grid-template-columns: 22px minmax(140px, 1.4fr) minmax(100px, 1fr) minmax(100px, .9fr) 80px minmax(100px, 1fr) auto; }
+  .sch-row > :nth-child(5) { display: none; }
+}
+
+/* 明細 */
+.sch-d-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sch-d-head h2 { margin: 0; font-size: 16px; color: var(--text-hi); overflow-wrap: anywhere; }
+.sch-d-meta { display: flex; flex-wrap: wrap; gap: 2px 10px; color: var(--text-3); font-size: 12px; margin: 4px 0 12px; }
+.sch-badge { font-size: 11px; border-radius: 5px; padding: 1px 6px; color: var(--text-2); background: var(--bg-raised); border: 1px solid var(--border); }
+.sch-badge.fail { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); border-color: color-mix(in srgb, var(--red) 30%, transparent); }
+.sch-badge.origin-agent { color: var(--acc); border-color: color-mix(in srgb, var(--acc) 40%, transparent); }
+.sch-agentbox { border: 1px solid color-mix(in srgb, var(--acc) 35%, var(--border)); background: color-mix(in srgb, var(--acc) 6%, var(--bg-pane));
+  border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.sch-ab-h { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text-hi); margin-bottom: 8px; }
+.sch-ab-h .ic { width: 14px; height: 14px; color: var(--acc); }
+.sch-ab-h .sch-sub { font-weight: 400; margin-left: auto; }
+.sch-ab-tasks { display: flex; flex-wrap: wrap; gap: 6px; }
+.sch-ab-links, .sch-ab-diag { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12px; color: var(--text-2); }
+.sch-diag { display: inline-flex; align-items: center; gap: 5px; }
+.sch-diag.ok .ic { width: 13px; height: 13px; color: var(--green); }
+.sch-switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-2); }
+.sch-link { color: var(--link); background: none; border: 0; padding: 0; font: inherit; cursor: pointer; text-align: left; }
+.sch-link:hover { text-decoration: underline; }
+.sch-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 14px; }
+.sch-quick .sch-more { margin-left: auto; }
+.sch-sec { margin-bottom: 14px; }
+.sch-sec-h { color: var(--text-3); font-size: 11.5px; margin-bottom: 6px; }
+.sch-err { color: var(--red); font-size: 12px; margin-bottom: 6px; }
+.sch-kv { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 5px 10px; font-size: 12.5px; }
+.sch-kv .k { color: var(--text-3); }
+.sch-code { display: block; padding: 6px 8px; border-radius: 6px; background: var(--bg-sunken); border: 1px solid var(--border); font-size: 11.5px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.sch-xml { margin-top: 8px; font-size: 12px; }
+.sch-xml summary { cursor: pointer; color: var(--text-2); }
+.sch-xml pre { margin: 6px 0 0; padding: 8px; max-height: 320px; overflow: auto; border-radius: 6px; background: var(--bg-sunken); border: 1px solid var(--border); font-size: 11px; }
+.sch-runs { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.sch-run { display: grid; grid-template-columns: 14px 86px minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.sch-gap { color: var(--text-3); font-size: 11px; }
+.sch-chg { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; font-size: 12px; color: var(--text-2); padding: 2px 0; }
+.sch-chg .mono { color: var(--text-3); margin-right: 4px; }
+
+/* Myriagent 的定時訊息：清單一組、新增與編輯的對話框 */
+.sch-timed .sch-gh .ic { width: 15px; height: 15px; color: var(--text-2); }
+.sch-badge.origin-timed { color: var(--tone-plan); border-color: color-mix(in srgb, var(--tone-plan) 40%, transparent); }
+.sch-form { display: flex; flex-direction: column; gap: 12px; }
+.sch-field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.sch-field > .k { color: var(--text-2); }
+.sch-when-row { display: flex; gap: 8px; }
+.sch-when-row select { flex: none; width: 200px; }
+.sch-when-row input { flex: 1; min-width: 0; }
+.sch-ta { resize: vertical; min-height: 96px; }
+
+/* 其他電腦（S3）：離線的灰掉，標最後回報的時間 */
+.sch-gh .gdot.off { background: color-mix(in srgb, var(--text-3) 60%, transparent); }
+.sch-group.offline .sch-table { opacity: .72; }
+.sch-chip.dim { opacity: .6; }

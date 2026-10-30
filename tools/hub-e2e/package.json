@@ -1,0 +1,18 @@
+{
+  "name": "myriagent-hub-e2e",
+  "private": true,
+  "description": "Myriagent Hub 瀏覽器端到端（WP2.5，第 3 階段改成帳號密碼；WP3.6 瀏覽器閘道；WP3.5 配對與儀表板；WP4.6 瀏覽器遠端操作）：Playwright 用本機 Chrome，跑擁有者登入登出、改密碼、再驗證、工作階段撤銷、CSP、跨站請求、稽核、/app/ 的 hub、兩台假裝置的配對與儀表板、對假裝置的遠端操作、第 4 階段的全流程（WP4.9：兩台假裝置、延遲代理）（不必下載瀏覽器）",
+  "type": "module",
+  "scripts": {
+    "e2e": "node hub-e2e.mjs",
+    "gateway": "node gateway.mjs",
+    "pairing": "node pairing.mjs",
+    "remote-control": "node remote-control.mjs",
+    "full-flow": "node full-flow.mjs",
+    "real-exe": "node real-exe.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.64.0"
+  }
+}

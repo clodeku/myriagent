@@ -1,0 +1,1058 @@
+/* Clode Myriagent：設計變數、基礎元件、頂部列、側欄、工作區與分頁、選單、對話框、提示 */
+
+/* ───── 設計變數（深色為預設） ───── */
+:root {
+  --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft JhengHei UI", sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", "Microsoft JhengHei UI", sans-serif;
+  --mono: "Cascadia Code", "Cascadia Mono", Consolas, "Microsoft JhengHei UI", monospace;
+  --fs-chat: 14px;
+
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
+  --ease-io: cubic-bezier(.77, 0, .175, 1);
+  --ease-drawer: cubic-bezier(.32, .72, 0, 1);
+
+  --bg-app: #181818;
+  --bg-pane: #1f1f1f;
+  --bg-raised: #252526;
+  --bg-input: #2b2b2b;
+  --bg-sunken: #191919;
+  --bg-hover: #2a2d2e;
+  --bg-active: #37373d;
+  --bg-elev: #282829;
+  --border: #2b2b2b;
+  --border-2: #3c3c3c;
+  --border-3: #505050;
+  --rail: #424242;
+  --text: #cccccc;
+  --text-hi: #e8e8e8;
+  --text-2: #9d9d9d;
+  /* 第三層文字也是要讀的資訊（用量列、日期分組、提示、佔位文字）：對各層底色（含輸入框 #2b2b2b）至少 4.5:1 */
+  --text-3: #929292;
+  --focus: #0078d4;
+  --link: #4daafc;
+  --green: #4cc38a;
+  --amber: #e2b340;
+  --orange: #f0883e;
+  --red: #f14c4c;
+  --folder: #dcb67a;
+  --tone-neutral: #a4a4a4;
+  --tone-edit: #b88be6;
+  --tone-plan: #2fbecf;
+  --tone-auto: #4ba0ff;
+  --tone-danger: #f25f5c;
+  --btn-pri-bg: #e8e8e8;
+  --btn-pri-fg: #1a1a1a;
+  --ring-track: rgba(255, 255, 255, .075);
+  --sev-warn: #e2b340;
+  --sev-high: #f0883e;
+  --sev-max: #f14c4c;
+  --badge-wait: #e8ad2a;
+  --inline-code: rgba(255, 255, 255, .08);
+  --mark: rgba(226, 179, 64, .32);
+  --diff-add: rgba(46, 160, 67, .12);
+  --diff-del: rgba(248, 81, 73, .11);
+  --diff-hunk: rgba(56, 139, 253, .08);
+  --scrim: rgba(0, 0, 0, .52);
+  --shadow-pop: 0 10px 32px rgba(0, 0, 0, .48), 0 0 0 1px rgba(255, 255, 255, .07);
+  --shadow-dlg: 0 28px 72px rgba(0, 0, 0, .58), 0 0 0 1px rgba(255, 255, 255, .08);
+
+  --acc: #D97757;
+  --acc-ink: #141414; /* 與 util.js inkOn(--acc) 相同：珊瑚色上深色字的對比較高 */
+  /* 帳戶色直接當文字（疊在帳戶色淡底上）時混入的顏色：深色主題提亮、淺色主題加深，各帳戶色都至少 4.5:1 */
+  --acc-text-mix: #fff 25%;
+  /* 側欄的 token 計數（科技藍）：數字、剛鎖定的字、標籤與亂碼、發光 */
+  --tk: #5cb8ff;
+  --tk-hi: #e0f1ff;
+  --tk-dim: rgba(92, 184, 255, .58);
+  --tk-glow: rgba(92, 184, 255, .4);
+  /* token 數的綠（輸入框下方的 token 數與輸出速度、一輪的結算單、自動壓縮的說明；fx.css 的第六批把 --tk 換成這一組。側欄帳戶卡的今日 token 2026-10-25 起改成各帳戶的色系）。
+     2026-10-26 使用者要求改回綠色、再深一點：色相同以前駭客任務的綠（oklch 約 148°），亮度由 0.88／0.78 降到 0.70／0.64——
+     在窗格底上約 6.6:1（一輪進行中）／5.2:1（平常），以前是 12.4:1／8.9:1；和狀態燈的 --green（約 158°、較亮）分得開。
+     2026-10-25 曾是紫、深藍偏靛（約 3:1） */
+  --mx: #41ba5d;
+  --mx-soft: #33a550;
+  --mx-hi: #d1f7d5;
+  --mx-dim: rgba(65, 186, 93, .6);
+  --mx-glow: rgba(40, 180, 80, .4);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg-app: #f7f7f7;
+  --bg-pane: #ffffff;
+  --bg-raised: #f9f9f9;
+  --bg-input: #ffffff;
+  --bg-sunken: #f5f5f5;
+  --bg-hover: #efefef;
+  --bg-active: #e4e4e6;
+  --bg-elev: #ffffff;
+  --border: #e6e6e6;
+  --border-2: #d6d6d6;
+  --border-3: #bdbdbd;
+  --rail: #d2d2d2;
+  --text: #3b3b3b;
+  --text-hi: #1e1e1e;
+  --text-2: #696969;
+  --text-3: #707070;
+  --focus: #005fb8;
+  --link: #005fb8;
+  /* 狀態色也當膠囊文字（疊在同色淡底上）：加深到 4.5:1 以上 */
+  --green: #17703f;
+  --amber: #855900;
+  --orange: #c9560a;
+  --red: #cd2f27;
+  --folder: #b98a3e;
+  --tone-neutral: #616161;
+  --tone-edit: #8243c2;
+  --tone-plan: #0b8394;
+  --tone-auto: #0b66cf;
+  --tone-danger: #cd2f27;
+  --btn-pri-bg: #1f1f1f;
+  --btn-pri-fg: #ffffff;
+  --ring-track: rgba(0, 0, 0, .07);
+  --sev-warn: #dc9a0c;
+  --sev-high: #e5651c;
+  --sev-max: #d93a30;
+  --badge-wait: #f0b429;
+  --inline-code: rgba(0, 0, 0, .06);
+  --mark: rgba(230, 170, 20, .3);
+  --diff-add: rgba(46, 160, 67, .12);
+  --diff-del: rgba(220, 50, 40, .1);
+  --diff-hunk: rgba(10, 100, 220, .07);
+  --scrim: rgba(20, 20, 20, .3);
+  --shadow-pop: 0 10px 30px rgba(0, 0, 0, .13), 0 0 0 1px rgba(0, 0, 0, .07);
+  --shadow-dlg: 0 28px 70px rgba(0, 0, 0, .2), 0 0 0 1px rgba(0, 0, 0, .07);
+  --acc-text-mix: #000 45%;
+  --tk: #0a5fc2;
+  --tk-hi: #042a5c;
+  --tk-dim: rgba(10, 95, 194, .66);
+  --tk-glow: rgba(10, 95, 194, .18);
+  --mx: #076b29;
+  --mx-soft: #035e23;
+  --mx-hi: #013912;
+  --mx-dim: rgba(7, 107, 41, .66);
+  --mx-glow: rgba(7, 107, 41, .16);
+  color-scheme: light;
+}
+
+/* ───── 基礎 ───── */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+/* 左右滑是叫出與收起兩側面板（側欄、電腦狀態）的觸控手勢（drawer.js）：不讓瀏覽器把橫向滑動當成上一頁／下一頁（Chrome 的滑動導覽；iOS 從螢幕邊緣滑的系統手勢擋不了） */
+html, body { overscroll-behavior-x: none; }
+/* 整頁不縮放（2026-10-27 使用者要求：手機上不小心點兩下整個畫面被放大，介面要一直貼合螢幕）：manipulation 關掉雙擊縮放
+   （iOS 13 起；新版 iOS 不理 viewport 的 user-scalable=no），兩指捏合由 index.html 的 viewport（Android）與 app.js 擋 gesture 事件（iOS）。
+   touch-action 是沿祖先取交集：燈箱（touch-action: none，自己處理雙點與捏合）不受影響 */
+html { touch-action: manipulation; }
+/* 安全區域（index.html 的 viewport-fit=cover；2026-10-25 使用者回報：iPhone 上畫面上下都被截掉——最上面那排在狀態列的漸層底下、
+   最下面那行貼在手勢列上）：整個 app 縮在安全區域裡，外面露出 body 的底色。桌面與沒有瀏海的裝置 env() 是 0，不變。
+   上緣一律用 --safe-top：iOS 26 起狀態列底下的模糊漸層（捲動邊緣效果）比安全區域還往下延伸約 30pt（2026-10-30 使用者回報 iPhone 18 的網頁版：
+   頂列貼著安全區域，上半部被糊掉、變暗），iOS（只有 WebKit 認得 -webkit-touch-callout）上緣有安全區域時再多讓 32px；
+   min(安全區域 × 1000, 32px) 在沒有安全區域時是 0（Safari 網址列在上方、橫向） */
+:root { --safe-top: env(safe-area-inset-top, 0px); }
+@supports (-webkit-touch-callout: none) {
+  :root { --safe-top: calc(env(safe-area-inset-top, 0px) + min(env(safe-area-inset-top, 0px) * 1000, 32px)); }
+}
+body {
+  padding: var(--safe-top) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  background: var(--bg-app);
+  color: var(--text);
+  font: 13px/1.45 var(--font);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-align: inherit; }
+button:disabled { cursor: default; opacity: .45; }
+input, textarea, select { font: inherit; color: inherit; margin: 0; }
+h1, h2, h3, h4 { font-weight: 600; }
+:focus { outline: none; }
+:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+/* 按鈕與色票：焦點框畫在外側、留 2px 間隙（內側 1px 線疊在帳戶色、紅色等實心底上幾乎看不見） */
+.btn:focus-visible, .cbtn:focus-visible, .swatch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+::selection { background: color-mix(in srgb, var(--focus) 42%, transparent); }
+mark { background: var(--mark); color: inherit; border-radius: 2px; }
+kbd { font-family: var(--mono); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(121, 121, 121, .3); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background-color: rgba(121, 121, 121, .5); }
+::-webkit-scrollbar-corner, ::-webkit-scrollbar-track { background: transparent; }
+
+.grow { flex: 1 1 auto; min-width: 0; }
+.ic { display: inline-flex; width: 16px; height: 16px; flex: none; }
+.ic svg { width: 100%; height: 100%; display: block; }
+/* 代理標誌：各家官方圖示的圓角磚（icons.js 的 MARKS），陰影讓磚浮起來；字形與漸層的定義放在看不見的 .pmark-defs */
+.pmark { display: inline-flex; flex: none; border-radius: 27%; box-shadow: 0 1px 1.5px rgb(0 0 0 / .28), 0 3px 8px -3px rgb(0 0 0 / .3); }
+.pmark-defs { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+.pmark svg { width: 100%; height: 100%; display: block; }
+.dim { color: var(--text-3); }
+.mono { font-family: var(--mono); }
+
+.spin {
+  display: inline-block; flex: none; width: 13px; height: 13px; border-radius: 50%;
+  border: 1.6px solid color-mix(in srgb, currentColor 22%, transparent); border-top-color: currentColor;
+  animation: spin .75s linear infinite;
+}
+/* 等背景工作回報（代理這一輪結束了、背景工作還在跑）：虛線圈，和執行中的實心轉圈分得出來；慢慢轉的動畫在 fx.css（減少動態時靜止） */
+.bg-ring {
+  display: inline-block; flex: none; box-sizing: border-box; width: 13px; height: 13px; border-radius: 50%;
+  border: 1.6px dashed var(--acc); opacity: .85;
+}
+.bg-ring[hidden] { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.78); } }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
+/* ───── 按鈕、輸入、開關 ───── */
+.ibtn {
+  width: 28px; height: 28px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; color: var(--text-2); transition: background-color 100ms, color 100ms;
+}
+.ibtn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-hi); }
+.ibtn.on, .ibtn.is-open { background: var(--bg-active); color: var(--text-hi); }
+.ibtn.sm { width: 22px; height: 22px; border-radius: 5px; }
+.ibtn.sm .ic { width: 14px; height: 14px; }
+
+.btn {
+  height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none;
+  padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--bg-raised);
+  color: var(--text-hi); font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  transition: transform 120ms var(--ease-out), background-color 100ms, border-color 100ms;
+}
+.btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-3); }
+.btn:active:not(:disabled) { transform: scale(.97); }
+.btn .ic { width: 14px; height: 14px; }
+.btn .spin { width: 12px; height: 12px; }
+.btn.sm { height: 26px; padding: 0 10px; font-size: 12px; }
+.btn.primary { background: var(--btn-pri-bg); color: var(--btn-pri-fg); border-color: transparent; }
+.btn.primary:hover:not(:disabled) { background: var(--btn-pri-bg); filter: brightness(.92); border-color: transparent; }
+.btn.acc { background: var(--acc); color: var(--acc-ink); border-color: transparent; }
+.btn.acc:hover:not(:disabled) { background: var(--acc); filter: brightness(1.08); border-color: transparent; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
+.btn.ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-hi); border-color: transparent; }
+.btn.danger-solid { background: var(--red); color: #fff; border-color: transparent; }
+.btn.danger-solid:hover:not(:disabled) { background: var(--red); filter: brightness(1.08); }
+
+.input {
+  height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-2);
+  background: var(--bg-input); color: var(--text-hi); outline: none; min-width: 0;
+  transition: border-color 100ms, box-shadow 100ms;
+}
+textarea.input { height: auto; padding: 8px 10px; line-height: 1.5; }
+.input::placeholder { color: var(--text-3); }
+.input:focus { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+input[type="search"]::-webkit-search-cancel-button { filter: grayscale(1); opacity: .6; cursor: pointer; }
+
+.switch { position: relative; display: inline-flex; width: 34px; height: 20px; flex: none; cursor: pointer; }
+.switch-input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+.switch-input:disabled { cursor: default; }
+.switch-track {
+  position: relative; width: 100%; height: 100%; border-radius: 999px;
+  background: var(--bg-active); border: 1px solid var(--border-2); transition: background-color 160ms, border-color 160ms;
+}
+.switch-knob {
+  position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-2);
+  transition: transform 180ms var(--ease-out), background-color 160ms;
+}
+.switch-input:checked + .switch-track { background: var(--focus); border-color: transparent; }
+.switch-input:checked + .switch-track .switch-knob { transform: translateX(14px); background: #fff; }
+.switch-input:focus-visible + .switch-track { outline: 1px solid var(--focus); outline-offset: 2px; }
+.switch-input:disabled + .switch-track { opacity: .5; }
+
+.seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 7px; background: var(--bg-pane); border: 1px solid var(--border); flex: none; }
+.seg-btn {
+  height: 24px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 5px;
+  color: var(--text-2); font-size: 12.5px; white-space: nowrap; transition: background-color 100ms, color 100ms;
+}
+.seg-btn:hover { color: var(--text-hi); }
+.seg-btn.on { background: var(--bg-active); color: var(--text-hi); }
+.seg-btn .ic { width: 14px; height: 14px; }
+
+.badge-wait {
+  min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--badge-wait); color: #1b1404; font-size: 10.5px; font-weight: 700; line-height: 1;
+}
+.dot-unread { width: 7px; height: 7px; border-radius: 50%; background: var(--link); flex: none; }
+
+/* ───── 版面 ───── */
+/* 高度用 100dvh（看得到的區域，跟著網址列與工具列伸縮）：iOS（Safari 與 iOS 的 Chrome）的 100vh 是工具列收起時的高度，
+   比看得到的區域高，body 又不捲動，最下面的輸入區被瀏覽器的工具列蓋住、點不到。不認得 dvh 的舊瀏覽器照用前一行的 100vh */
+.app {
+  display: flex; flex-direction: column; height: 100vh; height: 100dvh;
+  height: calc(100dvh - var(--safe-top) - env(safe-area-inset-bottom, 0px));
+}
+.body { flex: 1; min-height: 0; display: flex; }
+/* 側欄＋工作區的大小（工作區的格狀看高度決定要不要捲動）；選單、對話框、提示都掛在 document.body，不在這個容器裡 */
+.body { container: shell / size; }
+
+.topbar {
+  height: 40px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 6px;
+  background: var(--bg-app); border-bottom: 1px solid var(--border); user-select: none;
+}
+.brand { display: flex; align-items: center; gap: 8px; padding: 0 10px 0 4px; }
+.brand-mark { width: 18px; height: 18px; display: inline-flex; flex: none; }
+.brand-mark svg { width: 100%; height: 100%; }
+/* 品牌圖示 C 裡的三根聲波柱：平常是靜止的高低，有對話執行中才伸縮（fx.css 的 .app.acct-running） */
+.brand-wave { position: absolute; left: 31%; top: 31%; width: 38%; height: 38%; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
+.brand-wave > i { width: 1.8px; height: 100%; border-radius: 1px; background: linear-gradient(#F2A182, #3FD3AE 60%, #1FAE8E); transform: scaleY(var(--bw-lo, .6)); }
+.brand-wave > i:nth-child(1) { --bw-lo: .5; --bw-d: .62s; }
+.brand-wave > i:nth-child(2) { --bw-lo: 1; --bw-d: .48s; }
+.brand-wave > i:nth-child(3) { --bw-lo: .65; --bw-d: .7s; }
+.brand-name { font-weight: 600; font-size: 13px; color: var(--text-hi); white-space: nowrap; }
+/* 品牌名旁的版號（#appVer，versionrules.js）：平常是淡色小字；桌面有新版（update）、瀏覽器版伺服器已換版（warn）換色調。
+   class 設了 display，hidden 要另外寫才藏得住 */
+.app-ver {
+  height: 20px; display: inline-flex; align-items: center; gap: 4px; margin-left: -2px; padding: 0 7px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; text-decoration: none;
+  color: var(--text-2); background: transparent; border: 1px solid transparent;
+}
+.app-ver[hidden] { display: none !important; }
+.app-ver:hover, .app-ver:focus-visible { color: var(--text); background: var(--bg-hover); }
+.app-ver[data-tone="update"] {
+  color: color-mix(in srgb, var(--tone-auto), var(--acc-text-mix)); background: color-mix(in srgb, var(--tone-auto) 12%, transparent);
+  border-color: color-mix(in srgb, var(--tone-auto) 30%, transparent);
+}
+.app-ver[data-tone="warn"] {
+  color: var(--amber); background: color-mix(in srgb, var(--amber) 11%, transparent); border-color: color-mix(in srgb, var(--amber) 30%, transparent);
+}
+.app-ver-time[hidden] { display: none; }
+/* 版號前面的日期時間（這一版的提交時間）：和版號之間用淡一點的點隔開（不算進文字） */
+.app-ver-time::after { content: '·'; margin-left: 4px; opacity: .6; }
+@media (max-width: 480px) {
+  .app-ver-pre { display: none; }
+  /* 手機寬度放不下「日期 時刻 · 版號」：版號收進提示與讀屏（瀏覽器版還在「版本與更新」頁），日期與時刻疊成兩行小字 */
+  .app-ver:has(> .app-ver-time:not([hidden])) { height: 28px; padding: 0 6px; border-radius: 8px; }
+  .app-ver:has(> .app-ver-time:not([hidden])) .app-ver-num { display: none; }
+  .app-ver-time:not([hidden]) { display: inline-flex; flex-direction: column; align-items: center; font-size: 10px; line-height: 12px; }
+  .app-ver-time::after { content: none; }
+}
+.view-switch { margin-left: 2px; }
+/* 手機寬度：檢視鈕只留圖示（2026-10-27：瀏覽器版多了排程鈕，390px 寬的頂部列撐到 481px，
+   iPhone 的 Safari 把整頁縮小、右邊與下面空一塊）。文字以視覺隱藏留著當讀屏的名稱，提示是 title；
+   選中的那顆也不顯示文字（寬度不隨換頁改變，滑動的底色才對得準），靠底色辨認。live-probe 的 hubChat390NoHScroll 把關 */
+@media (max-width: 480px) {
+  .view-switch .seg-btn { padding-left: 8px; padding-right: 8px; }
+  .view-switch .seg-btn > span:not(.ic) {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+}
+.cli-badge {
+  height: 24px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: var(--amber); white-space: nowrap;
+  background: color-mix(in srgb, var(--amber) 13%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent);
+}
+.cli-badge:hover { background: color-mix(in srgb, var(--amber) 20%, transparent); }
+.cli-badge .ic { width: 14px; height: 14px; }
+/* 〔熱更新〕安裝不一致（錯誤）、安裝變動中與換版中（進行中）：色調同 CLI 卡的狀態膠囊；文字混一點前景色，頂部列的底色上也有 4.5:1 */
+.cli-badge[data-tone="err"] {
+  color: color-mix(in srgb, var(--red), var(--acc-text-mix)); background: color-mix(in srgb, var(--red) 13%, transparent);
+  border-color: color-mix(in srgb, var(--red) 32%, transparent);
+}
+.cli-badge[data-tone="err"]:hover { background: color-mix(in srgb, var(--red) 20%, transparent); }
+.cli-badge[data-tone="busy"] {
+  color: color-mix(in srgb, var(--tone-auto), var(--acc-text-mix)); background: color-mix(in srgb, var(--tone-auto) 13%, transparent);
+  border-color: color-mix(in srgb, var(--tone-auto) 32%, transparent);
+}
+.cli-badge[data-tone="busy"]:hover { background: color-mix(in srgb, var(--tone-auto) 20%, transparent); }
+.mode-popout .view-switch, .mode-popout #btnSidebar { display: none; }
+.view-dashboard #btnSidebar { visibility: hidden; }
+
+/* app 自我更新的橫幅（頂部列下方；appupdate.js） */
+.app-banner { display: flex; align-items: center; gap: 10px; padding: 6px 14px; font-size: 12.5px; color: var(--text);
+  border-bottom: 1px solid color-mix(in srgb, var(--tone-auto) 26%, var(--border)); background: color-mix(in srgb, var(--tone-auto) 8%, var(--bg-pane)); }
+.app-banner[hidden] { display: none !important; }
+.app-banner[data-tone="warn"] { border-bottom-color: color-mix(in srgb, var(--amber) 40%, var(--border)); background: color-mix(in srgb, var(--amber) 8%, var(--bg-pane)); }
+.app-banner-ic { width: 14px; height: 14px; flex: none; color: var(--tone-auto); }
+.app-banner[data-tone="warn"] .app-banner-ic { color: var(--amber); }
+.app-banner-text { flex: 1; min-width: 0; }
+.app-banner-close { margin-left: 4px; }
+/* 設定頁「Clode Myriagent」區塊的按鈕列：可能同時有「立即檢查」「立即重啟」「安裝到這台電腦」 */
+.app-actions { gap: 8px; }
+
+.no-host { margin: auto; display: flex; align-items: center; gap: 8px; color: var(--text-2); grid-column: 1 / -1; }
+
+/* ───── 側欄 ───── */
+.sidebar {
+  width: 264px; flex: none; display: flex; flex-direction: column; min-height: 0;
+  background: var(--bg-app); border-right: 1px solid var(--border);
+}
+.sb-sec-accts { flex: none; max-height: 46%; display: flex; flex-direction: column; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.sb-sec-hist { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sb-head { display: flex; align-items: center; gap: 2px; height: 34px; padding: 0 8px 0 14px; flex: none; }
+.sb-title { flex: 1; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+.sb-accts { display: flex; flex-direction: column; gap: 1px; padding: 0 6px; overflow-y: auto; min-height: 0; }
+
+/* 帳戶卡：左邊上下兩行（名稱、狀態），右邊的用量圓環佔兩行高 */
+.macct {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 18px 18px; row-gap: 4px;
+  align-items: center; padding: 7px 8px 7px 15px; border-radius: 6px; cursor: pointer; user-select: none;
+}
+.macct:hover { background: var(--bg-hover); }
+.macct.filtered { background: var(--bg-active); }
+.macct.dragging { opacity: .45; }
+.macct.drop-above { box-shadow: inset 0 2px 0 var(--focus); }
+.macct.drop-below { box-shadow: inset 0 -2px 0 var(--focus); }
+.macct-bar { position: absolute; left: 5px; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: var(--acc); }
+.macct-main { display: contents; }
+.macct-top { grid-area: 1 / 1; display: flex; align-items: center; gap: 6px; min-width: 0; height: 18px; }
+.macct-name { flex: 1; min-width: 0; font-weight: 600; color: var(--text-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 名稱放不下時的跑馬燈（sidebar.js 的 fitNames 加 .marquee、算好 --mq-dist 與 --mq-dur）：來回捲動、兩端停一下，關鍵影格同標題列（chat.css 的 ch-marquee）。
+   滑過卡片時照常捲（＋出現、名稱的框變窄，要看全名就看它）；無限循環只動 transform；減少動態或關掉動態效果（data-fx="off"）時不捲動，照舊以「…」截斷 */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-fx="off"]) .macct-name.marquee { text-overflow: clip; }
+  :root:not([data-fx="off"]) .macct-name.marquee > .macct-name-run {
+    display: inline-block; animation: ch-marquee var(--mq-dur, 8s) ease-in-out infinite alternate;
+  }
+}
+.macct-run {
+  display: inline-flex; align-items: center; gap: 4px; height: 16px; padding: 0 6px 0 5px; border-radius: 999px; flex: none;
+  font-size: 11px; font-weight: 600; color: color-mix(in srgb, var(--acc), var(--acc-text-mix)); background: color-mix(in srgb, var(--acc) 15%, transparent);
+}
+.macct-spin { width: 9px; height: 9px; border-width: 1.4px; }
+/* 等背景工作回報的對話數：和執行中同樣的小膠囊，但用虛線圈與虛線框、沒有底色（代理沒有在產生內容，只是在等） */
+.macct-bg {
+  display: inline-flex; align-items: center; gap: 4px; height: 16px; padding: 0 6px 0 5px; border-radius: 999px; flex: none; box-sizing: border-box;
+  font-size: 11px; font-weight: 600; color: color-mix(in srgb, var(--acc), var(--acc-text-mix));
+  border: 1px dashed color-mix(in srgb, var(--acc) 45%, transparent);
+}
+.macct-bg-ring { width: 9px; height: 9px; border-width: 1.4px; }
+.macct-wait { display: inline-flex; flex: none; }
+.macct-wait span {
+  width: 16px; height: 16px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--badge-wait); color: #1b1404; font-size: 10.5px; font-weight: 700;
+}
+/* 背景程式：這一輪結束了、但代理開的程式脫離 CLI 還在跑（靜態，不做持續動畫；和執行中的轉圈、等背景工作回報的虛線圈分開，用綠色系） */
+.macct-prog {
+  display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 6px 0 4px; border-radius: 999px; flex: none;
+  font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--green), var(--acc-text-mix)); background: color-mix(in srgb, var(--green) 15%, transparent);
+}
+.macct-prog .ic { width: 11px; height: 11px; }
+/* 執行中的子代理（2026-10-28；個數）：靜態，同工具卡的子代理圖示，青色系（和執行中的轉圈、等背景工作的虛線圈、背景程式的綠色分開） */
+.macct-agents {
+  display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 6px 0 4px; border-radius: 999px; flex: none;
+  font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--tone-plan), var(--acc-text-mix)); background: color-mix(in srgb, var(--tone-plan) 15%, transparent);
+}
+.macct-agents .ic { width: 11px; height: 11px; }
+.macct-new { display: none; margin: -3px -4px -3px 0; }
+.macct:hover .macct-new, .macct:focus-within .macct-new { display: inline-flex; }
+.macct-sub { grid-area: 2 / 1; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11.5px; color: var(--text-2); min-height: 18px; }
+.macct-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); flex: none; }
+.macct[data-status="ready"] .macct-dot { background: var(--green); }
+.macct[data-status="notLoggedIn"] .macct-dot, .macct[data-status="apiKey"] .macct-dot { background: var(--amber); }
+.macct[data-status="error"] .macct-dot, .macct[data-status="notInstalled"] .macct-dot { background: var(--red); }
+.macct[data-status="checking"] .macct-dot { animation: breathe 1.4s ease-in-out infinite; }
+.macct-sub-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.macct-meters { grid-area: 1 / 2 / span 2; display: flex; gap: 5px; margin-left: 8px; }
+.macct-meters:empty { display: none; }
+/* 用量圓環（40px）：弧線的顏色跟著嚴重度；第一次出現從 0 長到目前的數值，之後數值變了滑過去 */
+.mmeter { --gauge: var(--acc); position: relative; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: none; }
+.mmeter[data-sev="warn"] { --gauge: var(--sev-warn); }
+.mmeter[data-sev="high"] { --gauge: var(--sev-high); }
+.mmeter[data-sev="max"] { --gauge: var(--sev-max); }
+.mring { position: absolute; inset: 0; width: 100%; height: 100%; }
+.mring-track { fill: none; stroke: var(--ring-track); stroke-width: 3; }
+.mring-arc { fill: none; stroke: var(--gauge); stroke-width: 3; stroke-linecap: round; transition: stroke-dasharray 900ms var(--ease-out), opacity 200ms ease; }
+/* 圈內：百分比在上、重置倒數在下（疊在 fx.css 的雷達掃描上面） */
+.mmeter-txt { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; }
+.mmeter-n { display: inline-flex; align-items: baseline; font-family: var(--font-display); font-size: 11.5px; font-weight: 600; line-height: 12px;
+  letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--text-hi); }
+.mmeter-pct { margin-left: .5px; font-size: 7.5px; font-weight: 500; letter-spacing: 0; color: var(--text-2); }
+.mmeter-reset { font-size: 9px; line-height: 10px; font-variant-numeric: tabular-nums; color: var(--text-3); }
+.mmeter-n.sev-warn { color: var(--amber); }
+.mmeter-n.sev-high { color: var(--orange); }
+.mmeter-n.sev-max { color: var(--red); }
+/* 過時：圓環與數字變灰，狀態那一行的時鐘與年紀用琥珀色（只在資料真的停住時出現） */
+.macct-meters.stale .mmeter { --gauge: var(--text-3); opacity: .6; }
+.macct-meters.stale .mmeter-n { color: var(--text-3); }
+.macct-stale { display: inline-flex; flex: none; }
+.mstale { display: inline-flex; align-items: center; gap: 2px; font-size: 10.5px; font-variant-numeric: tabular-nums; color: var(--amber); }
+.mstale .ic { width: 12px; height: 12px; }
+/* 登入即將到期（剩 3 天內）：名稱那一行的小膠囊（同 .macct-run 的做法），琥珀色；已到期是紅色。是按鈕（點一下重新登入） */
+.macct-login {
+  --tone: var(--amber);
+  display: inline-flex; flex: none; align-items: center; gap: 3px; height: 16px; padding: 0 6px 0 5px; border: 0; border-radius: 999px;
+  font: inherit; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer;
+  color: color-mix(in srgb, var(--tone), var(--acc-text-mix)); background: color-mix(in srgb, var(--tone) 15%, transparent);
+}
+.macct-login.expired { --tone: var(--red); color: color-mix(in srgb, var(--red) 45%, var(--text-hi)); } /* 紅字小，往前景色多混一些（對比 ≥ 4.5，介面探針量） */
+.macct-login:hover { background: color-mix(in srgb, var(--tone) 26%, transparent); }
+.macct-login .ic { width: 11px; height: 11px; }
+/* 名稱那一行已經有執行中、等待你的標示：只留圖示（剩餘時間在提示裡），名稱不被擠到只剩一個字 */
+.macct-login.compact { padding: 0 5px; }
+.macct-login.compact .mlogin-left { display: none; }
+/* token 計數（tokenfx.js）：放在狀態那一行（原本方案名稱的位置），in 與 out 兩個數字並排；藍色等寬字與發光，每個字一格等寬，解碼時的亂碼不會讓版面跳動。
+   這一行剩下的寬度（兩個圓環，再加上過時標示或各電腦小點）放不下 in／out 標籤時收起標籤、改用斜線隔開，數字小一點；
+   再放不下就在右緣裁掉（overflow-x: clip），數字絕不蓋到後面的標示（精確值在滑過的說明） */
+.macct-bar, .macct-top, .macct-sub, .macct-meters { z-index: 1; }
+.macct-top, .macct-sub, .macct-meters { position: relative; }
+.macct-tok {
+  flex: 1; display: flex; align-items: baseline; gap: 3px; min-width: 0; font: 11.5px/18px var(--mono); color: var(--tk); white-space: nowrap;
+  container: mtok / inline-size; overflow-x: clip;
+}
+.mtok-tag { flex: none; font-size: 10px; color: var(--tk-dim); letter-spacing: .04em; }
+.mtok-out { margin-left: 6px; }
+.mtok-sep { display: none; flex: none; margin: 0 -2px; font-size: 10px; color: var(--tk-dim); }
+/* 122px＝兩個數字都是最長（6 個字）時 in／out 標籤版的寬度（介面探針 tokensFit 量） */
+@container mtok (width < 122px) {
+  .mtok-tag { display: none; }
+  .mtok-sep { display: inline; }
+  .mtok-n { font-size: 11px; }
+}
+.mtok-v { position: relative; display: inline-flex; flex: none; }
+.mtok-n { position: relative; display: inline-flex; align-items: baseline; font-weight: 600; text-shadow: 0 0 6px var(--tk-glow); }
+.mtok-n.zero { opacity: .55; text-shadow: none; }
+.mtok-c { display: inline-block; width: 1ch; text-align: center; }
+.mtok-c.sep { width: .55ch; }
+.mtok-c.scr { color: var(--tk-dim); }
+.mtok-c.lock { color: var(--tk-hi); text-shadow: 0 0 8px var(--tk), 0 0 2px var(--tk-hi); }
+.macct:has(.macct-run:not([hidden])) .mtok-v > .mtok-n:not(.zero) { text-shadow: 0 0 8px var(--tk-glow), 0 0 2px var(--tk-glow); }
+
+.sb-add {
+  display: flex; align-items: center; gap: 8px; height: 28px; margin: 2px 6px 0; padding: 0 10px; border-radius: 6px;
+  color: var(--text-2); font-size: 12.5px; flex: none;
+}
+.sb-add:hover { background: var(--bg-hover); color: var(--text-hi); }
+.sb-add .ic { width: 14px; height: 14px; }
+
+/* 清單下方、側欄最左下角的工具列：搜尋框與「全部」在上、篩選下拉在最下面（沒有篩選下拉時搜尋框就是最後一列；
+   手機的手勢列由 body 的安全區域留邊擋開） */
+.sb-tools {
+  flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+.sb-search { position: relative; display: flex; gap: 6px; flex: none; }
+.sb-search-ic { position: absolute; left: 9px; top: 6px; width: 14px; height: 14px; color: var(--text-3); pointer-events: none; }
+.sb-search-input { flex: 1; height: 26px; padding-left: 29px; font-size: 12.5px; background: var(--bg-pane); }
+/* 搜尋框右邊的「全部」：樣式同篩選下拉，沒有篩選時底色加深（按下的樣子） */
+.sb-all {
+  flex: none; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-2);
+  color: var(--text-2); font-size: 12px; white-space: nowrap;
+}
+.sb-all:hover { background: var(--bg-hover); color: var(--text-hi); border-color: var(--border-3); }
+.sb-all.on { background: var(--bg-active); color: var(--text-hi); border-color: transparent; }
+/* 帳戶、電腦與工作區的篩選：下拉一排兩個、各佔一半（三個時第三個自成一排佔滿，只有一個時佔滿整列）；有篩選時底色加深，一眼看得出清單不是全部 */
+.sb-filters { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
+.sb-pick {
+  flex: 1 1 calc(50% - 3px); min-width: 0; height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 5px 0 8px;
+  border-radius: 6px; border: 1px solid var(--border-2); color: var(--text-2); font-size: 12px; white-space: nowrap;
+}
+.sb-pick:hover, .sb-pick.is-open { background: var(--bg-hover); color: var(--text-hi); border-color: var(--border-3); }
+.sb-pick.on { background: var(--bg-active); color: var(--text-hi); border-color: transparent; }
+.sb-pick-ic { width: 13px; height: 13px; flex: none; color: var(--text-3); }
+.sb-pick-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--acc); flex: none; }
+.sb-pick-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.sb-pick-chev { width: 12px; height: 12px; flex: none; opacity: .65; }
+.sb-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 8px; }
+.sb-list { display: flex; flex-direction: column; gap: 1px; }
+.sb-group { font-size: 11px; font-weight: 600; color: var(--text-3); padding: 12px 8px 4px; }
+.sb-group:first-child { padding-top: 2px; }
+.crow {
+  display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 3px 0 9px; border-radius: 6px;
+  cursor: pointer; color: var(--text); user-select: none;
+}
+.crow:hover { background: var(--bg-hover); }
+.crow.open .crow-title { color: var(--text-hi); }
+.crow.active { background: var(--bg-active); color: var(--text-hi); }
+.crow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--acc); flex: none; }
+.crow-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crow-state { display: flex; align-items: center; gap: 4px; flex: none; }
+.crow-spin { width: 11px; height: 11px; color: var(--acc); border-width: 1.5px; }
+.crow-bg { width: 11px; height: 11px; border-width: 1.5px; }
+/* 自動重新命名正在產生標題（清單的 titling） */
+.crow-titling { width: 13px; height: 13px; color: var(--text-2); animation: breathe 1.4s ease-in-out infinite; }
+.crow-more { opacity: 0; }
+.crow:hover .crow-more, .crow:focus-within .crow-more, .crow-more.is-open { opacity: 1; }
+.crow-input { flex: 1; height: 22px; padding: 0 6px; font-size: 12.5px; }
+.sb-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 10px; color: var(--text-2); font-size: 12.5px; }
+/* 側欄搜尋：內容符合處的片段換到標題下一行（與標題對齊）；內容的結果還沒來時清單下面的「搜尋內容中…」 */
+.crow.has-snip { flex-wrap: wrap; height: auto; min-height: 28px; row-gap: 0; padding-top: 4px; padding-bottom: 5px; }
+.crow-snip {
+  flex: 1 0 calc(100% - 15px); order: 10; min-width: 0; margin: -1px 0 0 15px;
+  font-size: 11.5px; line-height: 1.45; color: var(--text-2);
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere;
+}
+.crow-snip mark { padding: 0 1px; color: var(--text-hi); }
+.sb-searching { display: flex; align-items: center; gap: 7px; padding: 10px 10px 12px; color: var(--text-3); font-size: 12px; }
+.sb-searching-spin { width: 11px; height: 11px; border-width: 1.5px; }
+.sb-searching.is-note { color: var(--text-2); line-height: 1.45; }
+
+/* ───── 工作區：窗格格狀 ───── */
+/* 最多 4 欄 × 3 排（12 個窗格，workspace.js 的 MAX_PANES）：欄數＝⌈√n⌉（最多 4）、排數＝⌈n／欄數⌉，欄與排都只增不減；
+   格子沒排滿時第一個窗格往下多佔幾排補滿（--ws-lead，3 個時就是左邊一個高的） */
+.ws {
+  --ws-cols: 1; --ws-rows: 1; --ws-lead: 1;
+  flex: 1; min-width: 0; min-height: 0; display: grid; gap: 1px; background: var(--border);
+  grid-template-columns: repeat(var(--ws-cols), minmax(0, 1fr)); grid-template-rows: repeat(var(--ws-rows), minmax(0, 1fr));
+}
+.ws > .pane:first-child { grid-row: span var(--ws-lead); }
+.ws[data-count="2"] { --ws-cols: 2; }
+.ws[data-count="3"] { --ws-cols: 2; --ws-rows: 2; --ws-lead: 2; }
+.ws[data-count="4"] { --ws-cols: 2; --ws-rows: 2; }
+.ws[data-count="5"] { --ws-cols: 3; --ws-rows: 2; --ws-lead: 2; }
+.ws[data-count="6"] { --ws-cols: 3; --ws-rows: 2; }
+.ws[data-count="7"] { --ws-cols: 3; --ws-rows: 3; --ws-lead: 3; }
+.ws[data-count="8"] { --ws-cols: 3; --ws-rows: 3; --ws-lead: 2; }
+.ws[data-count="9"] { --ws-cols: 3; --ws-rows: 3; }
+.ws[data-count="10"] { --ws-cols: 4; --ws-rows: 3; --ws-lead: 3; }
+.ws[data-count="11"] { --ws-cols: 4; --ws-rows: 3; --ws-lead: 2; }
+.ws[data-count="12"] { --ws-cols: 4; --ws-rows: 3; }
+/* 3 排放不下（每排不到 216px，主視窗接近最小的大小時）：每排固定 216px、工作區直向捲動，最忙的輸入區（佇列＋附件＋停止鈕）
+   才不會被擠出窗格。只在放不下時捲動：捲動的工作區會裁掉最上排的 / 指令提示超出工作區的部分 */
+@container shell (max-height: 649px) {
+  .ws:is([data-count="7"], [data-count="8"], [data-count="9"], [data-count="10"], [data-count="11"], [data-count="12"]) {
+    grid-template-rows: repeat(var(--ws-rows), 216px); overflow-y: auto;
+  }
+}
+.pane {
+  position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  background: var(--bg-pane); container: pane / inline-size;
+}
+.pane-body { position: relative; flex: 1; min-height: 0; display: flex; }
+.pane.tab-target .pane-body::after {
+  content: ""; position: absolute; inset: 8px; z-index: 60; pointer-events: none; border-radius: 10px;
+  border: 2px dashed color-mix(in srgb, var(--focus) 65%, transparent); background: color-mix(in srgb, var(--focus) 8%, transparent);
+}
+.pane-empty { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px; text-align: center; color: var(--text-2); }
+.pane-empty-title { font-size: 14px; font-weight: 600; color: var(--text-hi); }
+.pane-empty .btn { margin-top: 6px; }
+
+/* 分頁列 */
+.strip { height: 35px; flex: none; display: flex; align-items: stretch; background: var(--bg-app); border-bottom: 1px solid var(--border); }
+.mode-popout .strip { display: none; }
+.tabs { flex: 1; min-width: 0; display: flex; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  position: relative; display: flex; align-items: center; gap: 7px; height: 100%; flex: 0 1 auto;
+  min-width: 96px; max-width: 220px; padding: 0 5px 0 12px; border-right: 1px solid var(--border);
+  color: var(--text-2); font-size: 12.5px; cursor: pointer; user-select: none;
+}
+.tab:hover { color: var(--text); background: color-mix(in srgb, var(--bg-hover) 55%, transparent); }
+.tab.active { background: var(--bg-pane); color: var(--text-hi); }
+.tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--bg-pane); }
+.tab.active::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: var(--border-3); }
+.tab.focused::before { height: 2px; background: var(--acc); }
+.tab.dragging { opacity: .45; }
+.tab.ins-before { box-shadow: inset 2px 0 0 var(--focus); }
+.tab.ins-after { box-shadow: inset -2px 0 0 var(--focus); }
+.tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--acc); flex: none; }
+.tab-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-state { width: 20px; height: 20px; flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.tab-spin { width: 11px; height: 11px; color: var(--acc); border-width: 1.5px; }
+.tab-bg { width: 11px; height: 11px; border-width: 1.5px; }
+.tab-x { display: none; width: 20px; height: 20px; flex: none; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-2); }
+.tab-x .ic { width: 14px; height: 14px; }
+.tab-x:hover { background: var(--bg-active); color: var(--text-hi); }
+.tab:hover .tab-x, .tab.active:not(.has-state) .tab-x { display: inline-flex; }
+.tab:hover .tab-state, .tab.active:not(.has-state) .tab-state { display: none; }
+.strip-actions { display: flex; align-items: center; gap: 1px; padding: 0 5px; flex: none; }
+.strip-actions .ibtn { width: 26px; height: 26px; }
+.strip-actions .ibtn .ic { width: 15px; height: 15px; }
+
+/* ───── 選單 ───── */
+.menu {
+  position: fixed; z-index: 1000; min-width: 180px; max-width: min(460px, calc(100vw - 16px)); overflow-y: auto;
+  padding: 4px; border-radius: 8px; background: var(--bg-elev); box-shadow: var(--shadow-pop);
+  font-size: 12.5px; color: var(--text);
+  transition: opacity 130ms var(--ease-out), transform 130ms var(--ease-out);
+}
+@starting-style { .menu { opacity: 0; transform: scale(.97); } }
+.menu-item {
+  width: 100%; display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 10px 4px 8px;
+  border-radius: 5px; text-align: left; color: var(--text);
+}
+.menu-item.has-desc { align-items: flex-start; padding-top: 6px; padding-bottom: 6px; }
+.menu-item.active, .menu-item:focus-visible { background: var(--bg-active); color: var(--text-hi); outline: none; }
+.menu-item:disabled { opacity: .42; }
+.menu-item.danger { color: var(--red); }
+.menu-item.danger .mi-ic { color: var(--red); }
+.mi-check { width: 14px; height: 16px; flex: none; display: inline-flex; align-items: center; color: var(--text-hi); }
+.mi-check .ic { width: 14px; height: 14px; }
+.mi-ic { width: 15px; height: 15px; color: var(--text-2); }
+.mi-dot { width: 8px; height: 8px; margin: 0 3px; border-radius: 50%; background: var(--acc); flex: none; }
+.has-desc .mi-dot { margin-top: 5px; }
+.has-desc .mi-ic, .has-desc .mi-check { margin-top: 1px; }
+.mi-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mi-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mi-desc { font-size: 11.5px; line-height: 1.4; color: var(--text-2); white-space: normal; overflow-wrap: anywhere; }
+.menu-item.active .mi-desc, .menu-item.active .mi-hint { color: var(--text); }
+.mi-hint { margin-left: 14px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+.menu-sep { height: 1px; margin: 4px 6px; background: var(--border-2); }
+.menu-head { padding: 7px 10px 3px; font-size: 11px; font-weight: 600; color: var(--text-3); }
+.menu-path { display: flex; flex-direction: column; gap: 3px; padding: 6px 10px 9px; margin-bottom: 4px; border-bottom: 1px solid var(--border-2); }
+.menu-path-label { font-size: 11px; color: var(--text-3); }
+.menu-path-value { font: 11.5px/1.45 var(--mono); color: var(--text-hi); word-break: break-all; }
+.menu-perm .mi-dot { background: var(--acc); }
+.menu-folder .mi-desc { font: 11px/1.4 var(--mono); }
+.menu-foot { display: flex; align-items: center; gap: 8px; margin: 4px -4px -4px; padding: 7px 12px 8px; border-top: 1px solid var(--border-2); font-size: 11.5px; color: var(--text-3); }
+.menu-foot kbd { padding: 0 5px; border-radius: 4px; border: 1px solid var(--border-2); font-size: 10.5px; line-height: 17px; color: var(--text-2); }
+
+/* ───── 對話框 ───── */
+.dlg-back {
+  position: fixed; inset: 0; z-index: 900; display: flex; align-items: center; justify-content: center; padding: 24px;
+  padding: max(24px, var(--safe-top)) max(24px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(24px, env(safe-area-inset-left, 0px));
+  background: var(--scrim); transition: opacity 150ms ease;
+}
+@starting-style { .dlg-back { opacity: 0; } }
+.dlg-back.leaving { opacity: 0; transition-duration: 110ms; pointer-events: none; }
+.dlg {
+  width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); max-height: calc(100dvh - max(24px, var(--safe-top)) - max(24px, env(safe-area-inset-bottom, 0px))); display: flex; flex-direction: column;
+  background: var(--bg-raised); border-radius: 10px; box-shadow: var(--shadow-dlg);
+  transition: transform 180ms var(--ease-out), opacity 180ms var(--ease-out);
+}
+@starting-style { .dlg { opacity: 0; transform: scale(.98) translateY(4px); } }
+.dlg-head { display: flex; align-items: center; gap: 8px; padding: 14px 12px 4px 20px; flex: none; }
+.dlg-title { flex: 1; margin: 0; font-size: 15px; font-weight: 600; color: var(--text-hi); }
+.dlg-body { padding: 8px 20px 18px; overflow: auto; min-height: 0; }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--border); flex: none; }
+.confirm-msg { margin: 0 0 8px; line-height: 1.65; color: var(--text-hi); }
+.confirm-detail { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--text-2); }
+/* 多個選項的對話框（ui.choiceDialog）：窄螢幕放不下就換行 */
+.dlg-choice .dlg-foot { flex-wrap: wrap; }
+.check-row {
+  display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 10px 12px;
+  border: 1px solid var(--border-2); border-radius: 8px; cursor: pointer; background: var(--bg-pane);
+}
+.check-row input { margin-top: 2px; width: 15px; height: 15px; accent-color: var(--red); flex: none; }
+.check-row.disabled { cursor: default; opacity: .7; }
+.check-text { display: flex; flex-direction: column; gap: 4px; color: var(--text-hi); line-height: 1.5; }
+.check-text small { font-size: 11.5px; color: var(--text-2); word-break: break-all; }
+
+/* ───── 提示 ───── */
+.toasts { position: fixed; right: 16px; bottom: 16px; z-index: 1100; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+.toast {
+  pointer-events: auto; display: flex; align-items: flex-start; gap: 10px; min-width: 240px; max-width: 420px;
+  padding: 10px 6px 10px 12px; border-radius: 8px; background: var(--bg-elev); box-shadow: var(--shadow-pop);
+  font-size: 12.5px; line-height: 1.5; color: var(--text-hi);
+  transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out);
+}
+@starting-style { .toast { opacity: 0; transform: translateY(8px); } }
+.toast.leaving { opacity: 0; transform: translateY(4px); transition-duration: 140ms; }
+.toast-ic { width: 16px; height: 16px; margin-top: 1px; color: var(--link); }
+.toast.success .toast-ic { color: var(--green); }
+.toast.error .toast-ic { color: var(--red); }
+.toast-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast-x { width: 20px; height: 20px; }
+.toast-x .ic { width: 13px; height: 13px; }
+/* 手機寬度：通知改到畫面上方、左右撐滿——右下角正好是輸入框的麥克風與送出鈕，「沒有聽到聲音：請按一下麥克風再說一次」會蓋在麥克風上 */
+@media (max-width: 600px) {
+  .toasts { top: calc(var(--safe-top) + 10px); bottom: auto; left: 10px; right: 10px; align-items: stretch; }
+  .toast { min-width: 0; max-width: none; }
+}
+
+.tip {
+  position: fixed; z-index: 1200; pointer-events: none; padding: 4px 8px; border-radius: 5px; white-space: nowrap;
+  background: var(--bg-elev); box-shadow: var(--shadow-pop); font-size: 11.5px; color: var(--text-hi); font-variant-numeric: tabular-nums;
+}
+
+/* 要你回來看的對話（完成、失敗、提問、核准、計畫：宿主的 flash、瀏覽器版的 speak；attnflash.js 加上 attn-flash，點了那個對話才拿掉）：
+   分頁與側欄那一列一直閃（對話標頭在 chat.css）。外框與底色畫在偽元素、只動 opacity（無限循環的動畫只能動 transform／opacity）：
+   分頁自己的兩個偽元素是作用中分頁的上下緣，改畫在 .tab-title 的偽元素上（.tab-title 沒有定位，以 .tab 為準）；isolation 讓 z-index: -1 的底色墊在字下面。
+   系統要求減少動態或設定關掉動態效果時不閃（下面兩條規則把動畫縮成一瞬間，留下平常的 opacity 1），是同樣的靜態標示，一樣到點了才拿掉。
+   視窗沒有焦點時照常閃：是狀態指示（tools/ui-probe/perf-probe.mjs 的 INACTIVE_STATUS） */
+.tab.attn-flash, .crow.attn-flash { isolation: isolate; }
+.crow.attn-flash { position: relative; }
+.tab.attn-flash .tab-title::before, .crow.attn-flash::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
+  box-shadow: inset 0 0 0 2px var(--focus); background: color-mix(in srgb, var(--focus) 22%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tab.attn-flash .tab-title::before, .crow.attn-flash::before { animation: attn-flash 1.2s ease-in-out infinite; }
+}
+@keyframes attn-flash { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  .spin { animation: spin 1.6s linear infinite !important; }
+}
+/* 設定關掉了動態效果（settings.visualEffects，theme.js 設 data-fx）：同上停掉動畫，但留著轉場（點按、展開的回饋照舊） */
+:root[data-fx="off"] *, :root[data-fx="off"] *::before, :root[data-fx="off"] *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+:root[data-fx="off"] .spin { animation: spin 1.6s linear infinite !important; }
+
+/* ── 設定：多電腦同步（WP3.4）── */
+.sync-box {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 8px 0; padding: 12px 14px;
+  border-radius: 8px; border: 1px solid var(--border-2); background: var(--bg-pane); overflow-wrap: anywhere;
+}
+.sync-box.warn { border-color: color-mix(in srgb, var(--amber) 55%, var(--border-2)); background: color-mix(in srgb, var(--amber) 6%, var(--bg-pane)); }
+.sync-code { font-size: 26px; font-weight: 600; line-height: 1.2; letter-spacing: .08em; color: var(--text-hi); font-variant-numeric: tabular-nums; user-select: all; }
+.sync-fp { letter-spacing: .04em; color: var(--text-hi); user-select: all; }
+.sync-countdown { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+/* 紅字（配對錯誤、已停止的膠囊）：--red 疊在深色底或同色淡底上不到 4.5:1，和藍色膠囊一樣混一點白（深色主題）或黑（淺色主題）；
+   中性的「已暫停」膠囊的 --text-2 疊在 --bg-active 上也不到 4.5:1，改用主要文字色 */
+.sync .note.err, .sync .pill.st-error { color: color-mix(in srgb, var(--red), var(--acc-text-mix)); }
+.sync .pill.st-checking { color: var(--text-hi); }
+/* 已配對之後的分組（其他電腦的遠端操作、這台、已配對的電腦）與裝置清單 */
+.sync .sync-group { margin-top: 18px; }
+.sync .sync-group > .set-h { margin-bottom: 2px; }
+/* 卡片（settings.js 的 card）前後的說明與按鈕列留一點距離 */
+.sync .set-card + .card-actions, .sync .set-card + .set-actions { margin-top: 10px; }
+.sync .sync-group > .set-card, .sync-phase > .set-desc + .set-card { margin-top: 8px; }
+.sync-rename { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sync-rename .input { width: 200px; }
+.sync-devs { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; min-width: 0; }
+.sync-dev { min-width: 0; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-pane); overflow-wrap: anywhere; }
+.sync-dev[data-revoked="true"] { border-style: dashed; }
+.sync-dev-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-width: 0; }
+.sync-dev-name { min-width: 0; font-size: 13px; font-weight: 600; color: var(--text-hi); }
+.sync-dev-state { margin-left: auto; }
+.sync-dev-seen { font-size: 12px; color: var(--text-2); }
+.sync-dev-meta { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; min-width: 0; font-size: 12px; color: var(--text-2); }
+/* 標籤：中性的用主要文字色（--text-2 疊在 --bg-active 上不到 4.5:1），琥珀與紅色同狀態膠囊的配色 */
+.sync-dev .tag { margin-left: 0; color: var(--text-hi); }
+.sync-dev .tag.warn { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+.sync-dev .tag.bad { color: color-mix(in srgb, var(--red), var(--acc-text-mix)); background: color-mix(in srgb, var(--red) 13%, transparent); }
+
+/* ── 網頁即時檢視（WP4.6）：所在電腦的徽章與裝置行、狀態列 ── */
+/* 在線小點：線上綠、離線灰、不明空心 */
+.crow-dev-dot, .ch-dev-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--text-3); }
+[data-online="true"] > .crow-dev-dot, [data-online="true"] > .ch-dev-dot { background: var(--green); }
+[data-online="unknown"] > .crow-dev-dot, [data-online="unknown"] > .ch-dev-dot { background: transparent; box-shadow: inset 0 0 0 1px var(--text-3); }
+/* 側欄清單：標題後面的電腦名稱（窄，超出省略） */
+.crow-dev { display: inline-flex; align-items: center; gap: 4px; flex: 0 1 auto; max-width: 42%; min-width: 0; font-size: 11px; color: var(--text-2); }
+.crow-dev-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 標頭的裝置行：「在 OFFICE-PC 執行・線上」 */
+.ch-dev { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; font-size: 12px; color: var(--text-2); }
+.ch-dev-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container pane (max-width: 640px) { .ch-dev-text { display: none; } }
+/* 狀態列沒有在執行（瀏覽器版的「電腦離線」「伺服器正在整理這個對話」）：不轉圈，前面是狀態小點的位置 */
+.runline.idle { color: var(--text-2); }
+/* 瀏覽器版的窄螢幕（手機）：側欄改成蓋在工作區上的抽屜（不把對話擠到超出畫面），工作區用滿寬度；Ctrl+B／左上角的鈕照樣收合。
+   收起時不拿掉（hidden）：往左滑出畫面，滑完才換成 visibility: hidden（轉場的延遲）；對話那一側蓋著遮罩，點一下收起（drawer.js）。
+   左右滑時（.drawer-drag）跟著手指、不做轉場，放開後從那個位置接著滑到開或關；收到第一則 init 之前（還原版面）不滑 */
+.sb-scrim { display: none; }
+/* 觸控左右滑叫出收起的側欄或電腦狀態（drawer.js；並排的欄位與手機版的電腦狀態，手機版的側欄用下面的抽屜樣式）：
+   拖曳中與落定前疊在對話上（.peek-left／.peek-right），落定才回到欄位，拖曳中對話不跟著重排；放開後自己滑到開或關的位置（.drawer-settle）。
+   拖曳中與落定前 .body 裁掉滑出畫面的部分（往右收的電腦狀態不撐出水平捲動） */
+.app:is(.peek-left, .peek-right) .body { position: relative; }
+.app:is(.drawer-drag, .drawer-settling) .body { overflow: clip; }
+.app.peek-left .sidebar { position: absolute; top: 0; bottom: 0; left: 0; z-index: 30; box-shadow: 0 10px 30px rgb(0 0 0 / .4); }
+.app.peek-right .mon { position: absolute; top: 0; bottom: 0; right: 0; z-index: 30; box-shadow: -10px 0 30px rgb(0 0 0 / .4); }
+.sidebar.drawer-settle, .mon.drawer-settle { transition: transform .24s var(--ease-drawer); }
+@media (max-width: 720px) {
+  .mode-hub .body { position: relative; }
+  .mode-hub .sidebar {
+    position: absolute; top: 0; bottom: 0; left: 0; z-index: 30; width: min(300px, 86vw); box-shadow: 0 10px 30px rgb(0 0 0 / .4);
+    transition: transform .3s var(--ease-drawer), visibility 0s;
+  }
+  .mode-hub .sidebar-collapsed .sidebar { transform: translateX(-100%); visibility: hidden; transition: transform .26s var(--ease-drawer), visibility 0s .26s; }
+  .mode-hub .sb-scrim {
+    display: block; position: absolute; inset: 0; z-index: 29; background: var(--scrim); cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: opacity .3s var(--ease-drawer), visibility 0s;
+  }
+  .mode-hub .sidebar-collapsed .sb-scrim { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .26s var(--ease-drawer), visibility 0s .26s; }
+  .mode-hub .drawer-drag .sidebar, .mode-hub .drawer-drag .sb-scrim { visibility: visible; transition: none; }
+  .mode-hub .app:not(.ready) .sidebar, .mode-hub .app:not(.ready) .sb-scrim { transition: none; }
+}
+/* 手機版與平板的帳戶區預設收起（sidebar.js 的 .foldable）：標題列整列是展開／收起的按鈕，高一點好按 */
+.sb-sec-accts.foldable .sb-head { height: 40px; padding: 0 6px; }
+.sb-sec-accts.folded { padding-bottom: 0; }
+/* 帳戶區的展開／收起鈕：「帳戶」（和「對話」對齊）、收起時的合計（帳戶數、執行中、等你回應）、最右邊的箭頭（展開時朝上） */
+.sb-fold {
+  flex: 1; min-width: 0; height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 6px;
+  -webkit-tap-highlight-color: transparent;
+}
+.sb-fold:focus-visible { background: var(--bg-hover); }
+@media (hover: hover) { .sb-fold:hover { background: var(--bg-hover); } } /* 觸控點完不留著滑過的底色 */
+.sb-fold .sb-title { flex: none; }
+.sb-fold-chev { width: 14px; height: 14px; flex: none; margin-left: auto; color: var(--text-2); transition: transform .2s var(--ease-out); }
+.sb-fold[aria-expanded="true"] .sb-fold-chev { transform: rotate(180deg); }
+.sb-fold-sum { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.sb-fold[aria-expanded="true"] .sb-fold-sum { display: none; }
+.sb-fold-n { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-3); }
+/* 送出的閘門說明（輸入框下方）與結果不明（輸入區上方）；卡片的閘門說明與結果不明 */
+.cgate, .csettle { display: flex; align-items: flex-start; gap: 6px; padding: 6px 4px 0; font-size: 12px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; }
+.csettle { padding: 0 4px 6px; color: var(--amber); }
+.cgate .ic, .csettle .ic { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+.card-gate, .card-settle { display: flex; align-items: flex-start; gap: 6px; font-size: calc(var(--fs-chat) - 1px); line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; }
+.card-settle { color: var(--amber); }
+.card-gate .ic, .card-settle .ic { width: 13px; height: 13px; flex: none; margin-top: 3px; }
+/* 伺服器只帶佇列前幾則：其餘的數量（沒有取消鈕） */
+.queue-more { height: 22px; display: flex; align-items: center; font-size: 11.5px; color: var(--text-2); }
+/* 草稿的「電腦：OFFICE-PC」晶片（點了換電腦） */
+.ch-devchip { max-width: 220px; }
+/* 選電腦的對話框：每台一列（名稱 textContent） */
+.pick-dev { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.pick-dev-btn { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-2); text-align: left; color: var(--text-hi); }
+.pick-dev-btn:hover, .pick-dev-btn:focus-visible { background: var(--bg-hover); border-color: var(--border-3); }
+.pick-dev-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 刪除中（等伺服器的結果；被拒或不明時恢復） */
+.conv.deleting .conv-main { opacity: .55; pointer-events: none; }
+/* 頂部列下方的常駐提示（連線狀態列之後）：預設密碼的警告、伺服器換版、開啟瀏覽器通知；窄螢幕可換行 */
+.live-notices { flex: none; display: flex; flex-direction: column; }
+.live-notice {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 7px 14px;
+  font-size: 12.5px; line-height: 1.45; color: var(--text); border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--tone-auto) 10%, var(--bg-app));
+}
+.live-notice .live-notice-ic { width: 14px; height: 14px; flex: none; color: var(--tone-auto); }
+.live-notice-text { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.live-notice[data-tone="warn"] { background: color-mix(in srgb, var(--amber) 14%, var(--bg-app)); }
+.live-notice[data-tone="warn"] .live-notice-ic { color: var(--amber); }
+.live-notice .btn .ic { width: 13px; height: 13px; }
+/* 複製中（等伺服器回原文） */
+.code-copy.busy { color: var(--text-2); cursor: progress; }
+/* 剪貼簿寫不進去時的退路框：唯讀、等寬、自動全選 */
+.copy-fallback { display: flex; flex-direction: column; gap: 10px; }
+.copy-fallback-text {
+  width: 100%; min-height: 160px; max-height: 50vh; resize: vertical; padding: 8px 10px; border-radius: 6px;
+  border: 1px solid var(--border-2); background: var(--bg-input); color: var(--text-hi);
+  font: 12.5px/1.5 var(--mono); white-space: pre; overflow: auto;
+}
+/* ── 步 10：副本唯讀的輸入區、伺服器已刪除的標籤、側欄的「全部／本機」、遠端操作紀錄與回收區 ── */
+/* 副本的輸入區換成唯讀說明＋「在網頁版開啟」（輸入框與送出鈕不在 DOM 裡） */
+.creadonly {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; padding: 10px 12px;
+  border-radius: 10px; border: 1px dashed var(--border-2); background: var(--bg-pane);
+  font-size: 12.5px; line-height: 1.5; color: var(--text);
+}
+.creadonly > .ic { width: 14px; height: 14px; flex: none; color: var(--text-2); }
+.creadonly-text { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.creadonly .btn .ic { width: 13px; height: 13px; }
+/* 標頭的「已從伺服器刪除」：琥珀色（同設定頁的警告標籤） */
+.ch .ch-sync-del { flex: none; margin-left: 0; color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); white-space: nowrap; }
+/* 遠端操作紀錄、回收區的對話框：清單自己捲動，每列的文字都可換行（來源、標題是其他電腦給的） */
+.slog { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.slog-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-height: min(52vh, 480px); overflow-y: auto; }
+.slog-list:empty { display: none; }
+.slog-row { min-width: 0; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-pane); overflow-wrap: anywhere; }
+.slog-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.slog-time { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.slog-cmd { min-width: 0; font-size: 13px; font-weight: 600; color: var(--text-hi); }
+.slog-head .pill, .slog-trash .slog-head .btn { margin-left: auto; }
+.slog-meta { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; min-width: 0; font-size: 12px; color: var(--text-2); }
+.slog-status { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; color: var(--text-2); }
+.slog-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.slog-actions .btn .ic { width: 13px; height: 13px; }
+.slog-export {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--border-2); background: var(--bg-pane); font-size: 12.5px; color: var(--text); overflow-wrap: anywhere;
+}
+.slog-export-text { flex: 1 1 240px; min-width: 0; }
+.slog-export[data-tone="ok"] { border-color: color-mix(in srgb, var(--green) 45%, var(--border-2)); }
+.slog-export[data-tone="err"] { border-color: color-mix(in srgb, var(--red) 45%, var(--border-2)); }
+/* 紅字與中性膠囊的對比（同設定頁同步區）：紅色混一點白（深色）或黑（淺色），中性用主要文字色 */
+.slog-export[data-tone="err"] .slog-export-text, .slog .pill.st-error { color: color-mix(in srgb, var(--red), var(--acc-text-mix)); }
+.slog .pill.st-checking { color: var(--text-hi); }
+.slog .tag { margin-left: 0; color: var(--text-hi); }
+.slog .tag.warn { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+/* ── 步 12：瀏覽器版的燈箱與影片播放器 ── */
+/* 瀏覽器模式的媒體沒有本機路徑（docs/web-protocol.md 第三節）：「用預設程式開啟」「在檔案總管顯示」一律停用，藏起來；
+   手機寬度時工具列才放得下，關閉鈕不會被擠出畫面 */
+.mode-hub .lb-div, .mode-hub .lb-btn { display: none; }
+.mode-hub .lb-btn[data-field="mediaSave"] { display: inline-flex; }
+/* ── 步 11：瀏覽器版的上傳晶片、資料夾挑選、檔案預覽、政策 Off 的影片說明 ── */
+/* 上傳晶片：底部 2px 的進度條；失敗的紅框、原因可換行、一直看得到「×」（觸控沒有 hover） */
+.up-tile { cursor: default; }
+.up-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; pointer-events: none; }
+.up-fill { display: block; width: 100%; height: 100%; background: var(--acc); transform: scaleX(0); transform-origin: left center; transition: transform .15s linear; }
+.up-chip[data-state="attached"] .up-bar, .up-chip[data-state="error"] .up-bar { display: none; }
+.up-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.up-chip[data-state="error"] .att { border-color: color-mix(in srgb, var(--red) 55%, var(--border-2)); }
+.atts.in-composer .up-chip[data-state="error"] .att-doc { height: auto; min-height: 46px; padding-top: 5px; padding-bottom: 5px; }
+.up-chip[data-state="error"] .up-sub { white-space: normal; overflow-wrap: anywhere; color: color-mix(in srgb, var(--red), var(--acc-text-mix)); }
+.up-chip[data-state="error"] .chip-x { opacity: 1; }
+/* 挑選模式（「瀏覽資料夾…」）：底列放目前的資料夾與「選這個資料夾」；目前的工作資料夾標成強調色 */
+.dr-pick { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding: 8px 10px; border-top: 1px solid var(--border); }
+.dr-pick-path { flex: 1 1 160px; min-width: 0; font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+.dr-pick-acts { display: flex; gap: 6px; margin-left: auto; }
+.fe.current .fe-icon .ic, .fe.current .fe-name { color: var(--acc); }
+/* 檔案預覽的對話框：檔名（伺服器給的，textContent）、讀取中、錯誤與「開啟」連結 */
+.file-ref { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.file-ref-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; color: var(--text-hi); }
+.file-ref-row .ic { width: 16px; height: 16px; flex: none; color: var(--text-2); }
+.file-ref-name { min-width: 0; overflow-wrap: anywhere; }
+.file-ref-wait { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+.file-ref-err { margin: 0; font-size: 12.5px; color: color-mix(in srgb, var(--red), var(--acc-text-mix)); }
+.file-ref-acts { display: flex; justify-content: flex-end; }
+.file-ref-acts .btn { text-decoration: none; }
+.file-ref-acts .btn .ic { width: 13px; height: 13px; }
+/* 放在 iframe 裡的影片（framedvideo.js）：iframe 套原本影片的框；長寬比在拿到中繼資料後照影片設，之前同 video 元素預設的 300×150。
+   color-scheme 和 iframe 裡的文件（about:blank 的 normal）一致，iframe 的畫布才是透明的（不一致時 Chrome 先鋪一層不透明的底色） */
+.vframe { display: block; border: 0; aspect-ratio: 2 / 1; background: #000; color-scheme: normal; }
+/* 政策 Off 時影片放不出來的說明（只看得到縮圖） */
+.mvid-note { display: flex; align-items: flex-start; gap: 6px; padding: 6px 10px; background: var(--bg-raised); font-size: 12px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; }
+.mvid-note .ic { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+/* ── 匯入本機外部 CLI 歷史對話對話框（桌面專屬） ── */
+.imp-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.imp-hint { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-2); }
+.imp-toolbar { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.imp-search { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+.imp-search-ic { position: absolute; left: 9px; width: 14px; height: 14px; color: var(--text-2); pointer-events: none; }
+.imp-search-input { width: 100%; padding-left: 28px; }
+.imp-pills { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.imp-pill {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px;
+  border-radius: 999px; border: 1px solid var(--border-2); background: var(--bg-pane);
+  font-size: 12px; color: var(--text-2); cursor: pointer;
+}
+.imp-pill:hover, .imp-pill:focus-visible { background: var(--bg-hover); color: var(--text-hi); }
+.imp-pill.on { background: color-mix(in srgb, var(--acc) 16%, var(--bg-pane)); border-color: color-mix(in srgb, var(--acc) 55%, var(--border-2)); color: var(--text-hi); font-weight: 600; }
+.imp-pill-count { font-size: 11px; opacity: .78; font-variant-numeric: tabular-nums; }
+.imp-status { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 26px 12px; font-size: 13px; color: var(--text-2); text-align: center; }
+.imp-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-height: 400px; overflow-y: auto; padding-right: 2px; }
+.imp-row {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%; min-width: 0; padding: 9px 12px;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--bg-pane);
+  text-align: left; color: var(--text-hi); cursor: pointer;
+}
+.imp-row:hover, .imp-row:focus-visible { background: var(--bg-hover); border-color: var(--border-3); }
+.imp-mark { width: 18px; height: 18px; flex: none; margin-top: 2px; }
+.imp-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.imp-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.imp-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text-hi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imp-time { flex: none; font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.imp-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; font-size: 11.5px; color: var(--text-2); }
+.imp-acct { font-weight: 500; color: var(--text); }
+.imp-folder { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imp-meta-ic { width: 12px; height: 12px; flex: none; opacity: .75; }
+.imp-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* ───── 多人協作（collab.js；docs/plans/2026-10-30-collaborators.md） ───── */
+/* 協作人只看分享給他的對話與自己的介面設定：擁有者的功能藏起來，對話的設定只顯示、不能改 */
+body.viewer-collab .owner-only,
+body.viewer-collab #viewSwitch,
+body.viewer-collab #cliBadge,
+body.viewer-collab #btnMonitor,
+body.viewer-collab .ch-title-auto,
+body.viewer-collab .codex-tools { display: none !important; }
+body.viewer-collab .perm-chev,
+body.viewer-collab .pick-chev,
+body.viewer-collab .ch-acct .chip-chev,
+body.viewer-collab .ch-folder .chip-chev { display: none; }
+body.viewer-collab .perm,
+body.viewer-collab .pick,
+body.viewer-collab .ch-acct,
+body.viewer-collab .ch-folder { cursor: default; }
+/* 設定頁的協作人清單 */
+.collab-list { display: flex; flex-direction: column; }
+.collab-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--border); }
+.collab-row.is-off .collab-text { opacity: .55; }
+.collab-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--text-3); opacity: .5; }
+.collab-dot.on { background: var(--green); opacity: 1; }
+.collab-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.collab-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-weight: 500; }
+.collab-name > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collab-user { font-size: 11.5px; font-weight: 400; color: var(--text-3); font-family: var(--mono, ui-monospace, monospace); }
+.collab-meta { font-size: 11.5px; color: var(--text-2); }
+.collab-empty { margin: 0; padding: 10px 14px; color: var(--text-3); font-size: 12.5px; border-top: 1px solid var(--border); }
+.collab-hint { margin-top: 6px; color: var(--sev-warn); }
+.collab-form, .collab-pass { display: flex; flex-direction: column; gap: 12px; }
+.collab-pass { width: 100%; max-width: 360px; }
+.collab-show { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; color: var(--text-2); }
+.field-hint { display: block; margin-top: 4px; font-size: 11.5px; color: var(--text-3); }
+.collab-msg { margin: 0; font-size: 12.5px; }
+.collab-msg[data-level="error"] { color: var(--tone-danger); }
+.collab-msg[data-level="ok"] { color: var(--green); }
+.collab-share { display: flex; flex-direction: column; gap: 10px; }
+.collab-share-list { display: flex; flex-direction: column; max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.collab-share-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; }
+.collab-share-row + .collab-share-row { border-top: 1px solid var(--border); }
+.collab-share-row.is-off { opacity: .55; }
+.collab-share-row .collab-name { flex: 1; }
+.collab-warn { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: 12px; color: var(--sev-warn); }
+.collab-warn .ic { width: 14px; height: 14px; flex: none; margin-top: 1px; }

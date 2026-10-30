@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ACME 端到端（WP2.5，設計 11.3、9.6）：Pebble v2.10.1＋pebble-challtestsrv 對本機高埠的 MyriagentHub
+    做 TLS-ALPN-01 取得、熱換（開著的連線不斷）、ARI 續期、admin cert-renew。說明見 README.md。
+    不進 Myriagent.slnx：dotnet build tools/acme-e2e -c Release
+    外部執行檔（Pebble、challtestsrv）在執行時下載到 repo 以外的快取資料夾並驗 SHA-256，不進 repo。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MyriagentTools.AcmeE2e</RootNamespace>
+    <AssemblyName>acme-e2e</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- Job Object（子程序隨本程式結束）用 LibraryImport -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+</Project>

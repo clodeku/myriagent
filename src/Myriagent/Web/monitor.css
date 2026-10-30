@@ -1,0 +1,291 @@
+/* 電腦狀態面板（monitor.js）：對話檢視右側，每台連線電腦一張 HUD 卡片——CPU、記憶體環形量表（外圈刻度環隨 CPU 負載轉得更快）、
+   與伺服器的延遲雷達＋訊號格、上下行走勢圖、磁碟分段 LED 條、在線呼吸燈。沿用 fx.css 的 HUD 語彙（角框、小方塊燈、網格、掃描光）。
+   數值文字一律用文字色（--text-hi／--text-2），系列色只畫在線與色塊上；嚴重度另有文字（偏高、滿載…），不只靠顏色。
+   持續的動畫只用 transform／opacity、都在小元素上，而且只在系統沒有要求減少動態時才有（外圈刻度環由 monitor.js 每秒推進，要求減少動態時不轉）。
+   尺寸是第一版的約 70%（2026-10-22 使用者要求：一台電腦佔太多版面），排版與第一版相同；最小的字不小於 7px。
+   上傳／下載兩色以 dataviz 的 validate_palette.js 驗過：深色 #2a9fd6／#d0609e（對 #1f1f1f、#191919）、淺色 #1f7fb8／#b8467f（對 #ffffff、#f5f5f5），六項全過。 */
+
+:root {
+  --mon-ok: var(--tone-plan);       /* 正常負載與這台的強調色（青） */
+  --mon-rx: #2a9fd6;                /* 下載 */
+  --mon-tx: #d0609e;                /* 上傳 */
+  --mon-tick: rgba(255, 255, 255, .16);
+  --mon-w: 212px;
+}
+:root[data-theme="light"] {
+  --mon-rx: #1f7fb8;
+  --mon-tx: #b8467f;
+  --mon-tick: rgba(0, 0, 0, .17);
+}
+
+/* ───── 面板 ───── */
+.mon {
+  position: relative; isolation: isolate; width: var(--mon-w); flex: none; display: flex; flex-direction: column; min-height: 0;
+  background: var(--bg-app); border-left: 1px solid var(--border);
+}
+/* 背景：淡淡的方格，往下漸漸消失 */
+.mon::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    linear-gradient(var(--hud-dot) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, var(--hud-dot) 1px, transparent 1px) 0 0 / 24px 24px;
+  mask: linear-gradient(#000, transparent 70%);
+}
+.mon-toggle[aria-pressed="true"] { color: var(--mon-ok); }
+/* 手機寬度：頂部列多了這個開關，收緊間距才放得下（瀏覽器版 390px 寬不出現橫向捲動） */
+@media (max-width: 480px) {
+  .topbar { gap: 3px; }
+  .topbar .brand { padding-right: 4px; }
+}
+.mode-popout .mon-toggle { display: none; }
+.view-dashboard .mon-toggle { visibility: hidden; }
+
+.mon-head {
+  position: relative; height: 34px; flex: none; display: flex; align-items: center; gap: 7px; padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border); overflow: hidden; user-select: none;
+}
+/* 標題列底線：一段光由左往右掃（3×3 小方塊組成） */
+.mon-head::after {
+  content: ""; position: absolute; left: 0; bottom: 0; width: 42%; height: 2px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--mon-ok) 45%, transparent) 60%, var(--mon-ok) 96%, transparent);
+  mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 5px);
+  transform: translateX(-110%); opacity: .85;
+}
+.mon-head-mark { position: relative; display: inline-flex; color: var(--mon-ok); }
+.mon-head-mark .ic { width: 12px; height: 12px; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--mon-ok) var(--fx-glow), transparent)); }
+.mon-title { font-size: 10.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
+.mon-count { font-size: 9.5px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mon-close { width: 24px; height: 24px; }
+.mon-close .ic { width: 14px; height: 14px; }
+
+.mon-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.mon-foot { flex: none; padding: 6px 10px 7px; font-size: 9px; line-height: 1.5; color: var(--text-2); border-top: 1px solid var(--border); }
+
+/* ───── 每台電腦一張卡片：點狀網格的底、四角的 HUD 角框（同 fx.css 的作法） ───── */
+.mon-dev {
+  --fx-bracket: var(--hud-line);
+  position: relative; flex: none; min-width: 0; padding: 7px 9px 9px; border-radius: 6px; border: 1px solid var(--border);
+  background: radial-gradient(circle at 1px 1px, var(--hud-dot) 1px, transparent 1.6px) 0 0 / 10px 10px, var(--bg-pane);
+}
+.mon-dev::after {
+  content: ""; position: absolute; inset: 2px; z-index: 1; pointer-events: none;
+  border: 1px solid var(--fx-bracket); border-radius: 4px;
+  background:
+    linear-gradient(var(--fx-led, transparent) 0 0) left 2px top 2px / 2px 2px no-repeat,
+    linear-gradient(var(--fx-led, transparent) 0 0) right 2px top 2px / 2px 2px no-repeat,
+    linear-gradient(var(--fx-led, transparent) 0 0) right 2px bottom 2px / 2px 2px no-repeat,
+    linear-gradient(var(--fx-led, transparent) 0 0) left 2px bottom 2px / 2px 2px no-repeat;
+  mask:
+    linear-gradient(#000 0 0) left top / 7px 7px no-repeat,
+    linear-gradient(#000 0 0) right top / 7px 7px no-repeat,
+    linear-gradient(#000 0 0) left bottom / 7px 7px no-repeat,
+    linear-gradient(#000 0 0) right bottom / 7px 7px no-repeat;
+  transition: border-color 160ms ease;
+}
+.mon-dev[data-self="true"] { --fx-bracket: color-mix(in srgb, var(--mon-ok) 55%, transparent); }
+/* MyriagentHub 主機：同一套元件，強調色換成紫（量表的正常色、角框、雷達、徽章跟著換）；底色帶一點紫 */
+.mon-dev[data-kind="hub"] {
+  --mon-ok: var(--tone-edit);
+  --fx-bracket: color-mix(in srgb, var(--tone-edit) 55%, transparent);
+  background: radial-gradient(circle at 1px 1px, var(--hud-dot) 1px, transparent 1.6px) 0 0 / 10px 10px, color-mix(in srgb, var(--tone-edit) 5%, var(--bg-pane));
+}
+.mon-dev[data-kind="hub"]:hover { --fx-bracket: color-mix(in srgb, var(--tone-edit) 85%, transparent); }
+.mon-kind { width: 10px; height: 10px; flex: none; color: var(--mon-ok); }
+.mon-lat.mon-conn { --lat: var(--mon-ok); }
+.mon-dev:hover { --fx-bracket: color-mix(in srgb, var(--mon-ok) 80%, transparent); }
+.mon-dev[data-state="offline"] { background: transparent; border-style: dashed; }
+.mon-dev[data-state="offline"], .mon-dev[data-state="nodata"], .mon-dev[data-state="waiting"] { padding-bottom: 7px; }
+
+.mon-dev-head { display: flex; align-items: center; gap: 5px; min-width: 0; }
+/* 狀態燈（3×3 的方塊燈放大）：在線綠、資料過時琥珀、在線沒資料空心、讀取中青、離線灰 */
+.mon-led { position: relative; width: 5px; height: 5px; flex: none; border-radius: 1px; background: var(--text-3); }
+.mon-led::after { content: ""; position: absolute; inset: -2px; border-radius: 2px; border: 1px solid currentColor; opacity: 0; pointer-events: none; }
+.mon-dev[data-state="live"] .mon-led { color: var(--green); background: var(--green); box-shadow: 0 0 5px color-mix(in srgb, var(--green) var(--fx-glow), transparent); }
+.mon-dev[data-state="stale"] .mon-led { color: var(--amber); background: var(--amber); }
+.mon-dev[data-state="nodata"] .mon-led { background: transparent; box-shadow: inset 0 0 0 1px var(--green); }
+.mon-dev[data-state="waiting"] .mon-led { color: var(--mon-ok); background: var(--mon-ok); }
+.mon-dev[data-state="offline"] .mon-led { opacity: .7; }
+.mon-name { flex: 0 1 auto; min-width: 0; font-size: 10px; font-weight: 600; color: var(--text-hi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-dev[data-state="offline"] .mon-name { color: var(--text-2); }
+.mon-badge {
+  flex: none; height: 12px; display: inline-flex; align-items: center; padding: 0 3px; border-radius: 2px;
+  font-size: 8px; font-weight: 600; color: var(--text-hi);
+  background: color-mix(in srgb, var(--mon-ok) 15%, transparent); border: 1px solid color-mix(in srgb, var(--mon-ok) 38%, transparent);
+}
+/* 右上角（開機時間、離線多久）：空間不夠時比名稱先縮 */
+.mon-meta { margin-left: auto; flex: 0 3 auto; min-width: 0; padding-left: 3px; font-size: 8px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.mon-sub { margin: 1px 0 0 10px; font-size: 8px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-msg { margin: 3px 0 0 10px; font-size: 8.5px; line-height: 1.45; color: var(--text-2); }
+.mon-dev[data-state="stale"] .mon-msg { color: var(--amber); }
+
+.mon-body { margin-top: 7px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* 資料過時：照樣顯示最後的數字，但整個變淡 */
+.mon-dev[data-state="stale"] .mon-body { opacity: .5; }
+
+/* ───── 環形量表（CPU、記憶體）與延遲雷達：一列三格 ───── */
+.mon-gauges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; }
+.mon-g { --sev: var(--mon-ok); display: flex; flex-direction: column; align-items: center; min-width: 0; text-align: center; }
+.mon-g[data-sev="warn"] { --sev: var(--sev-warn); }
+.mon-g[data-sev="max"] { --sev: var(--sev-max); }
+.mon-g-ring { position: relative; width: 46px; height: 46px; flex: none; }
+.mon-g-spin, .mon-g-main, .mon-g-spin > svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
+/* 外圈：40 格刻度與兩段彗星弧，轉包住 svg 的 span（monitor.js 每秒推進角度，1 秒線性過渡＝連續轉動）。
+   不直接轉 svg：svg 元素的 transform 轉場不能交給合成器，主執行緒每一幀都要處理 */
+.mon-g-spin { transition: transform 1s linear; will-change: transform; }
+.mon-g-ticks { fill: none; stroke: var(--mon-tick); stroke-width: 3; stroke-dasharray: 1.3 3.96; }
+.mon-g-comet { fill: none; stroke: var(--sev); stroke-width: 1.5; stroke-dasharray: 13 37; stroke-linecap: round; opacity: .85; transition: stroke 300ms ease; }
+.mon-g-main { filter: drop-shadow(0 0 2px color-mix(in srgb, var(--sev) calc(var(--fx-glow) - 5%), transparent)); }
+.mon-g-track { fill: none; stroke: color-mix(in srgb, var(--sev) 17%, transparent); stroke-width: 5; transition: stroke 300ms ease; }
+/* 每秒一筆取樣、每張卡兩個量表：弧長不做轉場、每秒直接換成新值（數字也是每秒跳一次）。SVG 的 stroke-dashoffset 不能交給合成器，
+   轉場期間主執行緒每幀重算、連同 .mon-g-main 的陰影濾鏡重畫；以前 700 ms 時量表一直在轉場，縮成 200 ms 仍佔每秒的五分之一 */
+.mon-g-arc { fill: none; stroke: var(--sev); stroke-width: 5; stroke-linecap: round; transition: stroke 300ms ease; }
+.mon-g-inner { fill: none; stroke: var(--hud-line); stroke-width: 1; stroke-dasharray: 2 3; }
+.mon-g-center { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.mon-g-val { display: inline-flex; align-items: baseline; }
+.mon-g-num { font-family: var(--font-display); font-size: 12px; font-weight: 600; line-height: 1; letter-spacing: -.01em; color: var(--text-hi); font-variant-numeric: tabular-nums; }
+.mon-g-unit { margin-left: .5px; font-size: 7px; color: var(--text-2); }
+.mon-g-label { margin-top: 3px; display: flex; align-items: center; justify-content: center; gap: 3px; max-width: 100%; font-size: 8.5px; font-weight: 600; color: var(--text-hi); white-space: nowrap; }
+.mon-g-sev {
+  padding: 0 3px; border-radius: 2px; font-size: 7.5px; font-weight: 600; line-height: 11px;
+  color: color-mix(in srgb, var(--sev), var(--acc-text-mix)); background: color-mix(in srgb, var(--sev) 15%, transparent);
+}
+.mon-g-detail {
+  min-height: 11px; margin-top: 1px; display: flex; align-items: center; justify-content: center; gap: 3px; max-width: 100%;
+  font-size: 8px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums;
+}
+
+/* 延遲：雷達（同心圓、十字線、掃描扇面、往外擴的脈衝）＋四格訊號；良好綠、普通琥珀、偏慢橘、沒有連線灰 */
+.mon-lat { --lat: var(--text-3); }
+.mon-lat[data-tier="good"] { --lat: var(--green); }
+.mon-lat[data-tier="fair"] { --lat: var(--sev-warn); }
+.mon-lat[data-tier="slow"] { --lat: var(--sev-high); }
+.mon-radar {
+  position: absolute; inset: 2px; border-radius: 50%; overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--lat) 50%, transparent);
+  background: radial-gradient(circle, color-mix(in srgb, var(--lat) 12%, transparent), transparent 72%);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--lat) calc(var(--fx-glow) - 20%), transparent), inset 0 0 7px color-mix(in srgb, var(--lat) 14%, transparent);
+}
+.mon-radar-grid, .mon-radar-sweep { position: absolute; inset: 0; border-radius: 50%; }
+.mon-radar-grid {
+  background:
+    repeating-radial-gradient(circle, transparent 0 6.5px, color-mix(in srgb, var(--lat) 24%, transparent) 6.5px 7.5px),
+    linear-gradient(transparent calc(50% - .5px), color-mix(in srgb, var(--lat) 20%, transparent) calc(50% - .5px) calc(50% + .5px), transparent calc(50% + .5px)),
+    linear-gradient(90deg, transparent calc(50% - .5px), color-mix(in srgb, var(--lat) 20%, transparent) calc(50% - .5px) calc(50% + .5px), transparent calc(50% + .5px));
+}
+.mon-radar-sweep { background: conic-gradient(transparent 0 72%, color-mix(in srgb, var(--lat) 40%, transparent) 98%, var(--lat) 99.4%, transparent 99.4%); opacity: .85; }
+.mon-lat[data-tier="none"] .mon-radar-sweep { display: none; }
+.mon-radar-ping { position: absolute; inset: 0; border-radius: 50%; border: 1px solid var(--lat); opacity: 0; transform: scale(.15); pointer-events: none; }
+.mon-lat[data-tier="none"] .mon-radar-ping { display: none; }
+.mon-lat .mon-g-num { text-shadow: 0 0 6px var(--bg-pane), 0 0 2px var(--bg-pane); }
+.mon-bars { display: inline-flex; align-items: flex-end; gap: 1px; height: 7px; flex: none; }
+.mon-bars i { width: 2px; border-radius: .5px; background: var(--hud-line); }
+.mon-bars i:nth-child(1) { height: 2px; }
+.mon-bars i:nth-child(2) { height: 3.5px; }
+.mon-bars i:nth-child(3) { height: 5px; }
+.mon-bars i:nth-child(4) { height: 7px; }
+.mon-bars[data-bars="1"] i:nth-child(-n+1), .mon-bars[data-bars="2"] i:nth-child(-n+2),
+.mon-bars[data-bars="3"] i:nth-child(-n+3), .mon-bars[data-bars="4"] i { background: var(--lat); box-shadow: 0 0 3px color-mix(in srgb, var(--lat) var(--fx-glow), transparent); }
+.mon-lat-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* ───── 走勢圖：上傳／下載共用一個 y 軸（同一張圖）、延遲另一張；發光的線、往下淡掉的填色、最新一點的光點 ───── */
+.mon-chart { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mon-chart-head { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 8px; color: var(--text-2); white-space: nowrap; }
+.mon-chart-title { flex: none; font-size: 8.5px; font-weight: 600; color: var(--text-hi); }
+.mon-leg { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
+.mon-chart-title + .mon-leg { margin-left: auto; }
+.mon-leg-k { color: var(--text-2); }
+.mon-leg-v { color: var(--text-hi); font-weight: 600; font-variant-numeric: tabular-nums; }
+[data-series="rx"] { --series: var(--mon-rx); }
+[data-series="tx"] { --series: var(--mon-tx); }
+[data-series="rtt"] { --series: var(--mon-ok); }
+.mon-sw { flex: none; width: 6px; height: 2px; border-radius: 1px; background: var(--series); }
+.mon-plot {
+  position: relative; width: 100%; cursor: crosshair; touch-action: pan-y;
+  background: repeating-linear-gradient(90deg, var(--hud-dot) 0 1px, transparent 1px 17px);
+}
+.mon-chart-svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
+.mon-chart-grid { stroke: var(--hud-line); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; opacity: .55; }
+.mon-chart-grid.mid { opacity: .3; }
+.mon-chart-base { stroke: var(--border-3); stroke-width: 1; vector-effect: non-scaling-stroke; opacity: .7; }
+.mon-line { fill: none; stroke: var(--series); stroke-width: 1.2; stroke-linejoin: round; stroke-linecap: round; filter: drop-shadow(0 0 2px color-mix(in srgb, var(--series) var(--fx-glow), transparent)); }
+.mon-stop-a { stop-color: var(--series); stop-opacity: .3; }
+.mon-stop-b { stop-color: var(--series); stop-opacity: 0; }
+.mon-axis {
+  position: absolute; left: 1px; top: 1px; padding: 0 2px; border-radius: 2px; pointer-events: none;
+  font-size: 7px; line-height: 9px; color: var(--text-2); font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--bg-pane) 78%, transparent);
+}
+.mon-cross { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -.5px; background: var(--text-2); opacity: .55; pointer-events: none; }
+.mon-dot, .mon-headdot { position: absolute; border-radius: 50%; background: var(--series); transform: translate(-50%, -50%); pointer-events: none; }
+.mon-dot { width: 6px; height: 6px; box-shadow: 0 0 0 1.5px var(--bg-pane); }
+.mon-headdot { left: 100%; width: 4px; height: 4px; box-shadow: 0 0 4px var(--series); }
+.mon-headdot::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 1px solid var(--series); opacity: 0; }
+
+/* 走勢圖的說明（ui.js 的 .tip） */
+.mon-tip { display: flex; flex-direction: column; gap: 2px; }
+.mon-tip-t { font-size: 10.5px; color: var(--text-2); }
+.mon-tip-row { display: flex; align-items: center; gap: 5px; }
+.mon-tip-row b { margin-left: auto; padding-left: 10px; font-weight: 600; }
+
+/* ───── 磁碟：分段 LED 條（6px 一格），偏高琥珀、快滿紅；CPU 溫度與顯示卡（量表下面）用同一種條 ───── */
+.mon-disks { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mon-disk, .mon-hwrow {
+  --sev: var(--mon-ok);
+  display: grid; grid-template-columns: 15px minmax(0, 1fr) 21px auto; align-items: center; gap: 5px; min-width: 0;
+  font-size: 8px; color: var(--text-2); font-variant-numeric: tabular-nums;
+}
+/* 標籤是「溫度」與廠牌（NVIDIA、Intel…），欄位寬一點；數字欄放得下「100%」「100°C」。各列共用欄寬（subgrid）：列尾的來源與顯存長短不一，條的右端照樣對齊 */
+.mon-hw { display: grid; grid-template-columns: 29px minmax(0, 1fr) 25px auto; row-gap: 3px; column-gap: 5px; min-width: 0; }
+.mon-hwrow { grid-column: 1 / -1; grid-template-columns: subgrid; }
+.mon-disk[data-sev="warn"], .mon-hwrow[data-sev="warn"] { --sev: var(--sev-warn); }
+.mon-disk[data-sev="max"], .mon-hwrow[data-sev="max"] { --sev: var(--sev-max); }
+.mon-disk-name, .mon-hw-name { font-family: var(--mono); font-size: 8px; font-weight: 600; color: var(--text-hi); }
+.mon-hw-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/*
+ * 分格的遮罩放在不動的軌道上，填色只以 transform 從左邊縮放（monitor.js 的 scaleX(百分比)；分格來自軌道的遮罩所以不變形，
+ * 掃光跟著填色縮放、照舊只掃過填滿的部分）：GPU、溫度每秒一筆，
+ * 以前轉場動的是 width，每秒有 600 ms 要主執行緒重排版面、連遮罩重畫，電腦狀態面板一直在動（2026-10-23 perf-probe：
+ * 加上這兩列之後主執行緒 136 → 247 ms／秒，關掉動態效果也停不了）
+ */
+.mon-seg {
+  position: relative; height: 6px; overflow: hidden;
+  background: color-mix(in srgb, var(--sev) 17%, transparent);
+  mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 4px);
+}
+.mon-seg-fill {
+  position: absolute; inset: 0; overflow: hidden; background: var(--sev);
+  transform: scaleX(0); transform-origin: left center; will-change: transform;
+  transition: transform 600ms var(--ease-out), background-color 300ms ease;
+}
+.mon-seg-fill::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 45%; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .6), transparent); transform: translateX(-120%); opacity: 0;
+}
+.mon-disk-pct { text-align: right; color: var(--text-hi); }
+.mon-disk-size { font-size: 7.5px; white-space: nowrap; }
+
+/* ───── 窄螢幕（手機、很窄的視窗）：疊在工作區右邊的抽屜，同瀏覽器版的側欄 ───── */
+@media (max-width: 720px) {
+  .body { position: relative; }
+  .mon { position: absolute; top: 0; bottom: 0; right: 0; z-index: 30; width: min(var(--mon-w), 90vw); box-shadow: -10px 0 30px rgb(0 0 0 / .4); }
+}
+
+/* ───── 持續的動畫：只在系統沒有要求減少動態時 ───── */
+@media (prefers-reduced-motion: no-preference) {
+  .mon-head::after { animation: mon-scan 4.8s var(--ease-io) infinite; }
+  /* 在線燈：方框往外擴（像鎖定目標）＋呼吸；讀取中閃爍 */
+  .mon-dev[data-state="live"] .mon-led::after { animation: fx-lock-on 2.4s var(--ease-out) infinite; }
+  .mon-dev[data-state="live"] .mon-led { animation: fx-breathe 2.4s ease-in-out infinite; }
+  .mon-dev[data-state="waiting"] .mon-led { animation: fx-blink 1s steps(1) infinite; }
+  /* 這台與主機的卡片：四角的燈亮著（以前輪流亮，動的是背景大小，每一幀都要主執行緒重畫） */
+  .mon-dev:is([data-self="true"], [data-kind="hub"])[data-state="live"] { --fx-led: var(--mon-ok); }
+  .mon-dev[data-state="live"] .mon-radar-sweep { animation: fx-rot 2.6s linear infinite; }
+  .mon-dev[data-state="live"] .mon-radar-ping { animation: mon-ping 2.6s var(--ease-out) infinite; }
+  .mon-dev[data-state="live"] .mon-radar-ping.late { animation-delay: 1.3s; }
+  .mon-dev[data-state="live"] .mon-headdot::after { animation: mon-ping 2s var(--ease-out) infinite; }
+  .mon-dev[data-state="live"] .mon-seg-fill::after { animation: mon-sheen 4.2s var(--ease-io) infinite; }
+}
+
+@keyframes mon-scan { from { transform: translateX(-110%); } to { transform: translateX(250%); } }
+@keyframes mon-ping { 0% { transform: scale(.15); opacity: .9; } 100% { transform: scale(1); opacity: 0; } }
+@keyframes mon-sheen { 0% { transform: translateX(-120%); opacity: 0; } 15% { opacity: 1; } 55%, 100% { transform: translateX(260%); opacity: 0; } }

@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- 根元素的 data-theme 由宿主依目前主題改寫（Myriagent.Protocol/UI/WebAssetRules.cs）：init 到達前的第一個影格就是正確的深淺色 -->
+<html lang="zh-Hant-TW" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <title>Clode Myriagent</title>
+  <!-- 與桌面 app 圖示同一張圖（tools/make_icon.py 產生）；伺服器在 /app/favicon.ico 供應 -->
+  <link rel="icon" href="favicon.ico">
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="chat.css">
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="media.css">
+  <link rel="stylesheet" href="fx.css">
+  <link rel="stylesheet" href="monitor.css">
+  <link rel="stylesheet" href="schedules.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div id="app" class="app">
+    <header class="topbar">
+      <button type="button" id="btnSidebar" class="ibtn" aria-label="側欄"></button>
+      <div class="brand">
+        <span id="brandMark"></span>
+        <span class="brand-name">Clode Myriagent</span>
+      </div>
+      <div id="viewSwitch" class="seg view-switch" role="tablist" aria-label="檢視">
+        <button type="button" class="seg-btn" role="tab" data-view="chat"><span>對話</span></button>
+        <button type="button" class="seg-btn" role="tab" data-view="dashboard"><span>儀表板</span></button>
+        <button type="button" class="seg-btn" role="tab" data-view="schedules" hidden><span>排程</span><i id="schedBadge" class="vs-badge" hidden></i></button>
+      </div>
+      <div class="grow"></div>
+      <button type="button" id="cliBadge" class="cli-badge" hidden></button>
+      <button type="button" id="btnSettings" class="ibtn" title="設定（Ctrl+,）" aria-label="設定"></button>
+    </header>
+    <div id="appBanner" class="app-banner" role="status" hidden></div>
+    <div class="body">
+      <aside id="sidebar" class="sidebar" aria-label="帳戶與對話"></aside>
+      <main id="workspace" class="ws" data-count="1" aria-label="對話工作區"></main>
+      <section id="dashboard" class="dash" aria-label="儀表板" hidden></section>
+      <section id="schedules" class="sched" aria-label="排程" hidden></section>
+    </div>
+  </div>
+</body>
+</html>

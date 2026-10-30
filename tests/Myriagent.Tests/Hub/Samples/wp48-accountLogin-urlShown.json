@@ -1,0 +1,8 @@
+{
+  "type": "accountLogin",
+  "accountId": "acc-claude2",
+  "message": "請打開登入網址登入 Claude（可以用這支手機），登入後把頁面上的授權碼貼回這裡",
+  "done": false,
+  "success": null,
+  "loginUrl": "https://claude.com/cai/oauth/authorize?code=true&client_id=sample&state=sample-state"
+}

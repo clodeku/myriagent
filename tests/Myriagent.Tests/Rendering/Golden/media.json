@@ -1,0 +1,471 @@
+{
+  "corpus": "media",
+  "description": "附件（圖片、影片、文件；有沒有給模型看的圖、影片長度與畫面數、各種大小與特殊字元的檔名）與代理產出的媒體（圖片、可播放與不可播放的影片、正斜線與 .. 的路徑、UNC）",
+  "workingDirectory": "C:\\repo\\myriagent",
+  "items": [
+    {
+      "id": "media-01-user-attachments",
+      "kind": "User",
+      "status": "Done",
+      "html": "幫我看這三個檔案",
+      "time": 1784077260000,
+      "seq": 1,
+      "attachments": [
+        {
+          "id": "x1",
+          "name": "登入卡住的畫面.png",
+          "kind": "Image",
+          "size": "182 KB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\登入卡住的畫面.png",
+          "thumbUrl": "https://myriagent.local/thumb?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C%E7%99%BB%E5%85%A5%E5%8D%A1%E4%BD%8F%E7%9A%84%E7%95%AB%E9%9D%A2.png&size=320",
+          "url": "https://myriagent.local/media?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C%E7%99%BB%E5%85%A5%E5%8D%A1%E4%BD%8F%E7%9A%84%E7%95%AB%E9%9D%A2.png",
+          "videoInfo": null
+        },
+        {
+          "id": "x2",
+          "name": "重現步驟.mp4",
+          "kind": "Video",
+          "size": "1.2 MB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\重現步驟.mp4",
+          "thumbUrl": "https://myriagent.local/thumb?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C.model%5C%E9%87%8D%E7%8F%BE%E6%AD%A5%E9%A9%9F_1.jpg&size=320",
+          "url": "https://myriagent.local/media?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C%E9%87%8D%E7%8F%BE%E6%AD%A5%E9%A9%9F.mp4",
+          "videoInfo": "0:03・6 張畫面"
+        },
+        {
+          "id": "x3",
+          "name": "agent.log",
+          "kind": "Document",
+          "size": "12 KB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\agent.log",
+          "thumbUrl": null,
+          "url": null,
+          "videoInfo": null
+        }
+      ]
+    },
+    {
+      "id": "media-02-user-attachment-only",
+      "kind": "User",
+      "status": "Done",
+      "html": "",
+      "time": 1784077320000,
+      "seq": 2,
+      "attachments": [
+        {
+          "id": "y1",
+          "name": "設定畫面.png",
+          "kind": "Image",
+          "size": "96 KB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\設定畫面.png",
+          "thumbUrl": "https://myriagent.local/thumb?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C%E8%A8%AD%E5%AE%9A%E7%95%AB%E9%9D%A2.png&size=320",
+          "url": "https://myriagent.local/media?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C%E8%A8%AD%E5%AE%9A%E7%95%AB%E9%9D%A2.png",
+          "videoInfo": null
+        }
+      ]
+    },
+    {
+      "id": "media-03-user-attachment-kinds",
+      "kind": "User",
+      "status": "Done",
+      "html": "各種格式與大小",
+      "time": 1784077380000,
+      "seq": 3,
+      "attachments": [
+        {
+          "id": "k1",
+          "name": "掃描.tif",
+          "kind": "Image",
+          "size": "5.3 MB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\掃描.tif",
+          "thumbUrl": "https://myriagent.local/thumb?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C%E6%8E%83%E6%8F%8F.tif&size=320",
+          "url": null,
+          "videoInfo": null
+        },
+        {
+          "id": "k2",
+          "name": "照片.webp",
+          "kind": "Image",
+          "size": "1 KB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\照片.webp",
+          "thumbUrl": "https://myriagent.local/thumb?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C%E7%85%A7%E7%89%87.webp&size=320",
+          "url": "https://myriagent.local/media?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C%E7%85%A7%E7%89%87.webp",
+          "videoInfo": null
+        },
+        {
+          "id": "k3",
+          "name": "螢幕錄影.avi",
+          "kind": "Video",
+          "size": "2 GB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\螢幕錄影.avi",
+          "thumbUrl": "https://myriagent.local/thumb?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C.model%5C%E8%9E%A2%E5%B9%95%E9%8C%84%E5%BD%B1_1.jpg&size=320",
+          "url": null,
+          "videoInfo": "1:02:05・6 張畫面"
+        },
+        {
+          "id": "k4",
+          "name": "沒有畫面.mov",
+          "kind": "Video",
+          "size": "1.5 KB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\沒有畫面.mov",
+          "thumbUrl": "https://myriagent.local/thumb?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C%E6%B2%92%E6%9C%89%E7%95%AB%E9%9D%A2.mov&size=320",
+          "url": "https://myriagent.local/media?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5C%E6%B2%92%E6%9C%89%E7%95%AB%E9%9D%A2.mov",
+          "videoInfo": "0 張畫面"
+        },
+        {
+          "id": "k5",
+          "name": "登入流程規格.pdf",
+          "kind": "Document",
+          "size": "1.4 MB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\登入流程規格.pdf",
+          "thumbUrl": null,
+          "url": null,
+          "videoInfo": null
+        },
+        {
+          "id": "k6",
+          "name": "圖示.svg",
+          "kind": "Document",
+          "size": "0 B",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\圖示.svg",
+          "thumbUrl": null,
+          "url": null,
+          "videoInfo": null
+        },
+        {
+          "id": "k7",
+          "name": "iPhone.heic",
+          "kind": "Document",
+          "size": "1023 B",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\iPhone.heic",
+          "thumbUrl": null,
+          "url": null,
+          "videoInfo": null
+        },
+        {
+          "id": "k8",
+          "name": "favicon.ico",
+          "kind": "Document",
+          "size": "1 KB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\favicon.ico",
+          "thumbUrl": null,
+          "url": "https://myriagent.local/media?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5Cfavicon.ico",
+          "videoInfo": null
+        },
+        {
+          "id": "k9",
+          "name": "a+b #1 100%&.png",
+          "kind": "Image",
+          "size": "1.5 MB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\a+b #1 100%&.png",
+          "thumbUrl": "https://myriagent.local/thumb?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5Ca%2Bb%20%231%20100%25%26.png&size=320",
+          "url": "https://myriagent.local/media?path=C%3A%5CUsers%5CLin%5CAppData%5CLocal%5CMyriagent%5Cconversations%5C0f3c9a52b7e94d0c8a61f2d4e5b6c7d8%5Cattachments%5Ca%2Bb%20%231%20100%25%26.png",
+          "videoInfo": null
+        },
+        {
+          "id": "k10",
+          "name": "備份.zip",
+          "kind": "Document",
+          "size": "3.25 GB",
+          "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\備份.zip",
+          "thumbUrl": null,
+          "url": null,
+          "videoInfo": null
+        }
+      ]
+    },
+    {
+      "id": "media-04-assistant-media",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "<p>重現步驟的畫面和修正後的樣子整理在下面，最後一段是修正後的操作錄影：</p>\n",
+      "time": 1784077440000,
+      "seq": 4,
+      "media": [
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E7%94%A8%E9%87%8F%E5%9C%96%E8%A1%A8-%E6%9C%AC%E9%80%B1.png",
+          "kind": "image",
+          "path": "C:\\repo\\myriagent\\assets\\用量圖表-本週.png",
+          "name": "用量圖表-本週.png"
+        },
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E7%99%BB%E5%85%A5%E7%95%AB%E9%9D%A2-%E4%BF%AE%E6%AD%A3%E5%BE%8C.png",
+          "kind": "image",
+          "path": "C:\\repo\\myriagent\\assets\\登入畫面-修正後.png",
+          "name": "登入畫面-修正後.png"
+        },
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E7%99%BB%E5%85%A5%E7%95%AB%E9%9D%A2-%E9%80%BE%E6%99%82%E6%8F%90%E7%A4%BA.jpg",
+          "kind": "image",
+          "path": "C:\\repo\\myriagent\\assets\\登入畫面-逾時提示.jpg",
+          "name": "登入畫面-逾時提示.jpg"
+        },
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E7%99%BB%E5%85%A5%E6%B5%81%E7%A8%8B%E7%A4%BA%E7%AF%84.mp4",
+          "kind": "video",
+          "path": "C:\\repo\\myriagent\\assets\\登入流程示範.mp4",
+          "name": "登入流程示範.mp4"
+        },
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E5%8B%95%E7%95%AB.gif",
+          "kind": "image",
+          "path": "C:\\repo\\myriagent\\assets\\動畫.gif",
+          "name": "動畫.gif"
+        },
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E7%9F%AD%E7%89%87.webm",
+          "kind": "video",
+          "path": "C:\\repo\\myriagent\\assets\\短片.webm",
+          "name": "短片.webm"
+        },
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E6%89%8B%E6%A9%9F%E9%8C%84%E5%BD%B1.MOV",
+          "kind": "video",
+          "path": "C:\\repo\\myriagent\\assets\\手機錄影.MOV",
+          "name": "手機錄影.MOV"
+        },
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cassets%5C%E8%88%8A%E5%9C%96.bmp",
+          "kind": "image",
+          "path": "C:\\repo\\myriagent\\assets\\舊圖.bmp",
+          "name": "舊圖.bmp"
+        },
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cout%5Cchart.png",
+          "kind": "image",
+          "path": "C:/repo/myriagent/assets/../out/chart.png",
+          "name": "chart.png"
+        },
+        {
+          "url": "https://myriagent.local/media?path=c%3A%5Crepo%5Cmyriagent%5Cout%5C%E5%B0%8F%E5%AF%AB%E7%A3%81%E7%A2%9F%E4%BB%A3%E8%99%9F.png",
+          "kind": "image",
+          "path": "c:\\repo\\myriagent\\out\\小寫磁碟代號.png",
+          "name": "小寫磁碟代號.png"
+        },
+        {
+          "url": "https://myriagent.local/media?path=%5C%5Cserver%5Cshare%5C%E7%B6%B2%E8%B7%AF%E5%85%B1%E7%94%A8.png",
+          "kind": "image",
+          "path": "\\\\server\\share\\網路共用.png",
+          "name": "網路共用.png"
+        }
+      ]
+    },
+    {
+      "id": "media-05-assistant-media-only",
+      "kind": "Assistant",
+      "status": "Done",
+      "html": "",
+      "time": 1784077500000,
+      "seq": 5,
+      "media": [
+        {
+          "url": "https://myriagent.local/media?path=C%3A%5Crepo%5Cmyriagent%5Cout%5C%E7%94%A2%E5%87%BA.png",
+          "kind": "image",
+          "path": "C:\\repo\\myriagent\\out\\產出.png",
+          "name": "產出.png"
+        }
+      ]
+    }
+  ],
+  "whitelist": [
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\登入卡住的畫面.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\重現步驟.mp4",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\重現步驟_1.jpg",
+      "media": false,
+      "thumb": true
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\重現步驟_2.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\重現步驟_3.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\重現步驟_4.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\重現步驟_5.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\重現步驟_6.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\agent.log",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\設定畫面.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\設定畫面_縮圖.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\掃描.tif",
+      "media": false,
+      "thumb": true
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\掃描.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\照片.webp",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\螢幕錄影.avi",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\螢幕錄影_1.jpg",
+      "media": false,
+      "thumb": true
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\螢幕錄影_2.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\螢幕錄影_3.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\螢幕錄影_4.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\螢幕錄影_5.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\.model\\螢幕錄影_6.jpg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\沒有畫面.mov",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\登入流程規格.pdf",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\圖示.svg",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\iPhone.heic",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\favicon.ico",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\a+b #1 100%&.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\0f3c9a52b7e94d0c8a61f2d4e5b6c7d8\\attachments\\備份.zip",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\用量圖表-本週.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\登入畫面-修正後.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\登入畫面-逾時提示.jpg",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\登入流程示範.mp4",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\動畫.gif",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\短片.webm",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\手機錄影.MOV",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:\\repo\\myriagent\\assets\\舊圖.bmp",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "C:/repo/myriagent/assets/../out/chart.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "c:\\repo\\myriagent\\out\\小寫磁碟代號.png",
+      "media": true,
+      "thumb": true
+    },
+    {
+      "path": "\\\\server\\share\\網路共用.png",
+      "media": false,
+      "thumb": false
+    },
+    {
+      "path": "C:\\repo\\myriagent\\out\\產出.png",
+      "media": true,
+      "thumb": true
+    }
+  ]
+}

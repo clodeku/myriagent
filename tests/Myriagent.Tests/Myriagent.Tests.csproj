@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <RootNamespace>Myriagent.Tests</RootNamespace>
+    <!-- 測試組件用自己的 Main（IsolationProbeProgram：S6 的子程序探針）；testhost 不呼叫它 -->
+    <GenerateProgramFile>false</GenerateProgramFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 測試找 MyriagentHub.exe 的建置輸出（src/MyriagentHub/bin/<組態>/...）時用同一個組態 -->
+    <AssemblyMetadata Include="BuildConfiguration" Value="$(Configuration)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+    <PackageReference Include="FluentAssertions" Version="7.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Myriagent.Protocol\Myriagent.Protocol.csproj" />
+    <ProjectReference Include="..\..\src\Myriagent\Myriagent.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- tools/fake-device 的元件（照 AppController 接法的一台無頭裝置）：長情境測試（Sync.LongRun 的 S12、還原）用同一套 -->
+    <Compile Include="..\..\tools\fake-device\Runtime\*.cs" Link="FakeDevice\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="FluentAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 項目渲染的黃金檔（ItemRendererGoldenTests 從輸出資料夾讀取、逐位元組比對） -->
+    <None Update="Rendering\Golden\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- 移除 WebView2 的 WPF 參考（避免 MSB3277）寫在根目錄的 Directory.Build.targets -->
+
+</Project>

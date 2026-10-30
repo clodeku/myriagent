@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    MyriagentHub.ProbeClient 的純函式規則的單元測試（WP4.9 步 9：LoadRules、FleetRules、守門、admin 包裝）。
+    不進 Myriagent.slnx（在 hub-probe.slnx 裡）：dotnet test tools/hub-probe/ProbeClient.Tests/ProbeClient.Tests.csproj -c Release
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>MyriagentHub.ProbeClient.Tests</RootNamespace>
+    <AssemblyName>MyriagentHub.ProbeClient.Tests</AssemblyName>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="FluentAssertions" Version="7.2.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ProbeClient\MyriagentHub.ProbeClient.csproj" />
+    <!-- SqliteBench 的資料根守門（SqliteBenchGuardTests；WP4.9 合併前審查） -->
+    <ProjectReference Include="..\SqliteBench\MyriagentHub.SqliteBench.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 正式站守門的共用測試表（hub-e2e 的 guard-rules.mjs 與 fake-device 的 LocalHubTargetRulesTests 讀同一份） -->
+    <None Include="..\..\hub-e2e\test\guard-cases.json" Link="guard-cases.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 子程序剝掉的環境變數要和 hub-e2e 的 child-env.mjs 相同（FleetRulesTests 比對） -->
+    <None Include="..\..\hub-e2e\lib\child-env.mjs" Link="child-env.mjs" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="FluentAssertions" />
+  </ItemGroup>
+
+</Project>

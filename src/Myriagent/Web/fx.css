@@ -1,0 +1,1700 @@
+/* HUD 疊加與執行中的動態效果：配色沿用各主題與帳戶色，只疊上角框、小方塊、刻度、網格與掃描光。
+   不影響操作：一律畫在偽元素、背景或 aria-hidden 的裝飾元素上（帳戶卡的 .acard-fx、圓環的刻度、光點與 .ring-sweep，dashboard.js 建立）、
+   pointer-events: none、不改既有元素的大小與位置（只有執行列尾端多一個方塊音量計、程式碼框標頭多一個行數、差異統計後面多一條方塊比例條，items.js 建立；
+   設定頁的區塊標題前面多一顆菱形，文字右移 13px）；選單的角框畫在選單的背景上（選單會捲動）；
+   送出時疊在輸入框上的那幾行字（composer.js 的 .send-ghost）播完就移除；通知底部的倒數條（ui.js 的 .toast-bar）以 Web Animations 只縮 scaleX；
+   工具做完、思考結束時那一列底下暫時多一個掃過內容的小框（items.js 的 .t-peek，約 0.7～1.3 秒，收起來就移除；打開與收起動它的高度，捲動只動 transform）；
+   標題解碼的期間每個字是一個 span（textfx.js），真的字透明、亂碼畫在偽元素上，寬度不變，播完換回單一文字節點；
+   持續的動畫只在執行中、等背景工作回報、等你回應、執行列建置中時出現，而且只在系統沒有要求減少動態時（prefers-reduced-motion）才有（帳戶卡出現時的掃描線只掃一次）；
+   例外是帳戶卡（儀表板的大卡、側欄的小卡）：已登入、沒有對話在跑時有慢而淡的怠速（已連上、在待命），執行中的動畫依執行中的對話數加快
+   （fxrules.js 的 accountPulse → data-pulse、--fx-tempo；怠速的都是裝飾，視窗沒有焦點時停下）；
+   無限循環的動畫只用 transform／opacity（交給合成器）；一格一格跳的（steps）也一樣只動 transform／opacity。
+   另有事件發生時播一次就停的動畫：對話框（新項目進場、一輪結束與停下的餘暉、工具結束與內容掃過一遍、思考結束的內容掃過一遍、卡片出現與有了結果、複製程式碼與整則回覆、點開思考與工具、送出、排進佇列、「↓ 最新」）、
+   執行列換階段、用量圓環、窗格焦點、切分頁、圖片載入（燈箱的放大與縮回在 viewer.js、media.css）、側欄新出現的列、通知進場，同樣以 transform／opacity 為主、只在沒有要求減少動態時才有；
+   數字與標題的解碼（tokenfx.js、textfx.js：側欄與輸入框的 token 數、待辦、儀表板摘要、git 徽章、帳戶卡的對話數、自動命名的標題）也一樣只在值變了的那一下；
+   徽章出現、新分頁、附件、檔案抽屜換資料夾、打開儀表板時的走勢線（外層與走勢線反方向位移）、背景分頁一輪結束、背景程式結束、對話框打開、
+   開機掃描（app 打開時一次）也是播一次就停；過載重試的倒數條與分段選擇的滑動以 Web Animations 只動 transform（items.js、ui.js）。
+   第五批：拖放的括號鎖定、換帳戶的交接、額度用完的鎖定、搜尋數字、健康度分析做完、Mermaid 圖表第一次捲進畫面、錯誤的訊號干擾、
+   主題切換的掃描（View Transitions）、開關的燈、小地圖跳過去的那一則也是播一次就停；對話小地圖的「目前範圍」框以捲動時間軸驅動（捲動時不跑 JS）；
+   滑鼠探照光只在滑過卡片時以 transform 移動。
+   第六批：輸入框下方的 token 數、輸出速度是深一點的綠（2026-10-25 從駭客任務的綠改成紫、同日再改成深藍、再暗成靛，2026-10-26 改回綠、比以前深；側欄的今日 token 2026-10-25 起是各帳戶的色系；亂碼是半形片假名）；下載讀數的燈、MCP 剛連上的燈、
+   燈箱的括號、捲動位置讀數、自動壓縮的圓環收縮也是播一次就停；新增的持續動畫只有 MCP 連線中的燈與匯入掃描中的雷達（狀態指示，只在那個狀態下有）。
+   連動真實數據的：輸入框下方的燈號與一輪進行中的 token 數、錄音音量表與語音訊息的波形（麥克風實際的音量，chat.css 與這裡的 .att-wave）。
+   第七批：一輪的結算單（浮出 4 秒）、思考的耗時、差異的變動地圖（畫出時算一次的靜態背景）、任務清單的方塊與完成數（純 CSS 計數）、
+   上傳讀數（進度條改用 scaleX）、用量燃燒預估、建置的錯誤與警告數、分頁拖放的角框與插入位置、問卷數字鍵按下、配對碼解碼與倒數條、
+   遠端操作紀錄與裝置的燈；沒有新增持續動畫（配對碼倒數條同額度鎖定的倒數條：20 格、只動 transform，每秒最多縮一格）。
+   一圈小方塊的轉動：方塊的間距是固定角度，每次剛好轉一格（steps），方塊看起來不動、只有亮的那幾格往前走。 */
+
+:root {
+  --hud-line: rgba(255, 255, 255, .17);  /* 角框、刻度、暗的小方塊 */
+  --hud-block: rgba(255, 255, 255, .1);  /* 空白頁的資料方塊 */
+  --hud-ring: rgba(255, 255, 255, .055); /* 空白頁的雷達圈 */
+  --hud-dot: rgba(255, 255, 255, .04);   /* 背景網格 */
+  --fx-glow: 45%;                        /* 發光的濃度（混進帳戶色） */
+}
+:root[data-theme="light"] {
+  --hud-line: rgba(0, 0, 0, .2);
+  --hud-block: rgba(0, 0, 0, .1);
+  --hud-ring: rgba(0, 0, 0, .06);
+  --hud-dot: rgba(0, 0, 0, .05);
+  --fx-glow: 28%;
+}
+
+/* ───── 角框（HUD 的四角括號）：容器內縮一點畫四個角，沿著容器的圓角；角落各有一顆小方塊燈（--fx-led，平常透明） ───── */
+.ccard, .dcli, .dev, .dlg, .acard-add, .code, .lbar-btns, .toast, .sch-tl, .sch-table, .sch-detail { position: relative; }
+.acard::after, .acard-add::after, .ccard::after, .dcli::after, .dev::after, .cbox::after, .it-card::after, .dlg::after, .code::after, .u-box::after,
+.lbar-btns::after, .toast::after, .tip::after, .it-assistant.fx-copied::after, .drop::after, .sch-tl::after, .sch-table::after, .sch-detail::after {
+  content: ""; position: absolute; inset: var(--fx-inset, 3px); z-index: 1; pointer-events: none;
+  border: 1px solid var(--fx-bracket, var(--hud-line)); border-radius: var(--fx-radius, 7px);
+  /* 四顆燈：左上、右上、右下、左下 */
+  background:
+    linear-gradient(var(--fx-led, transparent) 0 0) left var(--fx-led-at, 3px) top var(--fx-led-at, 3px) / 3px 3px no-repeat,
+    linear-gradient(var(--fx-led, transparent) 0 0) right var(--fx-led-at, 3px) top var(--fx-led-at, 3px) / 3px 3px no-repeat,
+    linear-gradient(var(--fx-led, transparent) 0 0) right var(--fx-led-at, 3px) bottom var(--fx-led-at, 3px) / 3px 3px no-repeat,
+    linear-gradient(var(--fx-led, transparent) 0 0) left var(--fx-led-at, 3px) bottom var(--fx-led-at, 3px) / 3px 3px no-repeat;
+  mask:
+    linear-gradient(#000 0 0) left top / var(--fx-arm, 12px) var(--fx-arm, 12px) no-repeat,
+    linear-gradient(#000 0 0) right top / var(--fx-arm, 12px) var(--fx-arm, 12px) no-repeat,
+    linear-gradient(#000 0 0) left bottom / var(--fx-arm, 12px) var(--fx-arm, 12px) no-repeat,
+    linear-gradient(#000 0 0) right bottom / var(--fx-arm, 12px) var(--fx-arm, 12px) no-repeat;
+  transition: border-color 160ms ease, opacity 160ms ease;
+}
+/* 帳戶卡：角框用帳戶色，避開頂端的色條；四角的燈平常淡淡亮著（有對話等你回應時換成琥珀色）；滑過時整個亮起來 */
+.acard { --fx-inset: 6px; --fx-radius: 5px; --fx-bracket: color-mix(in srgb, var(--acc) 55%, transparent); --fx-led: color-mix(in srgb, var(--acc) 70%, transparent); }
+.acard:has(.sess.wait) { --fx-led: var(--amber); }
+.acard:hover { --fx-bracket: color-mix(in srgb, var(--acc) 90%, transparent); }
+.acard.remote-only { --fx-bracket: var(--hud-line); --fx-led: transparent; }
+.acard-add { --fx-inset: 6px; --fx-radius: 5px; }
+.acard-add:hover { --fx-bracket: color-mix(in srgb, var(--focus) 70%, transparent); }
+.ccard:hover, .dcli:hover, .dev:hover { --fx-bracket: color-mix(in srgb, var(--acc) 70%, transparent); }
+/* 卡片（問卷、核准、計畫確認）的 .it 有 content-visibility 帶來的繪製限制，角框畫在框內（內縮 3px）才不會被裁掉 */
+.it-card { --fx-radius: 5px; }
+.it-card.waiting { --fx-bracket: var(--acc); }
+/* 輸入框的燈貼近角落：右下角是停止／送出鈕，燈不能疊到按鈕上 */
+.cbox { --fx-led-at: 1px; }
+.cbox:focus-within { --fx-bracket: color-mix(in srgb, var(--acc) 75%, transparent); }
+.dlg { --fx-arm: 14px; }
+/* 右下角的通知：角框與四顆燈依種類換色（一般藍、成功綠、錯誤紅）；浮動說明：小一號的角框 */
+.toast { --fx-radius: 6px; --fx-arm: 10px; --fx-tone: var(--link); --fx-bracket: color-mix(in srgb, var(--fx-tone) 50%, var(--hud-line)); --fx-led: color-mix(in srgb, var(--fx-tone) 80%, transparent); }
+.toast.success { --fx-tone: var(--green); }
+.toast.error { --fx-tone: var(--red); }
+.tip { --fx-inset: 2px; --fx-arm: 6px; --fx-radius: 4px; --fx-led-at: 2px; }
+/* 整則回覆複製成功（items.js 的 .fx-copied，0.9 秒）：外圍出現一圈綠色括號與四顆燈，閃兩下後淡掉（動畫在下面的一次性段落）；
+   畫在回覆外側 6px，這段時間拿掉 .it 的 content-visibility（繪製限制會裁掉框外的部分），同卡片出現的鎖定 */
+.it-assistant.fx-copied { content-visibility: visible; --fx-inset: -6px; --fx-radius: 8px; --fx-bracket: var(--green); --fx-led: var(--green); --fx-led-at: 0px; }
+/* 卡片有了結果（conversation.js 的 .fx-c-*，fxrules.cardSettleFx）：角框與四顆燈鎖定成結果的顏色（允許綠、拒絕紅、略過琥珀），閃兩下後回到平常的顏色 */
+.it-card.fx-c-ok { --fx-bracket: var(--green); --fx-led: var(--green); }
+.it-card.fx-c-no { --fx-bracket: var(--red); --fx-led: var(--red); }
+.it-card.fx-c-skip { --fx-bracket: var(--amber); --fx-led: var(--amber); }
+
+/* ───── 頂部列：品牌那一側的一道光（靜態）；品牌圖示外圈的一圈小方塊（執行中才亮） ───── */
+.topbar { position: relative; }
+.topbar::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; z-index: 1; pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 55%, transparent) 9%, transparent 32%);
+}
+.brand-mark { position: relative; }
+.brand-mark::after {
+  content: ""; position: absolute; inset: -5px; border-radius: 50%; pointer-events: none;
+  mask: radial-gradient(closest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2.5px)), repeating-conic-gradient(#000 0 18deg, transparent 18deg 30deg);
+  mask-composite: intersect;
+}
+
+/* ───── 儀表板：點狀網格、刻度尺、區塊標記、用量圓環外的一圈小方塊與外弧 ───── */
+.dash { background-image: radial-gradient(circle at 1px 1px, var(--hud-dot) 1px, transparent 1.6px); background-size: 22px 22px; }
+.dash-summary {
+  background:
+    repeating-linear-gradient(90deg, var(--hud-line) 0 1px, transparent 1px 50px) left bottom / 100% 7px no-repeat,
+    repeating-linear-gradient(90deg, var(--hud-line) 0 1px, transparent 1px 10px) left bottom / 100% 3px no-repeat;
+}
+.dash-summary { position: relative; }
+.sum-item.run { position: relative; }
+.sum-item.run .sum-n { text-shadow: 0 0 14px color-mix(in srgb, var(--tone-auto) var(--fx-glow), transparent); }
+.sum-item:is(.wait, .near, .hot) .sum-n { text-shadow: 0 0 14px color-mix(in srgb, currentColor var(--fx-glow), transparent); }
+.dash-h { display: inline-flex; align-items: center; gap: 9px; }
+.dash-h::before { content: ""; width: 6px; height: 6px; flex: none; transform: rotate(45deg); border: 1px solid var(--acc); box-shadow: 0 0 6px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+/* 區塊標題後面接一條往右淡掉的導線，開頭一小段刻度 */
+.dash-sec-head > .grow {
+  align-self: center; height: 5px; margin: 0 8px 0 4px;
+  background:
+    linear-gradient(90deg, var(--hud-line), transparent 90%) left center / 100% 1px no-repeat,
+    repeating-linear-gradient(90deg, var(--hud-line) 0 2px, transparent 2px 6px) left center / 38px 5px no-repeat;
+}
+
+/* ───── 帳戶卡：頂端色條中間的定位片、背景層（光暈、網格、側邊刻度）、標誌與「已登入」的燈、滑過與執行中的外光 ───── */
+.acard { transition: border-color 160ms ease, box-shadow 160ms ease; }
+.acard::before {
+  height: 5px;
+  clip-path: polygon(0 0, 100% 0, 100% 2px, calc(50% + 48px) 2px, calc(50% + 44px) 100%, calc(50% - 44px) 100%, calc(50% - 48px) 2px, 0 2px);
+}
+.acard:hover { border-color: color-mix(in srgb, var(--acc) 38%, var(--border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 12%, transparent), 0 12px 34px -18px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+.acard:has(.sess.run) { border-color: color-mix(in srgb, var(--acc) 32%, var(--border)); box-shadow: 0 0 28px -12px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+.acard.remote-only:hover { border-color: var(--border-2); box-shadow: none; }
+/* 背景層由上往下：帳戶色的光暈、把網格往下蓋掉的底色、細網格（16px）；remoteOnly 的卡是透明底，不畫 */
+.acard-fx {
+  position: absolute; inset: 0; z-index: -1; pointer-events: none; overflow: hidden;
+  background:
+    radial-gradient(ellipse 72% 150px at 50% 0, color-mix(in srgb, var(--acc) 15%, transparent), transparent),
+    linear-gradient(transparent 10%, var(--bg-raised) 72%),
+    linear-gradient(var(--hud-dot) 1px, transparent 1px) 0 0 / 100% 16px,
+    linear-gradient(90deg, var(--hud-dot) 1px, transparent 1px) 0 0 / 16px 100%;
+}
+.acard.remote-only .acard-fx { display: none; }
+/* 左右兩側中段的刻度尺 */
+.acard-fx::after {
+  content: ""; position: absolute; left: 3px; right: 3px; top: 36%; bottom: 36%;
+  background:
+    repeating-linear-gradient(var(--hud-line) 0 1px, transparent 1px 6px) left top / 3px 100% no-repeat,
+    repeating-linear-gradient(var(--hud-line) 0 1px, transparent 1px 6px) right top / 3px 100% no-repeat;
+}
+.acard-mark .pmark { filter: drop-shadow(0 0 7px color-mix(in srgb, var(--acc) var(--fx-glow), transparent)); }
+/* 標誌後面一團帳戶色的光：平常不亮，怠速時慢慢呼吸、執行中依執行量一明一暗（動畫在下面） */
+.acard-mark { position: relative; }
+.acard-mark::before {
+  content: ""; position: absolute; inset: 2px; z-index: -1; border-radius: 30%; pointer-events: none;
+  background: var(--acc); filter: blur(9px); opacity: 0;
+}
+.acard.remote-only .acard-mark .pmark { filter: grayscale(1) opacity(.55); }
+.acard .pill.st-ready::before { content: ""; width: 5px; height: 5px; flex: none; border-radius: 1px; background: currentColor; box-shadow: 0 0 6px currentColor; }
+.acard-add:hover .acard-add-ic { border-color: color-mix(in srgb, var(--focus) 60%, var(--border-2)); box-shadow: 0 0 14px color-mix(in srgb, var(--focus) var(--fx-glow), transparent); }
+
+/* ───── 用量圓環：圈內的刻度（細刻度＋每 25% 的粗刻度）、弧線末端的光點、雙層外光、百分比微光 ───── */
+.ring-scale { fill: none; stroke: color-mix(in srgb, var(--sev-color, var(--acc)) 30%, var(--hud-line)); stroke-width: 3; }
+.ring-scale-major { fill: none; stroke: color-mix(in srgb, var(--sev-color, var(--acc)) 65%, transparent); stroke-width: 5.5; }
+.ring-tip { transform-box: view-box; transform-origin: 60px 60px; transition: transform 900ms var(--ease-out), opacity 300ms ease; }
+.ring-tip-halo { fill: color-mix(in srgb, var(--sev-color, var(--acc)) 32%, transparent); }
+.ring-tip-core { fill: color-mix(in srgb, var(--sev-color, var(--acc)), #fff 70%); }
+.ring-num { text-shadow: 0 0 18px color-mix(in srgb, var(--sev-color, var(--acc)) calc(var(--fx-glow) - 10%), transparent); }
+.ring-sweep { display: none; position: absolute; inset: 16%; border-radius: 50%; pointer-events: none; }
+/* 走勢線：發光、底下一條虛線基準；最後一點發光 */
+/* 走勢線的外層（dashboard.js）：裁切（打開儀表板時由左往右畫出來）；留 6px 給發光，不裁到光暈 */
+.spark-wipe { display: block; width: 100%; height: 100%; overflow: clip; overflow-clip-margin: 6px; }
+.spark-svg { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--sev-color, var(--acc)) var(--fx-glow), transparent)); }
+.spark:has(.spark-svg)::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -3px; height: 1px; pointer-events: none;
+  background: repeating-linear-gradient(90deg, var(--hud-line) 0 2px, transparent 2px 6px);
+}
+.spark-end { box-shadow: 0 0 0 2px var(--bg-raised), 0 0 8px var(--sev-color, var(--acc)); }
+/* 圓環外側一圈 48 格的小方塊（每格 7.5°，約 4×4 px）；執行中有一段亮格一格一格繞圈 */
+.ring-wrap::before {
+  content: ""; position: absolute; inset: -8px; border-radius: 50%; pointer-events: none;
+  background: var(--hud-line);
+  mask: radial-gradient(closest-side, transparent calc(100% - 4px), #000 calc(100% - 4px)), repeating-conic-gradient(#000 0 3.75deg, transparent 3.75deg 7.5deg);
+  mask-composite: intersect;
+}
+.ring-wrap::after {
+  content: ""; position: absolute; inset: -11px; border-radius: 50%; pointer-events: none;
+  border: 1px solid transparent;
+  border-top-color: color-mix(in srgb, var(--sev-color, var(--acc)) 38%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--sev-color, var(--acc)) 38%, transparent);
+}
+.ring {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--sev-color, var(--acc)) calc(var(--fx-glow) - 5%), transparent))
+    drop-shadow(0 0 10px color-mix(in srgb, var(--sev-color, var(--acc)) calc(var(--fx-glow) - 20%), transparent));
+}
+
+/* ───── 側欄帳戶卡的用量圓環：外圈 36 格小刻度（每格 10°，約 2×2 px）；執行中的帳戶弧線發光，動畫在下面 ───── */
+.mmeter::before {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  background: var(--hud-line);
+  mask: radial-gradient(closest-side, transparent calc(100% - 2px), #000 calc(100% - 2px)), repeating-conic-gradient(#000 0 5deg, transparent 5deg 10deg);
+  mask-composite: intersect;
+}
+/* 執行中轉動的刻度（::before，40px 方框轉 45° 時外框多出約 8px）與雷達（::after）要裁在圓環裡：
+   否則最後一張卡執行中時，帳戶清單（overflow-y: auto）多出一兩 px 可捲動的高度，捲軸一下出現一下消失、卡片跟著左右跳。
+   看得到的刻度都在圓內；外留 4px 給弧線的光暈（drop-shadow 3px） */
+.mmeter { overflow: clip; overflow-clip-margin: 4px; }
+.macct:has(.macct-run:not([hidden])) .mring { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--gauge) var(--fx-glow), transparent)); }
+
+/* ───── 空白的新對話、沒有分頁的窗格：網格、雷達圈與零星的資料方塊（靜態） ───── */
+.draft { position: relative; isolation: isolate; }
+.draft::before, .pane-body:has(> .pane-empty)::before {
+  content: ""; position: absolute; z-index: -1; pointer-events: none;
+  background:
+    linear-gradient(var(--hud-block) 0 0) 69% 18% / 5px 5px no-repeat,
+    linear-gradient(var(--hud-block) 0 0) 85% 44% / 5px 5px no-repeat,
+    linear-gradient(var(--hud-block) 0 0) 62% 52% / 4px 4px no-repeat,
+    linear-gradient(var(--hud-block) 0 0) 91% 24% / 4px 4px no-repeat,
+    linear-gradient(var(--hud-block) 0 0) 57% 28% / 3px 3px no-repeat,
+    linear-gradient(var(--hud-block) 0 0) 79% 64% / 5px 5px no-repeat,
+    repeating-radial-gradient(circle at 76% 32%, transparent 0 55px, var(--hud-ring) 55px 56px),
+    linear-gradient(var(--hud-dot) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(90deg, var(--hud-dot) 1px, transparent 1px) 0 0 / 28px 28px;
+  mask: radial-gradient(ellipse 65% 70% at 62% 36%, #000 10%, transparent 78%);
+}
+.draft::before { inset: 0 -56px; }
+.pane-body:has(> .pane-empty)::before { inset: 0; z-index: 0; }
+.pane-empty { position: relative; z-index: 1; }
+
+/* ───── 對話框（靜態）：程式碼框做成終端機面板、使用者訊息、標題與表頭、差異比例條、時間軸的方塊點、兩側刻度尺、底部 token 數 ───── */
+/* 程式碼框：四角括號（帳戶色淡淡的、滑過時亮起來；複製成功時連四顆燈一起變綠）、標頭左側一顆帳戶色方塊燈與一段短刻度、
+   右側行數（items.js 的 .code-lines，fxrules.codeLineCount）、程式碼左緣一道帳戶色細線 */
+.code { --fx-bracket: color-mix(in srgb, var(--acc) 40%, var(--hud-line)); --fx-radius: 6px; }
+.code:hover { --fx-bracket: color-mix(in srgb, var(--acc) 80%, transparent); }
+.code.fx-copied { --fx-bracket: var(--green); --fx-led: var(--green); }
+.code-head {
+  background:
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--acc) 70%, transparent) 0 2px, transparent 2px 5px) left 12px bottom 0 / 32px 3px no-repeat,
+    linear-gradient(90deg, color-mix(in srgb, var(--acc) 9%, transparent), transparent 45%);
+}
+.code-lang { display: inline-flex; align-items: center; gap: 7px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-hi); }
+.code-lang::before {
+  content: ""; width: 5px; height: 5px; flex: none; border-radius: 1px; background: var(--acc);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--acc) var(--fx-glow), transparent);
+}
+.code-lines { margin-left: auto; margin-right: 8px; font: 10.5px var(--mono); letter-spacing: .06em; color: var(--text-3); white-space: nowrap; }
+.code pre { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--acc) 35%, transparent); }
+/* 使用者訊息：左邊線改成一串小方塊（最近的指令列同款）、底色由帳戶色往右淡掉、右側兩角的括號（左側是邊線） */
+.u-box {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 8%, transparent), transparent 55%), var(--bg-raised);
+  --fx-bracket: color-mix(in srgb, var(--acc) 50%, transparent); --fx-arm: 10px;
+}
+.u-box::before, .lp-body::before { mask: repeating-linear-gradient(to bottom, #000 0 4px, transparent 4px 6px); }
+.u-box::after { mask: linear-gradient(#000 0 0) right top / 10px 10px no-repeat, linear-gradient(#000 0 0) right bottom / 10px 10px no-repeat; }
+/* 回覆的標題前一顆 45° 小菱形（同儀表板的區塊標題）；表頭下緣一道帳戶色的線與刻度 */
+.md :is(h1, h2, h3)::before {
+  content: ""; display: inline-block; width: .4em; height: .4em; margin: 0 .6em .14em 1px; vertical-align: middle;
+  transform: rotate(45deg); border: 1px solid var(--acc);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--acc) var(--fx-glow), transparent);
+}
+.md thead th {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--acc) 40%, var(--border));
+  background-image: repeating-linear-gradient(90deg, var(--hud-line) 0 1px, transparent 1px 6px);
+  background-size: 100% 4px; background-position: left bottom; background-repeat: no-repeat;
+}
+/* 差異統計後面的 5 格方塊比例條（items.js 的 .t-ratio，fxrules.diffRatioCells；aria-hidden，數字本身就是資訊） */
+.t-ratio { display: inline-flex; align-items: center; gap: 2px; }
+.t-ratio > span { width: 6px; height: 6px; border-radius: 1px; background: var(--hud-line); }
+.t-ratio > .tr-add { background: var(--green); }
+.t-ratio > .tr-del { background: var(--red); }
+/* 時間軸的點改成小方塊（和其他 HUD 元素同一種形狀；外面擴散的方框本來就是方的） */
+.step-dot { border-radius: 1.5px; }
+/* 對話欄兩側的刻度尺：畫在不會捲動的 .conv-col 上，isolation 讓 z-index: -1 墊在訊息與輸入框底下（選單、提示都掛在 body，不受影響）；
+   上下淡掉。欄寬放得下對話串（800px）時貼在它外側，窄的時候貼在對話串的留白裡（窄欄 16px）：右邊距 7px，對話短到沒有捲軸時不壓到字，
+   有捲軸（10px，滑塊內縮 3px）時落在字與滑塊之間（tools/ui-probe 的 fxRulersOnePane、fxRulersFourPanes） */
+.conv-col { isolation: isolate; }
+.conv-col::before, .conv-col::after {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 7px; z-index: -1; pointer-events: none;
+  background:
+    repeating-linear-gradient(to bottom, var(--hud-line) 0 1px, transparent 1px 8px) left top / 3px 100% no-repeat,
+    repeating-linear-gradient(to bottom, color-mix(in srgb, var(--acc) 45%, transparent) 0 1px, transparent 1px 48px) left top / 7px 100% no-repeat;
+  mask: linear-gradient(transparent, #000 12%, #000 62%, transparent 82%);
+}
+.conv-col::before { left: max(6px, calc(50% - 424px)); }
+.conv-col::after { right: max(7px, calc(50% - 418px)); transform: scaleX(-1); }
+/* 捲軸滑過時帶帳戶色 */
+.scroller::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--acc) 55%, transparent); }
+/* 對話底部「上一輪」的 token 數、待辦的完成數與總數（composer.js 的 .ci-turn、.todo-count，items.js 的 .plan-count，都用 tokenfx.js 的計數器）：
+   字和旁邊一樣、0 不變淡，只有解碼時亂碼暗、鎖定的那一位亮藍 */
+:is(.ci-turn, .todo-count, .plan-count) .mtok-n { font-size: inherit; font-weight: inherit; text-shadow: none; }
+:is(.ci-turn, .todo-count, .plan-count) .mtok-n.zero { opacity: 1; }
+:is(.ci-turn, .todo-count, .plan-count) .mtok-c.scr { color: var(--text-3); }
+:is(.ci-turn, .todo-count, .plan-count) .mtok-c.lock { color: var(--tk-hi); text-shadow: 0 0 6px var(--tk); }
+/* 對話裡選取文字的底色：半透明帳戶色（其他地方是 app.css 的焦點色） */
+.conv ::selection { background: color-mix(in srgb, var(--acc) 34%, transparent); }
+
+/* ───── 執行列（launchbar.js）：按鈕群外圍的角框（畫在框外 4px）與四角的燈依階段換色——建置中帳戶色、執行中綠、暫停琥珀，
+   建置失敗或無法啟動時紅色一下（fx-l-err）；狀態燈是小方塊，執行中帶一點光。持續的光帶與一次性的閃爍在下面的動態段落 ───── */
+.lbar-btns { --fx-inset: -3px -4px; --fx-arm: 7px; --fx-radius: 10px; --fx-led-at: 0px; }
+.lbar[data-phase="building"] .lbar-btns { --fx-bracket: color-mix(in srgb, var(--acc) 75%, transparent); --fx-led: var(--acc); }
+.lbar[data-phase="running"] .lbar-btns { --fx-bracket: color-mix(in srgb, var(--green) 70%, transparent); --fx-led: var(--green); }
+.lbar[data-phase="paused"] .lbar-btns { --fx-bracket: color-mix(in srgb, var(--amber) 75%, transparent); --fx-led: var(--amber); }
+.lbar.fx-l-err .lbar-btns { --fx-bracket: var(--red); --fx-led: var(--red); }
+.lbar-status::before { border-radius: 1.5px; }
+.lbar-status[data-tone="ok"]::before { box-shadow: 0 0 6px color-mix(in srgb, var(--green) var(--fx-glow), transparent); }
+
+/* ───── 輸入框下方那一行（composer.js 的 .cinfo，單行）：最前面的燈號、用量的 5 格刻度（主要時間窗與每週）、token 數的等寬數字，各段以細直線分隔 ─────
+   燈號（.ci-leds；activityrules.js）：平常暗著，宿主量到真的數字才亮（運行跟著執行中；資料流、網路、硬碟由 activity 點亮一下，
+   持續有動靜時像硬碟燈一樣閃）。亮與暗是 class 切換、不是動畫；減少動態或關掉動態效果時亮久一點、不閃 */
+.ci-leds { display: inline-flex; align-items: center; gap: 9px; }
+.ci-led { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; letter-spacing: .06em; color: var(--text-3); cursor: default; }
+.ci-led[hidden] { display: none; }
+.ci-led > i { width: 6px; height: 6px; flex: none; border-radius: 1px; background: var(--hud-line); }
+.ci-led.on { color: var(--text-2); }
+.ci-led.on > i { background: var(--led); box-shadow: 0 0 6px color-mix(in srgb, var(--led) var(--fx-glow), transparent); }
+.ci-led[data-led="run"] { --led: var(--green); }
+.ci-led[data-led="data"] { --led: var(--tone-auto); }
+.ci-led[data-led="net"] { --led: var(--tone-plan); }
+.ci-led[data-led="disk"] { --led: var(--amber); }
+/* 分隔：「・」字留著（讀屏與複製），畫成一道細直線 */
+.cinfo .ci-sep { display: inline-block; width: 1px; height: 10px; padding: 0; margin: 0 9px; overflow: hidden; color: transparent; background: var(--border-2); opacity: 1; }
+/* 用量：每個時間窗一組刻度、各自的嚴重度顏色，兩組之間空一點（不寫名稱與百分比，滑過看說明） */
+/* 用量的兩組刻度上下疊成一欄（2026-10-26 使用者要求：省橫向空間）：上面主要時間窗、下面每週，每條 3px 高、間隔 2px，總高同以前的一組 */
+.ci-usage { display: inline-grid; grid-auto-rows: 3px; row-gap: 2px; align-content: center; padding: 3px 0; cursor: default; }
+.ci-meter { display: inline-flex; align-items: center; gap: 2px; cursor: default; --sev: var(--green); }
+.ci-meter.sev-warn { --sev: var(--amber); }
+.ci-meter.sev-high { --sev: var(--orange); }
+.ci-meter.sev-max { --sev: var(--red); }
+.ci-meter > i { width: 4px; height: 3px; border-radius: 1px; background: var(--hud-line); }
+.ci-meter > i.lit { background: var(--sev); }
+.ci-turn .mtok-n { font-family: var(--mono); color: var(--text-2); }
+/* 一輪進行中（標頭的 turnLive）：這一輪即時累計的數字換成 token 的藍色，跟著每次模型呼叫跳 */
+.ci-turn.live .mtok-n { color: var(--tk); }
+.ci-turn .ci-k { color: var(--text-3); }
+
+/* ───── 共用元件（靜態）：選單、輸入框的 @ 與 / 提示、設定頁的區塊標題、通知的倒數條 ───── */
+/* 選單與提示會捲動（內容長時 overflow），角框畫在自己的背景上（背景不跟著內容捲），不用偽元素；
+   選到的那一項（滑過、方向鍵）左緣一格小方塊：選單取開選單那顆按鈕的帳戶色（ui.js 的 --menu-acc，沒有就是焦點色），提示在輸入框裡、直接是對話的帳戶色 */
+.menu, .suggest {
+  --mb: var(--hud-line);
+  background:
+    linear-gradient(var(--mb) 0 0) left 3px top 3px / 10px 1px no-repeat, linear-gradient(var(--mb) 0 0) left 3px top 3px / 1px 10px no-repeat,
+    linear-gradient(var(--mb) 0 0) right 3px top 3px / 10px 1px no-repeat, linear-gradient(var(--mb) 0 0) right 3px top 3px / 1px 10px no-repeat,
+    linear-gradient(var(--mb) 0 0) left 3px bottom 3px / 10px 1px no-repeat, linear-gradient(var(--mb) 0 0) left 3px bottom 3px / 1px 10px no-repeat,
+    linear-gradient(var(--mb) 0 0) right 3px bottom 3px / 10px 1px no-repeat, linear-gradient(var(--mb) 0 0) right 3px bottom 3px / 1px 10px no-repeat,
+    var(--bg-elev);
+}
+.menu-item { position: relative; }
+.menu-item.active::before {
+  content: ""; position: absolute; left: 1px; top: 50%; width: 3px; height: 3px; margin-top: -1.5px; border-radius: .5px; pointer-events: none;
+  background: var(--menu-acc, var(--focus)); box-shadow: 0 0 5px color-mix(in srgb, var(--menu-acc, var(--focus)) var(--fx-glow), transparent);
+}
+.menu-item.danger.active::before { background: var(--red); box-shadow: none; }
+.sg-row { position: relative; }
+.sg-row.sel::before {
+  content: ""; position: absolute; left: 1px; top: 50%; width: 3px; height: 3px; margin-top: -1.5px; border-radius: .5px; pointer-events: none;
+  background: var(--acc); box-shadow: 0 0 5px color-mix(in srgb, var(--acc) var(--fx-glow), transparent);
+}
+/* 設定的區塊標題：前面一顆 45° 小菱形、後面一條往右淡掉的導線（同儀表板的區塊標題） */
+.set-h { display: flex; align-items: center; gap: 8px; }
+.set-h::before { content: ""; width: 5px; height: 5px; flex: none; transform: rotate(45deg); border: 1px solid var(--acc); }
+.set-h::after {
+  content: ""; flex: 1; min-width: 0; height: 5px;
+  background:
+    linear-gradient(90deg, var(--hud-line), transparent 90%) left center / 100% 1px no-repeat,
+    repeating-linear-gradient(90deg, var(--hud-line) 0 2px, transparent 2px 6px) left center / 30px 5px no-repeat;
+}
+/* 通知底部的倒數條（ui.js 的 .toast-bar，以 Web Animations 縮 scaleX，只動 transform）：在下方兩個角框之間，滑鼠移上去時停住；減少動態時不建立 */
+.toast-bar {
+  position: absolute; left: 16px; right: 16px; bottom: 3px; height: 1px; pointer-events: none; transform-origin: left center;
+  background: color-mix(in srgb, var(--fx-tone) 70%, transparent);
+}
+
+/* ───── 回覆內容（靜態）：清單符號是帳戶色小方塊、編號帶帳戶色、引用的左線是一串小方塊、表格數字等寬、滑過的那一列帶底色 ───── */
+.md ul > li { list-style-type: square; }
+.md :is(ul, ol) > li::marker { color: color-mix(in srgb, var(--acc) 70%, var(--text-3)); }
+.md ol > li::marker { font-variant-numeric: tabular-nums; }
+.md blockquote {
+  border-left: 0; padding-left: 14px;
+  background: repeating-linear-gradient(to bottom, color-mix(in srgb, var(--acc) 45%, var(--border-3)) 0 4px, transparent 4px 6px) left top / 2px 100% no-repeat;
+}
+.md td { font-variant-numeric: tabular-nums; }
+.md tbody tr:hover > td { background: color-mix(in srgb, var(--acc) 7%, transparent); }
+/* 分隔線：往兩端淡掉，中間一段刻度 */
+.md hr {
+  height: 5px; border: 0;
+  background:
+    linear-gradient(90deg, transparent, var(--hud-line) 18%, var(--hud-line) 82%, transparent) center / 100% 1px no-repeat,
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--acc) 55%, var(--hud-line)) 0 1px, transparent 1px 6px) center / 37px 5px no-repeat;
+}
+
+/* 語音訊息的錄音波形（items.js 的 .att-wave，附件的 wave：錄音時麥克風實際的音量）：一格一條、高度照 0～9，取代檔案大小那一行 */
+.att-wave { display: flex; align-items: center; gap: 1px; height: 16px; margin-top: 2px; }
+.att-wave > i { width: 2px; height: calc(2px + var(--h, 0) * 1.4px); border-radius: 1px; flex: none; background: color-mix(in srgb, var(--acc) 75%, var(--text-3)); }
+
+/* ───── 標頭與側欄的標示（靜態）：換帳戶的排程、背景程式的徽章、頂部的橫幅 ───── */
+/* 帳戶晶片裡「這一輪結束後換到某帳戶」（chip-next）：外面一圈虛線框（畫在框外、不改版面），帳戶名前面一個箭頭，看得出是排著、還沒生效 */
+.chip-next { position: relative; }
+.chip-next::after { content: ""; position: absolute; inset: -2px -4px; border: 1px dashed currentColor; border-radius: 4px; opacity: .55; pointer-events: none; }
+.chip-next-label::before { content: "→ "; }
+/* 帳戶卡的背景程式徽章：前面一顆綠色方塊燈（程式還活著） */
+.macct-prog::before { content: ""; width: 3px; height: 3px; flex: none; border-radius: .5px; background: var(--green); box-shadow: 0 0 4px color-mix(in srgb, var(--green) 70%, transparent); }
+/* app 更新與連線狀態的橫幅：左緣一串帶色調的小方塊（同使用者訊息的邊線） */
+.app-banner, .hub-status { position: relative; }
+.app-banner::before, .hub-status::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; pointer-events: none;
+  background: repeating-linear-gradient(to bottom, var(--fx-banner, var(--tone-auto)) 0 4px, transparent 4px 6px);
+}
+.app-banner[data-tone="warn"], .hub-status[data-tone="warn"] { --fx-banner: var(--amber); }
+.hub-status[data-tone="bad"] { --fx-banner: var(--red); }
+
+/* ───── 標題的解碼（textfx.js：自動命名產生新標題時，側欄的對話列與標題列）：還沒鎖定的字透明、亂碼疊在上面（寬度不跳），剛鎖定的字亮一下 ───── */
+.tdx-c.scr { position: relative; color: transparent; }
+.tdx-c.scr::before { content: attr(data-g); position: absolute; inset: 0; text-align: center; color: color-mix(in srgb, var(--acc) 65%, var(--text-3)); }
+.tdx-c.lock { color: color-mix(in srgb, var(--acc) 55%, var(--text-hi)); text-shadow: 0 0 6px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+
+/* 儀表板摘要的數字、git 晶片徽章的數字、側欄帳戶卡徽章的對話數借用側欄的計數器（tokenfx.js）：照原本的字級、字重與顏色，0 不變淡；只有解碼時的亂碼與剛鎖定的字換色 */
+:is(.sum-n, .git-badge, .macct-run-n, .macct-bg-n, .macct-prog-n, .macct-agents-n, .sch-pill) .mtok-n { font-size: inherit; font-weight: inherit; text-shadow: inherit; }
+:is(.sum-n, .git-badge, .macct-run-n, .macct-bg-n, .macct-prog-n, .macct-agents-n, .sch-pill) .mtok-n.zero { opacity: 1; }
+:is(.sum-n, .git-badge, .macct-run-n, .macct-bg-n, .macct-prog-n, .macct-agents-n, .sch-pill) .mtok-c.scr { color: var(--text-3); }
+:is(.sum-n, .git-badge, .macct-run-n, .macct-bg-n, .macct-prog-n, .macct-agents-n, .sch-pill) .mtok-c.lock { color: var(--tk-hi); text-shadow: 0 0 6px var(--tk); }
+
+/* ───── 第四批（靜態）：背景程式的燈、分段選擇的滑動、Ultracode、手機聽寫的預覽、程式碼框行號 ───── */
+/* 背景程式晶片：每個還在跑的程式一顆綠燈（conversation.js 的 .prog-leds，最多 5 顆）；自己結束時晶片閃一下琥珀色（下面的一次性段落） */
+.ch-prog { position: relative; }
+.prog-leds { display: inline-flex; align-items: center; gap: 2px; }
+.prog-leds:empty { display: none; }
+.prog-leds > i { width: 3px; height: 3px; border-radius: .5px; background: var(--green); box-shadow: 0 0 4px color-mix(in srgb, var(--green) 70%, transparent); }
+.ch-prog.fx-prog-exit .prog-leds > i { background: var(--amber); box-shadow: none; }
+/* 分段選擇（ui.js 的 segmented）：點了另一顆時選中的底色從原本那顆滑過去（暫時的 .seg-slide，以 Web Animations 只動 transform） */
+.seg { position: relative; }
+.seg-btn { position: relative; z-index: 1; }
+.seg-slide { position: absolute; top: 2px; bottom: 2px; z-index: 0; border-radius: 5px; background: var(--bg-active); transform-origin: left center; pointer-events: none; }
+.seg.seg-moving .seg-btn.on { background: transparent; }
+/* 「繼續」鈕按下時擴散一圈（同送出鈕；下面的一次性段落） */
+.ibtn.cont { position: relative; }
+/* 強度選單的 Ultracode（xhigh 加上動態工作流程，可以同時派多個代理）：帳戶色描邊與「多代理」記號；選了它時輸入列的強度按鈕也帶帳戶色 */
+.menu-item.mi-ultra { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--menu-acc, var(--focus)) 50%, transparent); }
+.menu-item.mi-ultra .mi-label::after {
+  content: "多代理"; margin-left: 6px; padding: 0 4px; border-radius: 3px; font-size: 10px; font-weight: 600; vertical-align: 1px;
+  color: var(--menu-acc, var(--focus)); border: 1px solid color-mix(in srgb, var(--menu-acc, var(--focus)) 55%, transparent);
+}
+.pick.ultra { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 45%, transparent); }
+.pick.ultra .pick-label { color: color-mix(in srgb, var(--acc), var(--acc-text-mix)); }
+/* 手機聽寫的預覽列（voicemsg.js 的 .dict-preview，輸入框上方）：只列還沒確定的字（淡色、虛線底線），前面一顆紅燈表示正在聽；
+   沒有未確定的字時寫「正在聽…」 */
+.dict-preview { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 10px 0; font-size: 12px; color: var(--text-3); }
+.dict-preview[hidden] { display: none; }
+.dict-led { width: 5px; height: 5px; flex: none; border-radius: 1px; background: var(--red); box-shadow: 0 0 5px color-mix(in srgb, var(--red) 70%, transparent); }
+.dict-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline dashed color-mix(in srgb, var(--text-3) 70%, transparent); text-underline-offset: 3px; }
+.dict-preview.idle .dict-text { text-decoration: none; font-style: italic; }
+/* 預覽列最右邊的「記錄」：打開語音輸入的診斷記錄（voicemsg.js 的 openDiag） */
+.dict-log { flex: none; margin-left: auto; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-2); font-size: 11px; }
+/* 程式碼框的行號（items.js 的 .code-gutter，兩行以上）：格線排版的左欄，字體與行高同程式碼才對得齊；不能選取、橫向捲動時固定在左邊 */
+.code.has-ln { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.code.has-ln > .code-head { grid-column: 1 / -1; }
+.code-gutter {
+  grid-column: 1; padding: 10px 8px 10px 12px; font: calc(var(--fs-chat) - 1.5px)/1.58 var(--mono); white-space: pre; text-align: right;
+  color: var(--text-3); user-select: none; border-right: 1px solid var(--hud-line); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--acc) 35%, transparent);
+}
+.code.has-ln pre { box-shadow: none; }
+
+/* ───── 鍵盤焦點與錯誤項目（靜態） ───── */
+/* 鍵盤焦點（只有 :focus-visible，滑鼠點不會出現）：常用的按鈕、晶片、分頁與列，原本的焦點框外再一圈淡淡的焦點色光暈 */
+:is(.ibtn, .lbtn, .chip, .btn, .cbtn, .tab, .crow, .t-row, .att, .code-copy, .lbar-out, .jump):focus-visible {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--focus) 22%, transparent);
+}
+/* 錯誤項目：左緣一條紅色的斜紋警示條 */
+.it-error {
+  background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--red) 65%, transparent) 0 3px, transparent 3px 6px);
+  background-size: 4px 100%; background-position: left top; background-repeat: no-repeat;
+}
+/* 送出時疊在輸入框上的那幾行字（composer.js 的 sendFx，Web Animations 往上滑出、播完移除） */
+.send-ghost {
+  position: absolute; z-index: 3; margin: 0; box-sizing: border-box; max-height: 5.4em; overflow: hidden;
+  white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-hi); pointer-events: none;
+}
+.cbtn.send { position: relative; }
+
+/* ───── 互動時的發光（只在滑過時，沒有持續的動畫） ───── */
+.cbtn { transition: transform 120ms var(--ease-out), background-color 120ms, box-shadow 160ms ease; }
+.cbtn.send:hover:not(:disabled):not(.queueing) {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 55%, transparent), 0 0 14px color-mix(in srgb, var(--acc) var(--fx-glow), transparent);
+}
+.btn { transition: transform 120ms var(--ease-out), background-color 100ms, border-color 100ms, box-shadow 160ms ease; }
+.btn.acc:hover:not(:disabled) { box-shadow: 0 0 12px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+
+/* ───── 執行中的靜態加強：工具圖示、執行列轉圈發光、串流游標改成終端機式的小方塊 ───── */
+.it-tool[data-status="Running"] .t-icwrap { color: var(--acc); }
+.run-spin { position: relative; filter: drop-shadow(0 0 3px color-mix(in srgb, currentColor var(--fx-glow), transparent)); }
+.run-spin::after { content: ""; position: absolute; inset: 2px; border-radius: 50%; border: 1px dotted currentColor; opacity: .55; }
+.it-assistant.running .md > :is(p, h1, h2, h3, h4, h5, blockquote):last-child::after,
+.it-assistant.running .md > :is(ul, ol):last-child > li:last-child::after {
+  width: .5em; height: .5em; border-radius: 1px;
+  box-shadow: 0 0 8px 1px color-mix(in srgb, var(--acc) calc(var(--fx-glow) + 20%), transparent);
+}
+
+/* 脈衝框的底（沒有動畫時看不到） */
+.step-dot::after, .crow-dot::after, .sum-item.run::after {
+  content: ""; position: absolute; inset: 0; border-radius: 1.5px; pointer-events: none; opacity: 0;
+}
+.crow-dot { position: relative; }
+.sum-item.run::after { inset: 2px auto auto calc(100% + 5px); width: 6px; height: 6px; border-radius: 1px; background: var(--tone-auto); opacity: 1; }
+
+/* ───── 持續的動畫：只在執行中、等背景工作回報、等你回應時，而且系統沒有要求減少動態、設定沒有關掉動態效果 ─────
+   無限循環的動畫一律只動 transform／opacity（交給合成器，主執行緒不必每一幀重算樣式與重畫）：掃描光是 25% 寬的偽元素以 fx-glide
+   從容器左緣滑到右緣、頭尾淡入淡出（不會畫到容器外，不必裁切）；平常的 opacity 是 0，動畫被減少動態或設定縮成一瞬間時就看不到。
+   2026-10-23 以前動的是 background-position／background-size（掃描光、文字流光、角落的燈輪流亮、方塊音量計、軸線的流光），
+   有對話在執行時 WebView2 的渲染程序一直吃掉約一顆核心（tools/ui-probe 的 --perf 量測與 perfNoMainThreadLoops* 檢查） */
+@media (prefers-reduced-motion: no-preference) {
+  /* 對話標題列底線：一段 3×3 小方塊組成的亮帶由左往右滑過 */
+  .ch { position: relative; }
+  .conv.running > .ch::after {
+    content: ""; position: absolute; left: 0; width: 25%; bottom: -2px; height: 3px; z-index: 1; pointer-events: none;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 35%, transparent) 55%, var(--acc) 94%, transparent 94%);
+    mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 5px);
+    opacity: 0; animation: fx-glide 2.6s linear infinite;
+  }
+
+  /* 輸入框：上緣同樣一段小方塊的亮帶滑過；角落的四顆燈亮著 */
+  .conv.running .cbox { --fx-bracket: color-mix(in srgb, var(--acc) 85%, transparent); --fx-led: var(--acc); }
+  .conv.running .cbox::before {
+    content: ""; position: absolute; top: -2px; left: 12px; width: calc((100% - 24px) / 4); height: 3px; z-index: 1; pointer-events: none;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 35%, transparent) 55%, var(--acc) 94%, transparent 94%);
+    mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 5px);
+    opacity: 0; animation: fx-glide 3s linear infinite;
+  }
+
+  /* 執行列：文字一明一暗、尾端的方塊音量計（兩組高低不同的四根方塊輪流顯示，看起來在跳） */
+  .runline:not(.idle) .run-text, .it-thinking.running .think-label, .conv.running .todo-cur { animation: fx-dim 2.2s ease-in-out infinite; }
+  .runline:not(.idle)::before, .runline:not(.idle)::after {
+    content: ""; flex: none; width: 15px; height: 11px;
+    mask: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px);
+  }
+  /* 兩組疊在同一格：::before 排到最後（order），::after 再以負邊界（寬度＋gap 8px）疊回同一個位置 */
+  .runline:not(.idle)::before {
+    order: 2;
+    background:
+      linear-gradient(var(--acc) 0 0) 0 100% / 3px 5px no-repeat,
+      linear-gradient(var(--acc) 0 0) 4px 100% / 3px 11px no-repeat,
+      linear-gradient(var(--acc) 0 0) 8px 100% / 3px 8px no-repeat,
+      linear-gradient(var(--acc) 0 0) 12px 100% / 3px 2px no-repeat;
+    opacity: .9; animation: fx-vu-a .7s steps(1) infinite;
+  }
+  .runline:not(.idle)::after {
+    order: 3; margin-left: -23px;
+    background:
+      linear-gradient(var(--acc) 0 0) 0 100% / 3px 11px no-repeat,
+      linear-gradient(var(--acc) 0 0) 4px 100% / 3px 5px no-repeat,
+      linear-gradient(var(--acc) 0 0) 8px 100% / 3px 2px no-repeat,
+      linear-gradient(var(--acc) 0 0) 12px 100% / 3px 8px no-repeat;
+    opacity: 0; animation: fx-vu-b .7s steps(1) infinite;
+  }
+
+  /* 時間軸：執行中的小點外有方框邊轉邊擴散（鎖定目標）、這一段的軸線亮起來；等你核准的工具是慢一點的琥珀色 */
+  .it-step.running .step-dot::after, .it-tool[data-status="Running"] .step-dot::after {
+    border: 1px solid var(--acc); animation: fx-lock-on 1.5s var(--ease-out) infinite;
+  }
+  .it-tool[data-status="Waiting"] .step-dot::after { border: 1px solid var(--amber); animation: fx-lock-on 2.4s var(--ease-out) infinite; }
+  .it-step.running::before, .it-tool[data-status="Running"]::before {
+    background: linear-gradient(to bottom, var(--rail), var(--acc) 50%, var(--rail));
+  }
+  /* 執行中的工具列：一條由 3×3 小方塊組成的光帶掃過（.it 的繪製限制會把移出去的部分裁掉）；
+     一進場就已經結束的工具也用這條光帶掃一次（下方「對話框的一次性動畫」換成只播一次） */
+  .it-tool[data-status="Running"]::after, .it-tool.fx-in:not([data-status="Running"]):not(.fx-done):not(.fx-fail)::after {
+    content: ""; position: absolute; left: 14px; right: 0; top: 0; height: 28px; border-radius: 6px; pointer-events: none;
+    background: linear-gradient(100deg, transparent 25%, color-mix(in srgb, var(--acc) 26%, transparent) 50%, transparent 75%);
+    mask: linear-gradient(90deg, #000 3px, transparent 3px) 0 0 / 4px 4px, linear-gradient(#000 3px, transparent 3px) 0 0 / 4px 4px;
+    mask-composite: intersect;
+    transform: translateX(-100%);
+    animation: fx-sweep 1.8s var(--ease-io) infinite;
+  }
+  /* 執行列建置中：按鈕群底下一段小方塊亮帶滑過（同輸入框上緣的光帶；只在建置中） */
+  .lbar[data-phase="building"] .lbar-btns::before {
+    content: ""; position: absolute; left: 4px; bottom: -5px; width: calc((100% - 8px) / 4); height: 2px; pointer-events: none;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 40%, transparent) 55%, var(--acc) 94%, transparent 94%);
+    mask: repeating-linear-gradient(90deg, #000 0 2px, transparent 2px 4px);
+    opacity: 0; animation: fx-glide 1.4s linear infinite;
+  }
+  .it-thinking.running .think-glyph { display: inline-block; animation: spin 3s linear infinite; }
+  /* 串流游標：方塊一亮一暗（像終端機） */
+  .it-assistant.running .md > :is(p, h1, h2, h3, h4, h5, blockquote):last-child::after,
+  .it-assistant.running .md > :is(ul, ol):last-child > li:last-child::after { animation: fx-blink 1s steps(1) infinite; }
+
+  /* 等你作答的卡片：角框連同四角的燈一起呼吸，像鎖定目標 */
+  .it-card.waiting { --fx-led: var(--acc); }
+  .it-card.waiting::after { animation: fx-breathe 2.4s ease-in-out infinite; }
+
+  /* 等背景工作回報（代理這一輪結束了、背景工作還在跑）：和執行中分得出來的「在等」——虛線圈慢慢轉、輸入框的角框與燈慢慢呼吸、
+     狀態列的字慢慢一明一暗；沒有掃描光與音量計（代理沒有在產生內容） */
+  .bg-ring { animation: fx-rot 6s linear infinite; }
+  .conv.bg-wait .cbox { --fx-bracket: color-mix(in srgb, var(--acc) 60%, transparent); --fx-led: color-mix(in srgb, var(--acc) 75%, transparent); }
+  .conv.bg-wait .cbox::after { animation: fx-breathe 3.2s ease-in-out infinite; }
+  .runline.bg .run-text { animation: fx-dim 3.2s ease-in-out infinite; }
+
+  /* 瀏覽器版重新連線中（hub-status 的 reconnecting、connecting）：下緣一道光滑過，連上就停（同執行中的光帶，只動 transform） */
+  .hub-status:is([data-kind="reconnecting"], [data-kind="connecting"])::after {
+    content: ""; position: absolute; left: 0; width: 25%; bottom: -1px; height: 2px; pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--fx-banner, var(--tone-auto)));
+    animation: fx-glide 1.8s linear infinite;
+  }
+  /* 分頁：執行中的分頁底部有光滑過。畫在 .tab-dot 的偽元素上（.tab 自己的兩個偽元素是作用中分頁的上下緣）：
+     .tab-dot 沒有定位，絕對定位的偽元素以 .tab 為準 */
+  .tab:has(.tab-spin) .tab-dot::after {
+    content: ""; position: absolute; left: 0; bottom: 0; width: 25%; height: 2px; pointer-events: none;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 85%, transparent), transparent);
+    opacity: 0; animation: fx-glide 2.4s var(--ease-io) infinite;
+  }
+
+  /* 側欄：執行中的帳戶色條發光、「執行中」膠囊掃光、對話列的小點外方框擴散 */
+  .macct-bar::after {
+    content: ""; position: absolute; inset: -1px -2px; border-radius: 3px; pointer-events: none;
+    background: var(--acc); filter: blur(4px); opacity: 0;
+  }
+  .macct:has(.macct-run:not([hidden])) .macct-bar::after { animation: fx-glow calc(1.8s / var(--fx-tempo, 1)) ease-in-out infinite; }
+  .macct-run { position: relative; overflow: hidden; }
+  .macct-run::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(100deg, transparent 25%, color-mix(in srgb, var(--acc) 28%, transparent) 50%, transparent 75%);
+    transform: translateX(-100%);
+    animation: fx-sweep calc(2s / var(--fx-tempo, 1)) var(--ease-io) infinite;
+  }
+  .crow:has(.crow-spin) .crow-dot::after { border: 1px solid var(--acc); animation: fx-lock-on 1.6s var(--ease-out) infinite; }
+  /* 用量圓環：外圈刻度有一段亮格逆時針一格一格繞，圈內有雷達光順時針掃（只用 transform 轉，疊在百分比底下） */
+  .macct:has(.macct-run:not([hidden])) .mmeter::before {
+    background: conic-gradient(var(--gauge) 0, color-mix(in srgb, var(--gauge) 35%, transparent) 22%, transparent 45%), var(--hud-line);
+    animation: fx-rot calc(1.8s / var(--fx-tempo, 1)) steps(36) infinite reverse;
+  }
+  .macct:has(.macct-run:not([hidden])) .mmeter::after {
+    content: ""; position: absolute; inset: 6px; border-radius: 50%; pointer-events: none;
+    background: conic-gradient(transparent 0 55%, color-mix(in srgb, var(--gauge) 8%, transparent) 75%,
+      color-mix(in srgb, var(--gauge) calc(var(--fx-glow) - 15%), transparent) 99%, var(--gauge) 99%);
+    animation: spin calc(2.4s / var(--fx-tempo, 1)) linear infinite;
+  }
+  /* 側欄的 token 計數：有對話在執行時數字底下有一道藍光由左往右滑過 */
+  .macct:has(.macct-run:not([hidden])) .mtok-v > .mtok-n::after {
+    content: ""; position: absolute; left: 0; width: 25%; bottom: 1px; height: 1px; pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--tk) 70%, var(--tk-hi) 92%, transparent);
+    opacity: 0; animation: fx-glide calc(1.5s / var(--fx-tempo, 1)) linear infinite;
+  }
+  /* 側欄帳戶卡的怠速（data-pulse="idle"：已登入、沒有對話在執行）：色條的光慢慢呼吸、圓環外圈有一段淡的亮格約 0.6 秒走一格；
+     各張卡依帳戶錯開（--fx-phase 以負的延遲起跑）。怠速一直開著（側欄一直看得到），所以都一格一格跳（steps）：值沒變的影格合成器不必重畫——
+     2026-10-24 以 perf-probe 的 MYRIAGENT_PERF_AB 量（四窗格、其他動畫全暫停、只留三張閒置小卡的怠速，各跑三次）：呼吸用平滑的時 GPU 程序多約 75 ms／秒，
+     改成一格一格（呼吸光每 0.26 秒換一次亮度）後多 16～48 ms／秒；一格一格的轉動單獨量幾乎不變（+1～10），主執行緒都沒有差別 */
+  .macct[data-pulse="idle"] .macct-bar::after { animation: fx-idle-glow 5.2s steps(10) calc(var(--fx-phase, 0) * -5.2s) infinite; }
+  .macct[data-pulse="idle"] .mmeter::before {
+    background: conic-gradient(color-mix(in srgb, var(--gauge) 70%, transparent) 0, color-mix(in srgb, var(--gauge) 18%, transparent) 9%, transparent 20%), var(--hud-line);
+    animation: fx-rot 21.6s steps(36) calc(var(--fx-phase, 0) * -21.6s) infinite reverse;
+  }
+
+  /* 頂部列：有任何對話在執行時，品牌圖示外圈的 12 格小方塊亮起一段、一格一格繞圈。
+     .acct-running 由 sidebar.js 的 markAnyRunning 在有帳戶卡顯示「執行中」時加上；不寫成 .app 的 has 選擇器——
+     掛在最外層的 has 讓畫面上任何變動都要重新檢查、樣式重算多一倍以上（WebCssPerfTests 把關） */
+  .app.acct-running .brand-mark::after {
+    background: conic-gradient(transparent 0 30%, color-mix(in srgb, var(--acc) 30%, transparent) 60%, var(--acc) 92%, transparent 92%);
+    animation: fx-rot calc(1.2s / var(--fx-tempo, 1)) steps(12) infinite;
+  }
+  /* 同時品牌圖示 C 裡的聲波柱各自伸縮（AI 在說話），一樣跟著執行量加快 */
+  .app.acct-running .brand-wave > i { animation: fx-brand-wave calc(var(--bw-d, .6s) / var(--fx-tempo, 1)) ease-in-out infinite alternate; }
+  @keyframes fx-brand-wave { from { transform: scaleY(.25); } to { transform: scaleY(1); } }
+
+  /* 儀表板：帳戶卡出現時（打開儀表板、新增帳戶）一道掃描線由上往下掃過一次 */
+  .acard-fx::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 42%; opacity: 0;
+    background: linear-gradient(transparent, color-mix(in srgb, var(--acc) 10%, transparent) 78%,
+      color-mix(in srgb, var(--acc) 55%, transparent) calc(100% - 1px), var(--acc) calc(100% - 1px));
+    animation: fx-scan-in 1.1s var(--ease-out) both;
+  }
+  /* 有對話等你回應（沒有在執行）的帳戶卡：角框連同四角的琥珀燈一起呼吸 */
+  .acard:has(.sess.wait):not(:has(.sess.run))::after { animation: fx-breathe 1.8s ease-in-out infinite; }
+  /* 有對話在執行的帳戶卡，頂端色條一明一暗、四角的燈亮著、圓環外那圈小方塊有一段亮格繞圈、外弧慢慢轉、圈內雷達掃描、
+     走勢線最後一點有圈擴散；摘要「執行中」後面的小方塊一亮一暗、摘要底下的刻度有一道光滑過 */
+  .acard:has(.sess.run) { --fx-led: var(--acc); }
+  .acard:has(.sess.run)::before { animation: fx-dim calc(2.4s / var(--fx-tempo, 1)) ease-in-out infinite; }
+  .acard:has(.sess.run) .acard-mark::before { animation: fx-glow calc(1.8s / var(--fx-tempo, 1)) ease-in-out infinite; }
+  .acard:has(.sess.run) .ring-sweep {
+    display: block;
+    background: conic-gradient(transparent 0 62%, color-mix(in srgb, var(--sev-color, var(--acc)) 7%, transparent) 80%,
+      color-mix(in srgb, var(--sev-color, var(--acc)) calc(var(--fx-glow) - 10%), transparent) 99.4%, var(--sev-color, var(--acc)) 99.4%);
+    animation: spin calc(3.2s / var(--fx-tempo, 1)) linear infinite;
+  }
+  .acard:has(.sess.run) .spark-end::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid var(--sev-color, var(--acc));
+    animation: fx-ping calc(1.6s / var(--fx-tempo, 1)) var(--ease-out) infinite;
+  }
+  .dash-summary:has(.sum-item.run)::after {
+    content: ""; position: absolute; left: 0; width: 25%; bottom: 0; height: 7px; pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--tone-auto) 80%, transparent);
+    mask:
+      repeating-linear-gradient(90deg, #000 0 1px, transparent 1px 50px) left bottom / 100% 7px no-repeat,
+      repeating-linear-gradient(90deg, #000 0 1px, transparent 1px 10px) left bottom / 100% 3px no-repeat;
+    opacity: 0; animation: fx-glide calc(3.4s / var(--fx-tempo, 1)) linear infinite;
+  }
+  .acard:has(.sess.run) .ring-wrap::before {
+    background:
+      conic-gradient(transparent 0 55%, color-mix(in srgb, var(--sev-color, var(--acc)) 35%, transparent) 80%, var(--sev-color, var(--acc)) 97%, transparent 97%),
+      var(--hud-line);
+    animation: fx-rot calc(3.6s / var(--fx-tempo, 1)) steps(48) infinite;
+  }
+  .acard:has(.sess.run) .ring-wrap::after {
+    border-top-color: color-mix(in srgb, var(--sev-color, var(--acc)) 75%, transparent);
+    border-bottom-color: color-mix(in srgb, var(--sev-color, var(--acc)) 75%, transparent);
+    animation: spin calc(9s / var(--fx-tempo, 1)) linear infinite;
+  }
+  .sum-item.run::after { animation: fx-blink 1s steps(1) infinite; }
+  /* 帳戶卡的怠速（data-pulse="idle"：已登入、沒有對話在執行）：已連上、在待命——標誌後面的光慢慢呼吸、
+     圓環外那圈小方塊有一段淡的亮格約 0.6 秒走一格（執行中是 75 ms）、走勢線最後一點每 5 秒多擴散一圈；各張卡依帳戶錯開 */
+  .acard[data-pulse="idle"] .acard-mark::before { animation: fx-idle-glow 5.2s steps(10) calc(var(--fx-phase, 0) * -5.2s) infinite; }
+  .acard[data-pulse="idle"] .ring-wrap::before {
+    background:
+      conic-gradient(transparent 0 74%, color-mix(in srgb, var(--sev-color, var(--acc)) 14%, transparent) 88%, color-mix(in srgb, var(--sev-color, var(--acc)) 55%, transparent) 97%, transparent 97%),
+      var(--hud-line);
+    animation: fx-rot 28.8s steps(48) calc(var(--fx-phase, 0) * -28.8s) infinite;
+  }
+  .acard[data-pulse="idle"] .spark-end::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--sev-color, var(--acc)) 60%, transparent);
+    animation: fx-ping-rest 5.2s var(--ease-out) calc(var(--fx-phase, 0) * -5.2s) infinite;
+  }
+}
+
+/* ───── 視窗沒有焦點時（theme.js 在 blur 時設 data-window="inactive"）：裝飾性的持續動畫停下，狀態指示照常 ─────
+   只動合成屬性的動畫照樣要合成器每一幀出影格（2026-10-24 tools/ui-probe 的 A/B，1920×1080 四窗格、兩個執行中、電腦狀態面板開著：
+   渲染程序 132 → 93、GPU 290 → 248 ms／秒。當初量到主執行緒 113 → 50，大多是影片控制列設下的動畫事件旗標，見 framedvideo.js）。
+   留著的是看得出狀態的：轉圈、串流游標、執行中與等你核准的小點、狀態文字一明一暗、等你作答與等背景工作的呼吸、跑馬燈、
+   電腦狀態面板讀取中的閃爍。新增裝飾性的無限循環動畫時加進這裡（探針 perfInactiveOnlyStatus 會擋下沒分類的）。
+   帳戶卡（側欄的小卡、儀表板的大卡）不停，改成一格一格的低更新頻率（下一段） */
+:root[data-window="inactive"] .conv.running > .ch::after,
+:root[data-window="inactive"] .conv.running .cbox::before,
+:root[data-window="inactive"] .runline::before,
+:root[data-window="inactive"] .runline::after,
+:root[data-window="inactive"] .it-tool::after,
+:root[data-window="inactive"] .lbar-btns::before,
+:root[data-window="inactive"] .tab-dot::after,
+:root[data-window="inactive"] .brand-mark::after,
+:root[data-window="inactive"] .brand-wave > i,
+:root[data-window="inactive"] .dash-summary::after,
+:root[data-window="inactive"] .mon-head::after,
+:root[data-window="inactive"] .mon-dev[data-state="live"] .mon-led,
+:root[data-window="inactive"] .mon-dev[data-state="live"] .mon-led::after,
+:root[data-window="inactive"] .mon-radar-sweep,
+:root[data-window="inactive"] .mon-radar-ping,
+:root[data-window="inactive"] .mon-headdot::after,
+:root[data-window="inactive"] .mon-seg-fill::after { animation: none !important; }
+
+/* ───── 視窗沒有焦點時的帳戶卡（2026-10-25 使用者要求：帳戶列表照樣動，同電腦狀態面板量表外圈的原則，只是降低更新頻率） ─────
+   執行中的動畫改成一格一格、每秒約 4 格（轉速跟著執行量加快時一樣倍數增加，最快 4 倍約 17 格；steps 是套在每一段關鍵影格上，fx-glow、fx-dim 一圈兩段、fx-glide 三段，格數要除下去）：值沒變的影格合成器不必重畫，省下的就是以前整批停掉想省的那一份
+   （怠速本來就一格一格、每秒約 2 格，只有走勢線末端的擴散是平滑的，也改成一格一格）。換成一格一格時位置最多差一格，不會整個跳走。
+   選擇器和上面持續動畫段落的同一組條件（只看帳戶卡自己裡面，小範圍的 :has）；perf-probe 的 perfInactiveOnlyStatus 以 INACTIVE_STEPPED 量每秒的格數 */
+:root[data-window="inactive"] .macct:has(.macct-run:not([hidden])) .macct-bar::after { animation-timing-function: steps(4) !important; }
+:root[data-window="inactive"] .macct-run::after { animation-timing-function: steps(8) !important; }
+:root[data-window="inactive"] .macct:has(.macct-run:not([hidden])) .mmeter::before { animation-timing-function: steps(8) !important; }
+:root[data-window="inactive"] .macct:has(.macct-run:not([hidden])) .mmeter::after { animation-timing-function: steps(10) !important; }
+:root[data-window="inactive"] .macct:has(.macct-run:not([hidden])) .mtok-v > .mtok-n::after { animation-timing-function: steps(2) !important; }
+:root[data-window="inactive"] .acard:has(.sess.run)::before { animation-timing-function: steps(5) !important; }
+:root[data-window="inactive"] .acard:has(.sess.run) .acard-mark::before { animation-timing-function: steps(4) !important; }
+:root[data-window="inactive"] .acard:has(.sess.run) .ring-sweep { animation-timing-function: steps(13) !important; }
+:root[data-window="inactive"] .acard:has(.sess.run) .spark-end::after { animation-timing-function: steps(6) !important; }
+:root[data-window="inactive"] .acard:has(.sess.run) .ring-wrap::before { animation-timing-function: steps(16) !important; }
+:root[data-window="inactive"] .acard:has(.sess.run) .ring-wrap::after { animation-timing-function: steps(36) !important; }
+:root[data-window="inactive"] .acard[data-pulse="idle"] .spark-end::after { animation-timing-function: steps(8) !important; }
+/* 第九批：排程頁執行中的那幾列（燈一明一暗、左緣的光）也是狀態指示，同帳戶卡一格一格 */
+:root[data-window="inactive"] .sch-row[data-led="run"] > .led { animation-timing-function: steps(3) !important; }
+:root[data-window="inactive"] .sch-row[data-led="run"]::after { animation-timing-function: steps(6) !important; }
+
+/* ───── 對話框的一次性動畫：事件發生時播一次就停（只動 transform／opacity），系統要求減少動態時不播、設定關掉動態效果時縮成一瞬間 ─────
+   即時新增的項目進場（conversation.js 的 applyBatch，一批最多 fxrules.ENTRANCE_MAX 個）、停下時的餘暉（setHeader 的 fx-cool）、
+   一輪結束（scheduleTurnEnd）、工具從執行中變成完成或失敗（items.js 的 fillTool）、等你作答的卡片出現、複製程式碼。
+   同一個項目同時有進場與結束的效果時（進場不到一秒就做完的工具），結束的優先 */
+.conv.fx-turn-ok { --fx-turn: var(--green); }
+.conv.fx-turn-err { --fx-turn: var(--red); }
+.it-tool.fx-done { --fx-settle: var(--green); }
+.it-tool.fx-fail { --fx-settle: var(--red); }
+@media (prefers-reduced-motion: no-preference) {
+  /* 新項目淡入、上移 5px；不是執行中的工具（很快就做完的），點外的方框鎖定一次、整列的光帶掃一次（上面執行中的那條） */
+  .it.fx-in { animation: fx-in 240ms var(--ease-out) both; }
+  .it-tool.fx-in:not([data-status="Running"]):not(.fx-done):not(.fx-fail) .step-dot::after { border: 1px solid var(--acc); animation: fx-lock-on 700ms var(--ease-out); }
+  .it-tool.fx-in:not([data-status="Running"]):not(.fx-done):not(.fx-fail)::after { animation: fx-sweep 900ms var(--ease-io) both; }
+
+  /* 停下：輸入框帳戶色的括號與四顆燈在 1.2 秒內淡掉（底下的角框一下子就換回平常的顏色，這一層疊在上面、只動 opacity）；
+     一輪結束：同一層改成閃兩下綠色（最後是錯誤時紅色）再淡掉，標題列底線一道光滑過一次（開始下一輪就讓給執行中的光帶） */
+  .conv:is(.fx-cool, .fx-turn-ok, .fx-turn-err):not(.running) .cbox::before {
+    content: ""; position: absolute; inset: 3px; z-index: 2; pointer-events: none;
+    border: 1px solid var(--fx-turn, color-mix(in srgb, var(--acc) 85%, transparent)); border-radius: 7px;
+    background:
+      linear-gradient(var(--fx-turn, var(--acc)) 0 0) left 1px top 1px / 3px 3px no-repeat,
+      linear-gradient(var(--fx-turn, var(--acc)) 0 0) right 1px top 1px / 3px 3px no-repeat,
+      linear-gradient(var(--fx-turn, var(--acc)) 0 0) right 1px bottom 1px / 3px 3px no-repeat,
+      linear-gradient(var(--fx-turn, var(--acc)) 0 0) left 1px bottom 1px / 3px 3px no-repeat;
+    mask:
+      linear-gradient(#000 0 0) left top / 12px 12px no-repeat,
+      linear-gradient(#000 0 0) right top / 12px 12px no-repeat,
+      linear-gradient(#000 0 0) left bottom / 12px 12px no-repeat,
+      linear-gradient(#000 0 0) right bottom / 12px 12px no-repeat;
+    animation: fx-fade-out 1.2s ease-in-out both;
+  }
+  .conv:is(.fx-turn-ok, .fx-turn-err):not(.running) .cbox::before { animation: fx-turn-end 1.3s ease-out both; }
+  .conv:is(.fx-turn-ok, .fx-turn-err):not(.running) > .ch::after {
+    content: ""; position: absolute; left: 0; width: 25%; bottom: -2px; height: 3px; z-index: 1; pointer-events: none;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--fx-turn) 40%, transparent) 55%, var(--fx-turn) 94%, transparent 94%);
+    mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 5px);
+    opacity: 0; animation: fx-glide 1s linear;
+  }
+
+  /* 等你作答的卡片出現：括號從外面收進來、閃兩下，一道掃描線由上往下掃過一次（之後接回上面的呼吸）。
+     .it 的 content-visibility 帶來的繪製限制會裁掉收進來之前超出卡片的括號：鎖定的這一下先拿掉（新出現的卡片本來就在畫面上，不會少省繪製） */
+  .it-card.fx-in { content-visibility: visible; }
+  .it-card.fx-in::after { animation: fx-lock-blink 520ms steps(1) both, fx-lock-in 320ms var(--ease-out) both; }
+  .it-card.fx-in::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 38%; z-index: 1; pointer-events: none; border-radius: 8px;
+    background: linear-gradient(transparent, color-mix(in srgb, var(--acc) 10%, transparent) 78%,
+      color-mix(in srgb, var(--acc) 55%, transparent) calc(100% - 1px), var(--acc) calc(100% - 1px));
+    opacity: 0; animation: fx-scan-in 800ms var(--ease-out);
+  }
+
+  /* 工具從執行中變成完成（綠）或失敗（紅）：小方塊擴散一圈、整列一道光淡出 */
+  .it-tool:is(.fx-done, .fx-fail) .step-dot::after { border: 1px solid var(--fx-settle); animation: fx-ping-sq 700ms var(--ease-out); }
+  .it-tool:is(.fx-done, .fx-fail)::after {
+    content: ""; position: absolute; left: 14px; right: 0; top: 0; height: 28px; border-radius: 6px; pointer-events: none;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--fx-settle) 20%, transparent), transparent 70%);
+    opacity: 0; animation: fx-fade-out 900ms ease-out;
+  }
+
+  /* 工具做完、思考結束時內容掃過一遍（items.js 的 playStepPeek、chat.css 的 .t-peek）：小框往下打開、裡面一格一行往上捲到最後、停一下再收回去。
+     打開與收起動這個小框的高度（各 0.1～0.2 秒、整串訊息跟著貼底），捲動只動 transform；同時只有一個（conversation.js 的 playPeek） */
+  .t-peek { animation: fx-peek-open var(--tp-open) var(--ease-out) both; }
+  .t-peek.fold { animation: fx-peek-fold var(--tp-fold) var(--ease-out) forwards; }
+  .t-peek.sweep .t-peek-run { animation: fx-peek-sweep var(--tp-sweep) steps(var(--tp-steps), jump-end) var(--tp-open) both; }
+
+  /* 複製程式碼：括號與四顆燈變綠（上面的靜態規則）並閃兩下 */
+  .code.fx-copied::after { animation: fx-blink2 700ms steps(1); }
+
+  /* 執行列換階段（fxrules.launchFx）：開始執行閃綠、建置失敗閃紅、暫停閃琥珀（角框與燈閃兩下）；停下時角框的顏色 1.2 秒慢慢淡回 */
+  .lbar:is(.fx-l-ok, .fx-l-err, .fx-l-pause) .lbar-btns::after { animation: fx-blink2 700ms steps(1); }
+  :root:not([data-fx="off"]) .lbar.fx-l-cool .lbar-btns::after { transition-duration: 1.2s, 160ms; }
+
+  /* 圖片載入完成才淡入（util.fadeInImg：對話的圖片、附件與檔案縮圖）；還沒載好時是靜態的佔位（第十批，下面的靜態段落） */
+  .fx-img.fx-img-in { animation: fx-fade-in 220ms ease-out; }
+
+  /* 送出鈕擴散一圈（composer.js 的 sendFx）；剛排進佇列的那一列滑進來；捲上去時有新項目，「↓ 最新」擴散一圈（conversation.js 的 noteUnseen） */
+  .cbtn.send.fx-sent::after, .jump.fx-ping::after, .ibtn.cont.fx-sent::after {
+    content: ""; position: absolute; inset: -1px; border-radius: inherit; border: 1px solid var(--acc); pointer-events: none;
+    animation: fx-ring-out 560ms var(--ease-out) both;
+  }
+  .queue-row.fx-in { animation: fx-in 240ms var(--ease-out) both; }
+
+  /* 用量圓環（輸入框的上下文、側欄的額度；fxrules.gaugeFx）：嚴重度升高時彈一下、重置或壓縮時倒轉一圈 */
+  .ctxm.fx-g-up .ctxm-ring, .mmeter.fx-g-up > svg { animation: fx-pop 520ms var(--ease-out); }
+  .ctxm.fx-g-reset .ctxm-ring, .mmeter.fx-g-reset > svg { animation: fx-spin-back 760ms var(--ease-out); }
+
+  /* 多窗格時焦點換到這一格（workspace.js）：四角的焦點色角框閃一下再淡掉；切到某個分頁時內容淡入（conversation.js 的 show） */
+  .pane.fx-focus::after {
+    content: ""; position: absolute; inset: 2px; z-index: 20; pointer-events: none; border: 1px solid var(--focus); border-radius: 6px;
+    mask:
+      linear-gradient(#000 0 0) left top / 16px 16px no-repeat,
+      linear-gradient(#000 0 0) right top / 16px 16px no-repeat,
+      linear-gradient(#000 0 0) left bottom / 16px 16px no-repeat,
+      linear-gradient(#000 0 0) right bottom / 16px 16px no-repeat;
+    animation: fx-flash-out 760ms ease-out both;
+  }
+  .conv.fx-show { animation: fx-show 200ms ease-out; }
+
+  /* 等你作答的卡片有了結果（conversation.js 的 .fx-c-*，fxrules.cardSettleFx）：鎖定成結果顏色的角框與燈閃兩下，結果的標籤淡入 */
+  .it-card:is(.fx-c-ok, .fx-c-no, .fx-c-skip)::after { animation: fx-blink2 700ms steps(1); }
+  .it-card:is(.fx-c-ok, .fx-c-no, .fx-c-skip) .result { animation: fx-in 240ms var(--ease-out) both; }
+  /* 整則回覆複製成功（items.js）：外圍的綠色括號閃兩下後淡掉 */
+  .it-assistant.fx-copied::after { animation: fx-copy-flash 860ms linear forwards; }
+  /* 點開思考與工具的內容（items.js 的 .fx-open）：淡入、往上 5px 歸位（不動高度，整串訊息不重排） */
+  .fx-open { animation: fx-in 220ms var(--ease-out) both; }
+  /* 側欄新出現的列（sidebar.js 的 renderHistory，fxrules.listEntranceCount）：由上往下錯開，從左邊滑進來。
+     關掉動態效果時 app.css 只把長度縮成一瞬間、不管延遲，錯開的延遲會讓列先透明一下，所以只在動態效果開著時才有 */
+  :root:not([data-fx="off"]) .fx-row-in { animation: fx-row-in 220ms var(--ease-out) both; animation-delay: calc(var(--fx-i, 0) * 24ms); }
+  /* 徽章從沒有變成有（sidebar.js：帳戶卡的執行中、等背景工作、等你回應、背景程式，對話列的「!」與未讀點）：彈出一下 */
+  .fx-badge-in { animation: fx-badge-in 460ms var(--ease-out) both; }
+  /* 開新分頁（workspace.js 的 renderTabs）：往上滑進來 */
+  .tab.fx-tab-in { animation: fx-tab-in 240ms var(--ease-out) both; }
+  /* 打開儀表板（dashboard.js 的 revealSparks）：走勢線由左往右畫出來——外層從左邊移進來、裡面的線反方向移同樣的距離，線看起來不動、露出的範圍往右長；
+     末端的點等線畫到了才淡入。錯開的延遲在關掉動態效果時會讓線先消失一下，所以只在動態效果開著時才有 */
+  :root:not([data-fx="off"]) .spark.fx-wipe .spark-wipe { animation: fx-wipe-window 700ms var(--ease-out) both; animation-delay: calc(var(--fx-i, 0) * 40ms); }
+  :root:not([data-fx="off"]) .spark.fx-wipe .spark-svg { animation: fx-wipe-content 700ms var(--ease-out) both; animation-delay: calc(var(--fx-i, 0) * 40ms); }
+  :root:not([data-fx="off"]) .spark.fx-wipe .spark-end { animation: fx-fade-in 220ms ease-out both; animation-delay: calc(560ms + var(--fx-i, 0) * 40ms); }
+  /* 附件：剛加進輸入框的淡入（composer.js 的 renderAttachments）；〔遠端〕上傳完成、附加進去的那一下外框閃一下綠 */
+  /* API 過載的自動重試開始了（items.js 的 settleRetryNotes）：提示的框閃一下綠；提早開始（取消）的只把倒數條淡掉（chat.css 的 .retry-done） */
+  .it-notice.retry-wait.fx-retry-go::after {
+    content: ""; position: absolute; inset: 0; border: 1px solid var(--green); border-radius: 8px; pointer-events: none;
+    animation: fx-flash-out 900ms ease-out both;
+  }
+  /* 看不到的對話一輪結束了（workspace.js 的 turn-end）：分頁底部閃兩下綠或紅再淡掉（同輸入框的結束燈） */
+  .tab.fx-tab-ok { --fx-tab: var(--green); }
+  .tab.fx-tab-err { --fx-tab: var(--red); }
+  .tab:is(.fx-tab-ok, .fx-tab-err) .tab-dot::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; pointer-events: none;
+    background: var(--fx-tab); animation: fx-turn-end 1.3s ease-out both;
+  }
+  /* 背景程式自己結束了（conversation.js 的 renderPrograms）：晶片外框閃一下琥珀色 */
+  .ch-prog.fx-prog-exit::after {
+    content: ""; position: absolute; inset: -1px; border: 1px solid var(--amber); border-radius: inherit; pointer-events: none;
+    animation: fx-flash-out 900ms ease-out both;
+  }
+  /* 對話框打開：角框從外面收進來、閃兩下（同等你作答的卡片出現；每次打開都是新的元素，所以每次都播） */
+  .dlg::after { animation: fx-lock-blink 520ms steps(1) both, fx-lock-in-far 360ms var(--ease-out) both; }
+  /* 開機掃描（app.js 的第一則 init，.app.fx-boot 約 1 秒）：整片點狀網格淡出、一道帳戶色的掃描光由上往下掃過一次；不擋操作 */
+  :root:not([data-fx="off"]) .app.fx-boot::before {
+    content: ""; position: fixed; inset: 0; z-index: 9000; pointer-events: none;
+    background-image: radial-gradient(circle at 1px 1px, var(--hud-line) 1px, transparent 1.6px); background-size: 22px 22px;
+    animation: fx-fade-out 900ms ease-out both;
+  }
+  :root:not([data-fx="off"]) .app.fx-boot::after {
+    content: ""; position: fixed; left: 0; right: 0; top: 0; height: 18vh; z-index: 9001; pointer-events: none;
+    background: linear-gradient(transparent, color-mix(in srgb, var(--acc) 10%, transparent) 78%, color-mix(in srgb, var(--acc) 55%, transparent) calc(100% - 1px), var(--acc) calc(100% - 1px));
+    animation: fx-boot-scan 900ms var(--ease-out) both;
+  }
+  .atts.in-composer > .fx-in { animation: fx-in 220ms var(--ease-out) both; }
+  .up-chip.fx-up-done::after {
+    content: ""; position: absolute; inset: -2px; z-index: 1; border: 1px solid var(--green); border-radius: 9px; pointer-events: none;
+    animation: fx-flash-out 760ms ease-out both;
+  }
+  /* 輸入框的 @ 與 / 提示：出現時往上 4px 淡入（同選單；每打一個字只換內容、不會重播） */
+  .suggest { transition: opacity 120ms var(--ease-out), transform 120ms var(--ease-out); }
+  @starting-style { .suggest { opacity: 0; transform: translateY(4px); } }
+  /* 右下角的通知：從右邊滑進來（蓋過 app.css 的往上），角框從外面收進來、閃兩下 */
+  @starting-style { .toast { transform: translateX(18px); } }
+  .toast::after { animation: fx-lock-blink 520ms steps(1) both, fx-lock-in-far 360ms var(--ease-out) both; }
+}
+
+/* 25% 寬的光帶從容器左緣滑到右緣（自身寬度的 3 倍）、頭尾淡入淡出 */
+@keyframes fx-glide { 0% { transform: translateX(0); opacity: 0; } 12%, 88% { opacity: 1; } 100% { transform: translateX(300%); opacity: 0; } }
+@keyframes fx-dim { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@keyframes fx-sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+/* 方塊音量計的兩組輪流顯示 */
+@keyframes fx-vu-a { 0% { opacity: .9; } 50% { opacity: 0; } }
+@keyframes fx-vu-b { 0% { opacity: 0; } 50% { opacity: .9; } }
+/* 一圈小方塊的轉動：搭配 steps(格數)，每一步剛好轉一格 */
+@keyframes fx-rot { to { transform: rotate(360deg); } }
+/* 方框邊轉邊擴散：放大到 1.9 倍為止，轉到 45° 附近時對角線也不會超出 .it 的繪製範圍 */
+@keyframes fx-lock-on { 0% { transform: scale(1) rotate(0deg); opacity: .9; } 100% { transform: scale(1.9) rotate(90deg); opacity: 0; } }
+@keyframes fx-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes fx-glow { 0%, 100% { opacity: .12; } 50% { opacity: .7; } }
+/* 怠速的呼吸：比執行中的 fx-glow 淡很多 */
+@keyframes fx-idle-glow { 0%, 100% { opacity: .06; } 50% { opacity: .34; } }
+@keyframes fx-blink { 0% { opacity: 1; } 50% { opacity: .15; } }
+/* 帳戶卡的開場掃描線（高度是卡片的 42%，移到 240%＝卡片底部）；走勢線末端的擴散圈 */
+@keyframes fx-scan-in { 0% { transform: translateY(-100%); opacity: 1; } 70% { opacity: 1; } 100% { transform: translateY(240%); opacity: 0; } }
+@keyframes fx-ping { 0% { transform: scale(.45); opacity: 1; } 100% { transform: scale(1.7); opacity: 0; } }
+/* 怠速的擴散：前四成擴散一圈、後面休息 */
+@keyframes fx-ping-rest { 0% { transform: scale(.45); opacity: .8; } 40%, 100% { transform: scale(1.7); opacity: 0; } }
+/* 對話框的一次性動畫：進場、一輪結束的燈、卡片的括號收進來與閃爍、工具結束的擴散與淡出、複製的閃爍 */
+@keyframes fx-in { from { opacity: 0; transform: translateY(5px); } }
+@keyframes fx-turn-end { 0% { opacity: 1; } 12% { opacity: .15; } 24% { opacity: 1; } 36% { opacity: .15; } 48% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-lock-blink { 0%, 40%, 80%, 100% { opacity: 1; } 20%, 60% { opacity: .2; } }
+@keyframes fx-lock-in { from { transform: scale(1.025); } }
+@keyframes fx-ping-sq { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(2.2); opacity: 0; } }
+@keyframes fx-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes fx-fade-in { from { opacity: 0; } }
+/* 送出鈕與「↓ 最新」外擴的一圈；圓環彈一下、倒轉一圈；窗格焦點角框閃一下再淡掉；切分頁時內容淡入 */
+@keyframes fx-ring-out { from { transform: scale(1); opacity: .9; } to { transform: scale(1.45); opacity: 0; } }
+@keyframes fx-pop { 0% { transform: scale(1); } 35% { transform: scale(1.3); } 100% { transform: scale(1); } }
+@keyframes fx-spin-back { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
+@keyframes fx-flash-out { 0%, 40% { opacity: 1; } 20% { opacity: .25; } 100% { opacity: 0; } }
+@keyframes fx-show { from { opacity: .35; } }
+@keyframes fx-blink2 { 0%, 50%, 100% { opacity: 1; } 25%, 75% { opacity: .2; } }
+/* 整則回覆複製：亮、暗、亮、暗、亮（每段幾乎是跳的），最後 300ms 淡掉；通知的括號從比較遠的地方收進來；側欄的列從左邊滑進來 */
+@keyframes fx-copy-flash { 0%, 14% { opacity: 1; } 15%, 29% { opacity: .2; } 30%, 44% { opacity: 1; } 45%, 59% { opacity: .2; } 60%, 65% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-lock-in-far { from { transform: scale(1.06); } }
+@keyframes fx-row-in { from { opacity: 0; transform: translateX(-6px); } }
+/* 徽章彈出；新分頁往上滑進來；走勢線的外層與內容反方向位移 */
+@keyframes fx-badge-in { 0% { transform: scale(.3); opacity: 0; } 60% { transform: scale(1.18); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes fx-tab-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes fx-wipe-window { from { transform: translateX(-100%); } }
+@keyframes fx-wipe-content { from { transform: translateX(100%); } }
+/* 開機掃描：掃描光從畫面上方外滑到下方外、最後淡掉（光帶高 18vh，移 560% 約一整個畫面） */
+@keyframes fx-boot-scan { 0% { transform: translateY(-100%); opacity: 1; } 75% { opacity: 1; } 100% { transform: translateY(560%); opacity: 0; } }
+/* 工具內容掃過一遍：小框打開與收回（高度）、內容一格一行捲到最後一行（移「要捲的行數」個行高） */
+@keyframes fx-peek-open { from { height: 0; opacity: .4; } }
+@keyframes fx-peek-fold { to { height: 0; opacity: 0; } }
+@keyframes fx-peek-sweep { to { transform: translateY(calc(var(--tp-steps) * var(--tp-lh) * -1)); } }
+
+/* ───── 第五批（靜態）：對話小地圖、往返讀數、拖放讀數、額度鎖定與重置倒數、搜尋命中、健康度分格、Mermaid 藍圖、探照光、開關燈與游標 ───── */
+/* 對話小地圖（minimap.js）：捲動軸左邊的細軌；標記依種類上色（你的訊息帳戶色、錯誤紅、等你回應琥珀、改了檔案綠）。
+   「目前看得到的範圍」框跟著捲動走：.scroller 的捲動時間軸（scroll-timeline）驅動 transform，捲動時不跑 JS；框的高度與行程由 minimap.js 量測時寫入 */
+.scroller { scroll-timeline: --conv-scroll block; }
+.conv-col { timeline-scope: --conv-scroll; }
+.mmap { position: absolute; z-index: 4; width: 8px; cursor: pointer; opacity: .7; transition: opacity 160ms ease; }
+.mmap:hover { opacity: 1; }
+.mmap::before { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px; background: var(--hud-line); pointer-events: none; }
+.mmap-marks { position: absolute; inset: 0; }
+.mmap-mark { position: absolute; left: 1px; right: 1px; height: 2px; margin-top: -1px; border-radius: .5px; background: var(--text-3); }
+.mmap-mark[data-kind="user"] { background: color-mix(in srgb, var(--acc) 85%, transparent); }
+.mmap-mark[data-kind="edit"] { background: color-mix(in srgb, var(--green) 70%, transparent); }
+.mmap-mark[data-kind="wait"] { height: 3px; background: var(--amber); }
+.mmap-mark[data-kind="err"] { height: 3px; background: var(--red); }
+.mmap:hover .mmap-mark { left: 0; right: 0; }
+.mmap-view {
+  position: absolute; left: 0; right: 0; top: 0; height: var(--mmap-vh, 20px); pointer-events: none; border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--acc) 55%, transparent); background: color-mix(in srgb, var(--acc) 8%, transparent);
+  animation: mmap-view linear both; animation-timeline: --conv-scroll;
+}
+/* 減少動態與關掉動態效果的全域規則把動畫縮成一瞬間：這個框是位置指示、不是裝飾，照樣跟著捲動 */
+:root .conv-col > .mmap > .mmap-view { animation-duration: auto !important; animation-iteration-count: 1 !important; }
+@supports not (animation-timeline: scroll()) { .mmap-view { display: none; } }
+@container col (max-width: 520px) { .mmap { display: none; } }
+@keyframes mmap-view { from { transform: translateY(0); } to { transform: translateY(var(--mmap-travel, 0px)); } }
+/* 〔遠端〕往返讀數（composer.js 的 .ci-rtt）：燈號後面「⇅ 182 ms」，亮一下就收起 */
+.ci-rtt { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; letter-spacing: .04em; color: var(--text-2); font-variant-numeric: tabular-nums; cursor: default; }
+.ci-rtt > i { font-style: normal; color: var(--green); }
+.ci-rtt > i::before { content: "⇅"; }
+/* 拖放附件（conversation.js 的 .drop）：四角括號用帳戶色、角落的燈亮著；第二行是檔案的種類與個數 */
+.ch-acct { position: relative; }
+.drop { --fx-bracket: var(--acc); --fx-led: var(--acc); --fx-arm: 18px; --fx-inset: 6px; --fx-radius: 7px; }
+.drop-lines { display: flex; flex-direction: column; gap: 1px; }
+.drop-sum { font-size: 11.5px; font-weight: 500; letter-spacing: .02em; color: var(--text-2); font-variant-numeric: tabular-nums; }
+/* 額度用完（鎖住）：側欄與儀表板的圓環換成紅色、外面一圈虛線；儀表板另有重置倒數條（20 格，亮的格數＝還剩多少時間） */
+.mmeter.locked { --gauge: var(--red); }
+.mmeter.locked .mring { border-radius: 50%; outline: 1px dashed color-mix(in srgb, var(--red) 70%, transparent); outline-offset: 1px; }
+.ring-col.locked { --sev-color: var(--red); }
+.ring-col.locked .ring { border-radius: 50%; outline: 1px dashed color-mix(in srgb, var(--red) 65%, transparent); outline-offset: -2px; }
+.ring-cd {
+  position: relative; width: 100px; height: 4px; margin-top: 5px; flex: none; background: var(--hud-line);
+  mask: repeating-linear-gradient(90deg, #000 0 4px, transparent 4px 5px);
+}
+.ring-cd > i { position: absolute; inset: 0; background: var(--red); transform-origin: left center; transition: transform 600ms var(--ease-out); }
+/* 搜尋命中（sidebar.js）：標題與內容片段裡符合的字用帳戶色方框；找到幾個在搜尋框裡 */
+.sb-list mark { background: color-mix(in srgb, var(--acc) 18%, transparent); color: var(--text-hi); border-radius: 2px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 55%, transparent); }
+.sb-count { flex: none; align-self: center; padding: 0 2px; font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 健康度的分格量表（health.js 的 .ah-segs）：每個檢查項目一格、依等級上色 */
+.ah-segs { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.ah-segs > i { width: 5px; height: 9px; border-radius: 1px; background: var(--text-3); opacity: .8; }
+.ah-segs > i[data-level="ok"] { background: var(--green); }
+.ah-segs > i[data-level="warn"] { background: var(--amber); opacity: 1; }
+.ah-segs > i[data-level="bad"] { background: var(--red); opacity: 1; }
+/* Mermaid 圖表：底下點狀網格（藍圖）；滑過節點時它、相連的邊與另一端的節點亮起來，其他淡下去（mermaid.js 的 .mm-focus、.mm-hl） */
+.code-mermaid > .code-diagram { background-image: radial-gradient(circle at 1px 1px, var(--hud-line) 1px, transparent 1.4px); background-size: 16px 16px; }
+.mm-svg :is(.mm-node, .mm-node-inner, .mm-text, .mm-state-start, .mm-edge, .mm-arrow, .mm-edge-bg, .mm-edge-text) { transition: opacity 160ms ease; }
+.mm-svg.mm-focus :is(.mm-node, .mm-node-inner, .mm-text, .mm-state-start, .mm-edge, .mm-arrow, .mm-edge-bg, .mm-edge-text):not(.mm-hl) { opacity: .28; }
+.mm-svg .mm-edge.mm-hl, .mm-svg .mm-node.mm-hl { stroke: var(--acc); }
+.mm-svg .mm-arrow.mm-hl { fill: var(--acc); stroke: var(--acc); }
+/* 滑鼠探照光（spotlight.js）：卡片裡的裁切層，光暈只以 transform 移動 */
+.fx-spot { position: absolute; inset: 0; z-index: 0; border-radius: inherit; overflow: hidden; pointer-events: none; opacity: 0; transition: opacity 220ms ease; }
+.fx-spot > i {
+  position: absolute; left: -110px; top: -110px; width: 220px; height: 220px; border-radius: 50%; will-change: transform;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--acc, var(--focus)) 24%, transparent), transparent);
+}
+.fx-spot-on > .fx-spot { opacity: 1; }
+:root[data-fx="off"] .fx-spot { display: none; }
+@media (prefers-reduced-motion: reduce) { .fx-spot { display: none; } }
+/* 開關：旋鈕上一顆小方塊燈，打開時亮（焦點色）、關掉時熄；切換的那一下閃一下（下面的一次性段落） */
+.switch-knob::after { content: ""; position: absolute; left: 5px; top: 5px; width: 4px; height: 4px; border-radius: 1px; background: transparent; transition: background-color 160ms; }
+.switch-input:checked + .switch-track .switch-knob::after { background: var(--focus); box-shadow: 0 0 4px color-mix(in srgb, var(--focus) 70%, transparent); }
+/* 輸入游標：帳戶色（對話裡是這個對話的帳戶，其他地方是預設的帳戶色） */
+textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { caret-color: var(--acc, var(--focus)); }
+/* 載入較早的訊息：按鈕下方一條分格的載入列（只在真的在等宿主回應的期間）；接縫掃過一道光（conversation.js 的 .older-seam） */
+.older.loading { position: relative; }
+.older.loading::before {
+  content: ""; position: absolute; left: 10%; right: 10%; bottom: 7px; height: 3px; pointer-events: none;
+  background: var(--hud-line); mask: repeating-linear-gradient(90deg, #000 0 6px, transparent 6px 8px);
+}
+.older-seam { position: absolute; left: 0; right: 0; top: 0; height: 1px; overflow: hidden; pointer-events: none; }
+
+/* ───── 第五批（一次性與狀態動畫）：系統要求減少動態時不播，關掉動態效果時縮成一瞬間（往返讀數不播） ───── */
+@media (prefers-reduced-motion: no-preference) {
+  /* 小地圖跳過去的那一則閃兩下 */
+  .it.fx-mmap-hit { animation: fx-mmap-hit 700ms steps(1) both; }
+  /* 往返讀數：從左邊滑進來、停一下、淡掉（關掉動態效果時不播，整段時間都看得到，時間到由 composer.js 收起） */
+  :root:not([data-fx="off"]) .ci-rtt.fx-rtt { animation: fx-rtt 2.4s ease both; }
+  /* 拖檔案進來：括號從外面收進來、閃兩下，中間的說明往上淡入 */
+  .drop.fx-drop-lock::after { animation: fx-lock-blink 520ms steps(1) both, fx-lock-in-far 360ms var(--ease-out) both; }
+  .drop.fx-drop-lock .drop-box { animation: fx-in 240ms var(--ease-out) both; }
+  /* 換帳戶的交接：帳戶晶片的圓點與名稱從下面接上，外框閃一下新帳戶的顏色 */
+  .ch-acct.fx-handoff :is(.chip-dot, .chip-label) { animation: fx-handoff-in 380ms var(--ease-out) both; }
+  .ch-acct.fx-handoff::after {
+    content: ""; position: absolute; inset: 0; border: 1px solid var(--acc); border-radius: inherit; pointer-events: none;
+    animation: fx-flash-out 900ms ease-out both;
+  }
+  /* 額度用完的那一下：圓環從大一點收回來、閃一下 */
+  .mmeter.fx-q-lock .mring, .ring-col.fx-q-lock .ring { animation: fx-q-lock 800ms var(--ease-out) both; }
+  /* 載入較早的訊息：一道帳戶色的光在分格列上來回（狀態指示，只在載入中） */
+  :root:not([data-fx="off"]) .older.loading::after {
+    content: ""; position: absolute; left: 10%; width: 20%; bottom: 7px; height: 3px; pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--acc), transparent); animation: fx-glide 1.1s var(--ease-io) infinite;
+  }
+  .older-seam::after {
+    content: ""; position: absolute; left: 0; top: 0; width: 25%; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--acc), transparent); animation: fx-glide 1.2s var(--ease-io) both;
+  }
+  /* 搜尋找到的數字變了：跳一下 */
+  .sb-count.fx-cnt { animation: fx-pop 420ms var(--ease-out); }
+  /* 健康度分析做完：分格由左往右亮一次 */
+  .acard-health.fx-ah-scan .ah-segs > i { animation: fx-ah-cell 520ms var(--ease-out) both; animation-delay: calc(var(--fx-i, 0) * 60ms); }
+  /* Mermaid 圖表第一次捲進畫面：節點依序放大淡入，實線的邊由起點畫到終點，其他的邊、箭頭與標籤淡入 */
+  .code-diagram.fx-mm-draw :is(.mm-node, .mm-node-inner, .mm-state-start) {
+    transform-box: fill-box; transform-origin: center; animation: fx-mm-node 420ms var(--ease-out) both; animation-delay: calc(var(--fx-i, 0) * 50ms);
+  }
+  .code-diagram.fx-mm-draw .mm-text { animation: fx-fade-in 300ms ease both; animation-delay: calc(120ms + var(--fx-i, 0) * 50ms); }
+  .code-diagram.fx-mm-draw .mm-edge[pathLength] { stroke-dasharray: 1; animation: fx-mm-edge 520ms var(--ease-out) both; animation-delay: calc(220ms + var(--fx-i, 0) * 50ms); }
+  .code-diagram.fx-mm-draw :is(.mm-edge:not([pathLength]), .mm-arrow, .mm-edge-bg, .mm-edge-text) {
+    animation: fx-fade-in 320ms ease both; animation-delay: calc(420ms + var(--fx-i, 0) * 50ms);
+  }
+  /* 失敗的訊號干擾：錯誤項目進場時左右錯位幾下、一道紅光由上往下掃過 */
+  .it-error.fx-in { animation: fx-in 240ms var(--ease-out) both, fx-glitch 360ms steps(1) 80ms both; }
+  .it-error.fx-in::after {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(transparent 40%, color-mix(in srgb, var(--red) 30%, transparent) 50%, transparent 60%);
+    animation: fx-err-scan 560ms ease-out both;
+  }
+  /* 主題切換：新的主題由上往下掃過去（theme.js 的 View Transitions；舊畫面不動） */
+  :root.vt-theme::view-transition-old(root) { animation: none; }
+  :root.vt-theme::view-transition-new(root) { animation: fx-theme-wipe 620ms var(--ease-io) both; }
+  /* 開關切換的那一下：燈閃一下 */
+  .switch.fx-sw .switch-knob::after { animation: fx-blink2 480ms steps(1) both; }
+}
+@keyframes fx-mmap-hit { 0%, 50%, 100% { opacity: 1; } 25%, 75% { opacity: .45; } }
+@keyframes fx-rtt { 0% { opacity: 0; transform: translateX(-4px); } 10% { opacity: 1; transform: none; } 80% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-handoff-in { from { opacity: 0; transform: translateY(70%); } }
+@keyframes fx-q-lock { 0% { transform: scale(1.18); opacity: .4; } 30% { opacity: 1; } 45% { opacity: .4; } 60%, 100% { transform: scale(1); opacity: 1; } }
+@keyframes fx-ah-cell { from { opacity: .15; transform: scaleY(.3); } }
+@keyframes fx-mm-node { from { opacity: 0; transform: scale(.8); } }
+@keyframes fx-mm-edge { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes fx-glitch { 0% { transform: translateX(-3px); } 20% { transform: translateX(2px) skewX(-6deg); } 40% { transform: translateX(-1px); } 60% { transform: translateX(2px); } 80%, 100% { transform: none; } }
+@keyframes fx-err-scan { from { transform: translateY(-60%); opacity: 1; } to { transform: translateY(60%); opacity: 0; } }
+@keyframes fx-theme-wipe { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+
+/* ───── 第六批（靜態）：綠的 token 數、輸出速度、工具計時、等你回應、下載讀數、MCP 燈、檔案抽屜、燈箱、矩陣十字準線、匯入、捲動位置、自動壓縮 ───── */
+/* 輸入框下方的 token 數與輸出速度：--tk 換成綠色系（app.css 的 --mx），數字解碼的亂碼是半形片假名（tokenrules.MATRIX_GLYPHS） */
+.ci-turn, .ci-rate { --tk: var(--mx); --tk-hi: var(--mx-hi); --tk-dim: var(--mx-dim); --tk-glow: var(--mx-glow); }
+/* 側欄帳戶卡的今日 token（2026-10-25 使用者要求：依各帳戶設定的顏色色系呈現、深淺色主題分開；2026-10-26 再要求 in 與 out 一深一淺）：
+   由卡片的帳戶色（--acc）算出同色系的兩階——out 是主色、in 退一階：
+   深色主題 out 取帳戶的色相、oklch 0.64（在側欄底上約 5:1），in 暗一階（0.53，約 3.2:1、彩度也收一點）；
+   淺色主題 out 最深（0.40，約 9:1），in 淡一階（0.52，約 5:1，仍過 4.5:1）；兩階的亮度差約 1.55 倍（深色）／1.7 倍（淺色）。
+   彩度設上限，黃、綠這類亮色不刺眼。解碼鎖定那一下的高亮兩個共用：深色主題是很淡的同色、淺色主題是更深的同色。
+   亂碼、標籤、發光由各自的 --tk 算（in 的標籤與數字掛 .mtok-in，--tk 換成 --tk-in 後重算 --tk-dim、--tk-glow；自訂屬性繼承的是算好的值，不重算就會沿用 out 的）。
+   不支援相對色語法（oklch(from …)）的瀏覽器以 color-mix 往黑調 */
+.macct-tok {
+  --tk-out: color-mix(in oklab, var(--acc) 92%, #000);
+  --tk-in: color-mix(in oklab, var(--acc) 76%, #000);
+  --tk-hi: color-mix(in oklab, var(--acc) 28%, #fff);
+  --tk: var(--tk-out);
+}
+:root[data-theme="light"] .macct-tok {
+  --tk-out: color-mix(in oklab, var(--acc) 50%, #000);
+  --tk-in: color-mix(in oklab, var(--acc) 72%, #000);
+  --tk-hi: color-mix(in oklab, var(--acc) 30%, #000);
+}
+@supports (color: oklch(from red l c h)) {
+  .macct-tok {
+    --tk-out: oklch(from var(--acc) 0.64 min(c, 0.18) h); --tk-in: oklch(from var(--acc) 0.53 min(c, 0.12) h);
+    --tk-hi: oklch(from var(--acc) 0.88 min(c, 0.05) h);
+  }
+  :root[data-theme="light"] .macct-tok {
+    --tk-out: oklch(from var(--acc) 0.4 min(c, 0.16) h); --tk-in: oklch(from var(--acc) 0.52 min(c, 0.12) h);
+    --tk-hi: oklch(from var(--acc) 0.27 min(c, 0.11) h);
+  }
+}
+.macct-tok > .mtok-in { --tk: var(--tk-in); }
+.macct-tok > .mtok-v.mtok-in { color: var(--tk); }
+.macct-tok, .macct-tok > .mtok-in { --tk-dim: color-mix(in srgb, var(--tk) 62%, transparent); --tk-glow: color-mix(in srgb, var(--tk) 42%, transparent); }
+:root[data-theme="light"] :is(.macct-tok, .macct-tok > .mtok-in) { --tk-dim: color-mix(in srgb, var(--tk) 66%, transparent); --tk-glow: color-mix(in srgb, var(--tk) 16%, transparent); }
+.ci-turn { color: var(--mx-soft); font-family: var(--mono); }
+.ci-turn .ci-k { color: var(--mx-dim); }
+/* 箭頭寫法（2026-10-26）：↑ 輸入、↓ 輸出，箭頭小一點、輸出前留一點間隔 */
+.ci-turn .ci-arrow { font-size: 10px; margin-right: 1px; }
+.ci-turn .ci-out { margin-left: 6px; }
+.ci-turn .mtok-n { color: var(--mx-soft); }
+.ci-turn.live .mtok-n { color: var(--mx); text-shadow: 0 0 6px var(--mx-glow); }
+.ci-turn .mtok-c.scr { color: var(--mx-dim); }
+.ci-turn .mtok-c.lock { color: var(--mx-hi); text-shadow: 0 0 8px var(--mx), 0 0 2px var(--mx-hi); }
+.macct-tok .mtok-c.scr { color: var(--tk-dim); }
+.macct-tok .mtok-c.lock { color: var(--tk-hi); text-shadow: 0 0 8px var(--tk), 0 0 2px var(--tk-hi); }
+:root[data-theme="light"] .ci-turn.live .mtok-n, :root[data-theme="light"] :is(.ci-turn, .macct-tok) .mtok-c.lock { text-shadow: none; }
+/* 這一輪的輸出速度（composer.js 的 .ci-rate）：沒有新的輸出時變淡 */
+.ci-rate { display: inline-flex; align-items: center; gap: 3px; font: 10.5px var(--mono); color: var(--mx); font-variant-numeric: tabular-nums; text-shadow: 0 0 6px var(--mx-glow); }
+.ci-rate > i { font-style: normal; font-size: 8px; }
+.ci-rate > i::before { content: "▲"; }
+.ci-rate.idle { color: var(--mx-dim); text-shadow: none; }
+/* token 數後面的 CPU（composer.js 的 .ci-cpu，activityrules.js 的 cpu*，2026-10-26 使用者要求、選了「極光面積、依負載變色」）：
+   這個對話的程序樹的處理器使用率。canvas 在每次宿主取樣時畫一次，兩格之間由合成器平移（canvas 的 transform 動畫，主執行緒不參與每個影格）；
+   窗口 66px（22 格 × 3px）裁掉 canvas 左右多出來的各一格（canvas 72px、從左邊外 3px 開始）。百分比的顏色由 JS 依負載設定 */
+.ci-cpu { display: inline-flex; align-items: center; gap: 4px; font: 10.5px var(--mono); color: var(--mx-soft); font-variant-numeric: tabular-nums; }
+.ci-cpu .ci-k { color: var(--mx-dim); }
+.ci-cpu-win { position: relative; display: block; flex: none; width: 66px; height: 16px; overflow: hidden; contain: strict; }
+.ci-cpu-wave { position: absolute; left: -3px; top: 0; width: 72px; height: 16px; will-change: transform; }
+.ci-cpu-n { min-width: 4ch; text-align: right; }
+/* 記憶體（同一組程序的私人工作集加總）：寫在 CPU 百分比後面，和 token 數同一個綠 */
+.ci-mem { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; }
+.ci-mem[hidden] { display: none; }
+.ci-mem-n { min-width: 6ch; }
+:root[data-theme="light"] .ci-rate { text-shadow: none; }
+/* 執行中的工具計時（items.js 的 .t-elapsed）：超過 30 秒變琥珀色 */
+.t-elapsed { flex: none; margin-left: 6px; font: 10.5px var(--mono); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.t-elapsed.slow { color: var(--amber); }
+/* 等你作答的卡片已經等了多久（items.js 的 .card-age，在標題列右邊）：前面一顆燈，等太久變琥珀色 */
+.card-age { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; font-size: 11px; font-weight: 400; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.card-age::before { content: ""; width: 5px; height: 5px; border-radius: 1px; background: color-mix(in srgb, var(--acc) 80%, transparent); }
+.card-age.stale { color: var(--amber); }
+.card-age.stale::before { background: var(--amber); box-shadow: 0 0 5px color-mix(in srgb, var(--amber) 70%, transparent); }
+/* 下載新版的讀數（頂部列版號旁 #appDl）：每收到進度燈閃一下 */
+.app-dl { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 999px; font: 11px var(--mono); color: var(--green); font-variant-numeric: tabular-nums; white-space: nowrap; border: 1px solid color-mix(in srgb, var(--green) 35%, transparent); }
+.app-dl[hidden] { display: none !important; }
+.app-dl > i { width: 5px; height: 5px; border-radius: 1px; background: var(--green); opacity: .45; }
+/* MCP 燈列（mcp.js 的 .mcp-leds）：每個伺服器一顆，已連線綠、要授權琥珀、連不上紅、連線中閃（下面的狀態動畫）、停用與不明淡色 */
+.mcp-leds { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.mcp-leds > i { width: 5px; height: 9px; border-radius: 1px; background: var(--text-3); opacity: .7; }
+.mcp-leds > i[data-st="connected"] { background: var(--green); opacity: 1; }
+.mcp-leds > i[data-st="needs-auth"] { background: var(--amber); opacity: 1; }
+.mcp-leds > i[data-st="failed"] { background: var(--red); opacity: 1; }
+.mcp-leds > i[data-st="pending"] { background: var(--link); opacity: 1; }
+/* 檔案抽屜：大小比例條（相對這一頁最大的檔）、最近一小時改過的燈、拖曳寬度的讀數 */
+.fe.line { position: relative; }
+.fe-bar { position: absolute; left: 36px; right: 8px; bottom: 2px; height: 2px; pointer-events: none; }
+.fe-bar > i { position: absolute; inset: 0; background: color-mix(in srgb, var(--acc) 45%, transparent); transform-origin: left center; border-radius: 1px; }
+.fe.recent .fe-name::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 5px; vertical-align: 2px; border-radius: 1px; background: var(--acc); box-shadow: 0 0 5px color-mix(in srgb, var(--acc) 70%, transparent); }
+.dr-wread { position: absolute; top: 6px; left: 50%; z-index: 5; display: none; padding: 1px 6px; border-radius: 4px; font: 11px var(--mono); color: var(--text-hi); background: var(--bg-elev); border: 1px solid var(--border-2); transform: translateX(-50%); pointer-events: none; }
+.drawer.resizing .dr-wread:not(:empty) { display: block; }
+/* 燈箱：影像資訊（解析度、格式）與舞台的四角括號 */
+.lb-res { font: 11.5px var(--mono); color: rgba(255, 255, 255, .62); font-variant-numeric: tabular-nums; }
+.lb-res:empty { display: none; }
+.lb-stage::after {
+  content: ""; position: absolute; inset: 10px; pointer-events: none; border: 1px solid rgba(255, 255, 255, .35); border-radius: 4px;
+  mask: linear-gradient(#000 0 0) left top / 18px 18px no-repeat, linear-gradient(#000 0 0) right top / 18px 18px no-repeat,
+    linear-gradient(#000 0 0) left bottom / 18px 18px no-repeat, linear-gradient(#000 0 0) right bottom / 18px 18px no-repeat;
+}
+/* 帳戶×電腦矩陣：滑過的那一列（tr:hover）與那一行（remote.js 的 .mx-hc）亮起十字準線 */
+.mx tbody tr:hover > *, .mx .mx-hc { background: color-mix(in srgb, var(--focus) 7%, transparent); }
+.mx tbody tr:hover > .mx-hc { background: color-mix(in srgb, var(--focus) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--focus) 45%, transparent); }
+/* 匯入本機對話：訊息數比例條、掃描中的雷達 */
+.imp-row { position: relative; }
+.imp-bar { position: absolute; left: 12px; right: 12px; bottom: 3px; height: 2px; pointer-events: none; }
+.imp-bar > i { position: absolute; inset: 0; background: color-mix(in srgb, var(--focus) 45%, transparent); transform-origin: left center; border-radius: 1px; }
+.imp-radar { position: relative; display: inline-block; width: 18px; height: 18px; flex: none; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--focus) 45%, transparent); overflow: hidden; vertical-align: middle; }
+.imp-radar > i { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 70%, color-mix(in srgb, var(--focus) 75%, transparent)); }
+/* 捲動位置讀數（conversation.js 的 .conv-pos，小地圖的左邊） */
+.conv-pos {
+  position: absolute; right: 24px; z-index: 5; padding: 2px 8px; border-radius: 4px; pointer-events: none;
+  font: 11px var(--mono); color: var(--text-hi); background: color-mix(in srgb, var(--bg-elev) 92%, transparent); border: 1px solid color-mix(in srgb, var(--acc) 45%, var(--border-2));
+}
+@container col (max-width: 520px) { .conv-pos { display: none; } }
+/* 自動壓縮上下文（composer.js 的 .ctxm-note）：圓環上方的說明 */
+.ctxm { position: relative; }
+.ctxm-note {
+  position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 6; padding: 3px 8px; border-radius: 5px; white-space: nowrap; pointer-events: none;
+  font: 11px var(--mono); color: var(--mx); background: var(--bg-elev); border: 1px solid color-mix(in srgb, var(--mx) 45%, var(--border-2)); box-shadow: var(--shadow-pop);
+}
+.ctxm-note[hidden] { display: none; }
+
+/* ───── 第六批（一次性與狀態動畫）：系統要求減少動態時不播，關掉動態效果時縮成一瞬間 ───── */
+@media (prefers-reduced-motion: no-preference) {
+  /* 下載讀數：每收到進度燈閃一下 */
+  .app-dl > i.fx-dl { animation: fx-dl-blink 320ms ease-out; }
+  /* MCP：連線中的燈一明一暗（狀態指示，只在連線中）；剛連上的那一顆閃一下綠 */
+  :root:not([data-fx="off"]) .mcp-leds > i[data-st="pending"] { animation: fx-breathe 1.2s ease-in-out infinite; }
+  .mcp-leds > i.fx-led-ok { animation: fx-led-ok 900ms ease-out; }
+  /* 匯入：掃描中的雷達轉（狀態指示，只在真的在掃描時有這個元素；轉的是 HTML 元素） */
+  :root:not([data-fx="off"]) .imp-radar > i { animation: fx-rot 1.6s linear infinite; }
+  /* 燈箱：圖片載入後舞台的括號從外面收進來、閃兩下 */
+  .lb-stage.fx-lb-lock::after { animation: fx-lock-blink 520ms steps(1) both, fx-lock-in-far 360ms var(--ease-out) both; }
+  /* 捲動位置讀數：淡入、停一下、淡出 */
+  :root:not([data-fx="off"]) .conv-pos.fx-pos { animation: fx-pos 1.6s ease both; }
+  /* 自動壓縮：圓環照舊倒轉一圈（fx-g-reset），百分比收縮一下，說明往上淡入 */
+  .ctxm.fx-compact .ctxm-n { animation: fx-squeeze 700ms var(--ease-out); }
+  :root:not([data-fx="off"]) .ctxm.fx-compact .ctxm-note { animation: fx-note-in 3.6s ease both; }
+}
+@keyframes fx-dl-blink { 0% { opacity: 1; box-shadow: 0 0 6px var(--green); } 100% { opacity: .45; } }
+@keyframes fx-led-ok { 0%, 40% { transform: scaleY(1.5); filter: brightness(1.6); } 100% { transform: none; filter: none; } }
+@keyframes fx-pos { 0% { opacity: 0; transform: translateX(6px); } 12% { opacity: 1; transform: none; } 75% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-squeeze { 0% { transform: scale(1); } 30% { transform: scale(.6); } 100% { transform: scale(1); } }
+@keyframes fx-note-in { 0% { opacity: 0; transform: translateY(4px); } 8% { opacity: 1; transform: none; } 85% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ───── 第七批（靜態）：結算單、思考耗時、差異變動地圖、任務清單、上傳讀數、燃燒預估、建置計數、分頁拖放、問卷鍵帽、配對碼、遠端操作紀錄 ───── */
+/* 一輪的結算單（conversation.js 的 .turn-sum）：浮在輸入區上方、靠左；往上捲、出現「↓ 最新」時移到那顆按鈕的上方（兩個都看得到） */
+.turn-sum {
+  position: absolute; left: 24px; bottom: calc(100% + 10px); z-index: 5; max-width: calc(100% - 48px);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; padding: 3px 10px 3px 8px; border-radius: 5px; pointer-events: none;
+  font: 11px var(--mono); color: var(--text-2); font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--bg-elev) 94%, transparent); border: 1px solid color-mix(in srgb, var(--fx-sum, var(--green)) 40%, var(--border-2)); box-shadow: var(--shadow-pop);
+}
+.turn-sum[hidden] { display: none; }
+.dock:has(> .jump:not([hidden])) > .turn-sum { bottom: calc(100% + 46px); }
+.turn-sum[data-state="err"] { --fx-sum: var(--red); }
+.turn-sum[data-state="stop"], .turn-sum[data-state="bg"] { --fx-sum: var(--amber); }
+.turn-sum > span { white-space: nowrap; }
+.turn-sum > span + span::before { content: "・"; color: var(--text-3); }
+.turn-sum > .ts-state { display: inline-flex; align-items: center; gap: 5px; color: var(--fx-sum, var(--green)); font-weight: 600; }
+.turn-sum > .ts-state::after { content: ""; order: -1; width: 5px; height: 5px; border-radius: 1px; background: currentColor; box-shadow: 0 0 5px currentColor; }
+.turn-sum > .ts-tok { color: var(--mx-soft); }
+.turn-sum b { font-weight: 400; }
+.turn-sum b.add { color: var(--green); }
+.turn-sum b.del { color: var(--red); }
+/* 思考的耗時（items.js 的 .think-time）：等寬數字，執行中用帳戶色 */
+.think-time { margin-left: 5px; font: 11px var(--mono); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.think-time:empty { display: none; }
+.it-thinking.running .think-time { color: color-mix(in srgb, var(--acc) 80%, var(--text-2)); }
+/* 差異的變動地圖（items.js 的 .diff-map）：差異框右側的細軌，左半刪除、右半新增；背景在畫出時算一次 */
+.diff-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 6px; gap: 3px; }
+.diff-map { position: relative; border-radius: 2px; background-color: var(--bg-sunken); background-size: 50% 100%; background-position: left top, right top; background-repeat: no-repeat; box-shadow: inset 0 0 0 1px var(--border); cursor: pointer; opacity: .85; }
+.diff-map:hover { opacity: 1; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 55%, var(--border)); }
+/* 任務清單（Markdig 的 task list：- [ ] / - [x]）：核取方塊換成 HUD 小方塊（完成的綠色實心、未完成空框），清單尾端寫「完成 3／7」。
+   計數是 CSS 計數器（每個清單自己算，巢狀的清單各算各的），不跑 JS */
+.md ul.contains-task-list { list-style: none; padding-left: 2px; counter-reset: task-all task-done; }
+.md li.task-list-item { position: relative; padding-left: 20px; list-style: none; counter-increment: task-all; }
+.md li.task-list-item:has(> input:checked) { counter-increment: task-all task-done; color: var(--text-2); }
+.md li.task-list-item > input[type="checkbox"] {
+  appearance: none; position: absolute; left: 3px; top: .5em; width: 10px; height: 10px; margin: 0; border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--acc) 55%, var(--hud-line)); background: transparent; pointer-events: none;
+}
+.md li.task-list-item > input[type="checkbox"]:checked { border-color: var(--green); background: var(--green); box-shadow: 0 0 5px color-mix(in srgb, var(--green) 60%, transparent); }
+.md ul.contains-task-list::after {
+  content: "完成 " counter(task-done) "／" counter(task-all); display: block; width: fit-content; margin-top: 4px; padding: 0 6px; border-radius: 3px;
+  font: 10.5px var(--mono); color: var(--text-3); font-variant-numeric: tabular-nums; border: 1px solid var(--hud-line);
+}
+/* 用量燃燒預估（dashboard.js 的 setRingBurn）：圓環剩下的部分是琥珀色虛線（墊在弧線底下）、圓環下一行琥珀色的預估 */
+.ring-burn { fill: none; stroke: var(--amber); stroke-width: 6; opacity: .55; }
+.ring-burn-note { margin-top: 2px; font-size: 11px; color: var(--amber); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; font-variant-numeric: tabular-nums; }
+.ring-burn-note::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 4px; vertical-align: 1px; border-radius: 1px; background: var(--amber); box-shadow: 0 0 5px color-mix(in srgb, var(--amber) 60%, transparent); }
+.ring-burn-note[hidden] { display: none; }
+.rings[data-count="4"] .ring-burn-note { font-size: 10px; }
+/* 執行列的建置錯誤與警告數（launchbar.js 的 .lbar-diag）：紅、琥珀的小方塊計數，點了打開輸出跳到第一個 */
+.lbar-diag { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 20px; padding: 0 6px; border-radius: 4px; font: 11px var(--mono); font-variant-numeric: tabular-nums; color: var(--text-2); }
+.lbar-diag[hidden] { display: none; }
+.lbar-diag:hover { background: var(--bg-hover); color: var(--text-hi); }
+.lbar-diag > span { display: inline-flex; align-items: center; gap: 3px; }
+.lbar-diag > span[hidden] { display: none; }
+.lbar-diag > span::before { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; border-radius: 2px; font-size: 9px; line-height: 1; color: #fff; }
+.lbar-diag > .ld-err { color: var(--red); }
+.lbar-diag > .ld-err::before { content: "✕"; background: var(--red); }
+.lbar-diag > .ld-warn { color: var(--amber); }
+.lbar-diag > .ld-warn::before { content: "!"; font-weight: 700; color: #1a1300; background: var(--amber); }
+.lout-line.fx-hit { background: color-mix(in srgb, var(--amber) 22%, transparent); }
+/* 分頁拖放（workspace.js）：經過的窗格是拖著的分頁的帳戶色角框（取代虛線框）、插入位置是一排發光的小方塊（.tab-ins，只動 transform）、
+   放下時角框收合一次（.fx-dropped）。--drag-acc 在 dragstart 時由 workspace.js 的 setDragAcc 設在它自己的一條規則（.tab-ins、.pane-body::after），
+   不設在 body 上：自訂屬性會繼承，整份文件都要重算樣式（別的視窗拖來的沒有，用焦點色） */
+.pane.tab-target .pane-body::after {
+  --dk: var(--drag-acc, var(--focus));
+  border: 0; border-radius: 6px;
+  background:
+    linear-gradient(var(--dk) 0 0) left top / 26px 2px no-repeat, linear-gradient(var(--dk) 0 0) left top / 2px 26px no-repeat,
+    linear-gradient(var(--dk) 0 0) right top / 26px 2px no-repeat, linear-gradient(var(--dk) 0 0) right top / 2px 26px no-repeat,
+    linear-gradient(var(--dk) 0 0) left bottom / 26px 2px no-repeat, linear-gradient(var(--dk) 0 0) left bottom / 2px 26px no-repeat,
+    linear-gradient(var(--dk) 0 0) right bottom / 26px 2px no-repeat, linear-gradient(var(--dk) 0 0) right bottom / 2px 26px no-repeat,
+    color-mix(in srgb, var(--dk) 7%, transparent);
+  box-shadow: inset 0 0 24px color-mix(in srgb, var(--dk) 12%, transparent);
+}
+.strip { position: relative; }
+.tab-ins {
+  position: absolute; left: 0; top: 5px; bottom: 5px; z-index: 3; width: 3px; display: none; pointer-events: none;
+  background: repeating-linear-gradient(to bottom, var(--drag-acc, var(--focus)) 0 3px, transparent 3px 5px);
+  filter: drop-shadow(0 0 3px var(--drag-acc, var(--focus)));
+}
+.strip.ins-on .tab-ins { display: block; }
+.strip.ins-on .tab.ins-before, .strip.ins-on .tab.ins-after { box-shadow: none; }
+/* 問卷卡的數字鍵（items.js 的 .opt-key.fx-press）：按下時亮起帳戶色（動畫在下面的一次性段落） */
+.opt-key.fx-press { border-color: var(--acc); color: var(--text-hi); background: color-mix(in srgb, var(--acc) 30%, transparent); box-shadow: 0 0 6px color-mix(in srgb, var(--acc) 55%, transparent); }
+/* 配對碼的到期倒數條（settings.js 的 .sync-cd）：20 格，亮的格數＝還剩多少時間；剩一分鐘轉琥珀色 */
+.sync-cd {
+  position: relative; width: 160px; height: 4px; margin: 6px 0 2px; background: var(--hud-line);
+  mask: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 8px);
+}
+.sync-cd[hidden] { display: none; }
+.sync-cd > i { position: absolute; inset: 0; background: var(--green); transform-origin: left center; transition: transform 600ms var(--ease-out), background-color 300ms ease; }
+.sync-cd.warn > i { background: var(--amber); }
+/* 遠端操作紀錄（synclog.js）：每列時間前面依結果一顆燈 */
+.slog-head { position: relative; }
+.slog-row[data-led] .slog-head::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 1px; background: var(--red); }
+.slog-row[data-led="done"] .slog-head::before { background: var(--green); box-shadow: 0 0 5px color-mix(in srgb, var(--green) 60%, transparent); }
+.slog-row[data-led="rejected"] .slog-head::before { background: var(--amber); }
+.slog-row[data-led="executing"] .slog-head::before { background: var(--link); }
+/* 設定頁的裝置清單（settings.js 的 fillDeviceRow）：名稱前面一顆燈 */
+.sync-dev-name::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 1px; border-radius: 1px; background: var(--hud-line); }
+.sync-dev[data-led="on"] .sync-dev-name::before { background: var(--green); box-shadow: 0 0 6px color-mix(in srgb, var(--green) 65%, transparent); }
+.sync-dev[data-led="recent"] .sync-dev-name::before { background: color-mix(in srgb, var(--green) 55%, transparent); }
+.sync-dev[data-led="revoked"] .sync-dev-name::before { background: transparent; box-shadow: inset 0 0 0 1px var(--red); }
+/* 工具卡與核准卡的指令（items.js 的 detailPre）：宿主寫在指令前面的說明用一般字體、淡色，不上色 */
+.pre .t-cmd-note { font-family: var(--font); color: var(--text-2); }
+
+/* ───── 第七批（一次性動畫）：系統要求減少動態時不播，關掉動態效果時縮成一瞬間 ───── */
+@media (prefers-reduced-motion: no-preference) {
+  /* 結算單：往上淡入、停著、淡出（4.2 秒，同 fxrules.TURN_SUM_MS） */
+  :root:not([data-fx="off"]) .turn-sum.fx-in { animation: fx-sum 4.2s ease both; }
+  /* 數字鍵帽：下沉再彈回 */
+  .opt-key.fx-press { animation: fx-key-press 260ms var(--ease-out); }
+  /* 放下分頁：角框從原本的位置收進來、淡掉 */
+  .pane.fx-dropped .pane-body::after {
+    content: ""; position: absolute; inset: 8px; z-index: 60; pointer-events: none; border-radius: 6px; --dk: var(--drag-acc, var(--focus));
+    background:
+      linear-gradient(var(--dk) 0 0) left top / 26px 2px no-repeat, linear-gradient(var(--dk) 0 0) left top / 2px 26px no-repeat,
+      linear-gradient(var(--dk) 0 0) right top / 26px 2px no-repeat, linear-gradient(var(--dk) 0 0) right top / 2px 26px no-repeat,
+      linear-gradient(var(--dk) 0 0) left bottom / 26px 2px no-repeat, linear-gradient(var(--dk) 0 0) left bottom / 2px 26px no-repeat,
+      linear-gradient(var(--dk) 0 0) right bottom / 26px 2px no-repeat, linear-gradient(var(--dk) 0 0) right bottom / 2px 26px no-repeat;
+    animation: fx-drop-close 420ms var(--ease-out) both;
+  }
+}
+@keyframes fx-key-press { 0% { transform: translateY(0) scale(1); } 35% { transform: translateY(1.5px) scale(.88); } 100% { transform: none; } }
+@keyframes fx-drop-close { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.94); } }
+@keyframes fx-sum { 0% { opacity: 0; transform: translateY(4px); } 6% { opacity: 1; transform: none; } 88% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ───── 第八批（靜態）：待辦的分格進度、指令結果晶片、搜尋命中數與網域、子代理的步驟、每一輪的分隔、回溯預覽、佇列序號、滑桿 ───── */
+/* 待辦清單（items.js 的 .plan-bar，fxrules.planCells）：標頭的分格進度，每一步一格（完成綠、進行中帳戶色、還沒做空框）；
+   進行中那一列左緣一道帳戶色、底色由帳戶色往右淡掉 */
+.plan-bar { flex: 1 1 auto; display: flex; align-items: center; gap: 2px; min-width: 0; max-width: 288px; margin-left: 4px; }
+.plan-bar > span { flex: 1 1 0; min-width: 2px; max-width: 12px; height: 6px; border: 1px solid var(--hud-line); }
+.plan-bar > .pb-done { background: var(--green); border-color: var(--green); }
+.plan-bar > .pb-run { background: color-mix(in srgb, var(--acc) 70%, transparent); border-color: var(--acc); }
+.ps { position: relative; }
+.ps.inProgress { margin: 0 -6px; padding-left: 6px; padding-right: 6px; border-radius: 4px; box-shadow: inset 2px 0 0 var(--acc);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 12%, transparent), transparent 70%); }
+/* 指令的結果晶片（items.js 的 .t-outcome，fxrules.outcomeChips）：通過綠、失敗紅、警告琥珀，小方塊外框；有失敗時通過數淡一點 */
+.t-outcome { display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 2px; font: 600 10.5px/16px var(--mono); font-variant-numeric: tabular-nums;
+  --oc: var(--green); color: var(--oc); border: 1px solid color-mix(in srgb, var(--oc) 45%, transparent); background: color-mix(in srgb, var(--oc) 10%, transparent); }
+.t-outcome[data-kind="pass-dim"] { --oc: color-mix(in srgb, var(--green) 60%, var(--text-3)); }
+.t-outcome[data-kind="fail"] { --oc: var(--red); }
+.t-outcome[data-kind="warn"] { --oc: var(--amber); }
+/* 展開的指令輸出裡的錯誤與警告行（items.js 的 markDiagLines）：左緣一道色、淡淡的底色 */
+.pre.out :is(.ol-err, .ol-warn) { --ol: var(--red); background: color-mix(in srgb, var(--ol) 12%, transparent); box-shadow: inset 2px 0 0 var(--ol); color: var(--text-hi); }
+.pre.out .ol-warn { --ol: var(--amber); }
+/* 搜尋與網頁工具的晶片（items.js 的 .t-hits，fxrules.toolHits）：找到幾筆（帳戶色）、沒找到（淡）、網站（前面一顆小方塊） */
+.t-hits { display: inline-flex; align-items: center; gap: 4px; height: 16px; padding: 0 5px; border-radius: 2px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 600 10.5px/16px var(--mono); color: color-mix(in srgb, var(--acc) 80%, var(--text-hi)); border: 1px solid color-mix(in srgb, var(--acc) 35%, transparent); }
+.t-hits[data-kind="none"] { color: var(--text-3); border-color: var(--hud-line); }
+.t-hits[data-kind="host"] { font-weight: 500; color: var(--text-2); border-color: var(--hud-line); }
+.t-hits[data-kind="host"]::before { content: ""; width: 4px; height: 4px; flex: none; background: var(--acc); }
+/* 子代理的進度（items.js 的 appendAgentProgress）：步數的小方塊晶片、執行中正在做的那一個工具（前面一顆帳戶色方塊，太長截斷） */
+.t-agent-steps { display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 2px; font: 600 10.5px/16px var(--mono); font-variant-numeric: tabular-nums;
+  color: var(--text-2); border: 1px solid var(--hud-line); }
+/* 子代理的 token 用量（Header.subagents，items.paintAgentUsage）：同步數晶片的外框，顏色淡一點 */
+.t-agent-tokens { display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 2px; font: 500 10.5px/16px var(--mono); font-variant-numeric: tabular-nums; color: var(--text-3); border: 1px solid var(--border-2); }
+.it-tool[data-status="Running"] .t-agent-steps { color: color-mix(in srgb, var(--acc) 85%, var(--text-hi)); border-color: color-mix(in srgb, var(--acc) 45%, transparent); }
+.t-agent-now { display: inline-block; max-width: 220px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font: 500 calc(var(--fs-chat) - 2.5px) var(--font); color: var(--text-3); }
+.t-agent-now::before { content: ""; display: inline-block; width: 4px; height: 4px; margin-right: 5px; vertical-align: 2px; background: var(--acc); }
+/* 每一輪的分隔線（conversation.js 的 paintTurnRules，fxrules.turnRules）：使用者訊息上緣一條刻度線，左邊寫前面那一段的摘要（時間、工具、檔案）；
+   高 14px，從那則的上邊距（18px）扣掉，加上去或拿掉都不會讓下面的內容移動 */
+.it-user.has-rule { margin-top: 4px; }
+.turn-rule { display: flex; align-items: center; height: 14px; overflow: hidden; white-space: nowrap; font: 500 11px/14px var(--font); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.turn-rule::before { content: ""; width: 5px; height: 5px; flex: none; margin-right: 7px; border: 1px solid var(--hud-line); transform: rotate(45deg); }
+/* 後面一段刻度（固定 96px、不淡出）：不用 mask——每一條都要另外合成遮罩，長對話裡有幾十條 */
+.turn-rule::after { content: ""; flex: 0 1 96px; min-width: 0; height: 5px; margin-left: 9px;
+  background: repeating-linear-gradient(90deg, var(--hud-line) 0 1px, transparent 1px 6px); }
+.turn-rule > span + span::before { content: ""; display: inline-block; width: 1px; height: 8px; margin: 0 7px; vertical-align: -1px; background: var(--hud-line); }
+.turn-rule b { font-weight: 600; }
+.turn-rule .add { color: var(--green); }
+.turn-rule .del { color: var(--red); }
+.turn-rule .rl-state { color: var(--red); }
+/* 回溯預覽（conversation.js 的 markRewind）：回溯的對話框開著時，回溯點那則與之後的項目淡下去，回溯點上緣一條琥珀色虛線與說明 */
+.rewind-preview .it-user.rw-from ~ .it, .rewind-preview .it-user.rw-from > * { opacity: .32; }
+.rewind-preview .it-user.rw-from::before {
+  content: "回溯點：這則訊息與之後的內容會捨棄"; display: flex; align-items: center; gap: 6px; margin-bottom: 4px; padding-top: 4px;
+  border-top: 1px dashed var(--amber); font: 600 11px/16px var(--font); color: var(--amber);
+}
+/* 佇列（composer.js 的 renderQueue）：每一列前面一格序號（CSS 計數器，離開中的列不算），第一列另標「下一則」 */
+.queue-list { position: relative; counter-reset: qn; }
+.queue-row:not(.fx-leave) { counter-increment: qn; }
+.queue-row::before { content: counter(qn); flex: none; min-width: 16px; height: 16px; padding: 0 3px; border: 1px solid var(--hud-line); border-radius: 2px;
+  font: 600 10px/14px var(--mono); text-align: center; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.queue-row:nth-child(1 of .queue-row:not(.fx-leave))::before { border-color: color-mix(in srgb, var(--acc) 60%, transparent); color: var(--acc); }
+.queue-row > :last-child { order: 2; }
+.queue-row:nth-child(1 of .queue-row:not(.fx-leave))::after { content: "下一則"; order: 1; flex: none; padding: 0 4px; border-radius: 2px; font: 600 10px/15px var(--font);
+  color: color-mix(in srgb, var(--acc) 85%, var(--text-hi)); background: color-mix(in srgb, var(--acc) 14%, transparent); }
+.queue.paused .queue-row:nth-child(1 of .queue-row:not(.fx-leave))::after { content: "暫停中"; color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+/* 離開的那一列（composer.js）：疊在原本的位置上淡出，不佔位置、不接受點擊（top 由 JS 給） */
+.queue-row.fx-leave { position: absolute; left: 0; right: 0; pointer-events: none; }
+.queue-row.fx-leave::before { content: "↑"; }
+/* 設定頁的滑桿（settings.js 的 paintRange，fxrules.rangeFill／rangeTicks）：分格刻度的軌道、已選的那一段帳戶色、方塊滑塊；
+   拖動時右邊的數字亮起來（相鄰兄弟選擇器，不用 :has） */
+.range { -webkit-appearance: none; appearance: none; height: 20px; background: transparent; cursor: pointer; --fill: 50%; --ticks: 6; --rg: var(--acc, var(--focus)); }
+.range::-webkit-slider-runnable-track {
+  height: 8px; border: 1px solid var(--hud-line); border-radius: 1px;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 calc(100% / var(--ticks) - 1px), var(--hud-line) calc(100% / var(--ticks) - 1px) calc(100% / var(--ticks))),
+    linear-gradient(90deg, color-mix(in srgb, var(--rg) 65%, transparent) var(--fill), transparent var(--fill));
+}
+.range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 10px; height: 16px; margin-top: -5px; border-radius: 2px;
+  background: var(--bg-raised, var(--bg-pane)); border: 1.5px solid var(--rg); box-shadow: 0 0 0 2px color-mix(in srgb, var(--rg) 18%, transparent); }
+.range:active::-webkit-slider-thumb { background: var(--rg); }
+.range:focus-visible { outline: none; }
+.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 55%, transparent); }
+.range:disabled { cursor: default; opacity: .45; }
+.range:active + .range-val { color: var(--acc, var(--focus)); }
+
+/* ───── 第八批（一次性動畫）：系統要求減少動態時不播，關掉動態效果時縮成一瞬間 ───── */
+@media (prefers-reduced-motion: no-preference) {
+  /* 待辦的一步完成（items.js 的 fx-ps-done）：那一列亮一下綠、勾勾彈一下 */
+  .ps.fx-ps-done::after { content: ""; position: absolute; inset: 0 -6px; border-radius: 4px; pointer-events: none;
+    background: color-mix(in srgb, var(--green) 22%, transparent); animation: fx-glow-out 900ms var(--ease-out) both; }
+  .ps.fx-ps-done .ps-mark { animation: fx-pop 360ms var(--ease-out); }
+  /* 子代理多了步數（items.js 的 fx-step）：晶片彈一下 */
+  .t-agent-steps.fx-step { animation: fx-pop 360ms var(--ease-out); }
+  /* 離開佇列的那一列（composer.js 的 fx-leave）往上淡出 */
+  .queue-row.fx-leave { animation: fx-q-leave 260ms var(--ease-out) both; }
+}
+@keyframes fx-glow-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes fx-q-leave { to { opacity: 0; transform: translateY(-6px); } }
+
+/* ───── 第九批（靜態，2026-10-26）：排程頁同其他頁的 HUD——點狀網格、角框（上面的共用規則）、摘要底下的刻度尺、標題的菱形、群組的導線；
+   時間軸的刻度尺（每小時細刻度、0／6／12／18 點粗刻度）、「現在」那條線的光暈（時間寫在標題後面，寫在線旁會和即將執行的標示疊在一起）、
+   一小時內最近一次的琥珀標示（每分鐘重畫一次，沒有動畫） ───── */
+.sch-main { background-image: radial-gradient(circle at 1px 1px, var(--hud-dot) 1px, transparent 1.6px); background-size: 22px 22px; }
+.sch-head h1 { display: inline-flex; align-items: center; gap: 10px; }
+.sch-head h1::before { content: ""; width: 7px; height: 7px; flex: none; transform: rotate(45deg); border: 1px solid var(--acc);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+.sch-pills { padding-bottom: 10px;
+  background:
+    repeating-linear-gradient(90deg, var(--hud-line) 0 1px, transparent 1px 50px) left bottom / 100% 7px no-repeat,
+    repeating-linear-gradient(90deg, var(--hud-line) 0 1px, transparent 1px 10px) left bottom / 100% 3px no-repeat; }
+.sch-gh::after { content: ""; flex: 1; align-self: center; height: 5px; margin-left: 4px;
+  background:
+    linear-gradient(90deg, var(--hud-line), transparent 90%) left center / 100% 1px no-repeat,
+    repeating-linear-gradient(90deg, var(--hud-line) 0 2px, transparent 2px 6px) left center / 38px 5px no-repeat; }
+.sch-tl-body { border-bottom-color: transparent; }
+.sch-hours { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; pointer-events: none;
+  background: linear-gradient(var(--hud-line), var(--hud-line)) left bottom / 100% 1px no-repeat; }
+.sch-hours > i { position: absolute; bottom: 0; width: 1px; height: 4px; background: var(--hud-line); }
+.sch-hours > i.major { height: 8px; background: color-mix(in srgb, var(--text-3) 70%, transparent); }
+.sch-tl-body .now { box-shadow: 0 0 8px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+.sch-tl-now { font: 11px var(--mono); color: var(--acc); }
+.sch-track .dot.soon { box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 55%, transparent), 0 0 8px color-mix(in srgb, var(--amber) var(--fx-glow), transparent); }
+.sch-soon-tag { position: absolute; top: -2px; transform: translateX(8px); font: 10px var(--mono); color: var(--amber); white-space: nowrap; pointer-events: none; }
+.sch-next.soon { color: var(--amber); font-weight: 600; }
+.sch-row { position: relative; }
+
+/* ───── 第九批（一次性與狀態動畫）：系統要求減少動態時不播，關掉動態效果時縮成一瞬間（app.css） ───── */
+@media (prefers-reduced-motion: no-preference) {
+  /* 排程有了新的一次結果（schedules.js 的 decorateRow）：那一列亮一下（成功綠、失敗紅），最近 14 次的長條最右邊那格長出來 */
+  .sch-row.fx-sch-ok { --fx-sch: var(--green); }
+  .sch-row.fx-sch-fail { --fx-sch: var(--red); }
+  .sch-row:is(.fx-sch-ok, .fx-sch-fail)::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: color-mix(in srgb, var(--fx-sch) 24%, transparent); animation: fx-glow-out 1100ms var(--ease-out) both; }
+  .sch-hist > i.fx-new { transform-origin: bottom; animation: fx-ah-cell 600ms var(--ease-out) both; }
+  /* 頂端「排程」鈕的失敗數變多（app.js）：彈一下 */
+  .vs-badge.fx-pop-badge { animation: fx-pop 520ms var(--ease-out); }
+  /* 執行中的排程（狀態指示，只有真的在跑的那幾列）：燈一明一暗、左緣一道光由上往下掃 */
+  .sch-row[data-led="run"] > .led { animation: fx-breathe 1.6s ease-in-out infinite; }
+  .sch-row[data-led="run"]::after { content: ""; position: absolute; left: 0; top: 0; width: 2px; height: 40%; pointer-events: none;
+    background: linear-gradient(transparent, var(--tone-auto), transparent); animation: fx-sch-scan 1.8s linear infinite; }
+}
+@keyframes fx-sch-scan { from { transform: translateY(-100%); } to { transform: translateY(250%); } }
+
+/* 第九批（輸入區）：提示快取的外圈（composer.js 的 renderCache）——還在時是綠的弧（剩下的比例），最後 10 分鐘琥珀，過期是灰的虛線；
+   等額度重置的分格倒數（renderQuotaWait）亮著的是帳戶色。都只在分鐘數變了時改，沒有動畫 */
+.ctxm-cache { display: none; fill: none; stroke: var(--green); stroke-width: 1.2; stroke-linecap: round; opacity: .9; }
+.ctxm:is(.cache-fresh, .cache-low, .cache-expired) .ctxm-cache { display: inline; }
+.ctxm.cache-low .ctxm-cache { stroke: var(--amber); }
+.ctxm.cache-expired .ctxm-cache { stroke: var(--text-3); stroke-dasharray: 3 4; stroke-linecap: butt; opacity: .7; }
+.qw-cells { display: inline-flex; gap: 2px; margin: 0 8px 0 2px; flex: none; }
+.qw-cells > i { width: 5px; height: 8px; border-radius: 1px; background: var(--hud-line); }
+.qw-cells > i.lit { background: var(--acc); box-shadow: 0 0 4px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  /* 等額度重置的時間到、自動接著做：輸入框閃一下綠 */
+  .cbox.fx-qw-go { animation: fx-qw-go 900ms var(--ease-out); }
+}
+@keyframes fx-qw-go { 0% { box-shadow: 0 0 0 1px var(--green), 0 0 14px color-mix(in srgb, var(--green) 60%, transparent); } 100% { box-shadow: 0 0 0 1px transparent, 0 0 0 transparent; } }
+
+/* 第九批（靜態）：myriagent-remote 的工具卡（items.js 的 remoteChips）——「遠端：電腦名」藍色、電腦名太長截掉；
+   @ 委派帳戶選單（composer.js 的 renderSuggest）——帳戶色方塊、右邊上下疊的用量刻度（同輸入框下方那一行的 .ci-usage）與執行中的對話數 */
+.t-outcome[data-kind="remote"] { --oc: var(--link); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+.sg-acc-dot { border-radius: 2px; box-shadow: 0 0 5px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+.sg-acc-meta { flex: none; display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.sg-acc-meta .ci-usage { padding: 0; }
+.sg-acc-run { display: inline-flex; align-items: center; gap: 4px; font: 600 11px var(--mono); font-variant-numeric: tabular-nums; color: var(--green); }
+.sg-acc-run > i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 5px color-mix(in srgb, var(--green) var(--fx-glow), transparent); }
+
+/* 第九批（儀表板「每週額度每 5% 的 token」，usageseg.js）：數字格的比例底條（和這一欄最大的比，靠右對齊數字、在字的下方）、
+   各模型的組成條（顏色依模型的色系）、正在記的那一段的 5 格進度條。都是靜態的 */
+.us-table td.us-bar { background: linear-gradient(color-mix(in srgb, var(--focus) 55%, transparent), color-mix(in srgb, var(--focus) 55%, transparent))
+  right 10px bottom 2px / calc(var(--us-f, 0) * (100% - 20px)) 2px no-repeat; }
+.us-mix { display: inline-flex; width: 56px; height: 6px; margin-right: 8px; vertical-align: middle; border-radius: 1px; overflow: hidden; gap: 1px; background: var(--hud-line); }
+.us-mix > i { flex: 0 0 0; min-width: 2px; height: 100%; }
+.us-mix > i.mt-opus { background: #a98bf0; }
+.us-mix > i.mt-sonnet { background: #e0894f; }
+.us-mix > i.mt-haiku { background: #4cc38a; }
+.us-mix > i.mt-fable { background: #e5b44a; }
+.us-mix > i.mt-gpt { background: #1fae8e; }
+.us-mix > i.mt-gemini { background: #4c8df6; }
+.us-mix > i.mt-grok { background: #9aa6b2; }
+.us-mix > i.mt-other { background: var(--text-3); }
+.us-prog { display: inline-block; position: relative; width: 44px; height: 6px; margin-left: 8px; vertical-align: middle; border-radius: 1px; overflow: hidden;
+  background: repeating-linear-gradient(90deg, var(--hud-line) 0 calc(20% - 1px), transparent calc(20% - 1px) 20%); }
+.us-prog > i { position: absolute; left: 0; top: 0; bottom: 0; background: repeating-linear-gradient(90deg, var(--focus) 0 8px, transparent 8px 8.8px);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--focus) var(--fx-glow), transparent); }
+
+/* 第九批（設定頁左側的分類，settings.js）：選取標示是一條滑過去的亮線（取代每個分頁自己的 ::after），搜尋時寫命中數、沒有命中的淡掉 */
+.set-tabs.has-ind { position: relative; }
+.set-tabs.has-ind .set-tab::after { display: none; }
+.set-tab-ind { position: absolute; left: 0; top: 0; width: 2px; height: 0; border-radius: 1px; background: var(--focus); pointer-events: none;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--focus) var(--fx-glow), transparent); transition: opacity 120ms; }
+.set-nav.searching .set-tab-ind { opacity: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .set-tab-ind.anim { transition: transform 240ms var(--ease-out), opacity 120ms; }
+}
+.set-tab-n { margin-left: auto; padding: 0 6px; border-radius: 999px; font: 600 10.5px/16px var(--mono); font-variant-numeric: tabular-nums;
+  color: var(--focus); background: color-mix(in srgb, var(--focus) 14%, transparent); }
+.set-nav.searching .set-tab.nohit { opacity: .45; }
+
+/* ───── 第十批（靜態，2026-10-27）：帳戶提及的晶片、帳戶委派與 MCP 的工具卡 ───── */
+/* 使用者訊息裡的 @[名稱](account:id)（items.js 的 chipMentions）：帳戶色的底、外框與一顆方塊燈，字照一般的亮色（帳戶色由使用者選，字不用它才看得清楚）；
+   換行時兩邊各自有框（box-decoration-break）。不認得的帳戶（刪了、其他電腦的）用中性色 */
+.acct-mention { padding: 1px 5px; margin: 0 1px; border-radius: 3px; font-weight: 600; color: var(--text-hi);
+  background: color-mix(in srgb, var(--acc) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 42%, transparent);
+  -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.acct-mention.unknown { --acc: var(--text-3); }
+.am-dot { display: inline-block; width: 7px; height: 7px; margin-right: 4px; vertical-align: 1px; border-radius: 2px; background: var(--acc);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+/* 委派工具卡（items.js 的 paintToolName）：整列帶交辦對象的帳戶色（左邊淡淡的底色、一圈細框），名稱裡的帳戶晶片太長截掉 */
+.it-tool.t-deleg > .t-row { background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 11%, transparent), transparent 75%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 30%, transparent); }
+.it-tool.t-deleg > .t-row:hover { background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 18%, transparent), var(--bg-hover) 75%); }
+.it-tool.t-deleg .t-icwrap { color: var(--acc); }
+.t-name .acct-mention { display: inline-block; max-width: 180px; margin-left: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; line-height: 18px; padding: 0 5px; }
+.it-tool.t-deleg .t-title { font-family: var(--font); }
+/* 子對話的狀態：執行中帳戶色（字混一點亮色）、等你回應琥珀；「開啟」是同高的小按鈕 */
+.t-dlg { display: inline-flex; align-items: center; gap: 4px; }
+.t-outcome[data-kind="deleg"] { --oc: var(--acc); color: color-mix(in srgb, var(--acc) 60%, var(--text-hi)); }
+.t-outcome[data-kind="wait"] { --oc: var(--amber); }
+.t-outcome[data-kind="wait"]::before { content: ''; width: 5px; height: 5px; margin-right: 4px; border-radius: 1px; background: var(--amber); box-shadow: 0 0 5px color-mix(in srgb, var(--amber) var(--fx-glow), transparent); }
+.t-dlg-open { height: 16px; padding: 0 6px; border-radius: 2px; font: 600 10.5px/14px var(--font); cursor: pointer; color: var(--text-hi);
+  background: transparent; border: 1px solid color-mix(in srgb, var(--acc) 50%, transparent); }
+.t-dlg-open:hover { background: color-mix(in srgb, var(--acc) 16%, transparent); }
+/* 其他 MCP 工具：「MCP」小標籤＋伺服器名，工具名前面一個 › */
+.t-mcp-tag { display: inline-block; margin-right: 5px; padding: 0 4px; border-radius: 2px; font: 700 9.5px/14px var(--mono); letter-spacing: .04em;
+  color: var(--text-2); box-shadow: inset 0 0 0 1px var(--hud-line); vertical-align: 1px; }
+.it-tool.t-mcp .t-title:not(:empty)::before { content: '› '; color: var(--text-3); }
+
+/* 第十批（靜態）：換帳戶提示的交接條（items.js 的 paintHandoff，fxrules.handoffLabels）——提示底下一條舊帳戶色→新帳戶色的線、兩端各一顆方塊燈，
+   圖示用新帳戶的顏色；輸入框跟著權限模式（composer.js 的 renderToolbar）——完全自動的角框與燈是紅的、規劃是藍的，接受編輯與自動只有燈 */
+.it-notice.account-switch.ho { position: relative; padding-bottom: 12px; }
+.it-notice.account-switch.ho::before { content: ""; position: absolute; left: 12px; right: 12px; bottom: 4px; height: 4px; pointer-events: none;
+  background: linear-gradient(var(--ho-from) 0 0) left center / 4px 4px no-repeat, linear-gradient(var(--ho-to) 0 0) right center / 4px 4px no-repeat,
+    linear-gradient(90deg, var(--ho-from), var(--ho-to)) center / calc(100% - 12px) 2px no-repeat; }
+.it-notice.account-switch.ho .note-icwrap { color: var(--ho-to); }
+.it-notice.account-switch.ho .note-ic { color: inherit; }
+@media (prefers-reduced-motion: no-preference) {
+  /* 剛出現的換帳戶提示（conversation.js 進場的 fx-in）：一道光從舊帳戶那端滑到新帳戶 */
+  .it-notice.account-switch.ho.fx-in::after { content: ""; position: absolute; left: 12px; bottom: 3px; width: calc((100% - 24px) / 4); height: 6px; pointer-events: none;
+    background: radial-gradient(closest-side, color-mix(in srgb, var(--ho-to) 90%, white), transparent); animation: fx-glide 900ms var(--ease-out) both; }
+  /* 換了權限模式：輸入框的角框與燈閃兩下（同執行列換階段） */
+  .cbox.fx-perm::after { animation: fx-blink2 700ms steps(1); }
+}
+.cbox[data-perm="danger"], .cbox[data-perm="danger"]:focus-within { --fx-bracket: color-mix(in srgb, var(--tone-danger) 75%, transparent); --fx-led: var(--tone-danger); }
+.cbox[data-perm="plan"], .cbox[data-perm="plan"]:focus-within { --fx-bracket: color-mix(in srgb, var(--tone-plan) 75%, transparent); --fx-led: var(--tone-plan); }
+.cbox[data-perm="edit"] { --fx-led: color-mix(in srgb, var(--tone-edit) 85%, transparent); }
+.cbox[data-perm="auto"] { --fx-led: color-mix(in srgb, var(--tone-auto) 85%, transparent); }
+
+/* ───── 第十批（一次性）：換頁（app.js 的 setView）——對話的整個工作區淡入、往上滑一點；儀表板與排程頁改成區塊依序進場（每塊差 40ms，第 6 塊之後一起）。
+   系統要求減少動態時不播，關掉動態效果時縮成一瞬間 ───── */
+@media (prefers-reduced-motion: no-preference) {
+  #workspace.fx-view-in { animation: fx-view-in 260ms var(--ease-out); }
+  .fx-view-in :is(.dash-inner, .sch-main) > *, .fx-view-in .sch-side { animation: fx-view-in 300ms var(--ease-out) backwards; }
+  .fx-view-in :is(.dash-inner, .sch-main) > :nth-child(2) { animation-delay: 40ms; }
+  .fx-view-in :is(.dash-inner, .sch-main) > :nth-child(3), .fx-view-in .sch-side { animation-delay: 80ms; }
+  .fx-view-in :is(.dash-inner, .sch-main) > :nth-child(4) { animation-delay: 120ms; }
+  .fx-view-in :is(.dash-inner, .sch-main) > :nth-child(5) { animation-delay: 160ms; }
+  .fx-view-in :is(.dash-inner, .sch-main) > :nth-child(n+6) { animation-delay: 200ms; }
+  .sf.fx-view-in > * { animation: fx-view-in 300ms var(--ease-out) backwards; }
+  .sf.fx-view-in > :nth-child(2) { animation-delay: 40ms; }
+}
+@keyframes fx-view-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* 第十批（靜態）：圖片還沒載好時的佔位（util.fadeInImg 的 .fx-img，載好是 .fx-img-in、載不到拿掉 class）——圖片元素自己的背景畫點狀網格與四角括號，
+   不做流光；對話裡的圖片（.md-img）載好之前沒有大小，先給一塊；縮圖格（代理的媒體、使用者訊息的附件）左下角寫檔名 */
+.fx-img:not(.fx-img-in) {
+  --ph: color-mix(in srgb, var(--acc, var(--focus)) 50%, transparent);
+  background:
+    linear-gradient(var(--ph) 0 0) left 4px top 4px / 10px 1px no-repeat, linear-gradient(var(--ph) 0 0) left 4px top 4px / 1px 10px no-repeat,
+    linear-gradient(var(--ph) 0 0) right 4px top 4px / 10px 1px no-repeat, linear-gradient(var(--ph) 0 0) right 4px top 4px / 1px 10px no-repeat,
+    linear-gradient(var(--ph) 0 0) left 4px bottom 4px / 10px 1px no-repeat, linear-gradient(var(--ph) 0 0) left 4px bottom 4px / 1px 10px no-repeat,
+    linear-gradient(var(--ph) 0 0) right 4px bottom 4px / 10px 1px no-repeat, linear-gradient(var(--ph) 0 0) right 4px bottom 4px / 1px 10px no-repeat,
+    radial-gradient(circle, color-mix(in srgb, var(--text-3) 45%, transparent) 1px, transparent 1.4px) center / 10px 10px,
+    var(--bg-sunken);
+}
+.md-img.fx-img:not(.fx-img-in) { min-width: min(240px, 100%); min-height: 135px; }
+.mimg, .u-box .att-img { position: relative; }
+/* 單張的排法圖片的高度是 auto：載好之前是 0，背景畫不出來，先給 160px */
+.mgrid.n1 .mimg > img.fx-img:not(.fx-img-in) { height: 160px; }
+.mimg:has(> img.fx-img:not(.fx-img-in))::after, .u-box .att-img:has(> img.fx-img:not(.fx-img-in))::after {
+  content: attr(title); position: absolute; left: 8px; right: 8px; bottom: 6px; pointer-events: none;
+  font: 500 10.5px/14px var(--mono); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 第十批（靜態）：延伸與委派的關聯——側欄的子對話（sidebar.js，liverules.nestFamilies）縮排、以導線接在主對話底下
+   （畫在背景：列的 ::before 給「要你回來看」的閃爍用；:hover 與選取的底色會蓋掉 background，所以三種狀態都補上導線）；
+   標頭的來源晶片（conversation.js 的 renderOrigin）；每一輪分隔線的間隔（fxrules.turnRules 的 gap） */
+.crow.crow-child { padding-left: 25px; }
+.crow.crow-child, .crow.crow-child:hover, .crow.crow-child.active {
+  background-image: linear-gradient(var(--hud-line) 0 0), linear-gradient(var(--hud-line) 0 0), linear-gradient(var(--hud-line) 0 0);
+  background-position: 13px 0, 13px 50%, 13px 100%; background-size: 1px 50%, 8px 1px, 1px 50%; background-repeat: no-repeat; }
+.crow.crow-child.crow-last, .crow.crow-child.crow-last:hover, .crow.crow-child.crow-last.active { background-size: 1px 50%, 8px 1px, 0 0; }
+.ch-origin { color: var(--text-2); }
+.ch-origin .chip-ic { color: var(--focus); }
+.ch-origin[data-kind="delegated"] .chip-ic { color: var(--acc); }
+.ch-origin .chip-label { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-origin:disabled { cursor: default; opacity: .75; }
+.turn-rule .rl-gap { color: color-mix(in srgb, var(--link) 75%, var(--text-2)); font-weight: 600; }
+
+/* 第十批（靜態）：文字排版——標題平衡換行（第二行不會只剩一兩個字；Chromium 只對 6 行以內的區塊做，標題都很短），
+   已經結束的回覆段落與清單避免最後一行只剩一個字（pretty；串流中的不套，每次重新排版都要多算） */
+.md :is(h1, h2, h3, h4, h5), .md .md-alert-title, .card-title, .plan-title, .draft-title, .dlg-title, .pane-empty-title { text-wrap: balance; }
+.it-assistant:not(.running) .md :is(p, li) { text-wrap: pretty; }
+
+/* 第十批（一次性）：延伸成新對話（workspace.js 的 takeForkPane）——新的窗格從原窗格那一側滑進來，靠原窗格的那一邊閃一道分支線 */
+@media (prefers-reduced-motion: no-preference) {
+  .pane.fx-fork-in { animation: fx-fork-in 320ms var(--ease-out); }
+  .pane.fx-fork-in::before { content: ""; position: absolute; left: -1px; top: 6%; bottom: 6%; width: 2px; z-index: 3; pointer-events: none;
+    background: linear-gradient(transparent, var(--focus), transparent); box-shadow: 0 0 8px color-mix(in srgb, var(--focus) 60%, transparent);
+    animation: fx-glow-out 900ms var(--ease-out) both; }
+}
+@keyframes fx-fork-in { from { opacity: 0; transform: translateX(-16px); } }

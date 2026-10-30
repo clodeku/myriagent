@@ -1,0 +1,441 @@
+/* Myriagent Hub 登入與帳戶管理頁：與桌面介面同一組設計變數（深色為預設，系統是淺色時跟著換） */
+
+:root {
+  --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft JhengHei UI", "PingFang TC", "Noto Sans TC", sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", "Microsoft JhengHei UI", "PingFang TC", sans-serif;
+  --mono: "Cascadia Code", "Cascadia Mono", Consolas, "Microsoft JhengHei UI", monospace;
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
+
+  --bg-app: #181818;
+  --bg-pane: #1f1f1f;
+  --bg-input: #2b2b2b;
+  --bg-hover: #2a2d2e;
+  --border: #2b2b2b;
+  --border-2: #3c3c3c;
+  --border-3: #505050;
+  --text: #cccccc;
+  --text-hi: #e8e8e8;
+  --text-2: #9d9d9d;
+  --text-3: #929292;
+  --focus: #0078d4;
+  --green: #4cc38a;
+  --red: #f14c4c;
+  --acc: #D97757;
+  --acc-ink: #141414;
+  --acc-text-mix: #fff 25%;
+  --brand-2: #1FAE8E; /* 品牌圖示內圈的青綠 */
+  --inline-code: rgba(255, 255, 255, .08);
+  --shadow: 0 1px 0 rgba(255, 255, 255, .03), 0 12px 32px rgba(0, 0, 0, .28);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-app: #f7f7f7;
+    --bg-pane: #ffffff;
+    --bg-input: #ffffff;
+    --bg-hover: #efefef;
+    --border: #e6e6e6;
+    --border-2: #d6d6d6;
+    --border-3: #bdbdbd;
+    --text: #3b3b3b;
+    --text-hi: #1e1e1e;
+    --text-2: #696969;
+    --text-3: #707070;
+    --focus: #005fb8;
+    --green: #17703f;
+    --red: #cd2f27;
+    --inline-code: rgba(0, 0, 0, .06);
+    --acc-text-mix: #000 45%;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 10px 28px rgba(0, 0, 0, .07);
+    color-scheme: light;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: var(--bg-app);
+  color: var(--text);
+  font: 14px/1.55 var(--font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+[hidden] { display: none !important; }
+button, input { font: inherit; color: inherit; margin: 0; }
+button { cursor: pointer; }
+button:disabled, button[aria-disabled="true"] { cursor: default; opacity: .5; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+code { font: 12.5px/1.4 var(--mono); background: var(--inline-code); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+
+.shell { width: min(560px, 100%); margin: 0 auto; padding: 48px 16px 32px; display: flex; flex-direction: column; gap: 16px; }
+
+.brand { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+.mark { width: 44px; height: 44px; flex: none; position: relative; }
+.brand h1 { display: flex; align-items: center; gap: 8px; margin: 0; font: 600 20px/1.2 var(--font-display); color: var(--text-hi); letter-spacing: .01em; }
+.brand-tag {
+  padding: 1px 6px; border-radius: 4px; font: 600 10.5px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--acc), var(--acc-text-mix)); background: color-mix(in srgb, var(--acc) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--acc) 35%, transparent);
+}
+.sub { margin: 2px 0 0; color: var(--text-2); font-size: 13px; }
+
+.status { margin: 0; padding: 10px 14px; border-radius: 8px; background: var(--bg-pane); border: 1px solid var(--border); color: var(--text-2); }
+.status[data-tone="error"] { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent); background: color-mix(in srgb, var(--red) 7%, var(--bg-pane)); }
+.status[data-tone="ok"] { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+
+.card {
+  background: var(--bg-pane); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
+  box-shadow: var(--shadow);
+}
+#view-account { display: flex; flex-direction: column; gap: 16px; }
+.card h2 { margin: 0 0 6px; font: 600 15px/1.3 var(--font-display); color: var(--text-hi); }
+.row-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.row-head h2 { margin-bottom: 0; }
+.hint { margin: 4px 0 14px; color: var(--text-2); font-size: 13px; }
+
+.form { display: flex; flex-direction: column; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-2); }
+.input {
+  height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-2); background: var(--bg-input); color: var(--text-hi);
+  transition: border-color .15s var(--ease-out), box-shadow .15s var(--ease-out);
+}
+.input::placeholder { color: var(--text-3); }
+.input:focus { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+/* 給密碼管理員對應帳號用的隱藏欄位（不佔版面、不能聚焦） */
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+.btn {
+  height: 36px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--border-2); background: transparent; color: var(--text-hi);
+  font-weight: 600; white-space: nowrap; transition: background-color .15s var(--ease-out), transform .1s var(--ease-out);
+}
+.btn:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--bg-hover); border-color: var(--border-3); }
+.btn:active:not(:disabled):not([aria-disabled="true"]) { transform: scale(.97); }
+.btn.acc { background: var(--acc); color: var(--acc-ink); border-color: transparent; }
+.btn.acc:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--acc); filter: brightness(1.08); }
+.btn.ghost { border-color: transparent; color: var(--text-2); }
+.btn.ghost:hover:not(:disabled) { color: var(--text-hi); }
+.btn.sm { height: 28px; padding: 0 12px; font-size: 12.5px; }
+.btn.danger { color: var(--red); }
+.btn.danger:hover:not(:disabled) { border-color: color-mix(in srgb, var(--red) 50%, transparent); background: color-mix(in srgb, var(--red) 8%, transparent); }
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 12px 0 0; font-size: 13px; }
+.facts dt { color: var(--text-2); }
+.facts dd { margin: 0; color: var(--text-hi); }
+
+.list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+.item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.item-text { flex: 1; min-width: 0; }
+.item-title { color: var(--text-hi); overflow-wrap: anywhere; }
+.item-meta { color: var(--text-3); font-size: 12.5px; overflow-wrap: anywhere; }
+
+.dialog {
+  width: min(400px, calc(100% - 32px)); padding: 18px 20px; border-radius: 12px; border: 1px solid var(--border-2);
+  background: var(--bg-pane); color: var(--text); box-shadow: var(--shadow);
+}
+.dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.dialog h2 { margin: 0; font: 600 15px/1.3 var(--font-display); color: var(--text-hi); }
+.dialog .hint { margin: 0; }
+.actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.foot { color: var(--text-3); font: 11.5px/1.4 var(--mono); text-align: center; min-height: 1em; }
+
+/* 連結做成按鈕（「開啟網頁版」「核准電腦的配對」） */
+a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+#view-login .hint { margin: 0 0 12px; }
+
+/* 配對核准頁（/#pair）：配對碼、大字的裝置指紋、那台電腦的資料、核准與拒絕 */
+.pair-row { display: flex; gap: 8px; min-width: 0; }
+.pair-input { flex: 1; min-width: 0; font-family: var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.pair-input::placeholder { letter-spacing: .08em; }
+.pair-detail { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.pair-fp-box { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border-2); background: var(--bg-app); }
+.pair-fp-label { font-size: 12.5px; color: var(--text-2); }
+.pair-fp { font: 600 26px/1.25 var(--mono); letter-spacing: .06em; color: var(--text-hi); overflow-wrap: anywhere; }
+.pair-fp-hint { margin: 2px 0 0; }
+.pair-facts { margin: 0; }
+.pair-facts dd { min-width: 0; overflow-wrap: anywhere; }
+.pair-actions { margin-top: 2px; }
+.pair-result { margin: 14px 0 0; font-size: 13.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.pair-result[data-tone="error"] { color: var(--red); }
+.pair-result[data-tone="ok"] { color: var(--green); }
+#pair-done { margin-top: 12px; }
+
+/* 版本頁（/#releases）：表格欄位多，顯示時整頁放寬到 980px；窄螢幕時表格在 .table-wrap 裡水平捲動，整頁不捲 */
+.shell:has(#view-releases:not([hidden])) { width: min(980px, 100%); }
+#view-releases { display: flex; flex-direction: column; gap: 16px; }
+.row-actions { display: flex; align-items: center; gap: 6px; }
+.empty { margin: 4px 0 0; color: var(--text-2); }
+.releases-message { margin: 0 0 12px; font-size: 13.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.releases-message[data-tone="error"] { color: var(--red); }
+.releases-message[data-tone="ok"] { color: var(--green); }
+.table-wrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th { text-align: left; font-weight: 600; color: var(--text-2); padding: 6px 10px; border-bottom: 1px solid var(--border-2); white-space: nowrap; }
+.table td { padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text-hi); vertical-align: top; white-space: nowrap; }
+.table td.rd-name, .table td.rd-update { white-space: normal; min-width: 10em; overflow-wrap: anywhere; }
+.table tr.is-gone td { color: var(--text-3); }
+.badge {
+  display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; font-size: 11.5px; line-height: 18px; white-space: nowrap;
+  background: color-mix(in srgb, var(--acc) 18%, transparent); color: var(--acc);
+}
+.cell-actions { display: flex; gap: 6px; white-space: nowrap; }
+.cell-sub { color: var(--text-3); font-size: 12px; overflow-wrap: anywhere; }
+.cell-sub.rd-error { color: var(--red); }
+
+@media (max-width: 480px) {
+  .pair-fp { font-size: 21px; }
+  .pair-facts { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 6px 12px; }
+  .pair-actions .btn { flex: 1; }
+}
+
+@media (max-width: 480px) {
+  .shell { padding-top: 28px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+
+/* ───── HUD 外觀（第八批視覺效果，同桌面介面）：點狀網格、四角括號、品牌圖示外圈、狀態燈、版號刻度、表格的燈。
+   只有靜態的裝飾與事件發生時播一次的動畫（只動 transform／opacity），系統要求減少動態時不播；沒有持續的動畫 ───── */
+:root {
+  --hud-line: color-mix(in srgb, var(--text-3) 42%, transparent);
+  --grid-dot: rgba(255, 255, 255, .055);
+  --amber: #e5a50a;
+}
+@media (prefers-color-scheme: light) {
+  :root { --grid-dot: rgba(0, 0, 0, .07); --amber: #a86400; }
+}
+
+
+/* 四角括號：卡片、裝置指紋、對話框；角落各一顆小方塊燈（--fx-led，平常透明）。
+   對話框是 top layer（瀏覽器給它 position: fixed），不能另設 position */
+.card, .pair-fp-box { position: relative; }
+.card::after, .pair-fp-box::after, .dialog::after {
+  content: ""; position: absolute; inset: var(--fx-inset, 4px); pointer-events: none;
+  border: 1px solid var(--fx-bracket, var(--hud-line)); border-radius: var(--fx-radius, 9px);
+  background:
+    linear-gradient(var(--fx-led, transparent) 0 0) left 3px top 3px / 3px 3px no-repeat,
+    linear-gradient(var(--fx-led, transparent) 0 0) right 3px top 3px / 3px 3px no-repeat,
+    linear-gradient(var(--fx-led, transparent) 0 0) right 3px bottom 3px / 3px 3px no-repeat,
+    linear-gradient(var(--fx-led, transparent) 0 0) left 3px bottom 3px / 3px 3px no-repeat;
+  mask:
+    linear-gradient(#000 0 0) left top / var(--fx-arm, 14px) var(--fx-arm, 14px) no-repeat,
+    linear-gradient(#000 0 0) right top / var(--fx-arm, 14px) var(--fx-arm, 14px) no-repeat,
+    linear-gradient(#000 0 0) left bottom / var(--fx-arm, 14px) var(--fx-arm, 14px) no-repeat,
+    linear-gradient(#000 0 0) right bottom / var(--fx-arm, 14px) var(--fx-arm, 14px) no-repeat;
+  transition: border-color 160ms ease;
+}
+.card:focus-within { --fx-bracket: color-mix(in srgb, var(--acc) 70%, transparent); }
+.pair-fp-box { --fx-inset: 3px; --fx-radius: 7px; --fx-arm: 12px; --fx-bracket: color-mix(in srgb, var(--acc) 60%, transparent); --fx-led: color-mix(in srgb, var(--acc) 80%, transparent); overflow: hidden; }
+.dialog { --fx-bracket: color-mix(in srgb, var(--acc) 55%, transparent); }
+
+/* 區塊標題前一顆 45° 小菱形（同桌面的設定頁） */
+.card h2, .dialog h2 { display: flex; align-items: center; gap: 8px; }
+.card h2::before, .dialog h2::before { content: ""; width: 5px; height: 5px; flex: none; transform: rotate(45deg); border: 1px solid var(--acc); }
+
+/* 頂端的狀態列：前面一顆燈（一般灰、成功綠、錯誤紅） */
+.status { display: flex; align-items: center; gap: 10px; }
+.status::before { content: ""; width: 6px; height: 6px; flex: none; background: var(--text-3); box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-3) 18%, transparent); }
+.status[data-tone="ok"]::before { background: var(--green); box-shadow: 0 0 6px color-mix(in srgb, var(--green) 70%, transparent); }
+.status[data-tone="error"]::before { background: var(--red); box-shadow: 0 0 6px color-mix(in srgb, var(--red) 70%, transparent); }
+
+/* 頁尾的 build：兩側一段刻度尺（沒有 build 時不畫） */
+.foot { display: flex; align-items: center; justify-content: center; gap: 10px; letter-spacing: .04em; }
+.foot::before, .foot::after { content: ""; width: 56px; height: 5px; background: repeating-linear-gradient(90deg, var(--hud-line) 0 1px, transparent 1px 6px); }
+.foot:has(> #build:empty)::before, .foot:has(> #build:empty)::after { display: none; }
+
+/* 表格：表頭下緣一排刻度；狀態與連線欄前面一顆燈（releases.js 的 data-led） */
+.table th { background: repeating-linear-gradient(90deg, var(--hud-line) 0 1px, transparent 1px 7px) left bottom / 100% 4px no-repeat; }
+.table td[data-led]::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px; vertical-align: 1px; background: var(--text-3); opacity: .55; }
+.table td[data-led="ok"]::before { background: var(--green); opacity: 1; box-shadow: 0 0 5px color-mix(in srgb, var(--green) 60%, transparent); }
+.table td[data-led="warn"]::before { background: var(--amber); opacity: 1; }
+.table td[data-led="bad"]::before { background: var(--red); opacity: 1; }
+
+/* 逐字解碼（auth.js 的 decodeInto）：真的文字透明、亂碼畫在上面（attr() 只當文字），鎖定完就拿掉 */
+.fx-decoding { position: relative; color: transparent !important; }
+.fx-decoding::after { content: attr(data-scramble); position: absolute; inset: 0; color: var(--text-hi); pointer-events: none; overflow-wrap: anywhere; }
+
+/* 結果的顏色（auth.js 的 fx-deny、fx-ok，時間到拿掉）：角框與四顆燈鎖定成紅或綠 */
+.card.fx-deny { --fx-bracket: var(--red); --fx-led: var(--red); }
+.card.fx-ok { --fx-bracket: var(--green); --fx-led: var(--green); }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* 每一頁出現時往上淡入一次（hidden 拿掉時從頭播；之後不再動） */
+  .shell > .card:not([hidden]), .shell > section:not([hidden]) > .card { animation: fx-card-in 280ms var(--ease-out) both; }
+  @keyframes fx-card-in { from { opacity: 0; transform: translateY(6px); } }
+  /* 登入失敗：框左右錯位幾下（同桌面錯誤的訊號干擾） */
+  .card.fx-deny { animation: fx-deny 380ms linear both; }
+  @keyframes fx-deny { 15% { transform: translateX(-6px); } 30% { transform: translateX(5px); } 45% { transform: translateX(-4px); } 60% { transform: translateX(3px); } 75% { transform: translateX(-1px); } 100% { transform: none; } }
+  /* 核准成功：角框從外面收進來、閃兩下 */
+  .card.fx-ok::after { animation: fx-lock-in 360ms var(--ease-out) both, fx-blink 520ms steps(1) both; }
+  @keyframes fx-lock-in { from { transform: scale(1.03); opacity: 0; } }
+  @keyframes fx-blink { 25% { opacity: .2; } 50% { opacity: 1; } 75% { opacity: .2; } }
+  /* 裝置指紋出現：一道帳戶色的光由上往下掃過一次 */
+  .pair-fp-box.fx-scan::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 40%; pointer-events: none;
+    background: linear-gradient(transparent, color-mix(in srgb, var(--acc) 16%, transparent) 70%, color-mix(in srgb, var(--acc) 55%, transparent));
+    animation: fx-scan 700ms var(--ease-out) both;
+  }
+  @keyframes fx-scan { from { transform: translateY(-100%); } to { transform: translateY(260%); opacity: 0; } }
+}
+
+/* ───── 第九批（2026-10-30 使用者要求：登入頁的風格色調和網頁版的對話頁一致）：
+   背景層同空白對話頁（fx.css 的 .draft::before：細網格、雷達圈、零星的資料方塊）＋帳戶色與品牌青綠的光暈，固定在視窗、不跟著捲動重畫；
+   品牌同標題列的雙環圖示；卡片同帳戶卡（頂端的定位片、帳戶色光暈與細網格的底、角框），區塊標題後面接導線刻度；
+   登入時整頁置中、欄位編號、輸入框聚焦時帳戶色的框與外光（同對話的輸入框 .cbox）。
+   仍然沒有持續的動畫：只有出現時播一次（只動 transform／opacity），系統要求減少動態時不播 ───── */
+:root {
+  --hud-ring: rgba(255, 255, 255, .055);
+  --hud-block: rgba(255, 255, 255, .1);
+  --hud-grid: rgba(255, 255, 255, .035);
+  --fx-glow: 45%;
+}
+@media (prefers-color-scheme: light) {
+  :root { --hud-ring: rgba(0, 0, 0, .06); --hud-block: rgba(0, 0, 0, .1); --hud-grid: rgba(0, 0, 0, .045); --fx-glow: 28%; }
+}
+
+/* 背景層：::before 是網格、雷達圈與資料方塊（以橢圓遮罩往外淡掉），::after 是光暈；position: fixed 不隨捲動重畫 */
+body::before, body::after { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+body::before {
+  background:
+    linear-gradient(var(--hud-block) 0 0) 31% 22% / 5px 5px no-repeat,
+    linear-gradient(var(--hud-block) 0 0) 72% 18% / 4px 4px no-repeat,
+    linear-gradient(var(--hud-block) 0 0) 80% 46% / 5px 5px no-repeat,
+    linear-gradient(var(--hud-block) 0 0) 22% 58% / 4px 4px no-repeat,
+    linear-gradient(var(--hud-block) 0 0) 67% 71% / 3px 3px no-repeat,
+    linear-gradient(var(--hud-block) 0 0) 38% 80% / 5px 5px no-repeat,
+    linear-gradient(var(--hud-block) 0 0) 86% 28% / 3px 3px no-repeat,
+    repeating-radial-gradient(circle at 50% 42%, transparent 0 89px, var(--hud-ring) 89px 90px),
+    linear-gradient(var(--hud-grid) 1px, transparent 1px) center 0 / 28px 28px,
+    linear-gradient(90deg, var(--hud-grid) 1px, transparent 1px) center 0 / 28px 28px;
+  mask: radial-gradient(ellipse 70% 75% at 50% 42%, #000 15%, transparent 80%);
+}
+body::after {
+  background:
+    radial-gradient(ellipse 55% 38% at 50% -6%, color-mix(in srgb, var(--acc) 13%, transparent), transparent 70%),
+    radial-gradient(ellipse 38% 32% at 92% 104%, color-mix(in srgb, var(--brand-2) 8%, transparent), transparent 70%);
+}
+
+/* 主欄兩側的刻度尺（同對話欄）：寬螢幕才畫，窄螢幕不能多出水平捲動 */
+.shell { position: relative; }
+@media (min-width: 680px) {
+  .shell::before {
+    content: ""; position: absolute; top: 24px; bottom: 24px; left: -6px; right: -6px; z-index: -1; pointer-events: none;
+    background:
+      repeating-linear-gradient(transparent 0 47px, var(--hud-line) 47px 48px) left top / 5px 100% no-repeat,
+      repeating-linear-gradient(transparent 0 11px, color-mix(in srgb, var(--hud-line) 55%, transparent) 11px 12px) left top / 2px 100% no-repeat,
+      repeating-linear-gradient(transparent 0 47px, var(--hud-line) 47px 48px) right top / 5px 100% no-repeat,
+      repeating-linear-gradient(transparent 0 11px, color-mix(in srgb, var(--hud-line) 55%, transparent) 11px 12px) right top / 2px 100% no-repeat;
+    mask: linear-gradient(transparent, #000 18%, #000 82%, transparent);
+  }
+}
+
+/* 品牌圖示：外圈一圈帳戶色小方塊（同標題列執行中的那一圈），淡淡的光 */
+
+/* 頂端的狀態列：做成讀數列，右邊一段刻度 */
+.status {
+  padding-right: 84px;
+  background:
+    repeating-linear-gradient(90deg, var(--hud-line) 0 1px, transparent 1px 6px) right 14px center / 54px 7px no-repeat,
+    var(--bg-pane);
+}
+.status[data-tone="error"] {
+  background:
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--red) 45%, transparent) 0 1px, transparent 1px 6px) right 14px center / 54px 7px no-repeat,
+    color-mix(in srgb, var(--red) 7%, var(--bg-pane));
+}
+
+/* 卡片：同帳戶卡的底（上緣帳戶色光暈、往下淡掉的細網格）與頂端中間的定位片 */
+.card {
+  --fx-bracket: color-mix(in srgb, var(--acc) 38%, var(--hud-line));
+  border-color: color-mix(in srgb, var(--acc) 14%, var(--border-2));
+  background:
+    radial-gradient(ellipse 72% 130px at 50% 0, color-mix(in srgb, var(--acc) 9%, transparent), transparent),
+    linear-gradient(transparent 10%, var(--bg-pane) 60%),
+    linear-gradient(var(--hud-grid) 1px, transparent 1px) 0 0 / 100% 16px,
+    linear-gradient(90deg, var(--hud-grid) 1px, transparent 1px) 0 0 / 16px 100%,
+    var(--bg-pane);
+}
+.card::before {
+  content: ""; position: absolute; top: -1px; left: 50%; width: 120px; height: 4px; margin-left: -60px; pointer-events: none;
+  background: color-mix(in srgb, var(--acc) 80%, transparent);
+  clip-path: polygon(0 0, 100% 0, calc(100% - 4px) 100%, 4px 100%);
+}
+.card:focus-within { --fx-led: color-mix(in srgb, var(--acc) 75%, transparent); }
+
+/* 區塊標題：菱形發光，後面接一條往右淡掉的導線、開頭一小段刻度（同儀表板的區塊標題） */
+.card h2::before, .dialog h2::before { box-shadow: 0 0 6px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+.row-head h2 { flex: 1; min-width: 0; }
+.card h2::after {
+  content: ""; flex: 1; min-width: 24px; height: 5px; margin-left: 4px;
+  background:
+    linear-gradient(90deg, var(--hud-line), transparent 90%) left center / 100% 1px no-repeat,
+    repeating-linear-gradient(90deg, var(--hud-line) 0 2px, transparent 2px 6px) left center / 38px 5px no-repeat;
+}
+
+/* 欄位：標籤前一顆小方塊、右邊是兩位數的編號（純 CSS 計數）；聚焦的那一欄小方塊亮成帳戶色 */
+.form { counter-reset: fld; }
+.form .field > span { display: flex; align-items: center; gap: 7px; counter-increment: fld; }
+.form .field > span::before { content: ""; width: 4px; height: 4px; flex: none; background: var(--hud-line); transition: background-color .15s var(--ease-out); }
+.form .field > span::after { content: "0" counter(fld); margin-left: auto; font: 10.5px/1 var(--mono); letter-spacing: .08em; color: var(--text-3); }
+.form .field:focus-within > span { color: var(--text); }
+.form .field:focus-within > span::before { background: var(--acc); box-shadow: 0 0 5px color-mix(in srgb, var(--acc) 70%, transparent); }
+
+/* 輸入框：聚焦時帳戶色的框與外光（同對話的輸入框；它就是焦點指示，不另外畫藍色外框） */
+.input:focus-visible { outline: none; }
+.input:focus {
+  border-color: color-mix(in srgb, var(--acc) 80%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 45%, transparent), 0 0 16px -4px color-mix(in srgb, var(--acc) var(--fx-glow), transparent);
+}
+
+/* 主要按鈕：帳戶色的外光 */
+.btn.acc { letter-spacing: .06em; box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 35%, transparent), 0 8px 22px -12px color-mix(in srgb, var(--acc) 80%, transparent); }
+
+/* 登入：整頁置中、窄一點，品牌疊在卡片上方置中（只看直接子元素的 :has，範圍只有這一欄） */
+.shell:has(> #view-login:not([hidden])) { width: min(420px, 100%); min-height: 100vh; min-height: 100svh; justify-content: center; }
+.shell:has(> #view-login:not([hidden])) > .brand { flex-direction: column; text-align: center; gap: 18px; margin-bottom: 8px; }
+.shell:has(> #view-login:not([hidden])) .mark { width: 92px; height: 92px; }
+.shell:has(> #view-login:not([hidden])) .brand h1 { justify-content: center; font-size: 22px; }
+#view-login { padding: 22px 24px 24px; overflow: clip; }
+#view-login .btn.acc { height: 40px; margin-top: 4px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* 卡片出現時角框從外面收進來一次（:where 壓低權重，核准成功 .fx-ok 的動畫照樣蓋過它） */
+  :where(.shell > .card:not([hidden]), .shell > section:not([hidden]) > .card)::after { animation: fx-lock-in 420ms var(--ease-out) 60ms both; }
+  /* 登入卡出現時一道帳戶色的光由上往下掃過一次（畫在表單的偽元素上、以卡片定位，卡片 overflow: clip 裁掉） */
+  #view-login:not([hidden]) .form::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 45%; pointer-events: none;
+    background: linear-gradient(transparent, color-mix(in srgb, var(--acc) 7%, transparent) 70%, color-mix(in srgb, var(--acc) 28%, transparent));
+    animation: fx-scan 900ms var(--ease-out) 180ms both;
+  }
+}
+
+/* ───── 第十批（2026-10-30 使用者選的品牌圖示「對話波形」）：C 形的對話框（珊瑚漸層弧＋末端一顆青綠點），裡面是 AI 說話時的聲波，
+   外圈虛線環慢轉（同網頁版標題列 Web/icons.js 的 BRAND_SVG，標題列平常靜止、有對話執行中才動）。
+   每個會動的部分各是一層 HTML（SVG 元素的 transform 不交給合成器），只動 transform；系統要求減少動態時停在靜止的聲波 ───── */
+.mark > .mk-ring, .mark > .mk-c { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
+.mark .mk-ring > svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.mark .mk-dash { stroke: var(--hud-line); }
+.mark > .mk-c { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--acc) var(--fx-glow), transparent)); }
+.mk-wave { position: absolute; left: 31.5%; top: 34.8%; width: 34.8%; height: 30.3%; display: flex; align-items: center; justify-content: space-between; }
+.mk-wave > i {
+  width: 11%; height: 100%; border-radius: 99px; background: linear-gradient(#F2A182, #3FD3AE 60%, #1FAE8E);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--brand-2) 50%, transparent); transform: scaleY(var(--lo, .6));
+}
+.mk-wave > i:nth-child(1) { --lo: .45; --wd: .62s; --wa: -.1s; }
+.mk-wave > i:nth-child(2) { --lo: .75; --wd: .48s; --wa: -.3s; }
+.mk-wave > i:nth-child(3) { --lo: 1; --wd: .7s; --wa: -.2s; }
+.mk-wave > i:nth-child(4) { --lo: .7; --wd: .54s; --wa: -.45s; }
+.mk-wave > i:nth-child(5) { --lo: .4; --wd: .66s; --wa: -.05s; }
+@media (prefers-reduced-motion: no-preference) {
+  .mark > .mk-ring { animation: fx-mk-spin 18s linear infinite; }
+  .mk-wave > i { animation: fx-mk-wave var(--wd) ease-in-out var(--wa) infinite alternate; }
+  .mark > .mk-c { animation: fx-mk-in 700ms var(--ease-out) both; }
+  @keyframes fx-mk-spin { to { transform: rotate(360deg); } }
+  @keyframes fx-mk-wave { from { transform: scaleY(calc(var(--lo) * .4)); } to { transform: scaleY(1); } }
+  @keyframes fx-mk-in { from { opacity: 0; transform: rotate(-90deg) scale(.8); } }
+}

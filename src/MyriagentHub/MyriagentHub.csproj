@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    Myriagent Hub：Hub 主機上的中央協調伺服器（Kestrel 自架 Windows 服務，直接聽 443）。
+    設計：docs/plans/2026-10-10-multi-device-sync.md 第 2.2、8、9 章；開發說明見本資料夾的 README.md。
+    發佈：自含式 win-x64（指令見 README.md；Hub 主機沒有 AspNetCore 10 執行階段）。
+    本專案不參考任何 SQL Server 用戶端、不含任何會啟動程序的程式碼（SEC-15，tests/MyriagentHub.Tests/Security/HubDependencyTests 斷言）。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MyriagentHub</RootNamespace>
+    <AssemblyName>MyriagentHub</AssemblyName>
+    <Product>Myriagent Hub</Product>
+    <Version>0.2.0</Version>
+    <!-- 提交時間寫進組件中繼資料 MyriagentCommitTime（Directory.Build.targets）：網頁在版號前面顯示日期時間 -->
+    <MyriagentStampCommitTime>true</MyriagentStampCommitTime>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <IsPackable>false</IsPackable>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- 9.11 資源上限：Workstation GC（閒置私有記憶體比 Server GC 少 10～25 MB、執行緒少 30 條）＋背景 GC -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- GC 硬上限 512 MB：與同機的正式 SQL Server 共存（9.11） -->
+    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="536870912" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(MyriagentHubBuild)' != ''">
+    <!-- 部署的 build 識別碼（提交前 7 碼）：.github/workflows/myriagenthub.yml 以 -p:MyriagentHubBuild=<7 碼> 發佈，
+         /healthz、status\running.json、manifest 與安裝腳本的健康閘門都比對它（Hosting/BuildInfo.cs）。
+         沒帶時改用 SDK 的 SourceRevisionId（InformationalVersion 的「+」後面）前 7 碼。 -->
+    <AssemblyMetadata Include="MyriagentHubBuild" Value="$(MyriagentHubBuild)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Certes" Version="4.1.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.12" />
+    <!-- 裝置 hub 的 Newtonsoft JSON 協定（SyncJson 的設定；SignalR 伺服器本身在共用架構裡） -->
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.NewtonsoftJson" Version="10.0.13" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 第 3 階段起參考桌面與伺服器共用的協定（同步 DTO、裝置名冊與 Hello／Prove 簽章的規則）；
+         這是伺服器唯一參考的 Myriagent 組件，桌面程式本身一律不參考（HubDependencyTests 斷言） -->
+    <ProjectReference Include="..\Myriagent.Protocol\Myriagent.Protocol.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 瀏覽器閘道（WP3.6）：與桌面同一份網頁（不複製），以 app/檔名 嵌入、在 /app/ 供應（Web/AssetServer.cs）。
+         名稱是平的（同桌面 Myriagent.csproj 的 Web/%(Filename)%(Extension)）：Web 資料夾不得有子資料夾。這不是組件參考 -->
+    <EmbeddedResource Include="..\Myriagent\Web\**\*" LogicalName="app/%(Filename)%(Extension)" WithCulture="false" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 網頁與預設設定一律複製到輸出資料夾：服務的內容根目錄是程式所在資料夾，測試專案也從自己的輸出資料夾讀 -->
+    <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <InternalsVisibleTo Include="MyriagentHub.Tests" />
+    <!-- 模擬被攻破的伺服器（tools/fake-server，WP4.4；設計 S11、SEC-20）：直接使用伺服器的 hub 與信封元件，組件名稱固定 FakeServer -->
+    <InternalsVisibleTo Include="FakeServer" />
+  </ItemGroup>
+
+</Project>
