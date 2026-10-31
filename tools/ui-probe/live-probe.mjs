@@ -4761,10 +4761,22 @@ async function runMobileScrollSteady() {
     return { vh: innerHeight, app: r(app), cinfo: ci ? r(ci) : null, composer: comp ? r(comp) : null, first: r(app.firstElementChild) };
   }, sel);
   await shot(app, 'mobile-safe-area-390');
+  // iPhone、iPad（app.js 標的 data-os="ios"）：上緣再讓 32px 避開狀態列底下的模糊漸層，下緣只留安全區域的四成（34 × .4 = 13.6）
+  const ios = await page.evaluate((s) => {
+    document.documentElement.dataset.os = 'ios';
+    const r = (el) => { const b = el.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom) }; };
+    const app = document.querySelector('.app');
+    const ci = document.querySelector(s + ' .cinfo');
+    const out = { vh: innerHeight, app: r(app), cinfo: ci ? r(ci) : null, first: r(app.firstElementChild) };
+    delete document.documentElement.dataset.os;
+    return out;
+  }, sel);
   await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, bottom: 0, left: 0, right: 0 } }).catch(() => {});
   await cdp.detach().catch(() => {});
   check('hubMobileSafeArea', safe.app.top === 47 && safe.app.bottom === safe.vh - 34 && safe.first.top >= 47 && !!safe.cinfo && safe.cinfo.bottom <= safe.vh - 34,
     safe);
+  check('hubMobileSafeAreaIos', ios.app.top === 47 + 32 && ios.first.top >= 79 && Math.abs(ios.app.bottom - (ios.vh - 13.6)) <= 1 && !!ios.cinfo && ios.cinfo.bottom <= ios.vh - 13,
+    ios);
   await HP.closePage(app);
 }
 

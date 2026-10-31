@@ -78,15 +78,23 @@ export function isHandheld({ coarsePointer, userAgent, maxTouchPoints } = {}) {
 }
 
 /**
+ * 是不是 iPhone、iPad：使用者代理是 iPhone、iPad、iPod，或自稱 Macintosh 但有多點觸控（iPadOS 的 Safari）。dictationUtterances 與
+ * app.js 的 data-os="ios"（app.css 依它調上下緣的留白）用。不用 CSS 的 @supports (-webkit-touch-callout: none) 判斷：2026-10-30 試過，iPhone 18 的網頁版沒有套用
+ */
+export function isAppleTouch({ userAgent, maxTouchPoints } = {}) {
+  const ua = typeof userAgent === 'string' ? userAgent : '';
+  if (/iPhone|iPad|iPod/.test(ua)) return true;
+  return /Macintosh/.test(ua) && Number(maxTouchPoints) > 1;
+}
+
+/**
  * 一次只聽一句、聽完以同一個辨識器自己接著聽下一句嗎（iPhone、iPad；iPadOS 的 Safari 自稱 Macintosh，以觸控點數認出來）。
  * iOS 的連續辨識（continuous）不穩，每次按麥克風都新建一個辨識器時，開 app 之後只有第一次收得到字、之後的照樣發 start 卻一個字都沒有
  * （WebKit bug 321436 的 iOS 27.2 回報：頁面沒播過任何聲音也一樣；2026-10-28 使用者回報主畫面 app 關掉語音輸入再開就再也打不出字）。
  * 在 iPhone 上修好的做法都是 continuous=false、整頁共用同一個辨識器、一句結束後稍等再 start、停下只用 stop()
  */
 export function dictationUtterances({ userAgent, maxTouchPoints } = {}) {
-  const ua = typeof userAgent === 'string' ? userAgent : '';
-  if (/iPhone|iPad|iPod/.test(ua)) return true;
-  return /Macintosh/.test(ua) && Number(maxTouchPoints) > 1;
+  return isAppleTouch({ userAgent, maxTouchPoints });
 }
 
 /** 一句聽完之後隔多久接著聽下一句（毫秒）：讓 iOS 先放開這一句的錄音，馬上 start 常收不到聲音 */

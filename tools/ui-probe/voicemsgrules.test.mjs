@@ -58,6 +58,17 @@ test('手機與平板：觸控為主、手機平板的使用者代理、iPadOS �
   assert.equal(V.isHandheld(), false);
 });
 
+test('iPhone、iPad：使用者代理是 iPhone／iPad，或 iPadOS 自稱 Macintosh 但有多點觸控；Android、Mac、Windows 不算', () => {
+  const mac = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+  assert.equal(V.isAppleTouch({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148', maxTouchPoints: 5 }), true);
+  assert.equal(V.isAppleTouch({ userAgent: 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' }), true);
+  assert.equal(V.isAppleTouch({ userAgent: mac, maxTouchPoints: 5 }), true, 'iPadOS 的 Safari');
+  assert.equal(V.isAppleTouch({ userAgent: mac, maxTouchPoints: 0 }), false, 'Mac');
+  assert.equal(V.isAppleTouch({ userAgent: 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/141.0 Mobile Safari/537.36', maxTouchPoints: 5 }), false, 'Android');
+  assert.equal(V.isAppleTouch({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/141.0 Safari/537.36', maxTouchPoints: 10 }), false);
+  assert.equal(V.isAppleTouch(), false);
+});
+
 test('聽寫的字接到游標處：英數相鄰補空白、中文不補；沒有字時原樣', () => {
   assert.deepEqual(V.joinTranscript('請幫我', '整理報表', ''), { value: '請幫我整理報表', caret: 7 });
   assert.deepEqual(V.joinTranscript('open', 'README', 'now'), { value: 'open README now', caret: 12 });

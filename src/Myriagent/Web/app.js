@@ -36,7 +36,7 @@ import { retryNow } from './transport.js';
 import { remoteFromInit, applySync, applyDevices, trackDeviceLinks, nextLinkChange, reconnectGraceOf, connectionBanner, syncDot } from './remoterules.js';
 import { layoutDeviceFilter, applyItemPatch, patchReopenDue, mergeHeaderLists } from './liverules.js';
 import { failureOf } from './sendrules.js';
-import { isHandheld } from './voicemsgrules.js';
+import { isAppleTouch, isHandheld } from './voicemsgrules.js';
 import { pageTitle } from './titlerules.js';
 import { applySettings } from './theme.js';
 import { toast, handleEscape, hasLayer } from './ui.js';
@@ -86,6 +86,8 @@ const coarseMq = window.matchMedia('(pointer: coarse)');
  * 側欄照常並排，只有帳戶區和手機版一樣預設收起（2026-10-24 使用者要求；瀏覽器版與桌面都是）
  */
 const handheld = () => isHandheld({ coarsePointer: coarseMq.matches, userAgent: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints });
+// iPhone、iPad：app.css 依 data-os="ios" 讓開狀態列底下的模糊漸層、縮小手勢列上方的留白
+if (isAppleTouch({ userAgent: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints })) document.documentElement.dataset.os = 'ios';
 
 applySettings(state.settings);
 // 瀏覽器版：一開始（applyChrome 之前）就標 mode-hub（沒有這台的 CLI 徽章、同步小點）

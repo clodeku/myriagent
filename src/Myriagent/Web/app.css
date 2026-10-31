@@ -147,14 +147,17 @@ html { touch-action: manipulation; }
 /* 安全區域（index.html 的 viewport-fit=cover；2026-10-25 使用者回報：iPhone 上畫面上下都被截掉——最上面那排在狀態列的漸層底下、
    最下面那行貼在手勢列上）：整個 app 縮在安全區域裡，外面露出 body 的底色。桌面與沒有瀏海的裝置 env() 是 0，不變。
    上緣一律用 --safe-top：iOS 26 起狀態列底下的模糊漸層（捲動邊緣效果）比安全區域還往下延伸約 30pt（2026-10-30 使用者回報 iPhone 18 的網頁版：
-   頂列貼著安全區域，上半部被糊掉、變暗），iOS（只有 WebKit 認得 -webkit-touch-callout）上緣有安全區域時再多讓 32px；
-   min(安全區域 × 1000, 32px) 在沒有安全區域時是 0（Safari 網址列在上方、橫向） */
-:root { --safe-top: env(safe-area-inset-top, 0px); }
-@supports (-webkit-touch-callout: none) {
-  :root { --safe-top: calc(env(safe-area-inset-top, 0px) + min(env(safe-area-inset-top, 0px) * 1000, 32px)); }
+   頂列貼著安全區域，上半部被糊掉、變暗），iPhone、iPad（app.js 標的 data-os="ios"；CSS 的 @supports (-webkit-touch-callout) 在 iPhone 18 沒有套用）
+   上緣有安全區域時再多讓 32px，min(安全區域 × 1000, 32px) 在沒有安全區域時是 0（Safari 網址列在上方、橫向）。
+   下緣的 --safe-bottom 在 iPhone、iPad 只留手勢列安全區域的四成（2026-10-31 使用者回報讓得太多：最下面那行只是 token 數與燈號、不用點，
+   34pt 的手勢列區域約 14pt 就離開了橫條）；對話框、燈箱的控制鈕要點，照樣留整個安全區域 */
+:root { --safe-top: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); }
+:root[data-os="ios"] {
+  --safe-top: calc(env(safe-area-inset-top, 0px) + min(env(safe-area-inset-top, 0px) * 1000, 32px));
+  --safe-bottom: calc(env(safe-area-inset-bottom, 0px) * .4);
 }
 body {
-  padding: var(--safe-top) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  padding: var(--safe-top) env(safe-area-inset-right, 0px) var(--safe-bottom) env(safe-area-inset-left, 0px);
   background: var(--bg-app);
   color: var(--text);
   font: 13px/1.45 var(--font);
@@ -282,7 +285,7 @@ input[type="search"]::-webkit-search-cancel-button { filter: grayscale(1); opaci
    比看得到的區域高，body 又不捲動，最下面的輸入區被瀏覽器的工具列蓋住、點不到。不認得 dvh 的舊瀏覽器照用前一行的 100vh */
 .app {
   display: flex; flex-direction: column; height: 100vh; height: 100dvh;
-  height: calc(100dvh - var(--safe-top) - env(safe-area-inset-bottom, 0px));
+  height: calc(100dvh - var(--safe-top) - var(--safe-bottom));
 }
 .body { flex: 1; min-height: 0; display: flex; }
 /* 側欄＋工作區的大小（工作區的格狀看高度決定要不要捲動）；選單、對話框、提示都掛在 document.body，不在這個容器裡 */
