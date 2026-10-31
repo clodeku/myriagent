@@ -84,6 +84,7 @@ export function makeAccounts(now) {
       email: 'lin.dev@example.com', plan: 'Pro', status: 'ready', statusText: '已登入（ChatGPT）', safeMode: false, loginBusy: false,
       usage: {
         fetchedAt: now - 4 * MIN, stale: false, source: 'api', error: null, credits: '12345.68', note: null,
+        resetCredits: 1, resetCreditExpiresAt: now + 9 * DAY + 3 * HOUR,
         windows: [win(now, 'codex:primary', '每週', 18, 5 * DAY + 2 * HOUR, 'weekly', 31)],
       },
       sessions: { open: 1, running: 0, waiting: 0 },
@@ -234,10 +235,11 @@ const CODEX_MODELS = [
 export function makeConversationDefaults() {
   const rows = (models, efforts) => models.map((m) => Object.assign({}, m, { effort: efforts[m.value] || null }));
   return {
-    Claude: { model: 'opus', permission: 'Auto', permissionModes: CLAUDE_MODES, models: rows(CLAUDE_MODELS, { default: 'high', opus: 'max' }) },
-    Codex: { model: null, permission: 'Ask', permissionModes: CODEX_MODES, models: rows(CODEX_MODELS, { 'gpt-6-astra': 'ultra' }) },
-    Antigravity: { model: null, permission: 'AcceptEdits', permissionModes: AGY_MODES, models: rows(AGY_MODELS, {}) },
-    Grok: { model: null, permission: 'Ask', permissionModes: GROK_MODES, models: rows(GROK_MODELS, {}) },
+    // 自動壓縮上限（AutoCompactRules）：只有 Claude、Codex 有範圍
+    Claude: { model: 'opus', permission: 'Auto', permissionModes: CLAUDE_MODES, models: rows(CLAUDE_MODELS, { default: 'high', opus: 'max' }), autoCompact: null, autoCompactRange: { min: 67000, max: 967000 } },
+    Codex: { model: null, permission: 'Ask', permissionModes: CODEX_MODES, models: rows(CODEX_MODELS, { 'gpt-6-astra': 'ultra' }), autoCompact: 200000, autoCompactRange: { min: 20000, max: 2000000 } },
+    Antigravity: { model: null, permission: 'AcceptEdits', permissionModes: AGY_MODES, models: rows(AGY_MODELS, {}), autoCompact: null, autoCompactRange: null },
+    Grok: { model: null, permission: 'Ask', permissionModes: GROK_MODES, models: rows(GROK_MODELS, {}), autoCompact: null, autoCompactRange: null },
   };
 }
 

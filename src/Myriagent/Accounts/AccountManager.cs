@@ -1712,17 +1712,89 @@ internal sealed class AccountManager : IDisposable
             CapabilitiesDiscovered?.Invoke(account.Id, new AccountCapabilities(probe.Models, Array.Empty<AgentSlashCommand>()));
         if (probe.Limits != null)
         {
-            var (windows, credits) = UsageRules.ParseCodexRateLimits(probe.Limits);
-            // 看不懂的回應（沒有任何額度桶）當成查詢失敗，保留上次的資料與走勢；桶裡沒有時間窗則是合法的（沒有用量上限的方案）
-            if (windows.Count == 0 && !UsageRules.HasCodexRateLimits(probe.Limits))
-                MarkStale(account.Id, "用量回應的格式無法解析");
-            else
-                StoreUsage(account.Id, new UsageSnapshot(DateTimeOffset.UtcNow, "api", windows, credits, UsageRules.DescribeCodexBlock(probe.Limits), null, false));
+            ApplyCodexLimits(account.Id, probe.Limits);
         }
         else if (probe.Status == AccountStatus.Ready && probePlan.RateLimits)
         {
             // 閘門擋下、沒查用量時不標過期（畫面顯示共享的用量）
             MarkStale(account.Id, probe.Error);
+        }
+    }
+
+    /// <summary>Codex account/rateLimits/read 的結果存成這個帳戶的用量（UI 執行緒）</summary>
+    private void ApplyCodexLimits(string accountId, JObject limits)
+    {
+        var (windows, credits) = UsageRules.ParseCodexRateLimits(limits);
+        // 看不懂的回應（沒有任何額度桶）當成查詢失敗，保留上次的資料與走勢；桶裡沒有時間窗則是合法的（沒有用量上限的方案）
+        if (windows.Count == 0 && !UsageRules.HasCodexRateLimits(limits))
+        {
+            MarkStale(accountId, "用量回應的格式無法解析");
+            return;
+        }
+        var (resetCredits, resetExpires) = UsageRules.ParseCodexResetCredits(limits);
+        StoreUsage(accountId, new UsageSnapshot(DateTimeOffset.UtcNow, "api", windows, credits, UsageRules.DescribeCodexBlock(limits), null, false,
+            resetCredits, resetExpires));
+    }
+
+    // ───────────────────────────── Codex 免費重置 ─────────────────────────────
+
+    /// <summary>正在使用免費重置的帳戶（同一個帳戶同時只送一次；帳戶卡的「使用重置」顯示進行中）</summary>
+    private readonly HashSet<string> resetCreditBusy = new(StringComparer.Ordinal);
+
+    /// <summary>這個帳戶正在使用免費重置（AccountView 的 resetCreditBusy）</summary>
+    public bool IsResetCreditBusy(string accountId) => resetCreditBusy.Contains(accountId);
+
+    /// <summary>
+    /// 使用一次 Codex 的免費重置（<c>account/rateLimitResetCredit/consume</c>，會真的用掉一次；網頁先確認過）。UI 執行緒呼叫，回給使用者看的結果。
+    /// 檢查不過（<see cref="CodexResetCreditRules.Block"/>）什麼都不做；送了之後不論結果，以同一個 app-server 重讀用量存起來
+    /// （不經用量閘門：剛重置的額度與剩下的次數要馬上看得到）
+    /// </summary>
+    public async Task<CodexResetCreditResult> UseCodexResetCreditAsync(string accountId)
+    {
+        var account = Find(accountId);
+        var launcher = account?.Provider == AgentProvider.Codex ? ResolveLauncher(AgentProvider.Codex) : null;
+        var block = CodexResetCreditRules.Block(account?.Provider, account is null ? AccountStatus.Checking : GetState(accountId).Status,
+            GetUsage(accountId)?.ResetCredits, resetCreditBusy.Contains(accountId), CliPaused(AgentProvider.Codex), launcher != null);
+        if (block != null || account is null || launcher is null)
+            return new CodexResetCreditResult(false, block ?? "找不到這個帳戶", "info");
+
+        resetCreditBusy.Add(accountId);
+        RaiseChanged();
+        var lifetime = LifetimeOf(accountId);
+        try
+        {
+            var (result, limits) = await Task.Run(async () =>
+            {
+                CodexResetCreditResult outcome;
+                JObject? read = null;
+                try
+                {
+                    await using var client = await CodexAppServerClient.StartAsync(launcher, env => AccountRules.ApplyEnvironment(account, env), lifetime);
+                    var (consumed, error) = await client.RequestAsync(CodexResetCreditRules.ConsumeMethod, CodexResetCreditRules.BuildParams(Guid.NewGuid()),
+                        CodexResetCreditRules.ConsumeTimeout, lifetime);
+                    outcome = CodexResetCreditRules.Describe(consumed, error);
+                    (read, _) = await client.RequestAsync("account/rateLimits/read", null, TimeSpan.FromSeconds(30), lifetime);
+                }
+                catch (OperationCanceledException)
+                {
+                    outcome = new CodexResetCreditResult(false, "帳戶已移除或 app 正在結束，沒有完成", "info");
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+                {
+                    outcome = CodexResetCreditRules.Describe(null, ex.Message);
+                }
+                return (outcome, read);
+            });
+            if (!disposed && Find(accountId) != null && limits != null)
+                ApplyCodexLimits(accountId, limits);
+            Log.Info($"Codex 免費重置（{accountId}）：{result.Text}");
+            return result;
+        }
+        finally
+        {
+            resetCreditBusy.Remove(accountId);
+            if (!disposed)
+                RaiseChanged();
         }
     }
 
@@ -2059,7 +2131,9 @@ internal sealed class AccountManager : IDisposable
             return;
         var current = GetUsage(accountId);
         var merged = UsageRules.Merge(current?.Windows, updates);
-        var next = new UsageSnapshot(DateTimeOffset.UtcNow, "session", merged, credits ?? current?.Credits, note ?? current?.Note, null, false);
+        // 免費重置次數只有官方用量端點帶（rateLimits/updated 沒有），沿用上次查到的
+        var next = new UsageSnapshot(DateTimeOffset.UtcNow, "session", merged, credits ?? current?.Credits, note ?? current?.Note, null, false,
+            current?.ResetCredits, current?.ResetCreditExpiresAt);
         StoreUsage(accountId, next);
         // 每個 API 請求都回報一次、數字通常沒變：畫面上看得到的都一樣就不通知（以前每次都讓帳戶卡整份重算、網頁重整側欄與每個開著的對話）
         if (!UsageRules.SameForView(current, next))

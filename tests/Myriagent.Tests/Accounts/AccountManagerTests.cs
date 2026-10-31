@@ -285,6 +285,22 @@ public sealed class AccountManagerTests : IDisposable
     }
 
     [Fact]
+    public void ReportSessionRateLimit_Codex的稀疏更新沿用上次查到的免費重置次數()
+    {
+        var expires = DateTimeOffset.FromUnixTimeSeconds(1794007837);
+        manager.SeedUsage("x1", new UsageSnapshot(DateTimeOffset.UtcNow.AddMinutes(-5), "api",
+            [new UsageWindow("codex:10080", "每週", 9, null)], null, null, null, false, 2, expires));
+
+        manager.ReportSessionRateLimit("x1", AgentProvider.Codex, JObject.Parse("""{"limitId":"codex","primary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":1791959804}}"""));
+
+        var usage = manager.GetUsage("x1")!;
+        usage.Source.Should().Be("session");
+        usage.Windows.Single().Percent.Should().Be(42);
+        usage.ResetCredits.Should().Be(2);
+        usage.ResetCreditExpiresAt.Should().Be(expires);
+    }
+
+    [Fact]
     public void Dispose時把用量歷史寫回磁碟()
     {
         manager.ReportSessionRateLimit("x1", AgentProvider.Codex, JObject.Parse("""{"limitId":"codex","primary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":1791959804}}"""));

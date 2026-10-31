@@ -196,7 +196,10 @@ internal sealed record PrefsSetPayload(string Key, JToken Value, long Version);
 /// <summary>用量的一個時間窗（桌面 UsageWindow 的線上格式）</summary>
 internal sealed record SharedUsageWindow(string Key, string Label, double Percent, long? ResetsAt, bool Locked);
 
-/// <summary>共享的用量快照（桌面 UsageSnapshot 的線上格式）；<see cref="Source"/> 是 <c>api</c>（官方用量端點）或 <c>session</c>（對話中的 rate limit 事件）</summary>
+/// <summary>
+/// 共享的用量快照（桌面 UsageSnapshot 的線上格式）；<see cref="Source"/> 是 <c>api</c>（官方用量端點）或 <c>session</c>（對話中的 rate limit 事件）。
+/// <see cref="ResetCredits"/>、<see cref="ResetCreditExpiresAt"/>（毫秒）是 Codex 的免費重置次數與最早到期時間（2026-10-30 加的，舊版不送、送了舊版也忽略）
+/// </summary>
 internal sealed record SharedUsage(
     long FetchedAt,
     string Source,
@@ -204,7 +207,9 @@ internal sealed record SharedUsage(
     string? Credits,
     string? Note,
     string? Error,
-    bool Stale);
+    bool Stale,
+    int? ResetCredits = null,
+    long? ResetCreditExpiresAt = null);
 
 /// <summary><c>usage.snapshot</c>（伺服器寫）：某邏輯帳戶最新的用量，來自負責查詢的裝置或任何裝置的對話中 rate limit 事件</summary>
 internal sealed record UsageSnapshotPayload(string LogicalAccountId, SharedUsage Usage, string SourceDeviceId, long? Term);

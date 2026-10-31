@@ -105,3 +105,29 @@ test('normalizeHubUrl：補 https://、只留 origin；http、路徑、查詢字
     assert.equal(R.normalizeHubUrl(bad), null, String(bad));
   }
 });
+
+test('parseTokens：k／m、千分位、全形；空白與 default 是 null；看不懂的是 undefined（同宿主的 AutoCompactRules.TryParse）', () => {
+  assert.equal(R.parseTokens('400k'), 400000);
+  assert.equal(R.parseTokens(' 400K '), 400000);
+  assert.equal(R.parseTokens('400,000'), 400000);
+  assert.equal(R.parseTokens('0.4M'), 400000);
+  assert.equal(R.parseTokens('1.5m'), 1500000);
+  assert.equal(R.parseTokens('４００ｋ'), 400000);
+  assert.equal(R.parseTokens('123456'), 123456);
+  assert.equal(R.parseTokens(''), null);
+  assert.equal(R.parseTokens('  '), null);
+  assert.equal(R.parseTokens('Default'), null);
+  assert.equal(R.parseTokens(null), null);
+  for (const bad of ['abc', '0', '-5k', '4e5', '1.2.3k', 'k', '400kb', '2000000000']) assert.equal(R.parseTokens(bad), undefined, bad);
+});
+
+test('fmtTokens：整百寫成 k、整十萬以上寫成 M，其他照數字；null 是空字串', () => {
+  assert.equal(R.fmtTokens(400000), '400k');
+  assert.equal(R.fmtTokens(367500), '367.5k');
+  assert.equal(R.fmtTokens(1500000), '1.5M');
+  assert.equal(R.fmtTokens(1000000), '1M');
+  assert.equal(R.fmtTokens(967000), '967k');
+  assert.equal(R.fmtTokens(123456), '123456');
+  assert.equal(R.fmtTokens(999), '999');
+  assert.equal(R.fmtTokens(null), '');
+});

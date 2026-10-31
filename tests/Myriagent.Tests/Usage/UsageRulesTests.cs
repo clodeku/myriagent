@@ -212,6 +212,46 @@ public class UsageRulesTests
     }
 
     [Fact]
+    public void ParseCodexResetCredits_實測回應_次數與最早到期時間()
+    {
+        UsageRules.ParseCodexResetCredits(JObject.Parse(RealSamples.CodexRateLimitsRead))
+            .Should().Be(((int?)1, (DateTimeOffset?)DateTimeOffset.FromUnixTimeSeconds(1794007837)));
+    }
+
+    [Fact]
+    public void ParseCodexResetCredits_沒有可用_沒有欄位_格式不對_明細只看還能用的()
+    {
+        (int? Count, DateTimeOffset? NextExpiresAt) Parse(string json) => UsageRules.ParseCodexResetCredits(JObject.Parse(json));
+
+        // codex-cli 0.166.0 實測（2026-10-30，兩個帳戶都沒有）
+        Parse("""{"rateLimitResetCredits":{"availableCount":0,"credits":[]}}""").Should().Be(((int?)0, (DateTimeOffset?)null));
+        Parse("""{"rateLimits":{"primary":{"usedPercent":1}}}""").Should().Be(((int?)null, (DateTimeOffset?)null), "舊版 CLI、對話中的 rateLimits/updated");
+        Parse("""{"rateLimitResetCredits":null}""").Should().Be(((int?)null, (DateTimeOffset?)null));
+        Parse("""{"rateLimitResetCredits":{"availableCount":"2"}}""").Should().Be(((int?)null, (DateTimeOffset?)null));
+        UsageRules.ParseCodexResetCredits(null).Should().Be(((int?)null, (DateTimeOffset?)null));
+        Parse("""{"rateLimitResetCredits":{"availableCount":2,"credits":null}}""").Should().Be(((int?)2, (DateTimeOffset?)null), "只知道次數");
+        Parse("""{"rateLimitResetCredits":{"availableCount":-3}}""").Count.Should().Be(0);
+        Parse("""{"rateLimitResetCredits":{"availableCount":99999999999999999999999}}""").Count.Should().Be(UsageRules.MaxResetCredits);
+        Parse("""
+            {"rateLimitResetCredits":{"availableCount":3,"credits":[
+              {"id":"a","status":"redeemed","grantedAt":1,"expiresAt":1791000000,"resetType":"codexRateLimits"},
+              {"id":"b","status":"available","grantedAt":1,"expiresAt":null,"resetType":"codexRateLimits"},
+              {"id":"c","status":"available","grantedAt":1,"expiresAt":1793000000,"resetType":"codexRateLimits"},
+              {"id":"d","status":"available","grantedAt":1,"expiresAt":1792000000,"resetType":"codexRateLimits"},
+              null]}}
+            """).Should().Be(((int?)3, (DateTimeOffset?)DateTimeOffset.FromUnixTimeSeconds(1792000000)), "已兌換的不算、不會到期的略過");
+    }
+
+    [Fact]
+    public void SameForView_免費重置次數不同算不一樣()
+    {
+        var a = new UsageSnapshot(DateTimeOffset.UnixEpoch, "api", [], null, null, null, false, 1, null);
+        UsageRules.SameForView(a, a with { FetchedAt = DateTimeOffset.UnixEpoch.AddMinutes(1) }).Should().BeTrue();
+        UsageRules.SameForView(a, a with { ResetCredits = 0 }).Should().BeFalse();
+        UsageRules.SameForView(a, a with { ResetCreditExpiresAt = DateTimeOffset.UnixEpoch.AddDays(3) }).Should().BeFalse();
+    }
+
+    [Fact]
     public void ParseCodexRateLimits_多個額度桶_名稱加上LimitName()
     {
         var json = JObject.Parse("""

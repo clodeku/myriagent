@@ -565,7 +565,7 @@ public sealed partial class AccountViewRulesTests
             },
             Link("d_3", "ready"),
         };
-        var usage = new SharedUsage(6000, "api", [new SharedUsageWindow("session", "5 小時", 42, 7000, false)], null, null, null, false);
+        var usage = new SharedUsage(6000, "api", [new SharedUsageWindow("session", "5 小時", 42, 7000, false)], null, null, null, false, 1, 8000);
         var history = new Dictionary<string, IReadOnlyList<UsagePoint>> { ["session"] = [new(4000, 10), new(5000, 20)] };
 
         var view = AccountViewRules.Account(Acc(label: "工作", expectedEmail: "me@example.com"), links, usage, history, "d_1", devices);
@@ -593,6 +593,8 @@ public sealed partial class AccountViewRulesTests
                   { "key": "session", "label": "5 小時", "percent": 42.0, "resetsAt": 7000, "severity": "ok", "history": [[4000, 10.0], [5000, 20.0]] }
                 ],
                 "credits": null,
+                "resetCredits": 1,
+                "resetCreditExpiresAt": 8000,
                 "note": null
               },
               "sessions": { "open": 2, "running": 1, "waiting": 0, "background": 0, "programs": 0, "subagents": 0 },

@@ -112,6 +112,8 @@ internal static class RemoteCommandCatalog
         "setConversationDefault", "cliApplyNow", "cliContinue", "cliCancelUpdate",
         "chooseFolder", "attach", "addFiles", "pasteImage", "addPathAttachment",
         "openFolder", "openPath", "revealPath", "saveFile", "openLink", "copyText", "popout", "accountOpenFolder",
+        // Codex 的免費重置（2026-10-31）：會真的用掉一次，只在這台的儀表板按
+        "accountResetCredit",
         // 多視窗（2026-10-25）：這台的視窗與分頁怎麼排，只有這台的視窗能做
         "newWindow", "tabDrag", "tabDragEnd", "tabMoveIn", "moveToNewWindow", "closeWindow",
         // 自動重新命名（標題的右鍵選單）：用這台的帳戶跑 CLI 產生標題

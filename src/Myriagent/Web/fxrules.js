@@ -811,6 +811,26 @@ export function smoothRate(prev, next) {
 }
 
 /**
+ * Codex 的免費重置次數（儀表板帳戶卡的一行，web-protocol Usage 的 resetCredits）：
+ * 不知道（沒有欄位、不是非負整數）回 null；有就回 { count, expiresAt }，expiresAt 只在還有次數、最早到期的時間還沒到時才有，否則 null
+ */
+export function resetCreditsInfo(usage, now) {
+  const count = usage ? usage.resetCredits : null;
+  if (!Number.isInteger(count) || count < 0) return null;
+  const at = Number(usage.resetCreditExpiresAt);
+  return { count, expiresAt: count > 0 && Number.isFinite(at) && at > now ? at : null };
+}
+
+/**
+ * 帳戶卡的「使用重置」（accountResetCredit）：這台已登入的 Codex 帳戶、還有次數才給；瀏覽器版、其他電腦的帳戶（remoteOnly）不給。
+ * 回 null（不顯示）或 { busy }（正在使用中，按鈕停用）
+ */
+export function resetCreditAction(a, info, hub) {
+  if (hub || !a || a.provider !== 'Codex' || a.remoteOnly || a.status !== 'ready' || !info || info.count <= 0) return null;
+  return { busy: !!a.resetCreditBusy };
+}
+
+/**
  * 用量燃燒預估（儀表板的圓環）：照這個額度週期到目前的平均速度，什麼時候用完。
  * 週期至少過了一成而且 10 分鐘、用量至少 5% 才算（太早算出來的不準）；會比重置時間早用完才回 { at（用完的時間）, inMs（還有多久）, earlyMs（比重置早多久） }，
  * 其他（認不得時間窗長度、已經用完、來得及重置）回 null

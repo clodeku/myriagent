@@ -166,7 +166,9 @@ internal static class UsageSyncRules
             CatalogSyncRules.CleanText(snapshot.Credits, CatalogSyncRules.MaxShortTextLength),
             CatalogSyncRules.CleanText(snapshot.Note, CatalogSyncRules.MaxTextLength),
             CatalogSyncRules.CleanText(snapshot.Error, CatalogSyncRules.MaxTextLength),
-            snapshot.Stale);
+            snapshot.Stale,
+            snapshot.ResetCredits is { } count ? Math.Clamp(count, 0, UsageRules.MaxResetCredits) : null,
+            snapshot.ResetCreditExpiresAt?.ToUnixTimeMilliseconds() is > 0 and var expires ? expires : null);
     }
 
     /// <summary>
@@ -214,7 +216,9 @@ internal static class UsageSyncRules
             usage.Credits,
             usage.Note,
             usage.Error,
-            usage.Stale);
+            usage.Stale,
+            usage.ResetCredits is { } count ? Math.Clamp(count, 0, UsageRules.MaxResetCredits) : null,
+            usage.ResetCreditExpiresAt is > 0 and <= MaxUnixMs ? DateTimeOffset.FromUnixTimeMilliseconds(usage.ResetCreditExpiresAt.Value) : null);
     }
 
     /// <summary>

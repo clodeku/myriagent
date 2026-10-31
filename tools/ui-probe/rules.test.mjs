@@ -2320,6 +2320,32 @@ test('fxrules：上傳讀數——大小、速度；單位相同時前面不寫�
   assert.equal(FX.smoothRate(100, null), 100);
 });
 
+test('fxrules：Codex 的免費重置次數——不知道回 null；0 次也列；到期時間只在有次數、還沒到時給', () => {
+  const now = 10 * 3600e3;
+  assert.equal(FX.resetCreditsInfo(null, now), null);
+  assert.equal(FX.resetCreditsInfo({ credits: '12' }, now), null, '沒有欄位（Claude、舊版的電腦）');
+  assert.equal(FX.resetCreditsInfo({ resetCredits: null }, now), null);
+  assert.equal(FX.resetCreditsInfo({ resetCredits: -1 }, now), null);
+  assert.equal(FX.resetCreditsInfo({ resetCredits: 1.5 }, now), null);
+  assert.deepEqual(FX.resetCreditsInfo({ resetCredits: 0, resetCreditExpiresAt: now + 1 }, now), { count: 0, expiresAt: null });
+  assert.deepEqual(FX.resetCreditsInfo({ resetCredits: 2, resetCreditExpiresAt: now + 1 }, now), { count: 2, expiresAt: now + 1 });
+  assert.deepEqual(FX.resetCreditsInfo({ resetCredits: 2, resetCreditExpiresAt: now }, now), { count: 2, expiresAt: null }, '已經到期');
+  assert.deepEqual(FX.resetCreditsInfo({ resetCredits: 1, resetCreditExpiresAt: null }, now), { count: 1, expiresAt: null }, '不會到期');
+});
+
+test('fxrules：「使用重置」只給這台已登入、還有次數的 Codex 帳戶；瀏覽器版與其他電腦的帳戶不給', () => {
+  const a = { provider: 'Codex', status: 'ready', remoteOnly: false, resetCreditBusy: false };
+  const two = { count: 2, expiresAt: null };
+  assert.deepEqual(FX.resetCreditAction(a, two, false), { busy: false });
+  assert.deepEqual(FX.resetCreditAction({ ...a, resetCreditBusy: true }, two, false), { busy: true });
+  assert.equal(FX.resetCreditAction(a, two, true), null, '瀏覽器版');
+  assert.equal(FX.resetCreditAction({ ...a, remoteOnly: true }, two, false), null);
+  assert.equal(FX.resetCreditAction({ ...a, status: 'notLoggedIn' }, two, false), null);
+  assert.equal(FX.resetCreditAction({ ...a, provider: 'Claude' }, two, false), null);
+  assert.equal(FX.resetCreditAction(a, { count: 0, expiresAt: null }, false), null, '沒有次數');
+  assert.equal(FX.resetCreditAction(a, null, false), null, '不知道次數');
+});
+
 test('fxrules：用量燃燒預估——照這個週期的平均速度會比重置早用完才算；資料太少、已經用完、認不得時間窗不算', () => {
   const now = 10 * 3600e3;
   const H = 3600e3;

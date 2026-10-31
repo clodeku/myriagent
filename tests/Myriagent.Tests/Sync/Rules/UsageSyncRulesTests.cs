@@ -151,6 +151,7 @@ public sealed class UsageSyncRulesTests
         UsageSyncRules.MaxWindows.Should().Be(ServerRulesMirror.MaxWindows);
         UsageSyncRules.MaxWindowKeyLength.Should().Be(ServerRulesMirror.MaxWindowKeyLength);
         UsageSyncRules.MaxPercent.Should().Be(ServerRulesMirror.MaxPercent);
+        UsageRules.MaxResetCredits.Should().Be(ServerRulesMirror.MaxResetCredits);
 
         var lone = ((char)0xD800).ToString();
         var windows = Enumerable.Range(0, 12)
@@ -164,6 +165,33 @@ public sealed class UsageSyncRulesTests
         ServerRulesMirror.ValidateUsage(new UsagePublish(Logical, 3, shared)).Should().BeNull();
         ServerRulesMirror.ValidateUsage(new UsagePublish(Logical, null, UsageSyncRules.ToShared(snapshot with { Source = "session" })!)).Should().BeNull();
         shared.Windows.Should().NotContain(w => w.Key.Length > 32);
+    }
+
+    [Fact]
+    public void 免費重置次數_上傳與拉回都帶著_超出範圍的夾住或丟掉_舊版的資料是null()
+    {
+        var expires = DateTimeOffset.FromUnixTimeSeconds(1794007837);
+        var shared = UsageSyncRules.ToShared(Snapshot() with { ResetCredits = 2, ResetCreditExpiresAt = expires })!;
+        shared.ResetCredits.Should().Be(2);
+        shared.ResetCreditExpiresAt.Should().Be(expires.ToUnixTimeMilliseconds());
+        ServerRulesMirror.ValidateUsage(new UsagePublish(Logical, 3, shared)).Should().BeNull();
+
+        var back = UsageSyncRules.FromShared(new UsageSnapshotPayload(Logical, shared, "d_ZZZZZZZZZZZZZZZZZZZZZZZZZZ", 3), Self)!;
+        back.ResetCredits.Should().Be(2);
+        back.ResetCreditExpiresAt.Should().Be(expires);
+
+        var clamped = UsageSyncRules.ToShared(Snapshot() with { ResetCredits = 5000, ResetCreditExpiresAt = DateTimeOffset.UnixEpoch })!;
+        clamped.ResetCredits.Should().Be(UsageRules.MaxResetCredits);
+        clamped.ResetCreditExpiresAt.Should().BeNull();
+        ServerRulesMirror.ValidateUsage(new UsagePublish(Logical, 3, clamped)).Should().BeNull();
+        var bad = UsageSyncRules.FromShared(new UsageSnapshotPayload(Logical, shared with { ResetCredits = -1, ResetCreditExpiresAt = UsageSyncRules.MaxUnixMs + 1 }, "d_ZZZZZZZZZZZZZZZZZZZZZZZZZZ", 3), Self)!;
+        bad.ResetCredits.Should().Be(0);
+        bad.ResetCreditExpiresAt.Should().BeNull();
+
+        // 舊版的電腦與伺服器不送這兩個欄位
+        var old = SyncJson.Deserialize<SharedUsage>("""{"fetchedAt":1,"source":"api","windows":[],"credits":null,"note":null,"error":null,"stale":false}""")!;
+        old.ResetCredits.Should().BeNull();
+        old.ResetCreditExpiresAt.Should().BeNull();
     }
 
     [Fact]

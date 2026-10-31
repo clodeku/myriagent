@@ -23,7 +23,7 @@ import { requestMcp, createMcpStrip, updateMcpStrip, refreshMcpDialog } from './
 import { requestUsageSegments, createUsageSegmentsSection, renderUsageSegmentsSection } from './usageseg.js';
 import { loginExpiry, loginExpiryText } from './loginrules.js';
 import { tokenCounter } from './tokenfx.js';
-import { quotaLocked, resetCountdown, countdownCells, accountPulse, pulsePhase, burnForecast } from './fxrules.js';
+import { quotaLocked, resetCountdown, countdownCells, accountPulse, pulsePhase, burnForecast, resetCreditsInfo, resetCreditAction } from './fxrules.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const RING_R = 52;
@@ -450,6 +450,26 @@ function updateCard(card, a, first) {
   }
   if (u && u.error) e.notes.append(h('div', { class: 'note err' }, icon('warning'), h('span', { text: u.error })));
   if (u && u.credits) e.notes.append(h('div', { class: 'note' }, icon('sparkle'), h('span', { text: '額外點數 ' }), h('b', { text: fmtCredits(u.credits) })));
+  // Codex 的免費重置次數（rateLimitResetCredits）：沒有可用的也列（灰字），有的話標最早到期的時間
+  const rc = resetCreditsInfo(u, Date.now());
+  if (rc) {
+    const row = h('div', { class: 'note' + (rc.count ? '' : ' dim'), title: '可以把用完的額度提前重置的次數（Codex 回報）' }, icon('refresh'),
+      h('span', { text: '免費重置 ' }), h('b', { text: rc.count + ' 次' }),
+      rc.expiresAt ? h('span', { text: '・最早 ' + fmtDateTime(rc.expiresAt) + ' 到期' }) : null);
+    // 「使用重置」：說明列每次重畫，按鈕是同一個元素（按到一半帳戶清單更新也不會掉）
+    const act = resetCreditAction(a, rc, isHub);
+    if (act) {
+      if (!e.resetBtn) {
+        e.resetBtn = h('button', { type: 'button', class: 'btn sm ghost reset-credit-btn' });
+        e.resetBtn.addEventListener('click', () => confirmResetCredit(e.resetBtn._acc));
+      }
+      e.resetBtn._acc = a;
+      e.resetBtn.disabled = act.busy;
+      setButtonContent(e.resetBtn, act.busy ? 'clock' : 'refresh', act.busy ? '重置中…' : '使用重置');
+      row.append(e.resetBtn);
+    }
+    e.notes.append(row);
+  }
   if (u && u.note) e.notes.append(h('div', { class: 'note dim' }, icon('info'), h('span', { text: u.note })));
   // 登入到期（Claude，loginrules.js）：平常是一行灰字，剩 3 天內琥珀色、已到期紅色，下面的「重新登入」改成主要按鈕
   const lx = isHub ? null : loginExpiry(a, Date.now());
@@ -518,6 +538,19 @@ function updateCard(card, a, first) {
     e.newBtn.disabled = a.status === 'notInstalled';
   }
   card.classList.toggle('inactive', a.status !== 'ready' && a.status !== 'checking');
+}
+
+/** 「使用重置」：會真的用掉一次，先確認；結果由宿主的 toast 說明 */
+async function confirmResetCredit(a) {
+  const rc = a && resetCreditsInfo(a.usage, Date.now());
+  if (!rc || rc.count <= 0) return;
+  const r = await confirmDialog({
+    title: '使用免費重置',
+    message: '用掉「' + (a.label || 'Codex') + '」的 1 次免費重置，把用完的額度提前重置？',
+    detail: '目前有 ' + rc.count + ' 次' + (rc.expiresAt ? '，最早一次 ' + fmtDateTime(rc.expiresAt) + ' 到期' : '') + '。用掉之後不能復原。',
+    confirmLabel: '使用重置',
+  });
+  if (r.ok) post({ cmd: 'accountResetCredit', accountId: a.id });
 }
 
 function sess(label, n, tone, title) {

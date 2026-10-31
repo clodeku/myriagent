@@ -319,6 +319,8 @@ internal static class AccountViewRules
             ["error"] = S(usage.Error),
             ["windows"] = windows,
             ["credits"] = S(usage.Credits),
+            ["resetCredits"] = usage.ResetCredits,
+            ["resetCreditExpiresAt"] = usage.ResetCreditExpiresAt,
             ["note"] = S(usage.Note),
         };
     }

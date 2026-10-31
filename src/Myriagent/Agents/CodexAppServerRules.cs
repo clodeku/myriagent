@@ -137,9 +137,10 @@ internal static partial class CodexAppServerRules
     /// 實測 --enable 遇到這一版不認得的功能名稱會直接結束（exit 1），-c 只會警告並忽略——CLI 會自動更新，不能讓改名的旗標弄壞啟動。
     /// 精簡模式關掉外掛（plugins）、ChatGPT 連接器（apps）與設定檔裡的每個 MCP 伺服器。
     /// <paramref name="sharedMcpOverrides"/> 是共用設定帶過來的 MCP 伺服器（CodexConfigRules.BuildSharedMcpOverrides 的「-c」值），精簡模式不帶。
+    /// <paramref name="autoCompactTokens"/> 是設定頁的自動壓縮上限（model_auto_compact_token_limit，AutoCompactRules），精簡模式也帶。
     /// </summary>
     public static List<string> BuildServerArguments(bool useLocalCustomizations, IReadOnlyList<string> mcpServerNames,
-        IReadOnlyList<string>? sharedMcpOverrides = null)
+        IReadOnlyList<string>? sharedMcpOverrides = null, long? autoCompactTokens = null)
     {
         var args = new List<string>
         {
@@ -147,6 +148,8 @@ internal static partial class CodexAppServerRules
             "-c", "features.default_mode_request_user_input=true",
             "-c", "suppress_unstable_features_warning=true",
         };
+        if (AutoCompactRules.CodexOverride(autoCompactTokens) is { } autoCompact)
+            args.AddRange(new[] { "-c", autoCompact });
 
         if (!useLocalCustomizations)
         {

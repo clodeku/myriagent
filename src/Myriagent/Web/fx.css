@@ -87,11 +87,11 @@
 .it-card.fx-c-no { --fx-bracket: var(--red); --fx-led: var(--red); }
 .it-card.fx-c-skip { --fx-bracket: var(--amber); --fx-led: var(--amber); }
 
-/* ───── 頂部列：品牌那一側的一道光（靜態）；品牌圖示外圈的一圈小方塊（執行中才亮） ───── */
+/* ───── 頂部列：品牌那一側的一道光（靜態，品牌的藍、不跟帳戶色）；品牌圖示外圈的一圈小方塊（執行中才亮） ───── */
 .topbar { position: relative; }
 .topbar::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; z-index: 1; pointer-events: none;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 55%, transparent) 9%, transparent 32%);
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, .55) 9%, transparent 32%);
 }
 .brand-mark { position: relative; }
 .brand-mark::after {
@@ -647,16 +647,21 @@
     animation: fx-rot 21.6s steps(36) calc(var(--fx-phase, 0) * -21.6s) infinite reverse;
   }
 
-  /* 頂部列：有任何對話在執行時，品牌圖示外圈的 12 格小方塊亮起一段、一格一格繞圈。
+  /* 頂部列：有任何對話在執行時，品牌圖示外圈的 12 格小方塊亮起一段、一格一格繞圈（品牌的藍，不跟帳戶色）。
      .acct-running 由 sidebar.js 的 markAnyRunning 在有帳戶卡顯示「執行中」時加上；不寫成 .app 的 has 選擇器——
      掛在最外層的 has 讓畫面上任何變動都要重新檢查、樣式重算多一倍以上（WebCssPerfTests 把關） */
   .app.acct-running .brand-mark::after {
-    background: conic-gradient(transparent 0 30%, color-mix(in srgb, var(--acc) 30%, transparent) 60%, var(--acc) 92%, transparent 92%);
+    background: conic-gradient(transparent 0 30%, rgba(56, 189, 248, .3) 60%, #38BDF8 92%, transparent 92%);
     animation: fx-rot calc(1.2s / var(--fx-tempo, 1)) steps(12) infinite;
   }
-  /* 同時品牌圖示 C 裡的聲波柱各自伸縮（AI 在說話），一樣跟著執行量加快 */
-  .app.acct-running .brand-wave > i { animation: fx-brand-wave calc(var(--bw-d, .6s) / var(--fx-tempo, 1)) ease-in-out infinite alternate; }
-  @keyframes fx-brand-wave { from { transform: scaleY(.25); } to { transform: scaleY(1); } }
+  /* 同時品牌圖示的星群動起來（萬個代理在工作）：亮光繞著 C 走（遮罩層轉、裡面的亮點層反向轉，光點留在原地；兩層長度相同才不會錯開）、
+     中心的星芒呼吸旋轉、底下的藍光一明一暗，一樣跟著執行量加快 */
+  .app.acct-running .brand-sweep { animation: fx-rot calc(1.6s / var(--fx-tempo, 1)) linear infinite; }
+  .app.acct-running .brand-lit { animation: fx-rot calc(1.6s / var(--fx-tempo, 1)) linear infinite reverse; }
+  .app.acct-running .brand-spark { animation: fx-brand-spark calc(2.4s / var(--fx-tempo, 1)) ease-in-out infinite; }
+  .app.acct-running .brand-glow { animation: fx-brand-glow calc(2.4s / var(--fx-tempo, 1)) ease-in-out infinite; }
+  @keyframes fx-brand-spark { 50% { transform: rotate(45deg) scale(1.15); } }
+  @keyframes fx-brand-glow { 50% { opacity: .35; } }
 
   /* 儀表板：帳戶卡出現時（打開儀表板、新增帳戶）一道掃描線由上往下掃過一次 */
   .acard-fx::before {
@@ -731,7 +736,10 @@
 :root[data-window="inactive"] .lbar-btns::before,
 :root[data-window="inactive"] .tab-dot::after,
 :root[data-window="inactive"] .brand-mark::after,
-:root[data-window="inactive"] .brand-wave > i,
+:root[data-window="inactive"] .brand-sweep,
+:root[data-window="inactive"] .brand-lit,
+:root[data-window="inactive"] .brand-spark,
+:root[data-window="inactive"] .brand-glow,
 :root[data-window="inactive"] .dash-summary::after,
 :root[data-window="inactive"] .mon-head::after,
 :root[data-window="inactive"] .mon-dev[data-state="live"] .mon-led,

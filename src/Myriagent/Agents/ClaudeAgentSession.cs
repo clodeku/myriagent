@@ -832,7 +832,8 @@ internal sealed class ClaudeAgentSession : IAgentSession
            || !string.Equals(current.Agent ?? string.Empty, next.Agent ?? string.Empty, StringComparison.Ordinal)
            || !string.Equals(current.OutputStyle ?? string.Empty, next.OutputStyle ?? string.Empty, StringComparison.Ordinal)
            || !string.Equals(current.ResumeAt ?? string.Empty, next.ResumeAt ?? string.Empty, StringComparison.Ordinal)
-           || !string.Equals(current.DelegationMcpPipeName, next.DelegationMcpPipeName, StringComparison.Ordinal);
+           || !string.Equals(current.DelegationMcpPipeName, next.DelegationMcpPipeName, StringComparison.Ordinal)
+           || current.AutoCompactTokens != next.AutoCompactTokens;
 
     /// <summary>「default」與空白都代表帳號預設（不帶 --model）</summary>
     internal static string? NormalizeModel(string? model)
@@ -878,7 +879,8 @@ internal sealed class ClaudeAgentSession : IAgentSession
             OutputStyle: settings.OutputStyle,
             ResumeAt: settings.SessionStarted ? settings.ResumeAt : null,
             ForkSession: fork,
-            DelegationMcpPipeName: settings.DelegationMcpPipeName);
+            DelegationMcpPipeName: settings.DelegationMcpPipeName,
+            AutoCompactTokens: settings.AutoCompactTokens);
 
         // 工作資料夾由中樞負責（預設 workspace 會先建好）；使用者選的資料夾不存在就明確回報，不偷偷重建
         if (!Directory.Exists(settings.WorkingDirectory))

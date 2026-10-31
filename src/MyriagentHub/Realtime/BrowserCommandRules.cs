@@ -60,6 +60,8 @@ internal static class BrowserCommandRules
         "setConversationDefault", "cliApplyNow", "cliContinue", "cliCancelUpdate",
         "chooseFolder", "attach", "addFiles", "pasteImage", "addPathAttachment",
         "openFolder", "openPath", "revealPath", "saveFile", "openLink", "copyText", "popout", "accountOpenFolder",
+        // Codex 的免費重置（2026-10-31）：會真的用掉一次，只在那台的儀表板按（瀏覽器版的帳戶卡只顯示次數）
+        "accountResetCredit",
         // 多視窗（2026-10-25）：桌面的開新視窗與分頁在視窗之間搬移（瀏覽器版用瀏覽器自己的分頁與視窗）
         "newWindow", "tabDrag", "tabDragEnd", "tabMoveIn", "moveToNewWindow", "closeWindow",
         // 自動重新命名（標題的右鍵選單）：用這台電腦的帳戶跑 CLI 產生標題（瀏覽器版的選單沒有這一項）

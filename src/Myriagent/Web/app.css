@@ -295,12 +295,11 @@ input[type="search"]::-webkit-search-cancel-button { filter: grayscale(1); opaci
 .brand { display: flex; align-items: center; gap: 8px; padding: 0 10px 0 4px; }
 .brand-mark { width: 18px; height: 18px; display: inline-flex; flex: none; }
 .brand-mark svg { width: 100%; height: 100%; }
-/* 品牌圖示 C 裡的三根聲波柱：平常是靜止的高低，有對話執行中才伸縮（fx.css 的 .app.acct-running） */
-.brand-wave { position: absolute; left: 31%; top: 31%; width: 38%; height: 38%; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
-.brand-wave > i { width: 1.8px; height: 100%; border-radius: 1px; background: linear-gradient(#F2A182, #3FD3AE 60%, #1FAE8E); transform: scaleY(var(--bw-lo, .6)); }
-.brand-wave > i:nth-child(1) { --bw-lo: .5; --bw-d: .62s; }
-.brand-wave > i:nth-child(2) { --bw-lo: 1; --bw-d: .48s; }
-.brand-wave > i:nth-child(3) { --bw-lo: .65; --bw-d: .7s; }
+/* 品牌圖示「萬象星群」（icons.js 的 brandMark）：暗的光點是底圖，亮的光點由錐形遮罩照出一段（頭最亮、尾巴漸暗），
+   平常停在照亮 C 上半段的位置，有對話執行中才繞著 C 轉（fx.css 的 .app.acct-running）；中心的星芒下面一團藍光 */
+.brand-sweep, .brand-lit, .brand-glow, .brand-spark { position: absolute; inset: 0; display: block; pointer-events: none; }
+.brand-sweep { mask: conic-gradient(from 50deg, transparent 0 45%, #000 100%); }
+.brand-glow { inset: 22%; border-radius: 50%; background: radial-gradient(closest-side, rgba(56, 189, 248, .55), rgba(56, 189, 248, 0)); }
 .brand-name { font-weight: 600; font-size: 13px; color: var(--text-hi); white-space: nowrap; }
 /* 品牌名旁的版號（#appVer，versionrules.js）：平常是淡色小字；桌面有新版（update）、瀏覽器版伺服器已換版（warn）換色調。
    class 設了 display，hidden 要另外寫才藏得住 */

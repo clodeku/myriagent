@@ -39,7 +39,8 @@ internal sealed record ClaudeLaunchOptions(
     string? OutputStyle = null,
     string? ResumeAt = null,
     bool ForkSession = false,
-    string? DelegationMcpPipeName = null);
+    string? DelegationMcpPipeName = null,
+    long? AutoCompactTokens = null);
 
 /// <summary>「本對話都允許」同意過、程序重開時要帶回的範圍</summary>
 internal sealed record ClaudeSessionGrants(IReadOnlyList<string> Rules, IReadOnlyList<string> Directories);
@@ -767,6 +768,13 @@ internal static partial class ClaudeStreamRules
             args.Add("--effort");
             args.Add(o.Effort);
             flagSettings["env"] = new JObject { [EffortLevelVariable] = EffortEnvironmentValue(o.Effort) };
+        }
+        // 自動壓縮上限：--settings 的 env 優先於程序環境與使用者 settings.json 的 env（實測），門檻＝帶的視窗減緩衝
+        if (AutoCompactRules.ClaudeWindowValue(o.AutoCompactTokens) is { } autoCompactWindow)
+        {
+            var flagEnv = flagSettings["env"] as JObject ?? new JObject();
+            flagEnv[AutoCompactRules.ClaudeWindowVariable] = autoCompactWindow;
+            flagSettings["env"] = flagEnv;
         }
         if (o.UseLocalCustomizations && !string.IsNullOrWhiteSpace(o.AutoMemoryDirectory))
             flagSettings["autoMemoryDirectory"] = o.AutoMemoryDirectory;

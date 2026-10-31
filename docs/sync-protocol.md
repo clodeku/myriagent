@@ -401,6 +401,7 @@ deviceSig = Sign(裝置私鑰,     "myriagent-device-hello-v1\n{deviceId}\n{nonc
 - 每個邏輯帳戶由伺服器指派**一台**查官方用量（候選：連結正常、身分相符、在線、60 秒內有心跳、Claude 的存取權杖還有 5 分鐘以上——每台都不到 5 分鐘時不看權杖，照樣指派一台，讓它查詢時由 CLI 代查並換發，否則沒有一台會查、也沒有一台會換發〔2026-10-29〕；優先：有該帳戶執行中對話的 → 上一任 → deviceId 最小（序數比較））。換人時 `term`＋1，對新舊兩台各送 `UsageAssign{on/off, term}`；負責的那台 60 秒沒心跳就改派。伺服器每 15 秒、上下線時、目錄變更提交後重新評估。
 - `UsageAssign` 的到達順序**不保證**（重新評估可能連續發生、兩台各自的連線不同步）：裝置對每個帳戶記下看過的最大 `term`，比它小的 `UsageAssign` 丟掉；同一個 `term` 只會有一台 `on`。ProveResponse 的 `usageAssignments` 一樣照 term 合併。
 - 負責的那台照原本的頻率查，以 `UsagePublish{logicalAccountId, term, usage}` 上傳；對話中的 rate limit 事件（任何一台）以 `UsagePublish{logicalAccountId, usage}`（不帶 term）每帳戶 ≤每 60 秒一次上傳。伺服器的檢查：帶 term 的必須來自目前負責的那台、term 是目前值；不帶 term 的必須來自這個帳戶連結正常、身分相符的裝置，同一台同一帳戶兩次至少隔 50 秒（留 10 秒的計時誤差）。不合格的不採用（不回錯誤）。
+- `usage` 的 `resetCredits`（0～1000 的整數）、`resetCreditExpiresAt`（毫秒、>0）是 Codex 的免費重置次數與最早到期時間（2026-10-30 加的選用欄位）：舊版的電腦不送、送了舊版忽略，伺服器照存照轉、閘道照樣給網頁（web-protocol 的 Usage）。
 - 伺服器寫 `usage_latest`／`usage_points`（14 天）後發布 `usage.snapshot`；各台合併進自己的用量歷史（來源 `shared`）。歷史點的時間是**伺服器收到的時間**（不信任裝置時鐘），同一毫秒的兩點後到的取代先到的。
 - 連線期間沒被指派的裝置**不查**官方端點；與伺服器斷線超過 5 分鐘自動回到本機各自查詢。
 

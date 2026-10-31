@@ -72,6 +72,11 @@ public sealed class UsageRulesTests
         UsageRules.Validate(api with { Usage = api.Usage with { Windows = [window with { Label = "5\n小時" }] } }).Should().NotBeNull();
         UsageRules.Validate(api with { Usage = api.Usage with { Error = new string('x', 501) } }).Should().NotBeNull();
         UsageRules.Validate(null).Should().NotBeNull();
+        UsageRules.Validate(api with { Usage = api.Usage with { ResetCredits = 0, ResetCreditExpiresAt = 1 } }).Should().BeNull();
+        UsageRules.Validate(api with { Usage = api.Usage with { ResetCredits = UsageRules.MaxResetCredits } }).Should().BeNull();
+        UsageRules.Validate(api with { Usage = api.Usage with { ResetCredits = -1 } }).Should().NotBeNull();
+        UsageRules.Validate(api with { Usage = api.Usage with { ResetCredits = UsageRules.MaxResetCredits + 1 } }).Should().NotBeNull();
+        UsageRules.Validate(api with { Usage = api.Usage with { ResetCreditExpiresAt = 0 } }).Should().NotBeNull();
     }
 
     [Fact]

@@ -331,6 +331,8 @@ public class AgentRulesTests
         ClaudeAgentSession.NeedsRestart(current, Settings(accountKey: "a2|D:\\cfg")).Should().BeTrue("換帳戶");
         ClaudeAgentSession.NeedsRestart(current, Settings(exe: @"C:\npm\node.exe")).Should().BeTrue("CLI 更新或換安裝方式");
         ClaudeAgentSession.NeedsRestart(current, Settings(sessionId: "s-2")).Should().BeTrue();
+        ClaudeAgentSession.NeedsRestart(current, current with { AutoCompactTokens = 400_000 }).Should().BeTrue("自動壓縮上限在啟動時帶");
+        CodexAgentSession.Signature(current).Should().NotBe(CodexAgentSession.Signature(current with { AutoCompactTokens = 400_000 }), "Codex 也要重開 app-server");
     }
 
     [Theory]

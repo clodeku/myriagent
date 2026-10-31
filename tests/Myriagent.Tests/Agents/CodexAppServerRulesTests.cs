@@ -38,6 +38,17 @@ public class CodexAppServerRulesTests
     }
 
     [Fact]
+    public void 啟動參數_自動壓縮上限以設定覆寫帶入_精簡模式也帶()
+    {
+        CodexAppServerRules.BuildServerArguments(useLocalCustomizations: true, Array.Empty<string>(), autoCompactTokens: 400_000)
+            .Should().ContainInOrder("-c", "model_auto_compact_token_limit=400000");
+        CodexAppServerRules.BuildServerArguments(useLocalCustomizations: false, Array.Empty<string>(), autoCompactTokens: 150_000)
+            .Should().ContainInOrder("-c", "model_auto_compact_token_limit=150000");
+        CodexAppServerRules.BuildServerArguments(useLocalCustomizations: true, Array.Empty<string>())
+            .Should().NotContain(a => a.StartsWith("model_auto_compact", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void 啟動參數_共用的MCP伺服器逐一以設定覆寫帶入_精簡模式不帶()
     {
         var shared = new[] { "mcp_servers.node_repl.command=\"node\"", "mcp_servers.node_repl.env.FOO=\"bar\"" };

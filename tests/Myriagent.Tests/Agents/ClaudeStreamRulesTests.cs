@@ -135,6 +135,20 @@ public class ClaudeStreamRulesTests
     }
 
     [Fact]
+    public void BuildArguments_自動壓縮上限以Settings的Env帶視窗_上限加緩衝_和強度併在一起()
+    {
+        var args = ClaudeStreamRules.BuildArguments(Options(effort: "high") with { AutoCompactTokens = 400_000 });
+        var env = JObject.Parse(args[args.IndexOf("--settings") + 1])["env"]!;
+        env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]!.ToString().Should().Be("433000", "實測門檻＝視窗減 33,000");
+        env["CLAUDE_CODE_EFFORT_LEVEL"]!.ToString().Should().Be("high");
+        args.Count(a => a == "--settings").Should().Be(1);
+
+        var alone = ClaudeStreamRules.BuildArguments(Options() with { AutoCompactTokens = 67_000 });
+        JObject.Parse(alone[alone.IndexOf("--settings") + 1])["env"]!["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]!.ToString().Should().Be("100000");
+        ClaudeStreamRules.BuildArguments(Options()).Should().NotContain(a => a.Contains("AUTO_COMPACT"));
+    }
+
+    [Fact]
     public void BuildArguments_主代理只在不是精簡模式時帶_輸出風格併進同一個Settings()
     {
         var args = ClaudeStreamRules.BuildArguments(Options(local: true, effort: "high") with { Agent = "autopilot:debugger", OutputStyle = "Explanatory" });

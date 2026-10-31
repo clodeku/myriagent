@@ -24,6 +24,8 @@ internal static class ServerRulesMirror
     public const int MaxWindowKeyLength = 32;
     public const double MaxPercent = 1000;
 
+    public const int MaxResetCredits = 1000;
+
     public static string? ValidateLink(LinkUpsertPayload? p, bool prov1 = true)
     {
         if (p is null)
@@ -88,6 +90,8 @@ internal static class ServerRulesMirror
                 return "時間窗的數值不正確";
         }
 
+        if (usage.ResetCredits is < 0 or > MaxResetCredits || usage.ResetCreditExpiresAt is <= 0)
+            return "免費重置次數不正確";
         if (!IsOptionalText(usage.Credits, MaxShortTextLength) || !IsOptionalText(usage.Note, MaxTextLength) || !IsOptionalText(usage.Error, MaxTextLength))
             return "文字欄位太長或含控制字元";
         return null;

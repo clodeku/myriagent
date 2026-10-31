@@ -163,11 +163,29 @@ const MARKS = {
   Grok: tile('pm-grok-bg', '<use href="#pm-g-grok" fill="#fff" transform="translate(4.32 4.32) scale(.64)"/>'),
 };
 
-/** 品牌「對話波形」（2026-10-30 使用者選定）：缺口朝右的 C 形對話框（珊瑚弧＋末端一顆青綠點）；
- *  裡面的聲波柱是 HTML（brandMark 加上，執行中才伸縮：fx.css 的 .app.acct-running；登入頁 auth.html 是同一個圖示的大版本） */
-export const BRAND_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
-  '<circle cx="12" cy="12" r="9.4" fill="none" stroke="#D97757" stroke-width="2.6" stroke-linecap="round" pathLength="100" stroke-dasharray="76 100" transform="rotate(43 12 12)"/>' +
-  '<circle cx="18.83" cy="5.54" r="1.6" fill="#1FAE8E"/></svg>';
+/** 品牌「萬象星群」（2026-10-31 使用者選定）：兩圈光點排成缺口朝右的 C（Myriagent＝萬個代理同時工作），中心是 AI 星芒。
+ *  BRAND_SVG 是暗的那一層光點；會動的部分各是一層 HTML（brandMark 加上；SVG 元素的 transform 不交給合成器）：
+ *  亮的那層光點由一道轉動的錐形遮罩照出、繞著 C 走（.brand-sweep 轉、裡面的 .brand-lit 反向轉，光點留在原地），星芒呼吸旋轉。
+ *  平常靜止，有對話執行中才動（fx.css 的 .app.acct-running）；登入頁 auth.html 是同一個圖示的大版本、app.ico 由 tools/make_icon.py 畫 */
+const BRAND_DOTS = (() => {
+  // [半徑, 間隔數, 點的半徑, 顏色]：從 C 的下端（40°）順時針排到上端（320°），缺口朝右
+  let s = '';
+  for (const [r, n, size, fill] of [[10, 11, 1.05, '#2F6FEB'], [7, 8, 0.9, '#1FB3EC']]) {
+    s += `<g fill="${fill}">`;
+    for (let i = 0; i <= n; i++) {
+      const a = ((40 + (280 * i) / n) * Math.PI) / 180;
+      s += `<circle cx="${(12 + r * Math.cos(a)).toFixed(2)}" cy="${(12 + r * Math.sin(a)).toFixed(2)}" r="${size}"/>`;
+    }
+    s += '</g>';
+  }
+  return s;
+})();
+const brandSvg = (inner) => '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + inner + '</svg>';
+export const BRAND_SVG = brandSvg(`<g opacity=".42">${BRAND_DOTS}</g>`);
+const BRAND_LIT_SVG = brandSvg(BRAND_DOTS);
+const BRAND_SPARK_SVG = brandSvg('<defs><linearGradient id="brand-spark-g" x1="8" y1="8" x2="16" y2="16" gradientUnits="userSpaceOnUse">' +
+  '<stop offset="0" stop-color="#E6FDFF"/><stop offset=".45" stop-color="#38BDF8"/><stop offset="1" stop-color="#2563EB"/></linearGradient></defs>' +
+  '<path fill="url(#brand-spark-g)" d="M12 7.6C12.4 10.7 13.3 11.6 16.4 12C13.3 12.4 12.4 13.3 12 16.4C11.6 13.3 10.7 12.4 7.6 12C10.7 11.6 11.6 10.7 12 7.6Z"/>');
 
 const cache = new Map();
 
@@ -207,11 +225,17 @@ export function brandMark(cls) {
   const span = document.createElement('span');
   span.className = cls || 'brand-mark';
   span.append(fromTemplate('brand', BRAND_SVG));
-  // 聲波柱：SVG 元素的 transform 動畫不交給合成器，柱子做成 HTML
-  const wave = document.createElement('span');
-  wave.className = 'brand-wave';
-  for (let i = 0; i < 3; i++) wave.append(document.createElement('i'));
-  span.append(wave);
+  const layer = (c, child) => {
+    const el = document.createElement('span');
+    el.className = c;
+    el.append(child);
+    return el;
+  };
+  span.append(
+    layer('brand-sweep', layer('brand-lit', fromTemplate('brand:lit', BRAND_LIT_SVG))),
+    layer('brand-glow', document.createDocumentFragment()),
+    layer('brand-spark', fromTemplate('brand:spark', BRAND_SPARK_SVG)),
+  );
   return span;
 }
 

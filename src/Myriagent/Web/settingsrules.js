@@ -31,9 +31,38 @@ export const SETTING_KEYWORDS = Object.freeze({
   defaultPermission: '權限 核准 完全自動 每步詢問 permission',
   fallbackModel: '備援 過載 overloaded fallback',
   effort: '推理 思考 強度 effort reasoning thinking',
+  autoCompact: '自動壓縮 壓縮 上下文 context compact autocompact token 上限',
 });
 
 /** 比對用的字：全形英數轉半形（NFKC）、轉小寫 */
+/**
+ * 自動壓縮上限的輸入（同宿主的 AutoCompactRules.TryParse）：空白或 default＝CLI 預設（null）；數字可帶 k／m 與千分位逗號、底線、空白，
+ * 例如 400k、400,000、0.4M。看不懂的、0、負數回 undefined。範圍由宿主夾（設定送回來時照宿主的值顯示）
+ */
+export function parseTokens(text) {
+  let s = foldText(text).trim();
+  if (!s || s === 'default') return null;
+  s = s.replace(/[,_\s]/g, '');
+  let unit = 1;
+  if (s.endsWith('k')) unit = 1e3;
+  else if (s.endsWith('m')) unit = 1e6;
+  if (unit !== 1) s = s.slice(0, -1);
+  if (!/^(\d+(\.\d*)?|\.\d+)$/.test(s)) return undefined;
+  const n = Number(s);
+  if (!(n > 0) || n > 1e9) return undefined;
+  const tokens = Math.round(n * unit);
+  return tokens > 0 ? tokens : undefined;
+}
+
+/** token 數的短寫：400000 → 400k、1500000 → 1.5M、367500 → 367.5k、999 → 999；null 是空字串 */
+export function fmtTokens(n) {
+  if (n == null || !Number.isFinite(n)) return '';
+  const trim = (x) => String(Math.round(x * 10) / 10);
+  if (n >= 1e6 && n % 1e5 === 0) return trim(n / 1e6) + 'M';
+  if (n >= 1e3 && n % 100 === 0) return trim(n / 1e3) + 'k';
+  return String(n);
+}
+
 /**
  * 配對時使用者輸入的 Hub 網址：沒寫 https:// 的補上；只收 https、只有主機與連接埠（可以有結尾的 /），
  * 帶路徑、查詢字串、帳號密碼或反斜線的不收（同宿主的 DevTrustRules.ValidateServerUrl）。合格回 origin（https://host[:port]），否則 null

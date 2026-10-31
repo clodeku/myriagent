@@ -62,6 +62,10 @@ internal sealed class AgentRestartInProgressException : InvalidOperationExceptio
 /// 帳戶委派（docs/account-delegation.md）：使用者 @ 過帳戶的對話掛上 myriagent_accounts MCP，橋接程序連這個命名管道；
 /// 改變時重開程序（Claude 的 NeedsRestart、Codex 的程序簽章）。null＝不掛（只有 Claude、Codex 會用）
 /// </param>
+/// <param name="AutoCompactTokens">
+/// 自動壓縮上限（token，AutoCompactRules）：Claude 以 --settings 的 env 帶 CLAUDE_CODE_AUTO_COMPACT_WINDOW（上限＋緩衝）、
+/// Codex 以「-c model_auto_compact_token_limit」帶；改變時重開程序。null＝CLI 預設（其他代理忽略）
+/// </param>
 internal sealed record AgentSessionSettings(
     string? SessionId,
     bool SessionStarted,
@@ -88,7 +92,8 @@ internal sealed record AgentSessionSettings(
     string? ForkSource = null,
     string? CodexServiceTier = null,
     IReadOnlyList<AgentSkillSelection>? CodexSkills = null,
-    string? DelegationMcpPipeName = null)
+    string? DelegationMcpPipeName = null,
+    long? AutoCompactTokens = null)
 {
     /// <summary>啟動程序前取得共用設定的啟動參數（背景執行緒；不共用回 None）</summary>
     public async Task<AgentSharedLaunch> PrepareSharedAsync()

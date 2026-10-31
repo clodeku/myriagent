@@ -223,6 +223,44 @@ export async function runSettings(ctx, vp) {
       && by(s5, 'Antigravity').hidden && selOf(s5) === 'Claude' && s5.shown.join() === 'Claude' && !by(s6, 'Antigravity').hidden && selOf(s6) === 'Claude'
       && by(s7, 'Codex').sum === 'GPT-6 Astra',
     { claude: s0, right: s1, end: s2, wrap: s3, reopened: s4, removed: s5, restored: s6, modelChanged: s7 });
+
+    // 自動壓縮上限：Claude、Codex 有這一列（Codex 顯示宿主的 200k），Antigravity、Grok 沒有；打 400k 按 Enter 送出，
+    // 宿主夾進範圍後換成宿主的值；看不懂的標成錯誤、不送；清空送空字串
+    const compactOf = () => {
+      const r = {};
+      for (const p of ['Claude', 'Codex', 'Antigravity', 'Grok']) {
+        const rowEl = document.querySelector(`.dlg-settings .set-prov[data-provider="${p}"] .set-row[data-kw="autoCompact"]`);
+        const input = rowEl && rowEl.querySelector('.set-tokens');
+        r[p] = rowEl ? { hidden: rowEl.hidden, value: input.value, invalid: input.getAttribute('aria-invalid') === 'true', desc: rowEl.querySelector('.set-desc').textContent } : null;
+      }
+      return r;
+    };
+    const k0 = await page.evaluate(compactOf);
+    await page.click('.dlg-settings .set-subtab[data-provider="Claude"]');
+    const claudeInput = '.dlg-settings .set-prov[data-provider="Claude"] .set-tokens';
+    await page.fill(claudeInput, '400k');
+    await page.press(claudeInput, 'Enter');
+    const sent400 = await until(() => host.last('setConversationDefault', (m) => m.key === 'autoCompact' && m.provider === 'Claude'), 2000);
+    const k1 = await until(async () => { const r = await page.evaluate(compactOf); return r.Claude.value === '400k' ? r : null; }, 2000) || await page.evaluate(compactOf);
+    await shot(page, 'settings-autocompact-' + tag);
+    await page.fill(claudeInput, '5M');
+    await page.press(claudeInput, 'Enter');
+    const k2 = await until(async () => { const r = await page.evaluate(compactOf); return r.Claude.value === '967k' ? r : null; }, 2000) || await page.evaluate(compactOf);
+    const before = host.received.filter((m) => m.cmd === 'setConversationDefault').length;
+    await page.fill(claudeInput, 'abc');
+    await page.press(claudeInput, 'Enter');
+    await sleep(150);
+    const k3 = await page.evaluate(compactOf);
+    const sentBad = host.received.filter((m) => m.cmd === 'setConversationDefault').length - before;
+    await page.fill(claudeInput, '');
+    await page.press(claudeInput, 'Enter');
+    const cleared = await until(() => host.last('setConversationDefault', (m) => m.key === 'autoCompact' && m.value === ''), 2000);
+    const k4 = await until(async () => { const r = await page.evaluate(compactOf); return r.Claude.value === '' && !r.Claude.invalid ? r : null; }, 2000) || await page.evaluate(compactOf);
+    check('settingsAutoCompact', !k0.Claude.hidden && k0.Claude.value === '' && !k0.Codex.hidden && k0.Codex.value === '200k' && k0.Antigravity.hidden && k0.Grok.hidden
+      && /67k～967k/.test(k0.Claude.desc) && /20k～2M/.test(k0.Codex.desc)
+      && !!sent400 && sent400.value === '400000' && k1.Claude.value === '400k' && k2.Claude.value === '967k'
+      && k3.Claude.invalid && sentBad === 0 && !!cleared && k4.Claude.value === '',
+    { initial: k0, sent400, after400: k1, clamped: k2, invalid: k3, sentBad, cleared: !!cleared, afterClear: k4 });
     await closeApp(app);
   }
 

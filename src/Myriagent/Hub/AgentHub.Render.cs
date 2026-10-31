@@ -545,7 +545,7 @@ internal sealed partial class AgentHub
 
     /// <summary>
     /// 設定頁「模型設定」的一家：預設模型（null＝沿用上次選擇）、預設權限模式與可選的模式、
-    /// 每個模型（各帳戶回報的聯集）的預設推理強度（null＝CLI 預設）
+    /// 每個模型（各帳戶回報的聯集）的預設推理強度（null＝CLI 預設）、自動壓縮上限
     /// </summary>
     private JObject RenderConversationDefaults(AgentProvider provider)
     {
@@ -563,6 +563,9 @@ internal sealed partial class AgentHub
                 ["efforts"] = new JArray(m.Efforts),
                 ["effort"] = defaults.Efforts.TryGetValue(m.Value, out var effort) && m.Efforts.Contains(effort, StringComparer.Ordinal) ? effort : null,
             })),
+            // 自動壓縮上限（AutoCompactRules）：不支援的代理兩個都是 null，網頁不顯示那一列
+            ["autoCompact"] = AutoCompactRules.ForProvider(provider, defaults.AutoCompactTokens),
+            ["autoCompactRange"] = AutoCompactRules.RangeOf(provider) is { } range ? new JObject { ["min"] = range.Min, ["max"] = range.Max } : null,
         };
     }
 
@@ -600,6 +603,7 @@ internal sealed partial class AgentHub
                 // 隔離帳戶共用系統預設帳戶的設定（帳戶選單的勾選；系統預設帳戶本身就是來源，一律 false）
                 ["shareCustomizations"] = account.ShareCustomizations && !account.IsSystemDefault && AccountRules.SupportsSharedCustomizations(account.Provider),
                 ["loginBusy"] = state.LoginBusy,
+                ["resetCreditBusy"] = accounts.IsResetCreditBusy(account.Id),   // Codex 的「使用重置」進行中
                 ["deviceCodeLogin"] = CodexDeviceCodeRules.CanUseDeviceCode(account, state.Status) && !state.LoginBusy,   // 〔帳戶目錄〕帳戶選單的「用裝置碼登入」
                 ["loginExpiresAt"] = AccountIdentityRules.ShownLoginExpiresAt(state.Status, state.LoginExpiresAt),       // 登入到期（Claude），剩 3 天內帳戶卡提醒重新登入
                 ["usage"] = RenderUsage(account.Id),
@@ -670,6 +674,8 @@ internal sealed partial class AgentHub
             ["error"] = snapshot.Error,
             ["windows"] = windows,
             ["credits"] = snapshot.Credits,
+            ["resetCredits"] = snapshot.ResetCredits,
+            ["resetCreditExpiresAt"] = snapshot.ResetCreditExpiresAt?.ToUnixTimeMilliseconds(),
             ["note"] = snapshot.Note,
         };
     }

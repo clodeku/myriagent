@@ -624,6 +624,11 @@ class FakeHost {
         if (m.key === 'model') p.model = m.value || null;
         else if (m.key === 'permission') p.permission = m.value;
         else if (m.key === 'effort') { const row = p.models.find((x) => x.value === m.model); if (row) row.effort = m.value === 'default' ? null : m.value; }
+        else if (m.key === 'autoCompact') { // 同宿主：夾進範圍（解析在網頁已做過，這裡只收數字或空字串）
+          if (!p.autoCompactRange) break;
+          const n = m.value ? Number(m.value) : null;
+          p.autoCompact = n == null ? null : Math.min(p.autoCompactRange.max, Math.max(p.autoCompactRange.min, n));
+        }
         this.send({ type: 'settings', settings: this.settings });
         break;
       }
@@ -2794,6 +2799,28 @@ async function runDashGrid() {
     await closeApp(app);
   }
   check('dashGridUpToThree', ok, grids);
+  // Codex 的「使用重置」（fixtures 的 a3 有 1 次）：按了先跳確認框、取消不送，確認才送 accountResetCredit
+  {
+    const app = await openApp('dash-reset-credit', { vp: { w: 1440, h: 900 }, layout: onePane('c1', 'dashboard') });
+    await settle(app.page, 1300);
+    const sent = () => app.page.evaluate(() => window.__posted.filter((m) => m.cmd === 'accountResetCredit'));
+    const btn = app.page.locator('.reset-credit-btn');
+    const r = { buttons: await btn.count() };
+    await btn.first().click();
+    await app.page.locator('.dlg-confirm').waitFor({ timeout: 3000 });
+    r.dialog = await app.page.locator('.dlg-confirm').innerText();
+    await shot(app.page, 'dash-reset-credit-confirm');
+    await app.page.locator('.dlg-confirm .btn:not(.primary)').first().click();
+    await settle(app.page, 300);
+    r.afterCancel = (await sent()).length;
+    await btn.first().click();
+    await app.page.locator('.dlg-confirm .btn.primary').click();
+    await settle(app.page, 300);
+    r.afterConfirm = await sent();
+    await closeApp(app);
+    check('dashResetCreditConfirm', r.buttons === 1 && r.dialog.includes('1 次') && r.afterCancel === 0
+      && r.afterConfirm.length === 1 && r.afterConfirm[0].accountId === 'a3', r);
+  }
   // 淺色主題的截圖
   {
     const app = await openApp('dash-grid-light', { vp: { w: 1920, h: 1080 }, layout: onePane('c1', 'dashboard'), settings: { theme: 'light' }, colorScheme: 'light' });

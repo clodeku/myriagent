@@ -265,6 +265,8 @@ internal static class SyncViewRules
             ["error"] = usage.Error,
             ["windows"] = windows,
             ["credits"] = usage.Credits,
+            ["resetCredits"] = usage.ResetCredits,
+            ["resetCreditExpiresAt"] = usage.ResetCreditExpiresAt,
             ["note"] = usage.Note,
         };
     }

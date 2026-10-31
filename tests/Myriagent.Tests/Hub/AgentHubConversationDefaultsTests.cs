@@ -236,4 +236,37 @@ public class AgentHubConversationDefaultsTests
         settings.ConversationDefaults["Claude"].Efforts["opus"].Should().Be("max");
         settings.AccountDefaults["acc-claude"].PermissionMode.Should().BeNull();
     }
+
+    [Fact]
+    public void 自動壓縮上限_每家各自設定_夾進範圍_已開的對話下一則也套用_不支援的代理不收()
+    {
+        using var h = new HubHarness();
+        h.Command(h.Main, "ready", new { mode = "main" });
+        var defaults = h.Main.Last("init")!["settings"]!["conversationDefaults"]!;
+        defaults["Claude"]!["autoCompactRange"]!.Value<long>("min").Should().Be(67_000);
+        defaults["Grok"]!["autoCompactRange"]!.Type.Should().Be(JTokenType.Null, "Grok 只有百分比，不提供");
+        defaults["Antigravity"]!["autoCompactRange"]!.Type.Should().Be(JTokenType.Null);
+        var (id, session) = h.StartConversation(h.Main, h.Claude);
+        session.Sent.All[^1].Settings.AutoCompactTokens.Should().BeNull("預設照 CLI");
+
+        h.Command(h.Main, "setConversationDefault", new { provider = "Claude", key = "autoCompact", value = "400k" });
+        h.OnUi(() => h.Settings.ConversationDefaults!["Claude"].AutoCompactTokens).Should().Be(400_000);
+        h.Main.Last("settings")!["settings"]!["conversationDefaults"]!["Claude"]!.Value<long?>("autoCompact").Should().Be(400_000);
+
+        h.CompleteTurn(session);
+        h.Send(h.Main, id, "第二則");
+        session.Sent.All[^1].Settings.AutoCompactTokens.Should().Be(400_000, "已開的對話下一則也套用");
+
+        var (_, codex) = h.StartConversation(h.Main, h.Codex);
+        codex.Sent.All[^1].Settings.AutoCompactTokens.Should().BeNull("每家各自設定");
+
+        h.Command(h.Main, "setConversationDefault", new { provider = "Claude", key = "autoCompact", value = "5M" });
+        h.OnUi(() => h.Settings.ConversationDefaults!["Claude"].AutoCompactTokens).Should().Be(967_000, "夾進範圍");
+        h.Command(h.Main, "setConversationDefault", new { provider = "Claude", key = "autoCompact", value = "abc" });
+        h.OnUi(() => h.Settings.ConversationDefaults!["Claude"].AutoCompactTokens).Should().Be(967_000, "看不懂的不改");
+        h.Command(h.Main, "setConversationDefault", new { provider = "Grok", key = "autoCompact", value = "400k" });
+        h.OnUi(() => h.Settings.ConversationDefaults!["Grok"].AutoCompactTokens).Should().BeNull();
+        h.Command(h.Main, "setConversationDefault", new { provider = "Claude", key = "autoCompact", value = "" });
+        h.OnUi(() => h.Settings.ConversationDefaults!["Claude"].AutoCompactTokens).Should().BeNull("清空回到 CLI 預設");
+    }
 }

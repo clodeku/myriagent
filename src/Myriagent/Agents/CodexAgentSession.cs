@@ -337,7 +337,7 @@ internal sealed partial class CodexAgentSession : IAgentSession
 
     /// <summary>需要重開程序的設定組合：帳戶、執行檔、客製設定、帳戶委派的 MCP（執行檔身分另外比，見 CodexAppServerRules.NeedsNewProcess）</summary>
     internal static string Signature(AgentSessionSettings settings)
-        => $"{settings.AccountKey}|{settings.Launcher?.FileName}|{settings.UseLocalCustomizations}|{settings.DelegationMcpPipeName}";
+        => $"{settings.AccountKey}|{settings.Launcher?.FileName}|{settings.UseLocalCustomizations}|{settings.DelegationMcpPipeName}|{settings.AutoCompactTokens}";
 
     private async Task SendCoreAsync(AgentTurnInput input, AgentSessionSettings settings)
     {
@@ -641,7 +641,7 @@ internal sealed partial class CodexAgentSession : IAgentSession
             : CodexConfigRules.ParseMcpServerNames(CodexConfigRules.ReadConfig(settings.CodexHome));
         // 隔離帳戶共用系統預設帳戶的設定：同步全域指示與連結（背景執行緒），帶上共用的 MCP 伺服器
         var shared = await settings.PrepareSharedAsync();
-        var serverArguments = CodexAppServerRules.BuildServerArguments(settings.UseLocalCustomizations, mcpServers, shared.CodexConfigOverrides);
+        var serverArguments = CodexAppServerRules.BuildServerArguments(settings.UseLocalCustomizations, mcpServers, shared.CodexConfigOverrides, settings.AutoCompactTokens);
         // 帳戶委派（使用者 @ 過帳戶的對話）：以 -c 掛上 myriagent_accounts MCP，不寫進帳戶的 config.toml；精簡模式不載入 MCP
         if (settings.UseLocalCustomizations && settings.DelegationMcpPipeName != null)
             DelegationMcpRules.AddCodexArguments(serverArguments, settings.DelegationMcpPipeName);

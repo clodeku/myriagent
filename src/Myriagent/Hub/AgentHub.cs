@@ -593,6 +593,10 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                     else
                         _ = accounts.RefreshAllAsync(includeStatus: true);
                     break;
+                case "accountResetCredit":
+                    if (Str("accountId") is { } resetId)
+                        _ = UseResetCreditAsync(view, resetId);
+                    break;
                 case "accountOpenFolder":
                     if (accounts.Find(Str("accountId")) is { } folderAccount)
                     {
@@ -1712,7 +1716,9 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             ForkSource: account.Provider == AgentProvider.Claude ? c.Meta.ForkSourceTranscript : null,
             CodexServiceTier: c.Meta.CodexServiceTier,
             CodexSkills: c.Meta.CodexSkills,
-            DelegationMcpPipeName: DelegationMcpFor(c)?.PipeName);
+            DelegationMcpPipeName: DelegationMcpFor(c)?.PipeName,
+            // 自動壓縮上限是這一家 CLI 的設定：已開的對話也套用（改了下次送出時重開程序）
+            AutoCompactTokens: AutoCompactRules.ForProvider(account.Provider, ProviderDefaults(account.Provider).AutoCompactTokens));
     }
 
     /// <summary>設定頁開著「Claude 對話開啟 Remote Control」時的選項：以對話標題命名、接回上次的遠端工作階段（只有 Claude 會用，其他代理忽略）</summary>
@@ -2515,6 +2521,22 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             MarkHeaderDirty(c);
     }
 
+    /// <summary>帳戶卡的「使用重置」（Codex 的免費重置，網頁已確認）：結果只告訴按的那個視窗</summary>
+    private async Task UseResetCreditAsync(IAgentView view, string accountId)
+    {
+        CodexResetCreditResult result;
+        try
+        {
+            result = await accounts.UseCodexResetCreditAsync(accountId);
+        }
+        catch (Exception ex)
+        {
+            result = new CodexResetCreditResult(false, $"使用免費重置失敗：{ex.Message}", "error");
+        }
+        if (!disposed)
+            Toast(result.Text, view: view, level: result.Level);
+    }
+
     private async Task RunCliActionAsync(AgentProvider? provider, Func<Task> action)
     {
         try
@@ -2702,7 +2724,8 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
 
     /// <summary>
     /// 設定頁「模型設定」（setConversationDefault）：某一家的預設模型（空白＝沿用上次選擇）、預設權限模式，
-    /// 或某個模型的預設推理強度（"default"＝清除，回到 CLI 預設）；不合法的值不改也不廣播。已開的對話不受影響
+    /// 或某個模型的預設推理強度（"default"＝清除，回到 CLI 預設）、自動壓縮上限（autoCompact，空白＝CLI 預設）；不合法的值不改也不廣播。
+    /// 已開的對話不受影響（自動壓縮上限除外：下次啟動程序時套用）
     /// </summary>
     private void SetConversationDefault(string? providerText, string? key, string? model, string? value)
     {
@@ -2714,12 +2737,22 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             "model" => ConversationDefaultsRules.TrySetModel(defaults, value, ProviderModels(provider)),
             "permission" => ConversationDefaultsRules.TrySetPermission(defaults, provider, value),
             "effort" => ConversationDefaultsRules.TrySetEffort(defaults, model, value, ProviderModels(provider)),
+            "autoCompact" => TrySetAutoCompact(defaults, provider, value),
             _ => false,
         };
         if (!changed)
             return;
         settings.Save();
         PostSettings();
+    }
+
+    /// <summary>自動壓縮上限（AutoCompactRules）：不支援的代理、看不懂的值不改；值沒變也不廣播</summary>
+    private static bool TrySetAutoCompact(ProviderConversationDefaults defaults, AgentProvider provider, string? value)
+    {
+        if (!AutoCompactRules.TryNormalize(provider, value, out var tokens) || defaults.AutoCompactTokens == tokens)
+            return false;
+        defaults.AutoCompactTokens = tokens;
+        return true;
     }
 
     /// <summary>

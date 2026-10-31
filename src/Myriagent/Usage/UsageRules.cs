@@ -209,6 +209,46 @@ internal static class UsageRules
     /// <summary>看得懂的 Codex 用量回應（至少有一個額度桶；桶裡沒有時間窗是合法的，例如沒有用量上限的方案）</summary>
     public static bool HasCodexRateLimits(JObject? readResult) => readResult != null && CodexBuckets(readResult).Count > 0;
 
+    /// <summary>免費重置次數的上限（超過的當成這個數；伺服器的檢查同一個值）</summary>
+    public const int MaxResetCredits = 1000;
+
+    /// <summary>
+    /// Codex account/rateLimits/read 的 rateLimitResetCredits → 可用的免費重置次數與最早到期的時間（protocol-notes「Codex 的免費重置次數」）。
+    /// availableCount 是次數（credits 只是明細、後端可能截短，不拿來數）；明細的 expiresAt 是秒、null 是不會到期，已兌換或兌換中的不算。
+    /// 沒有這個欄位（舊版 CLI、對話中的 rateLimits/updated）或格式不對回 (null, null)
+    /// </summary>
+    public static (int? Count, DateTimeOffset? NextExpiresAt) ParseCodexResetCredits(JObject? readResult)
+    {
+        if (readResult?["rateLimitResetCredits"] is not JObject summary
+            || summary["availableCount"] is not JValue { Type: JTokenType.Integer } countValue)
+            return (null, null);
+        // 超過 long 的整數 Newtonsoft 讀成 BigInteger（Type 仍是 Integer），不能直接轉型
+        var count = countValue.Value switch
+        {
+            long n => (int)Math.Clamp(n, 0, MaxResetCredits),
+            System.Numerics.BigInteger big => big.Sign < 0 ? 0 : MaxResetCredits,
+            _ => 0,
+        };
+        DateTimeOffset? next = null;
+        if (count > 0 && summary["credits"] is JArray rows)
+        {
+            foreach (var row in rows.OfType<JObject>())
+            {
+                if (row.Value<string>("status") is "redeemed" or "redeeming")
+                    continue;
+                if (row["expiresAt"] is not JValue { Type: JTokenType.Integer, Value: long seconds } || seconds <= 0 || seconds > MaxUnixSeconds)
+                    continue;
+                var at = DateTimeOffset.FromUnixTimeSeconds(seconds);
+                if (next == null || at < next)
+                    next = at;
+            }
+        }
+        return (count, next);
+    }
+
+    /// <summary>DateTimeOffset 能表示的最大 Unix 秒（9999-12-31）</summary>
+    private const long MaxUnixSeconds = 253402300799;
+
     /// <summary>
     /// Codex 額度被擋的原因（畫面上的說明）：額度桶的 rateLimitReachedType（工作區點數用完、管理員設的上限…），
     /// 或 ordinaryUsageAllowed=false；沒被擋回 null
@@ -455,11 +495,12 @@ internal static class UsageRules
     }
 
     /// <summary>
-    /// 兩份快照在畫面上看起來一樣（時間窗、點數、說明、錯誤、過時、來源都相同；取得時間不算——只在過時時顯示）：
+    /// 兩份快照在畫面上看起來一樣（時間窗、點數、免費重置次數、說明、錯誤、過時、來源都相同；取得時間不算——只在過時時顯示）：
     /// 對話中的每個 API 請求都回報一次額度，數字通常沒變，一樣就不必通知（帳戶卡含走勢線整份重算、網頁重整側欄）
     /// </summary>
     public static bool SameForView(UsageSnapshot? a, UsageSnapshot b) =>
         a is not null && a.Source == b.Source && a.Stale == b.Stale && a.Credits == b.Credits && a.Note == b.Note && a.Error == b.Error
+        && a.ResetCredits == b.ResetCredits && a.ResetCreditExpiresAt == b.ResetCreditExpiresAt
         && a.Windows.SequenceEqual(b.Windows);
 
     /// <summary>快取資料推算重置：重置時間已過的時間窗使用率歸零、解除鎖定（下一次的重置時間未知）</summary>

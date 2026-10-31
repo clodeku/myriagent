@@ -37,6 +37,9 @@ internal static class UsageRules
 
     public const double MaxPercent = 1000;
 
+    /// <summary>Codex 免費重置次數的上限（同桌面的 <c>UsageRules.MaxResetCredits</c>）</summary>
+    public const int MaxResetCredits = 1000;
+
     public const string SourceApi = "api";
 
     public const string SourceSession = "session";
@@ -101,6 +104,8 @@ internal static class UsageRules
             if (!double.IsFinite(w.Percent) || w.Percent < 0 || w.Percent > MaxPercent || w.ResetsAt is <= 0)
                 return "時間窗的數值不正確";
         }
+        if (usage.ResetCredits is < 0 or > MaxResetCredits || usage.ResetCreditExpiresAt is <= 0)
+            return "免費重置次數不正確";
         if (!CatalogRules.IsOptionalText(usage.Credits, CatalogRules.MaxShortTextLength) || !CatalogRules.IsOptionalText(usage.Note, CatalogRules.MaxTextLength)
             || !CatalogRules.IsOptionalText(usage.Error, CatalogRules.MaxTextLength))
             return "文字欄位太長或含控制字元";

@@ -24,7 +24,7 @@ import { voiceSupported, voiceOn, setVoiceOn, voiceTuning, setVoiceTuning } from
 import { SPEED_MIN, SPEED_MAX, SPEED_STEP, PITCH_MIN, PITCH_MAX, normSpeed, normPitch, fmtSpeed, fmtPitch } from './voicerules.js';
 import { pairCountdown, countdownCells, deviceLed, rangeFill, rangeTicks } from './fxrules.js';
 import { setDecodedText } from './textfx.js';
-import { SETTING_KEYWORDS, searchSettings, searchTerms, highlightParts, snippet, tabKeyTarget, tabHitCounts, normalizeHubUrl } from './settingsrules.js';
+import { SETTING_KEYWORDS, searchSettings, searchTerms, highlightParts, snippet, tabKeyTarget, tabHitCounts, normalizeHubUrl, parseTokens, fmtTokens } from './settingsrules.js';
 import { collaboratorsSection, myAccountSection, canManageCollaborators, isCollaborator } from './collab.js';
 
 let open = null; // { d, refresh, browser, refreshApp }
@@ -631,13 +631,16 @@ function conversationDefaults() {
       fallback = pickButton('set-fallback');
       fallback.addEventListener('click', () => openFallbackMenu(fallback));
     }
+    // 自動壓縮上限（宿主的 AutoCompactRules）：只有宿主給了 autoCompactRange 的代理顯示這一列
+    const compact = autoCompactEditor(p);
     const block = h('div', { class: 'set-prov', role: 'tabpanel', id: 'set-prov-' + n + '-' + p.key, 'aria-labelledby': tab.id, dataset: { provider: p.key, name: p.name } },
       h('div', { class: 'set-group' },
         h('h4', { class: 'set-h', text: '新對話的預設' }),
         card(
           row('模型', '新對話開始時的模型；帳戶沒有這個模型時用帳戶預設模型。', model, null, 'defaultModel'),
           row('權限模式', '新對話開始時的權限模式。', perm, null, 'defaultPermission'),
-          fallback && row('備援模型', '主模型過載或不能用時，CLI 自動改用這個模型接著做（和對話的模型相同時不用）。', fallback, 'claudeFallbackModel', 'fallbackModel'))),
+          fallback && row('備援模型', '主模型過載或不能用時，CLI 自動改用這個模型接著做（和對話的模型相同時不用）。', fallback, 'claudeFallbackModel', 'fallbackModel'),
+          compact.row)),
       h('div', { class: 'set-group' },
         h('h4', { class: 'set-h', text: '推理強度' }),
         h('p', { class: 'set-desc set-group-desc', text: '每個模型在新對話開始時的推理強度；「CLI 預設」由 CLI 依模型與帳戶決定，不支援的模型不能選。' }),
@@ -645,7 +648,7 @@ function conversationDefaults() {
     model.addEventListener('click', () => openModelMenu(p.key, model));
     perm.addEventListener('click', () => openPermissionMenu(p.key, perm));
     panels.append(block);
-    return { p, tab, block, model, perm, models, fallback, available: false };
+    return { p, tab, block, model, perm, models, fallback, compact, available: false };
   });
 
   let cur = null;
@@ -697,6 +700,7 @@ function conversationDefaults() {
         const fm = fb ? (cd.models || []).find((m) => m.value === fb) : null;
         setPick(b.fallback, !fb ? '不用' : fm ? fm.label || fm.value : fb, 'Claude 的備援模型');
       }
+      b.compact.refresh(cd);
     }
     const any = blocks.some((b) => b.available);
     empty.hidden = any;
@@ -710,6 +714,43 @@ function conversationDefaults() {
     if (prov && panels.contains(prov)) select(prov.dataset.provider, false);
   };
   return { node, refresh, select: (key) => select(key, false), reveal };
+}
+
+/**
+ * 自動壓縮上限：一個短的輸入框（例如 400k；留空＝CLI 預設）。離開輸入框（Enter 也是）時送 setConversationDefault 的 autoCompact，
+ * 宿主夾進範圍後重送設定、輸入框換成宿主的值；看不懂的值標成錯誤、不送。Esc 還原。refresh(cd)：沒有 autoCompactRange 的代理整列藏起來
+ */
+function autoCompactEditor(p) {
+  const input = h('input', { type: 'text', class: 'input set-tokens', inputmode: 'decimal', spellcheck: 'false', autocomplete: 'off', placeholder: 'CLI 預設', 'aria-label': p.name + ' 的自動壓縮上限' });
+  const node = row('自動壓縮上限', '', input, null, 'autoCompact');
+  const desc = h('div', { class: 'set-desc' });
+  node.querySelector('.set-text').append(desc);
+  node.hidden = true;
+  let cur = null;
+  const show = () => { input.value = fmtTokens(cur); input.removeAttribute('aria-invalid'); };
+  const commit = () => {
+    const v = parseTokens(input.value);
+    if (v === undefined) { input.setAttribute('aria-invalid', 'true'); return; }
+    input.removeAttribute('aria-invalid');
+    if (v === cur) { show(); return; }
+    post({ cmd: 'setConversationDefault', provider: p.key, key: 'autoCompact', value: v == null ? '' : String(v) });
+  };
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }   // 離開輸入框才儲存，宿主送回來的值才換得上去
+    else if (e.key === 'Escape' && input.value !== fmtTokens(cur)) { e.preventDefault(); e.stopPropagation(); show(); }
+  });
+  input.addEventListener('input', () => input.removeAttribute('aria-invalid'));
+  const refresh = (cd) => {
+    const range = cd && cd.autoCompactRange;
+    node.hidden = !range;
+    if (!range) return;
+    cur = cd.autoCompact == null ? null : cd.autoCompact;
+    desc.textContent = '上下文用到這麼多 token 時，CLI 自動壓縮較早的對話（例如 400k）；留空是 CLI 預設。可設 '
+      + fmtTokens(range.min) + '～' + fmtTokens(range.max) + '，超出的自動調到範圍內；比模型的上下文視窗大時照 CLI 預設。已開的對話下一則訊息起套用。';
+    if (document.activeElement !== input) show();
+  };
+  return { row: node, refresh };
 }
 
 function pickButton(cls) {
