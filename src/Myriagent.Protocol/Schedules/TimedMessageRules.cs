@@ -447,6 +447,13 @@ internal static class TimedMessageRules
     /// <summary>一輪的結果寫回送出紀錄的 outcome</summary>
     public static string OutcomeName(bool failed, bool interrupted) => failed ? "failed" : interrupted ? "interrupted" : "completed";
 
+    /// <summary>
+    /// 送出的那一輪沒有正常結束，但中樞會自動接著做（額度用完換帳戶、API 過載重試、等額度重置）：先不記結果，等接著做的那一輪結束再記。
+    /// 2026-10-31 實例：帳戶每週額度用完，每次到點第一輪幾秒就失敗、換帳戶後發文都成功，排程頁卻一律記成失敗
+    /// </summary>
+    public static bool WaitsForContinuation(bool completed, bool continues, bool waitingForQuotaReset)
+        => !completed && (continues || waitingForQuotaReset);
+
     /// <summary>結果的等級（排程頁的燈號與長條）</summary>
     public static string LevelOf(string outcome) => outcome switch
     {

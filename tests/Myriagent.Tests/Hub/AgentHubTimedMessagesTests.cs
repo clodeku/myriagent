@@ -138,6 +138,45 @@ public sealed class AgentHubTimedMessagesTests
         h.Conversation(newId)!.AccountId.Should().Be(h.Claude.Id);
     }
 
+    /// <summary>2026-10-31 實例：帳戶每週額度用完，到點第一輪幾秒就失敗、換帳戶後發文成功，排程頁卻記成失敗</summary>
+    [Fact]
+    public async Task 額度用完換帳戶接著做_結果記接著做的那一輪()
+    {
+        var (h, clock) = Create();
+        using var dispose = h;
+        h.OnUi(() => h.Settings.AutoResumeAfterQuotaReset = false);
+        var (id, s1) = Conversation(h);
+        h.Command(h.Main, "timedSave", new { conversationId = id, text = "發一篇新貼文", when = new { kind = "daily", value = "09:00" } });
+        Tick(h, clock, Start.AddHours(1).AddSeconds(5));
+        await h.WaitUntilAsync(() => s1.Sent.Count == 2, "到點送出");
+
+        h.Raise(s1, new AgentQuotaExhaustedEvent(AgentProvider.Claude, DateTimeOffset.Now.AddHours(3)));
+        h.CompleteTurn(s1, AgentTurnOutcome.Failed, "You've hit your weekly limit");
+        h.Conversation(id)!.AccountId.Should().Be(h.Claude2.Id, "換到還有額度的帳戶接著做");
+        ((JObject)Timed(h).Single()["last"]!).Value<string>("text").Should().Be("已送出", "還在接著做，不記成失敗");
+
+        h.CompleteTurn(h.Sessions[^1]);
+        var last = (JObject)Timed(h).Single()["last"]!;
+        last.Value<string>("level").Should().Be("ok");
+        last.Value<string>("text").Should().Be("完成");
+    }
+
+    [Fact]
+    public async Task 一般的失敗_照樣記成失敗()
+    {
+        var (h, clock) = Create();
+        using var dispose = h;
+        var (id, s) = Conversation(h);
+        h.Command(h.Main, "timedSave", new { conversationId = id, text = "發一篇新貼文", when = new { kind = "daily", value = "09:00" } });
+        Tick(h, clock, Start.AddHours(1).AddSeconds(5));
+        await h.WaitUntilAsync(() => s.Sent.Count == 2, "到點送出");
+
+        h.CompleteTurn(s, AgentTurnOutcome.Failed, "代理執行失敗");
+        var last = (JObject)Timed(h).Single()["last"]!;
+        last.Value<string>("level").Should().Be("fail");
+        last.Value<string>("text").Should().Be("失敗");
+    }
+
     [Fact]
     public async Task 關機錯過好幾次_只補一次_啟動後先等一下()
     {

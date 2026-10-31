@@ -245,7 +245,8 @@ internal sealed partial class AgentHub
         }
     }
 
-    private void HookTurnCompleted(ConversationState c, AgentTurnOutcome outcome, AgentUsage? usage)
+    /// <param name="continues">中樞馬上自動接著做（換帳戶接續、API 過載重試）：送出的那件事還沒結束</param>
+    private void HookTurnCompleted(ConversationState c, AgentTurnOutcome outcome, AgentUsage? usage, bool continues = false)
     {
         // 插進這一輪的那則已經讀走或作廢：不能再取消（AgentHub.SteerCancel.cs）
         ForgetSteer(c);
@@ -269,8 +270,8 @@ internal sealed partial class AgentHub
         OnProgramsTurnCompleted(c);
         // 這一輪的指令碰到 Windows 排程：立刻重讀，變更記成這個對話做的（AgentHub.Schedules.cs）
         OnSchedulesTurnCompleted(c);
-        // 定時訊息送出的那一輪：記下結果（AgentHub.TimedMessages.cs）
-        OnTimedTurnCompleted(c, outcome);
+        // 定時訊息送出的那一輪：記下結果；會自動接著做的等接著做的那一輪（AgentHub.TimedMessages.cs）
+        OnTimedTurnCompleted(c, outcome, continues);
         // 委派的子對話這一輪結束：把結果交回主 AI；主對話結束：停掉還沒完成的子工作（AgentHub.Delegation.cs）
         OnDelegationTurnCompleted(c, outcome);
         if (conversationSink is not { } sink)

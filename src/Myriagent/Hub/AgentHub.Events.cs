@@ -569,7 +569,7 @@ internal sealed partial class AgentHub
         c.Running = false;
         c.StatusText = string.Empty;
         // 掛鉤在 Running 改回 false 之後（接收者看到的是已結束），接著送的下一輪之前
-        HookTurnCompleted(c, outcome, turn.Usage);
+        HookTurnCompleted(c, outcome, turn.Usage, continues: switching || overloadRetry != null);
         c.BlockItems.Clear();
         c.ToolItems.Clear();
         c.UnapprovedTools.Clear();

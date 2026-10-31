@@ -114,6 +114,15 @@ public sealed class TimedMessageRulesTests
     }
 
     [Fact]
+    public void WaitsForContinuation_OnlyWhenNotCompletedAndHubContinues()
+    {
+        TimedMessageRules.WaitsForContinuation(completed: false, continues: true, waitingForQuotaReset: false).Should().BeTrue("換帳戶接續、過載重試");
+        TimedMessageRules.WaitsForContinuation(completed: false, continues: false, waitingForQuotaReset: true).Should().BeTrue("等額度重置");
+        TimedMessageRules.WaitsForContinuation(completed: false, continues: false, waitingForQuotaReset: false).Should().BeFalse("一般的失敗、停止");
+        TimedMessageRules.WaitsForContinuation(completed: true, continues: true, waitingForQuotaReset: false).Should().BeFalse("正常結束就記");
+    }
+
+    [Fact]
     public void Cli_ParsesArgumentsAndBuildsRequest()
     {
         var a = CliArgs.Parse(new[] { "add", "--daily", "09:00", "--new", "--label", "日報", "--", "整理", "昨天的訂單" });

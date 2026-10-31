@@ -107,10 +107,10 @@ internal sealed partial class AgentHub
                     break;
             }
         }
-        // 等一輪結束的記號太久沒結束（被拒、對話被刪）就放掉
+        // 等一輪結束的記號太久沒結束（被拒、對話被刪）就放掉；在等額度重置（最多 12 小時）的留著
         foreach (var (id, p) in timedPending.ToList())
         {
-            if (now - p.At > TimeSpan.FromHours(6))
+            if (now - p.At > TimeSpan.FromHours(6) && !(conversations.TryGetValue(id, out var waiting) && waiting.Meta.QuotaWait != null))
                 timedPending.Remove(id);
         }
         if (changed)
@@ -214,10 +214,17 @@ internal sealed partial class AgentHub
     }
 
     /// <summary>一輪結束（HookTurnCompleted）：定時訊息送出的那一輪記下結果</summary>
-    private void OnTimedTurnCompleted(ConversationState c, AgentTurnOutcome outcome)
+    private void OnTimedTurnCompleted(ConversationState c, AgentTurnOutcome outcome, bool continues)
     {
-        if (!timedPending.Remove(c.Meta.Id, out var p))
+        if (!timedPending.TryGetValue(c.Meta.Id, out var p))
             return;
+        // 額度用完換帳戶、API 過載重試、等額度重置：中樞會自動接著做，結果等接著做的那一輪（逾時從現在重算）
+        if (TimedMessageRules.WaitsForContinuation(outcome == AgentTurnOutcome.Completed, continues, c.Meta.QuotaWait != null))
+        {
+            timedPending[c.Meta.Id] = (p.Message, p.Run, ScheduleClock());
+            return;
+        }
+        timedPending.Remove(c.Meta.Id);
         p.Run.Outcome = TimedMessageRules.OutcomeName(outcome == AgentTurnOutcome.Failed, outcome == AgentTurnOutcome.Interrupted);
         SaveTimedMessages();
         PostSchedules(force: true);
