@@ -19,6 +19,7 @@ import { setDecodedText } from './textfx.js';
 import { tokensOf, tokenSplit, showTokens, tokensTitle, fmtShort, fmtTokens, MATRIX_GLYPHS } from './tokenrules.js';
 import { searchTerms, searchKey, filterConversations, hitsFrom, markParts, MAX_QUERY } from './searchrules.js';
 import { loginExpiry, loginExpiryText } from './loginrules.js';
+import { sidebarWindows } from './accountrules.js';
 import { openImportDialog } from './importconv.js';
 import { isFlashing } from './attnflash.js';
 
@@ -340,10 +341,10 @@ function updateMiniCard(card, a) {
     if (strip) e.devs.append(strip);
     e.devs.hidden = !strip;
   }
-  // 用量圓環：前兩個時間窗，百分比與重置倒數寫在圈內。資料過時（例如權杖過期查不到）時圓環變灰，狀態那一行加時鐘與資料的年紀。
+  // 用量圓環：前兩個時間窗（Claude Code 略過每週・Fable），百分比與重置倒數寫在圈內。資料過時（例如權杖過期查不到）時圓環變灰，狀態那一行加時鐘與資料的年紀。
   // 圓環就地更新（數值變了弧線滑過去），時間窗的個數變了才重建
   const u = a.usage;
-  const wins = ((u && u.windows) || []).slice(0, 2);
+  const wins = sidebarWindows(a.provider, u && u.windows);   // Claude Code 不列「每週・Fable」
   const stale = !!(u && u.stale);
   const staleAt = stale && u.fetchedAt ? u.fetchedAt : 0;
   const sig = JSON.stringify(wins.map((w) => [w.label, Math.round(w.percent || 0), w.severity, w.resetsAt || 0]))

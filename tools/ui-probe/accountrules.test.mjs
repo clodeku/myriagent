@@ -748,3 +748,27 @@ test('backgroundSwitchCommand_一律帶when_現在換是now_其他都是等背�
   assert.deepEqual(A.backgroundSwitchCommand('c', 'a2', 'later'), { cmd: 'setAccount', conversationId: 'c', accountId: 'a2', when: 'turnEnd' });
   assert.equal(A.SWITCH_NOW, 'now', '同中樞 AccountSwitchRules.WhenNow');
 });
+
+test('側欄的用量圓環：Claude Code 不列每週・Fable，其他照原本的前兩個', () => {
+  const session = { key: 'session', label: '5 小時', percent: 20 };
+  const weekly = { key: 'weekly', label: '每週', percent: 52 };
+  const fable = { key: 'weekly:Fable', label: '每週・Fable', percent: 0 };
+  const opus = { key: 'weekly:Opus', label: '每週・Opus', percent: 10 };
+  // 每週用完、沒有 5 小時時，以前第二個圓環就是 Fable
+  assert.deepEqual(A.sidebarWindows('Claude', [weekly, fable]), [weekly]);
+  assert.deepEqual(A.sidebarWindows('Claude', [session, weekly, fable]), [session, weekly]);
+  // 其他模型的每週照樣列
+  assert.deepEqual(A.sidebarWindows('Claude', [weekly, fable, opus]), [weekly, opus]);
+  // 不分大小寫；沒有 key 時看標籤
+  assert.deepEqual(A.sidebarWindows('Claude', [weekly, { key: 'WEEKLY:fable', label: 'x' }]), [weekly]);
+  assert.deepEqual(A.sidebarWindows('Claude', [weekly, { label: '每週・Fable' }]), [weekly]);
+  // 其他代理種類不濾
+  const odd = { key: 'weekly:Fable', label: '每週・Fable' };
+  assert.deepEqual(A.sidebarWindows('Codex', [weekly, odd, session]), [weekly, odd]);
+  // 不是陣列、元素不是物件
+  assert.deepEqual(A.sidebarWindows('Claude', null), []);
+  assert.deepEqual(A.sidebarWindows('Claude', [null, 3, weekly]), [weekly]);
+  const input = [weekly, fable];
+  A.sidebarWindows('Claude', input);
+  assert.equal(input.length, 2, '不改傳入的陣列');
+});

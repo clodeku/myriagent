@@ -40,6 +40,27 @@ export function productName(provider) {
  */
 const SWITCH_WHILE_RUNNING = ['Claude', 'Codex', 'Antigravity', 'Grok'];
 
+/** 側欄帳戶卡最多畫幾個用量圓環 */
+export const SIDEBAR_GAUGES = 2;
+
+/**
+ * 側欄帳戶卡的用量圓環要畫哪幾個時間窗（照宿主給的順序取前 SIDEBAR_GAUGES 個）。
+ * Claude Code 不列「每週・Fable」（2026-10-31 使用者要求）：每週額度用完時沒有「5 小時」，前兩個就變成「每週」＋「每週・Fable」；
+ * 儀表板照舊全部列。認 key（weekly:Fable，不分大小寫），沒有 key 時看標籤（每週・Fable）。不改傳入的陣列
+ */
+export function sidebarWindows(provider, windows) {
+  const list = Array.isArray(windows) ? windows.filter((w) => isObj(w)) : [];
+  const kept = provider === 'Claude' ? list.filter((w) => !isClaudeFableWindow(w)) : list;
+  return kept.slice(0, SIDEBAR_GAUGES);
+}
+
+function isClaudeFableWindow(w) {
+  const key = str(w.key);
+  if (key) return key.toLowerCase() === 'weekly:fable';
+  const label = str(w.label);
+  return !!label && /^每週・\s*fable$/i.test(label.trim());
+}
+
 /** 這種代理的對話執行中能不能換帳戶（換到能在執行中換的任何一種代理的帳戶） */
 export function switchableWhileRunning(provider) {
   return typeof provider === 'string' && SWITCH_WHILE_RUNNING.includes(provider);
