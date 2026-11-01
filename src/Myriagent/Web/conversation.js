@@ -17,7 +17,8 @@ import { createItem, updateItem, applyCardGate, markItemCopied, refreshTimes, se
 import { mentionPlain } from './accountmentions.js';
 import { Composer } from './composer.js';
 import { FileDrawer } from './files.js';
-import { openLightbox, openVideo } from './viewer.js';
+import { openLightbox, openVideo, openDocument } from './viewer.js';
+import { docPreviewKind, localMediaUrl } from './filelinkrules.js';
 import { mediaOfTarget, openMediaMenu } from './mediamenu.js';
 import { enumKey, restartStateOf, restartIcon, restartText, restartWaitText, versionArrow, confirmApplyNowConversation } from './hotupdate.js';
 import { gitView, gitKey } from './gitrules.js';
@@ -123,9 +124,18 @@ export class ConvView {
       // 對話裡的影片帶 conversationId：播放器的「用預設程式開啟／在檔案總管顯示」宿主才認得出副本（WP4.6 步 10）；
       // 〔遠端〕那台的政策是 Off 時影片放不出來，播放器改說明只能看縮圖（步 11）
       openVideo: (m) => openVideo(Object.assign({ conversationId: id, errorText: this.videoErrorText() }, m)),
+      // 文件預覽（PDF、Word、Excel、PowerPoint）：只有這台的對話（路徑在這台）；不是文件、瀏覽器版、其他電腦的對話回 false
+      openDocument: (m) => {
+        const kind = docPreviewKind(m && m.path);
+        if (!kind || isHub || this.isReplica()) return false;
+        openDocument(kind === 'pdf'
+          ? { url: localMediaUrl(m.path), path: m.path, name: m.name || '', conversationId: id }
+          : { path: m.path, name: m.name || '', conversationId: id, convert: true });
+        return true;
+      },
       videoErrorText: () => this.videoErrorText(),
       // 〔遠端〕瀏覽器版的檔案預覽（fileFetch → fileRef，D34）：沒送出回 false
-      fetchFile: (path, name) => fetchFile(id, path, name),
+      fetchFile: (path, name, opts) => fetchFile(id, path, name, opts),
       // 〔遠端〕指令結果的追蹤（cmdtrack）、送出與卡片的閘門（D14、D18）、卡片的送出中與結果不明（重新載入項目時照它畫）
       track: (cid, info) => track(cid, info),
       // 〔遠端〕卡片的回答送到了：輸入框下方亮一下往返時間（composer.showRtt）

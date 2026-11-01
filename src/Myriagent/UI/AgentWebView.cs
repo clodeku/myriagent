@@ -20,10 +20,13 @@ namespace Myriagent.UI;
 /// </summary>
 internal class AgentWebView : IAgentView
 {
-    /// <summary>網頁的內容安全政策：只執行本頁腳本、圖片與影片只從本頁來源（含 /media、/thumb）載入</summary>
+    /// <summary>
+    /// 網頁的內容安全政策：只執行本頁腳本、圖片與影片只從本頁來源（含 /media、/thumb）載入；
+    /// iframe 只收本頁來源（PDF 預覽以 iframe 開 /media，WebView2 內建的檢視器顯示，2026-11-01）
+    /// </summary>
     public const string ContentSecurityPolicy =
         "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; " +
-        "font-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'";
+        "font-src 'self' data:; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'";
 
     /// <summary>/media 開檔最多等多久：網路磁碟離線時開檔會卡到 SMB 逾時（約 40 秒），先回 404，晚到的檔案直接關掉</summary>
     private static readonly TimeSpan MediaOpenTimeout = TimeSpan.FromSeconds(10);
@@ -248,7 +251,14 @@ internal class AgentWebView : IAgentView
     private void ServeMedia(CoreWebView2WebResourceRequestedEventArgs e, string? path)
     {
         var contentType = path == null ? null : AgentAttachmentRules.GetMediaContentType(path);
-        if (path == null || contentType == null || !AgentAttachmentRules.IsLocalDrivePath(path) || !hub.IsMediaAllowed(path))
+        bool allowed = contentType != null && hub.IsMediaAllowed(path!);
+        // PDF 預覽（2026-11-01）：畫面上出現過的 PDF（回覆的檔案連結、文件附件、檔案瀏覽器列出的），以 iframe 給內建的檢視器
+        if (contentType == null && path != null && hub.IsPdfAllowed(path))
+        {
+            contentType = AgentAttachmentRules.PdfContentType;
+            allowed = true;
+        }
+        if (path == null || contentType == null || !AgentAttachmentRules.IsLocalDrivePath(path) || !allowed)
         {
             e.Response = NotFound();
             return;

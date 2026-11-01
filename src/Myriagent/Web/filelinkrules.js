@@ -31,6 +31,16 @@ export function filePreviewKind(path) {
   return null;
 }
 
+/**
+ * 文件預覽（2026-11-01）：'pdf' 交給瀏覽器內建的 PDF 檢視器；'office'（Word、Excel、PowerPoint）由桌面先轉成 PDF（docPreview）。
+ * 副檔名和宿主的 DocPreviewRules.KindOf 同一組；其他回 null
+ */
+export function docPreviewKind(path) {
+  if (/\.pdf$/i.test(path || '')) return 'pdf';
+  if (/\.(docx?|docm|dotx?|rtf|odt|xlsx?|xlsm|xlsb|ods|pptx?|pptm|ppsx?|odp)$/i.test(path || '')) return 'office';
+  return null;
+}
+
 export function localMediaUrl(path) {
   return LOCAL_ORIGIN + '/media?path=' + encodeURIComponent(path);
 }

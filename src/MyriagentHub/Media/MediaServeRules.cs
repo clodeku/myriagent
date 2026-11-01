@@ -1,3 +1,4 @@
+using Myriagent.Agents;
 using Myriagent.Media;
 
 namespace MyriagentHub.Media;
@@ -57,6 +58,9 @@ internal static class MediaServeRules
             case MediaEndpointKind.File or MediaEndpointKind.ReplicaFile:
                 if (reply.ContentKind == MediaContentKinds.Text && reply.TotalLength is { } total && total <= MaxTextPreviewBytes)
                     return (TextPlain, MediaHeaderRules.ContentDisposition(reply.FileName, attachment: false));
+                // PDF（檔名是 .pdf）：inline 給瀏覽器內建的檢視器預覽（2026-11-01）；nosniff 之下不是 PDF 的內容只會顯示不出來
+                if (AgentAttachmentRules.IsPdf(reply.FileName))
+                    return (AgentAttachmentRules.PdfContentType, MediaHeaderRules.ContentDisposition(reply.FileName, attachment: false));
                 return (safe ?? OctetStream, MediaHeaderRules.ContentDisposition(reply.FileName, attachment: true));
             default:
                 throw new ArgumentOutOfRangeException(nameof(endpoint), endpoint, "縮圖不經這裡");

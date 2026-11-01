@@ -35,6 +35,18 @@ public sealed class SecurityHeaderRulesTests
     public void 其他路徑照網頁的CSP(string path)
         => SecurityHeaderRules.ContentSecurityPolicyFor(new PathString(path), Web).Should().Be(Web);
 
+    [Theory]
+    [InlineData("/f/x", "application/pdf", "SAMEORIGIN")]
+    [InlineData("/f/x", "Application/PDF; charset=binary", "SAMEORIGIN")]
+    [InlineData("/m/x", "application/pdf", "SAMEORIGIN")]
+    [InlineData("/f/x", "application/octet-stream", "DENY")]
+    [InlineData("/f/x", "text/plain; charset=utf-8", "DENY")]
+    [InlineData("/f/x", null, "DENY")]
+    [InlineData("/app/x.pdf", "application/pdf", "DENY")]
+    [InlineData("/", "text/html", "DENY")]
+    public void 只有媒體端點回的PDF准同源框住(string path, string? contentType, string expected)
+        => SecurityHeaderRules.FrameOptionsFor(new PathString(path), contentType).Should().Be(expected);
+
     [Fact]
     public void 媒體CSP不載入任何東西也不執行腳本()
     {

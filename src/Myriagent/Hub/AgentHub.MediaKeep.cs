@@ -178,5 +178,7 @@ internal sealed partial class AgentHub
         public string MarkdownLinkUrl(string path) => inner.MarkdownLinkUrl(path);
 
         public void AllowMarkdownImage(string path) => inner.AllowMarkdownImage(Shown(path));
+
+        public void AllowDocument(string path) => inner.AllowDocument(path);
     }
 }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('../../src/Myriagent/Web/filelinkrules.js', import.meta.url), 'utf8');
-const { fileLink, filePreviewKind, localMediaUrl } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+const { fileLink, filePreviewKind, docPreviewKind, localMediaUrl } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 const pptx = 'C:\\repo\\slides\\watercolor_final\\output\\年度簡報_水彩版.pptx';
 
 test('桌面與網頁連結保留中文、空白、百分比、加號與井字號檔名', () => {
@@ -29,4 +29,11 @@ test('只有宿主支援的圖片與影片進入預覽，PowerPoint 與 SVG 提�
   for (const ext of ['png', 'JPG', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']) assert.equal(filePreviewKind('C:\\a.' + ext), 'image');
   for (const ext of ['mp4', 'm4v', 'webm', 'mov']) assert.equal(filePreviewKind('C:\\a.' + ext), 'video');
   for (const path of [pptx, 'a.svg', 'a.jpg.exe', 'a.html', null]) assert.equal(filePreviewKind(path), null);
+});
+
+test('文件預覽：PDF 交給內建檢視器；Word、Excel、PowerPoint 先轉成 PDF；其他與看起來像的不算', () => {
+  assert.equal(docPreviewKind('C:/out/季報.PDF'), 'pdf');
+  for (const ext of ['doc', 'DOCX', 'docm', 'rtf', 'odt', 'xls', 'xlsx', 'xlsm', 'xlsb', 'ods', 'ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'odp']) assert.equal(docPreviewKind('C:/a.' + ext), 'office', ext);
+  for (const path of ['a.pdf.exe', 'a.docx.lnk', 'a.txt', 'a.csv', 'a.png', '', null, undefined]) assert.equal(docPreviewKind(path), null, String(path));
+  assert.equal(filePreviewKind('a.pdf'), null, '媒體預覽不變');
 });

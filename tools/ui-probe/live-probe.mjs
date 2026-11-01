@@ -1211,7 +1211,10 @@ async function runDesktopMediaMenu() {
   await page.setViewportSize({ width: 420, height: 800 });
   await sleep(250);
   r.lbNarrow = await closeBtnState(app, '.lb');
-  r.narrowLabels = await page.evaluate(() => [...document.querySelectorAll('.lb .lb-btn > span')].some((s) => getComputedStyle(s).display !== 'none'));
+  // 窄的畫面文字按鈕只留圖示：文字藏起來、看得到的按鈕圖示都在（icon() 的圖示也是 span，2026-11-01 曾經連圖示一起藏掉）
+  r.narrowLabels = await page.evaluate(() => [...document.querySelectorAll('.lb .lb-btn > span:not(.ic)')].some((s) => getComputedStyle(s).display !== 'none'));
+  r.narrowIcons = await page.evaluate(() => [...document.querySelectorAll('.lb .lb-btn')].filter((b) => getComputedStyle(b).display !== 'none')
+    .map((b) => Math.round(b.querySelector('.ic').getBoundingClientRect().width)));
   await shot(app, 'desktop-lightbox-close-420');
   if (r.lbNarrow) await page.click('.lb .lb-close');
   r.lbClosed = !!(await until(() => page.evaluate(() => (document.querySelector('.lb') ? null : true)), 2000));
@@ -1228,8 +1231,167 @@ async function runDesktopMediaMenu() {
     && JSON.stringify(menuLabels(r.videoMenu)) === JSON.stringify(['複製影片', '另存新檔', '用預設程式開啟', '在檔案總管顯示']) && !r.videoMenu[0].disabled
     && !!r.copy && r.copy.path === 'C:\\repo\\demo\\操作錄影.mp4' && r.copy.conversationId === 'c1',
   { imageMenu: r.imageMenu, lightbox: r.lightbox, save: r.save, videoMenu: r.videoMenu, copy: r.copy });
-  check('desktopViewerCloseTopRight', closeBtnOk(r.lbWide) && closeBtnOk(r.lbNarrow) && !r.narrowLabels && r.lbClosed && closeBtnOk(r.vpNarrow),
-    { lbWide: r.lbWide, lbNarrow: r.lbNarrow, narrowLabels: r.narrowLabels, closed: r.lbClosed, vpNarrow: r.vpNarrow });
+  check('desktopViewerCloseTopRight', closeBtnOk(r.lbWide) && closeBtnOk(r.lbNarrow) && !r.narrowLabels && r.narrowIcons.length >= 3 && r.narrowIcons.every((w) => w === 14)
+    && r.lbClosed && closeBtnOk(r.vpNarrow),
+    { lbWide: r.lbWide, lbNarrow: r.lbNarrow, narrowLabels: r.narrowLabels, narrowIcons: r.narrowIcons, closed: r.lbClosed, vpNarrow: r.vpNarrow });
+  await HP.closePage(app);
+}
+
+// ───── 文件預覽：PDF、Word、Excel、PowerPoint（2026-11-01 使用者要求；viewer.js 的 openDocument、宿主的 docPreview）─────
+
+/** 一份最小的 PDF（兩頁）：探針的 /media、/f/ 以它回應，真的 Chrome 的內建檢視器會顯示 */
+const PROBE_PDF = (() => {
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 5 0 R /Resources << /Font << /F1 6 0 R >> >> >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 5 0 R /Resources << /Font << /F1 6 0 R >> >> >>',
+    null,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  const content = 'BT /F1 36 Tf 72 720 Td (Probe PDF) Tj ET 0.2 0.4 0.8 rg 72 200 451 400 re f';
+  objs[4] = '<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream';
+  let out = '%PDF-1.4\n';
+  const offsets = [];
+  objs.forEach((o, i) => { offsets.push(out.length); out += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+  const xref = out.length;
+  out += 'xref\n0 ' + (objs.length + 1) + '\n0000000000 65535 f \n' + offsets.map((n) => String(n).padStart(10, '0') + ' 00000 n \n').join('');
+  out += 'trailer\n<< /Size ' + (objs.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n';
+  return Buffer.from(out, 'latin1');
+})();
+const pdfResponse = () => ({ status: 200, headers: { 'Content-Type': 'application/pdf', 'Cache-Control': 'no-store' }, body: PROBE_PDF });
+
+/** 文件檢視的狀態：iframe 的網址、狀態列的字與按鈕、關閉鈕；frames 是頁面裡的框（內建檢視器是 chrome-extension 的框） */
+const docViewState = (app) => app.page.evaluate(() => {
+  const dv = document.querySelector('.dv:not(.leaving)');
+  if (!dv) return null;
+  const f = dv.querySelector('iframe.dv-frame');
+  const st = dv.querySelector('[data-field="docStatus"]');
+  return {
+    src: f ? f.getAttribute('src') : null,
+    status: st && !st.hidden ? st.querySelector('.dv-text').textContent : null,
+    err: !!st && st.classList.contains('err'),
+    acts: st ? [...st.querySelectorAll('.dv-acts .btn')].map((b) => b.textContent) : [],
+    name: dv.querySelector('.lb-name').textContent,
+    save: (() => { const b = dv.querySelector('[data-field="mediaSave"]'); const i = b && !b.hidden ? b.querySelector('.ic') : null; return i ? Math.round(i.getBoundingClientRect().width) : null; })(),
+  };
+});
+const pdfViewerShown = (app) => app.page.frames().some((f) => f.url().startsWith('chrome-extension://'));
+const closeDoc = async (app) => { await app.page.keyboard.press('Escape'); await until(() => app.page.evaluate(() => (document.querySelector('.dv') ? null : true)), 2000); };
+
+async function runDesktopDocPreview() {
+  // 桌面：回覆的檔案連結（PDF、Word、PowerPoint）與使用者訊息的 PDF 附件。PDF 直接以 /media 預覽；Office 送 docPreview，宿主轉好回網址、失敗回說明
+  const P = { pdf: 'C:\\repo\\demo\\季報 第3季.pdf', docx: 'C:\\repo\\demo\\企劃書.docx', pptx: 'C:\\repo\\demo\\簡報.pptx', att: 'C:\\data\\attachments\\合約.pdf', conv: 'C:\\data\\cache\\doc-preview\\0123abcd.pdf' };
+  const open = (p) => 'https://myriagent.local/open?path=' + encodeURIComponent(p);
+  const media = (p) => 'https://myriagent.local/media?path=' + encodeURIComponent(p);
+  const items = LF.desktopItems(NOW, 'l').concat([
+    { id: 'ld1', kind: 'User', status: 'Done', time: NOW - 2 * LF.MIN, html: '<p>幫我看合約</p>',
+      attachments: [{ id: 'x9', name: '合約.pdf', kind: 'Document', size: '120 KB', path: P.att, thumbUrl: null, url: null }] },
+    { id: 'ld2', kind: 'Assistant', status: 'Done', time: NOW - LF.MIN,
+      html: '<p>產出了 <a href="' + open(P.pdf) + '">季報</a>、<a href="' + open(P.docx) + '">企劃書</a>、<a href="' + open(P.pptx) + '">簡報</a></p>' },
+  ]);
+  const app = await openDesktopLive('desktop-doc-preview', {
+    init: { layout: desktopLayout(['c1']) }, vp: { w: 1440, h: 900 },
+    host: {
+      items: (cid) => (cid === 'c1' ? items : undefined),
+      // Word 轉好（晚一點回）、PowerPoint 轉不了
+      docPreview: (m) => (m.path === P.docx ? { delay: 400, url: media(P.conv), error: null } : { delay: 100, url: null, error: '無法轉換這個檔案（可能有密碼保護或檔案已損毀），請用預設程式開啟' }),
+    },
+    media: (p, url) => (p === '/media' && /\.pdf$/i.test(url.searchParams.get('path') || '') ? pdfResponse() : null),
+  });
+  const { page } = app;
+  const sel = convSel('c1') + ':not(.loading) .it[data-id="ld2"] a';
+  await until(() => page.evaluate((s) => document.querySelectorAll(s).length === 3, sel), 4000);
+  const link = (i) => page.locator(sel).nth(i);
+  const r = {};
+  // 1. PDF 連結：文件檢視，iframe 是 /media 的網址、內建的檢視器顯示；右上角有關閉鈕
+  await link(0).click();
+  r.pdf = await until(() => docViewState(app), 3000);
+  r.pdfViewer = !!(await until(async () => ((await pdfViewerShown(app)) ? true : null), 5000));
+  r.close = await closeBtnState(app, '.dv');
+  await sleep(600);
+  await shot(app, 'desktop-doc-preview-pdf');
+  await closeDoc(app);
+  // 2. Word：先顯示轉換中、送 docPreview（requestId、路徑、對話 id），宿主回網址後換成 iframe
+  const d0 = postedOf(app, 'docPreview').length;
+  await link(1).click();
+  r.converting = await until(() => docViewState(app), 2000);
+  r.cmd = postedOf(app, 'docPreview').slice(d0)[0] || null;
+  r.docx = await until(async () => { const s = await docViewState(app); return s && s.src ? s : null; }, 3000);
+  await closeDoc(app);
+  // 3. PowerPoint 轉不了：說明與另存新檔、用預設程式開啟
+  await link(2).click();
+  r.pptx = await until(async () => { const s = await docViewState(app); return s && s.err ? s : null; }, 3000);
+  await shot(app, 'desktop-doc-preview-error');
+  await closeDoc(app);
+  // 4. 使用者訊息的 PDF 附件：直接預覽
+  await page.click(convSel('c1') + ' .it[data-id="ld1"] .att-doc');
+  r.att = await until(() => docViewState(app), 3000);
+  await closeDoc(app);
+  check('desktopDocPreviewPdf', !!r.pdf && r.pdf.src === media(P.pdf) && r.pdf.name === '季報 第3季.pdf' && r.pdfViewer && closeBtnOk(r.close)
+    && !!r.att && r.att.src === media(P.att), { pdf: r.pdf, viewer: r.pdfViewer, close: r.close, att: r.att });
+  check('desktopDocPreviewOffice', !!r.converting && /正在轉成 PDF/.test(r.converting.status || '') && !r.converting.src
+    && !!r.cmd && typeof r.cmd.requestId === 'string' && r.cmd.path === P.docx && r.cmd.conversationId === 'c1'
+    && !!r.docx && r.docx.src === media(P.conv) && !r.docx.status
+    && !!r.pptx && /無法轉換/.test(r.pptx.status) && !r.pptx.src && JSON.stringify(r.pptx.acts) === JSON.stringify(['另存新檔', '用預設程式開啟']),
+  { converting: r.converting, cmd: r.cmd, docx: r.docx, pptx: r.pptx });
+  await HP.closePage(app);
+}
+
+async function runHubDocPreview() {
+  // 瀏覽器版（手機 390×844）：回覆裡的 PDF 標記連結 → fileFetch → /f/ 的短效網址放進 iframe；Word 照舊在框裡給「開啟」；
+  // 瀏覽器沒有內建檢視器（Android 的 Chrome）時改說明，給下載與在新分頁開啟
+  const id = LF.CONV.idle;
+  const mark = (p) => '#local-file=' + encodeURIComponent(p);
+  const items = LF.liveItems(NOW).concat([{ id: 'i8', kind: 'Assistant', status: 'Done', time: NOW - LF.MIN, seq: 8,
+    html: '<p>產出了 <a href="' + mark('C:\\repo\\demo\\季報.pdf') + '">季報</a>、<a href="' + mark('C:\\repo\\demo\\企劃書.docx') + '">企劃書</a></p>' }]);
+  const app = await openWithLayout('hub-doc-preview', layoutOf([[[id], id]]), {
+    open: {
+      vp: { w: 390, h: 844 }, hasTouch: true,
+      hub: (hub) => hub.onCmd('open', (cmd) => ({ push: [LF.conversationMessage(NOW, cmd.conversationId, TITLE_OF[cmd.conversationId] || '對話', { items })] })),
+      media: (p) => (p.startsWith('/f/d_A-pdf') ? pdfResponse() : null),
+    },
+  });
+  const { hub, page } = app;
+  await waitLoaded(app, [id]);
+  await page.click('#btnSidebar');
+  await sleep(300);
+  let n = 0;
+  hub.onCmd('fileFetch', (cmd, arg) => {
+    n++;
+    const pdf = /\.pdf$/i.test(cmd.path);
+    const ref = pdf ? { url: '/f/d_A-pdf' + n, name: '季報.pdf', size: PROBE_PDF.length, expiresAt: NOW + 15 * LF.MIN, error: null }
+      : { url: '/f/d_A-doc' + n, name: '企劃書.docx', size: 2048, expiresAt: NOW + 15 * LF.MIN, error: null };
+    return { push: [serverResult(arg.commandId, 'done'), Object.assign({ type: 'fileRef', requestId: cmd.requestId, conversationId: cmd.conversationId }, ref)] };
+  });
+  const sel = itemSel(id, 'i8') + ' a';
+  const r = {};
+  // 1. PDF：直接預覽（iframe 是 /f/ 網址、內建的檢視器顯示），關閉鈕在右上角；沒有 docPreview
+  await page.locator(sel).nth(0).tap();
+  r.pdf = await until(async () => { const s = await docViewState(app); return s && s.src ? s : null; }, 4000);
+  r.viewer = !!(await until(async () => ((await pdfViewerShown(app)) ? true : null), 5000));
+  r.close = await closeBtnState(app, '.dv');
+  await sleep(600);
+  await shot(app, 'hub-mobile-doc-preview-pdf');
+  await page.tap('.dv .lb-close');
+  r.closed = !!(await until(() => page.evaluate(() => (document.querySelector('.dv') ? null : true)), 2000));
+  // 2. Word：網頁版還不轉檔，照舊是「預覽或下載檔案」框的「開啟」
+  await page.locator(sel).nth(1).tap();
+  r.docxDialog = await until(() => page.evaluate(() => { const a = document.querySelector('.dlg-file-ref [data-field="fileRefOpen"]'); return a ? a.getAttribute('href') : null; }), 3000);
+  r.docxViewer = await docViewState(app);
+  await page.keyboard.press('Escape');
+  await sleep(200);
+  // 3. 沒有內建檢視器（Android 的 Chrome）：說明＋下載、在新分頁開啟
+  await page.evaluate(() => Object.defineProperty(Navigator.prototype, 'pdfViewerEnabled', { configurable: true, get: () => false }));
+  await page.locator(sel).nth(0).tap();
+  r.noViewer = await until(async () => { const s = await docViewState(app); return s && s.status ? s : null; }, 4000);
+  await shot(app, 'hub-mobile-doc-preview-no-viewer');
+  await closeDoc(app);
+  check('hubDocPreviewPdf', !!r.pdf && /^\/f\/d_A-pdf\d$/.test(r.pdf.src) && r.pdf.name === '季報.pdf' && r.pdf.save === 14 && r.viewer && closeBtnOk(r.close) && r.closed
+    && hub.cmds('docPreview').length === 0, { pdf: r.pdf, viewer: r.viewer, close: r.close, closed: r.closed });
+  check('hubDocPreviewFallbacks', /^\/f\/d_A-doc\d$/.test(r.docxDialog || '') && !r.docxViewer
+    && !!r.noViewer && /不能在頁面裡顯示 PDF/.test(r.noViewer.status) && !r.noViewer.src && JSON.stringify(r.noViewer.acts) === JSON.stringify(['下載', '在新分頁開啟']),
+  { docxDialog: r.docxDialog, docxViewer: r.docxViewer, noViewer: r.noViewer });
   await HP.closePage(app);
 }
 
@@ -3328,6 +3490,12 @@ function desktopHost(o = {}) {
         st.exports++;
         const r = o.exportResult ? o.exportResult(st.exports) : null;
         if (r) host.send(Object.assign({ type: 'remoteAuditExport' }, r));
+        break;
+      }
+      case 'docPreview': {
+        // o.docPreview(m)：{ delay, url, error }（文件預覽的轉檔結果）
+        const r = o.docPreview ? o.docPreview(m) : null;
+        if (r) setTimeout(() => host.send({ type: 'docPreview', requestId: m.requestId, url: r.url, error: r.error }), r.delay || 0);
         break;
       }
       case 'syncListTrash': host.send({ type: 'trash', entries: st.trash }); break;
@@ -5901,6 +6069,8 @@ const SCENARIOS = [
   { checks: ['desktopLightboxSwipeMenu'], run: runDesktopLightboxSwipeMenu },
   { checks: ['hubMobileMediaLongPress', 'hubMobileVideoSwipe'], run: runMobileMediaTouch },
   { checks: ['desktopMediaContextMenu', 'desktopViewerCloseTopRight'], run: runDesktopMediaMenu },
+  { checks: ['desktopDocPreviewPdf', 'desktopDocPreviewOffice'], run: runDesktopDocPreview },
+  { checks: ['hubDocPreviewPdf', 'hubDocPreviewFallbacks'], run: runHubDocPreview },
   { checks: ['hubPhoneAcctsFolded', 'hubPhoneSwipeLeftCloses', 'hubPhoneSwipeLeftMonitor', 'hubPhoneSwipeIgnored', 'hubPhoneDragFollowsFinger', 'hubPhoneSwipeRightOpens', 'hubPhoneTapChatCloses', 'hubPhonePickCloses', 'hubPhoneDrawerNoHScroll', 'hubPhoneSearchBottomLeft', 'hubPhoneWideUnchanged', 'hubPhoneBrandRunMatches'], run: runPhoneDrawer },
   { checks: ['hubSendTrackedDone', 'hubRttReadout'], run: runSendDone },
   { checks: ['hubSendRejectedRestores'], run: runSendRejected },

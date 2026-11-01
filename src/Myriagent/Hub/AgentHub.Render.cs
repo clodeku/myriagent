@@ -78,6 +78,9 @@ internal sealed partial class AgentHub
     /// </summary>
     public bool IsMediaAllowed(string path) => mediaUrls.IsMediaAllowed(path);
 
+    /// <summary>/media 的 PDF 預覽：畫面上出現過的 PDF（<see cref="LocalMediaUrls.IsPdfAllowed"/>）</summary>
+    public bool IsPdfAllowed(string path) => mediaUrls.IsPdfAllowed(path);
+
     /// <summary>縮圖端點（/thumb）只提供登記過的檔案（附件與檔案瀏覽器列出的圖片／影片）</summary>
     public bool IsThumbAllowed(string path) => mediaUrls.IsThumbAllowed(path);
 

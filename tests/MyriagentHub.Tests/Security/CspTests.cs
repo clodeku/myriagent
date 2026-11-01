@@ -28,6 +28,7 @@ public sealed partial class CspTests
         var scriptSrc = csp.Split(';').Select(d => d.Trim()).Single(d => d.StartsWith("script-src ", StringComparison.Ordinal));
         scriptSrc.Should().Be("script-src 'self'", "不准 inline、eval、外站腳本");
         csp.Should().Contain("default-src 'none'").And.Contain("frame-ancestors 'none'").And.Contain("object-src 'none'").And.Contain("base-uri 'none'");
+        csp.Should().Contain("frame-src 'self'", "PDF 預覽以同源的 iframe 開 /f/（2026-11-01）").And.NotContain("frame-src *");
         csp.Should().NotContain("unsafe-eval");
 
         response.Headers.GetValues("X-Content-Type-Options").Single().Should().Be("nosniff");

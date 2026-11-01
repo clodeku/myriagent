@@ -27,4 +27,12 @@ internal interface IMediaUrlBuilder
     /// 實作只能放行可直接顯示的圖片與影片（AgentAttachmentRules.IsDisplayableMedia）：其他副檔名放行了，也只會讓縮圖端點替任意檔案產生外殼縮圖
     /// </summary>
     void AllowMarkdownImage(string path);
+
+    /// <summary>
+    /// 不能直接顯示的附件（文件）：不產生網址、輸出不變，只讓實作知道畫面上有這個檔（桌面登記成可另存與 PDF 預覽，2026-11-01）。
+    /// 預設什麼都不做（伺服器與複本的網址不經這裡）
+    /// </summary>
+    void AllowDocument(string path)
+    {
+    }
 }

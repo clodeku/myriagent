@@ -63,6 +63,23 @@ public sealed class MediaServeRulesTests
         MediaServeRules.Representation(MediaEndpointKind.File, Reply(kind: "binary", type: "image/png")).Should().Be(("image/png", (string?)"attachment"));
     }
 
+    [Theory]
+    [InlineData((int)MediaEndpointKind.File, "binary", "application/octet-stream")]
+    [InlineData((int)MediaEndpointKind.File, null, null)]
+    [InlineData((int)MediaEndpointKind.ReplicaFile, "binary", null)]
+    public void 檔案_PDF以檔名判斷_inline給瀏覽器的檢視器預覽(int endpoint, string? kind, string? declared)
+    {
+        // 舊的桌面送 octet-stream、或不帶型別：一律看檔名（2026-11-01）
+        var (type, disposition) = MediaServeRules.Representation((MediaEndpointKind)endpoint, Reply(kind: kind, type: declared, fileName: "季報.PDF", total: 50L * 1024 * 1024));
+
+        type.Should().Be("application/pdf");
+        disposition.Should().StartWith("inline;").And.Contain("filename*=UTF-8''%E5%AD%A3%E5%A0%B1.PDF");
+    }
+
+    [Fact]
+    public void 原檔端點的PDF不變_仍然下載()
+        => MediaServeRules.Representation(MediaEndpointKind.Media, Reply(type: "application/pdf", fileName: "a.pdf")).ContentType.Should().Be("application/octet-stream");
+
     [Fact]
     public void 縮圖端點不經Representation()
         => FluentActions.Invoking(() => MediaServeRules.Representation(MediaEndpointKind.Thumb, Reply())).Should().Throw<ArgumentOutOfRangeException>();
