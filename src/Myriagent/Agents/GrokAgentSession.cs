@@ -98,8 +98,40 @@ internal sealed class GrokAgentSession : IAgentSession
     /// <summary>這一輪送的是 _x.ai/compact_conversation（成功才發壓縮提示，不把回應的 token 當成上下文）</summary>
     private bool promptIsCompact;
 
-    /// <summary>還在跑的背景工作（task id → 工具卡）。一輪結束不清；程序換掉或結束才清，並發數量 0</summary>
-    private readonly Dictionary<string, (string? ToolCallId, AgentBackgroundTool Tool)> background = new(StringComparer.Ordinal);
+    /// <summary>手動壓縮進行中已經看過 auto_compact_completed（那則通知不另發提示，由這一輪的回應發）</summary>
+    private bool autoCompactSeenDuringManual;
+
+    /// <summary>手動壓縮的回應先到、通知還沒到：下一則 auto_compact_completed 不再發第二次提示</summary>
+    private bool suppressLateAutoCompact;
+
+    /// <summary>正在為分叉接上程序（不是一輪：不設 running，程序自己結束也不回報失敗）；這期間的送出等它做完再開始</summary>
+    private TaskCompletionSource? attachDone;
+
+    /// <summary>
+    /// 分叉接上程序時開了新的 grok 對話（續接失敗或從來沒建立過）：那次 session/new 的結果留給這個程序上的下一次送出，
+    /// 第一則才會帶 Myriagent 的指示與前文節錄（不然 sid 已經有了，送出時當成續接中的對話）
+    /// </summary>
+    private (AgentProcess Process, bool CreatedNew, bool LostHistory)? attachedFresh;
+
+    /// <summary>還在跑的背景工作（task id → 工具卡與本機輸出檔）。一輪結束不清；程序換掉或結束才清，並發數量 0</summary>
+    private readonly Dictionary<string, BackgroundWork> background = new(StringComparer.Ordinal);
+
+    /// <summary>一筆背景工作。OutputFile 只留本機磁碟路徑</summary>
+    private sealed class BackgroundWork
+    {
+        public BackgroundWork(string? toolCallId, AgentBackgroundTool tool, string? outputFile)
+        {
+            ToolCallId = toolCallId;
+            Tool = tool;
+            OutputFile = outputFile;
+        }
+
+        public string? ToolCallId { get; }
+
+        public AgentBackgroundTool Tool { get; }
+
+        public string? OutputFile { get; set; }
+    }
 
     /// <summary>目前程序已套用的設定（null＝不知道，下次一定送）</summary>
     private string? appliedModel;
@@ -232,8 +264,17 @@ internal sealed class GrokAgentSession : IAgentSession
         }
     }
 
-    private static string Signature(AgentSessionSettings settings)
-        => GrokAcpRules.Signature(settings.AccountKey, settings.Launcher?.FileName, settings.WorkingDirectory, settings.ConversationDirectory, settings.UseLocalCustomizations);
+    /// <summary>帳戶環境之後加上設定頁的自動壓縮門檻（AutoCompactRules）：蓋過伺服器給模型的門檻與 config 的設定；沒設定時照 CLI 預設</summary>
+    internal static void ApplyLaunchEnvironment(IDictionary<string, string?> env, AgentSessionSettings settings)
+    {
+        settings.ConfigureEnvironment(env);
+        if (settings.AutoCompactPercent is { } percent)
+            env[AutoCompactRules.GrokPercentVariable] = percent.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    internal static string Signature(AgentSessionSettings settings)
+        => GrokAcpRules.Signature(settings.AccountKey, settings.Launcher?.FileName, settings.WorkingDirectory, settings.ConversationDirectory, settings.UseLocalCustomizations)
+           + "|" + settings.AutoCompactPercent;
 
     // ───────────────────────────── 送出 ─────────────────────────────
 
@@ -241,10 +282,29 @@ internal sealed class GrokAgentSession : IAgentSession
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(settings);
+        // 分叉正在接上這個對話的程序（通常不到一秒）：等它做完再送，同一個程序與對話接著用
+        while (true)
+        {
+            Task? attachWait;
+            lock (gate)
+            {
+                ObjectDisposedException.ThrowIf(disposed, this);
+                attachWait = attachDone?.Task;
+            }
+            if (attachWait == null)
+                break;
+            await attachWait.ConfigureAwait(false);
+        }
+
         var preparation = new CancellationTokenSource();
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
+            if (attachDone != null)
+            {
+                preparation.Dispose();
+                throw new InvalidOperationException("正在準備 Grok 對話，請稍後再送出");
+            }
             if (restart != null)
             {
                 preparation.Dispose();
@@ -256,6 +316,7 @@ internal sealed class GrokAgentSession : IAgentSession
                 throw new InvalidOperationException("代理還在處理上一則訊息");
             }
             running = true;
+            suppressLateAutoCompact = false;
             interruptRequested = false;
             cancelSent = false;
             suspendedSession = null;
@@ -325,7 +386,18 @@ internal sealed class GrokAgentSession : IAgentSession
             }
             bool createdNew = false, lostHistory = false;
             if (sid == null)
+            {
                 (sid, createdNew, lostHistory) = await OpenSessionAsync(conn, settings, ct);
+            }
+            else
+            {
+                lock (gate)
+                {
+                    if (attachedFresh is { } fresh && ReferenceEquals(fresh.Process, current))
+                        (createdNew, lostHistory) = (fresh.CreatedNew, fresh.LostHistory);
+                    attachedFresh = null;
+                }
+            }
             if (TryAbortInterrupted())
                 return;
             await ApplyConfigAsync(conn, sid, settings, ct);
@@ -468,7 +540,8 @@ internal sealed class GrokAgentSession : IAgentSession
         // 共用設定（Grok 隔離帳戶或跨四家 CLI 共用）：啟動前在背景同步全域指示與連結 skills／rules
         _ = await settings.PrepareSharedAsync();
 
-        var started = await AgentProcess.StartWithRetryAsync(launcher, GrokAcpRules.AgentArguments, settings.WorkingDirectory, settings.ConfigureEnvironment, ct);
+        var started = await AgentProcess.StartWithRetryAsync(launcher, GrokAcpRules.AgentArguments, settings.WorkingDirectory,
+            env => ApplyLaunchEnvironment(env, settings), ct);
         var conn = new GrokAcpConnection(started);
         conn.Response += message => OnResponse(started, message);
         conn.Request += message => OnRequest(started, message);
@@ -827,7 +900,38 @@ internal sealed class GrokAgentSession : IAgentSession
                 if (ContextUsageRules.GrokCallTokens(note["usage"] as JObject) is { } used)
                     Raise(new AgentContextUsageEvent(used, null));
                 break;
+            case "x.ai/session_notification" when message.Params["update"] is JObject { } compact && compact.Value<string>("sessionUpdate") == "auto_compact_completed":
+                // 1.0.70 實測：tokens_after 可以比 tokens_before 大，不是剩下的上下文。手動 /compact 也會送這則，那次由回應收尾，這裡不發第二次
+                OnAutoCompact();
+                break;
         }
+    }
+
+    /// <summary>grok 自己壓縮完。不採用通知裡的 token 數。呼叫端不在讀取執行緒上 await 別的請求</summary>
+    private void OnAutoCompact()
+    {
+        bool raise;
+        lock (gate)
+        {
+            if (promptIsCompact)
+            {
+                autoCompactSeenDuringManual = true;
+                raise = false;
+            }
+            else if (suppressLateAutoCompact)
+            {
+                suppressLateAutoCompact = false;
+                raise = false;
+            }
+            else
+            {
+                raise = true;
+            }
+        }
+        if (!raise)
+            return;
+        Raise(new AgentNoticeEvent(GrokAcpRules.CompactedNotice, IsError: false));
+        Raise(new AgentContextUsageEvent(null, null, Compacted: true));
     }
 
     /// <summary>模型清單（initialize、session/new、session/resume、_x.ai/models/update）帶的各模型視窗：記下來，目前的模型有視窗就發上下文提示</summary>
@@ -923,6 +1027,7 @@ internal sealed class GrokAgentSession : IAgentSession
                 promptProcess = current;
                 promptWritten = false;
                 promptIsCompact = true;
+                autoCompactSeenDuringManual = false;
                 preparing = null;
             }
         }
@@ -1071,9 +1176,12 @@ internal sealed class GrokAgentSession : IAgentSession
                     events.AddRange(GrokAcpRules.ParseTokenEvents(message.Result, CurrentTokenModel()));
                     if (compacting && outcome == AgentTurnOutcome.Completed)
                     {
-                        // 壓縮那次回應的 token 不是對話剩下的上下文：清掉用量，等下一次呼叫
+                        // 壓縮那次回應的 token 不是對話剩下的上下文：清掉用量，等下一次呼叫。
+                        // 通知若還沒到，下一則 auto_compact_completed 不再發第二次
                         events.Add(new AgentNoticeEvent(GrokAcpRules.CompactedNotice, IsError: false));
                         events.Add(new AgentContextUsageEvent(null, null, Compacted: true));
+                        if (!autoCompactSeenDuringManual)
+                            suppressLateAutoCompact = true;
                     }
                     else if (ContextUsageRules.GrokPromptTokens(message.Result) is { } used)
                     {
@@ -1504,6 +1612,7 @@ internal sealed class GrokAgentSession : IAgentSession
         process = null;
         connection = null;
         processSessionId = null;
+        attachedFresh = null;
         processCli = null;
         processSignature = null;
         ResetAppliedLocked();
@@ -1531,7 +1640,10 @@ internal sealed class GrokAgentSession : IAgentSession
         {
             if (parsed.Kind == "task_backgrounded")
             {
-                background[parsed.TaskId] = (parsed.ToolCallId, DescribeBackgroundToolLocked(parsed));
+                var described = DescribeBackgroundToolLocked(parsed);
+                if (described.OutputFile == null && background.TryGetValue(parsed.TaskId, out var previous))
+                    described.OutputFile = previous.OutputFile;
+                background[parsed.TaskId] = described;
                 work = SnapshotBackgroundLocked();
             }
             else if (parsed.Kind == "task_completed" && background.Remove(parsed.TaskId, out var existing))
@@ -1552,16 +1664,21 @@ internal sealed class GrokAgentSession : IAgentSession
             PublishSafePoint();
     }
 
-    /// <summary>呼叫端已持有 gate。對得到工具卡就用它的名稱；否則標題用 monitor 說明</summary>
-    private AgentBackgroundTool DescribeBackgroundToolLocked(GrokBackgroundNote parsed)
+    /// <summary>呼叫端已持有 gate。對得到工具卡就用它的名稱；否則標題用 monitor 說明。TaskId 讓「詳細」來讀輸出檔</summary>
+    private BackgroundWork DescribeBackgroundToolLocked(GrokBackgroundNote parsed)
     {
+        AgentBackgroundTool tool;
         if (parsed.ToolCallId is { Length: > 0 } toolCallId && parser.GetToolCall(toolCallId) is { } call)
         {
             var described = GrokAcpRules.DescribeTool(call);
-            return new AgentBackgroundTool(described.Name, described.Kind, described.Title, described.Detail);
+            tool = new AgentBackgroundTool(described.Name, described.Kind, described.Title, described.Detail, parsed.TaskId);
         }
-        var title = string.IsNullOrWhiteSpace(parsed.Description) ? "背景工作" : parsed.Description.Trim();
-        return new AgentBackgroundTool("背景工作", "bash", title, null);
+        else
+        {
+            var title = string.IsNullOrWhiteSpace(parsed.Description) ? "背景工作" : parsed.Description.Trim();
+            tool = new AgentBackgroundTool("背景工作", "bash", title, null, parsed.TaskId);
+        }
+        return new BackgroundWork(parsed.ToolCallId, tool, GrokAcpRules.AcceptOutputFile(parsed.OutputFile));
     }
 
     /// <summary>呼叫端已持有 gate。ToolIds 空的時候給 null，中樞才留得住對不到卡的背景工作</summary>
@@ -1570,6 +1687,144 @@ internal sealed class GrokAgentSession : IAgentSession
         var tools = background.Values.Select(v => v.Tool).ToArray();
         var ids = background.Values.Select(v => v.ToolCallId).Where(id => !string.IsNullOrEmpty(id)).Cast<string>().ToArray();
         return new AgentBackgroundWorkEvent(background.Count, tools, ids.Length == 0 ? null : ids);
+    }
+
+    /// <summary>背景工作的輸出：讀通知帶來的本機檔尾端。沒有這筆、或路徑不是本機磁碟，回錯誤；檔案還沒寫出來回空字串</summary>
+    public Task<AgentTaskOutput> GetTaskOutputAsync(string taskId)
+    {
+        string? path;
+        lock (gate)
+        {
+            if (!background.TryGetValue(taskId, out var entry))
+                return Task.FromResult(new AgentTaskOutput(null, 0, false, "這個背景工作已經結束了"));
+            path = entry.OutputFile;
+        }
+        if (path == null)
+            return Task.FromResult(new AgentTaskOutput(null, 0, false, "這個背景工作沒有本機的輸出檔"));
+        var file = path;
+        return Task.Run(() => GrokAcpRules.ReadBackgroundOutput(file));
+    }
+
+    /// <summary>
+    /// 把目前的 grok 對話整份分叉（1.0.70 實測，tools/probes/grok/fork_probe.py：新對話續接後記得分叉前的內容、看不到原對話之後的，原對話不受影響）。
+    /// 成功回新的 session id（程序仍留在來源那份）。失敗回 null，呼叫端改附前文節錄。還沒建立過對話、或接上時原本的對話已經續接不了
+    /// （改開了新的，分叉出來的會是空的）也回 null
+    /// </summary>
+    public async Task<string?> ForkSessionAsync(string newSessionId, AgentSessionSettings settings)
+    {
+        try
+        {
+            if (!HasGrokSession(settings))
+                return null;
+            var (conn, sid, fresh) = await EnsureAttachedAsync(settings, CancellationToken.None).ConfigureAwait(false);
+            if (fresh)
+            {
+                Log.Warn("Grok 分叉：原本的對話已經續接不了（改開了新的），改附前文節錄");
+                return null;
+            }
+            var (result, error) = await conn.RequestAsync(GrokAcpRules.MethodFork, GrokAcpRules.BuildForkParams(sid, settings.WorkingDirectory, newSessionId), SessionRequestTimeout).ConfigureAwait(false);
+            if (error != null)
+            {
+                Log.Warn($"Grok 分叉失敗：{error.Text}");
+                return null;
+            }
+            var id = GrokAcpRules.ParseForkSessionId(result);
+            if (id == null)
+                Log.Warn("Grok 分叉回應沒有 newSessionId");
+            return id;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or DirectoryNotFoundException or AgentCliUnavailableException)
+        {
+            Log.Warn($"Grok 分叉失敗：{ex.Message}");
+            return null;
+        }
+    }
+
+    private bool HasGrokSession(AgentSessionSettings settings)
+    {
+        lock (gate)
+            return sessionId != null || settings.SessionStarted;
+    }
+
+    /// <summary>
+    /// 分叉要用活著的連線，但不開始一輪（不設 running，程序自己結束不會被當成這一輪失敗）。
+    /// 程序已在、這個對話已接上、設定沒變：直接用，執行中也可以。沒有可用的程序、這一輪又在跑：失敗。
+    /// 閒置且沒有程序：啟動並建立或續接，不送提示。Fresh＝這次開了新的 grok 對話（續接失敗或從來沒建立過，留給下一次送出帶指示與前文節錄）
+    /// </summary>
+    private async Task<(GrokAcpConnection Connection, string SessionId, bool Fresh)> EnsureAttachedAsync(AgentSessionSettings settings, CancellationToken ct)
+    {
+        TaskCompletionSource done;
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (attachDone != null)
+                throw new InvalidOperationException("正在準備 Grok 對話");
+            if (restart != null)
+                throw new InvalidOperationException("正在重開 Grok");
+            var signature = Signature(settings);
+            bool same = process != null && !process.HasExited && connection != null && processSessionId != null
+                && string.Equals(processSignature, signature, StringComparison.Ordinal)
+                && CliBinaryIdentity.SameOrUnknown(processCli, settings.Cli);
+            if (same)
+                return (connection!, processSessionId!, false);
+            if (running)
+                throw new InvalidOperationException("這一輪還在執行，不能另外接上 Grok");
+            done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            attachDone = done;
+        }
+
+        try
+        {
+            AgentProcess? current;
+            AgentProcess? stale = null;
+            int droppedBackground = 0;
+            lock (gate)
+            {
+                var signature = Signature(settings);
+                if (process != null && (process.HasExited || !string.Equals(processSignature, signature, StringComparison.Ordinal)
+                    || !CliBinaryIdentity.SameOrUnknown(processCli, settings.Cli)))
+                {
+                    stale = process;
+                    droppedBackground = DetachProcessLocked();
+                }
+                current = process;
+            }
+            RaiseBackgroundCleared(droppedBackground);
+            if (stale != null)
+            {
+                await stale.CloseAsync(CloseGrace).ConfigureAwait(false);
+                stale.Dispose();
+            }
+            ThrowIfDisposed();
+            current ??= await StartProcessAsync(settings, ct).ConfigureAwait(false);
+            ThrowIfDisposed();
+            GrokAcpConnection conn;
+            string? sid;
+            lock (gate)
+            {
+                conn = connection ?? throw new InvalidOperationException("Grok 程序已結束");
+                sid = processSessionId;
+            }
+            bool fresh = false;
+            if (sid == null)
+            {
+                var (opened, createdNew, lostHistory) = await OpenSessionAsync(conn, settings, ct).ConfigureAwait(false);
+                sid = opened;
+                fresh = createdNew || lostHistory;
+                if (fresh)
+                {
+                    lock (gate)
+                        attachedFresh = ReferenceEquals(connection, conn) && process is { } owner ? (owner, createdNew, lostHistory) : null;
+                }
+            }
+            return (conn, sid, fresh);
+        }
+        finally
+        {
+            lock (gate)
+                attachDone = null;
+            done.TrySetResult();
+        }
     }
 
     private void ResetAppliedLocked()

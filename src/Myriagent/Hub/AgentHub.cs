@@ -1082,6 +1082,8 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             foreach (var item in finalized)
                 HookItemChanged(c, item);
         }
+        // 修正之前延伸出來的對話：其他對話資料夾裡的媒體補留一份（AgentHub.MediaKeep.cs）
+        RepairForkMediaLater(c);
 
         return c.Items;
     }
@@ -1718,7 +1720,8 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             CodexSkills: c.Meta.CodexSkills,
             DelegationMcpPipeName: DelegationMcpFor(c)?.PipeName,
             // 自動壓縮上限是這一家 CLI 的設定：已開的對話也套用（改了下次送出時重開程序）
-            AutoCompactTokens: AutoCompactRules.ForProvider(account.Provider, ProviderDefaults(account.Provider).AutoCompactTokens));
+            AutoCompactTokens: AutoCompactRules.ForProvider(account.Provider, ProviderDefaults(account.Provider).AutoCompactTokens),
+            AutoCompactPercent: AutoCompactRules.PercentForProvider(account.Provider, ProviderDefaults(account.Provider).AutoCompactPercent));
     }
 
     /// <summary>設定頁開著「Claude 對話開啟 Remote Control」時的選項：以對話標題命名、接回上次的遠端工作階段（只有 Claude 會用，其他代理忽略）</summary>
@@ -2724,7 +2727,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
 
     /// <summary>
     /// 設定頁「模型設定」（setConversationDefault）：某一家的預設模型（空白＝沿用上次選擇）、預設權限模式，
-    /// 或某個模型的預設推理強度（"default"＝清除，回到 CLI 預設）、自動壓縮上限（autoCompact，空白＝CLI 預設）；不合法的值不改也不廣播。
+    /// 或某個模型的預設推理強度（"default"＝清除，回到 CLI 預設）、自動壓縮上限（autoCompact，空白＝CLI 預設）與百分比（autoCompactPercent，Grok）；不合法的值不改也不廣播。
     /// 已開的對話不受影響（自動壓縮上限除外：下次啟動程序時套用）
     /// </summary>
     private void SetConversationDefault(string? providerText, string? key, string? model, string? value)
@@ -2738,6 +2741,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             "permission" => ConversationDefaultsRules.TrySetPermission(defaults, provider, value),
             "effort" => ConversationDefaultsRules.TrySetEffort(defaults, model, value, ProviderModels(provider)),
             "autoCompact" => TrySetAutoCompact(defaults, provider, value),
+            "autoCompactPercent" => TrySetAutoCompactPercent(defaults, provider, value),
             _ => false,
         };
         if (!changed)
@@ -2752,6 +2756,15 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         if (!AutoCompactRules.TryNormalize(provider, value, out var tokens) || defaults.AutoCompactTokens == tokens)
             return false;
         defaults.AutoCompactTokens = tokens;
+        return true;
+    }
+
+    /// <summary>自動壓縮門檻的百分比（AutoCompactRules，Grok）：不支援的代理、看不懂的值不改；值沒變也不廣播</summary>
+    private static bool TrySetAutoCompactPercent(ProviderConversationDefaults defaults, AgentProvider provider, string? value)
+    {
+        if (!AutoCompactRules.TryNormalizePercent(provider, value, out var percent) || defaults.AutoCompactPercent == percent)
+            return false;
+        defaults.AutoCompactPercent = percent;
         return true;
     }
 

@@ -131,3 +131,25 @@ test('fmtTokens：整百寫成 k、整十萬以上寫成 M，其他照數字；n
   assert.equal(R.fmtTokens(999), '999');
   assert.equal(R.fmtTokens(null), '');
 });
+
+test('parsePercent／fmtPercent：整數可帶 %、全形；空白與 default 是 null；小數與看不懂的是 undefined（同宿主的 AutoCompactRules.TryParsePercent）', () => {
+  assert.equal(R.parsePercent('70'), 70);
+  assert.equal(R.parsePercent(' 70% '), 70);
+  assert.equal(R.parsePercent('70 %'), 70);
+  assert.equal(R.parsePercent('７０％'), 70);
+  assert.equal(R.parsePercent(''), null);
+  assert.equal(R.parsePercent('default'), null);
+  assert.equal(R.parsePercent(null), null);
+  for (const bad of ['abc', '0', '-5', '70.5', '%', '1e2', '70k', '12345']) assert.equal(R.parsePercent(bad), undefined, bad);
+  assert.equal(R.fmtPercent(70), '70%');
+  assert.equal(R.fmtPercent(null), '');
+});
+
+test('modelText：「預設」有 resolved 時寫成「預設（模型）」，其他照 label、沒有 label 用 value', () => {
+  assert.equal(R.modelText({ value: 'default', label: 'Default (recommended)', resolved: 'Opus 5.5' }), '預設（Opus 5.5）');
+  assert.equal(R.modelText({ value: 'default', label: 'Default (recommended)', resolved: null }), 'Default (recommended)');
+  assert.equal(R.modelText({ value: 'default', label: '預設' }), '預設');
+  assert.equal(R.modelText({ value: 'opus', label: 'Opus 5.5', resolved: 'x' }), 'Opus 5.5');
+  assert.equal(R.modelText({ value: 'gpt-6-astra' }), 'gpt-6-astra');
+  assert.equal(R.modelText(null), '');
+});

@@ -555,18 +555,68 @@ internal sealed partial class AgentHub
             ["model"] = defaults.Model,
             ["permission"] = ConversationDefaultsRules.PermissionFor(provider, defaults).ToString(),
             ["permissionModes"] = RenderPermissionModes(provider),
-            ["models"] = new JArray(ProviderModels(provider).Select(m => new JObject
+            ["models"] = RenderProviderModels(provider, defaults),
+            // 自動壓縮上限（AutoCompactRules）：不支援的代理兩個都是 null，網頁不顯示那一列
+            ["autoCompact"] = AutoCompactRules.ForProvider(provider, defaults.AutoCompactTokens),
+            ["autoCompactRange"] = AutoCompactRules.RangeOf(provider) is { } range ? new JObject { ["min"] = range.Min, ["max"] = range.Max } : null,
+            // 以百分比設定的（Grok）：同上
+            ["autoCompactPercent"] = AutoCompactRules.PercentForProvider(provider, defaults.AutoCompactPercent),
+            ["autoCompactPercentRange"] = AutoCompactRules.PercentRangeOf(provider) is { } pct ? new JObject { ["min"] = pct.Min, ["max"] = pct.Max } : null,
+        };
+    }
+
+    private JArray RenderProviderModels(AgentProvider provider, ProviderConversationDefaults defaults)
+    {
+        var models = ProviderModels(provider);
+        // 「預設」對應的模型：這一家第一個帳戶的（各帳戶的設定檔可能不同，Codex 看那個帳戶的 config.toml）
+        var account = accounts.Accounts.FirstOrDefault(a => a.Provider == provider);
+        var list = RenderModelList(models, DefaultModelLabel(provider, account != null ? ModelOptions(account.Id, provider) : models, account, replica: false));
+        foreach (var row in list.OfType<JObject>())
+        {
+            var value = row.Value<string>("value")!;
+            var efforts = models.First(m => m.Value == value).Efforts;
+            row["effort"] = defaults.Efforts.TryGetValue(value, out var effort) && efforts.Contains(effort, StringComparer.Ordinal) ? effort : null;
+        }
+        return list;
+    }
+
+    /// <summary>模型選單；"default" 那一項另帶 resolved（實際是哪個模型，DefaultModelRules；不知道是 null）</summary>
+    private static JArray RenderModelList(IReadOnlyList<AgentModelOption> models, string? resolvedDefault)
+        => new(models.Select(m =>
+        {
+            var row = new JObject
             {
                 ["value"] = m.Value,
                 ["label"] = m.Label,
                 ["description"] = m.Description,
                 ["efforts"] = new JArray(m.Efforts),
-                ["effort"] = defaults.Efforts.TryGetValue(m.Value, out var effort) && m.Efforts.Contains(effort, StringComparer.Ordinal) ? effort : null,
-            })),
-            // 自動壓縮上限（AutoCompactRules）：不支援的代理兩個都是 null，網頁不顯示那一列
-            ["autoCompact"] = AutoCompactRules.ForProvider(provider, defaults.AutoCompactTokens),
-            ["autoCompactRange"] = AutoCompactRules.RangeOf(provider) is { } range ? new JObject { ["min"] = range.Min, ["max"] = range.Max } : null,
-        };
+            };
+            if (string.Equals(m.Value, "default", StringComparison.OrdinalIgnoreCase))
+                row["resolved"] = resolvedDefault;
+            return row;
+        }));
+
+    /// <summary>Codex 帳戶 config.toml 的 model（路徑 → 讀的時間、值）：渲染標頭很頻繁，30 秒內不重讀</summary>
+    private readonly Dictionary<string, (DateTime ReadAt, string? Model)> codexConfiguredModels = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>「預設」實際是哪個模型（DefaultModelRules）。其他電腦的對話（replica）看不到那台的 Codex 設定檔，Codex 不顯示</summary>
+    private string? DefaultModelLabel(AgentProvider provider, IReadOnlyList<AgentModelOption> models, AgentAccount? account, bool replica)
+    {
+        if (provider == AgentProvider.Codex && (replica || account == null))
+            return null;
+        string? configured = null;
+        if (provider == AgentProvider.Codex)
+        {
+            var home = CodexConfigRules.ResolveHome(account!.IsSystemDefault ? null : account.ConfigDirectory);
+            var now = DateTime.UtcNow;
+            if (!codexConfiguredModels.TryGetValue(home, out var cached) || now - cached.ReadAt > TimeSpan.FromSeconds(30))
+            {
+                cached = (now, DefaultModelRules.ParseCodexConfiguredModel(CodexConfigRules.ReadConfig(home)));
+                codexConfiguredModels[home] = cached;
+            }
+            configured = cached.Model;
+        }
+        return DefaultModelRules.ResolvedLabel(provider, models, configured);
     }
 
     private static JArray RenderPermissionModes(AgentProvider provider)
@@ -814,13 +864,8 @@ internal sealed partial class AgentHub
             ["effort"] = c.Meta.Effort ?? "default",
             ["permission"] = AgentPermissionModes.Normalize(c.Meta.Provider, c.Meta.PermissionMode).ToString(),
             ["permissionModes"] = RenderPermissionModes(c.Meta.Provider),
-            ["models"] = new JArray(EnsureDefaultModel(models).Select(m => new JObject
-            {
-                ["value"] = m.Value,
-                ["label"] = m.Label,
-                ["description"] = m.Description,
-                ["efforts"] = new JArray(m.Efforts),
-            })),
+            ["models"] = RenderModelList(EnsureDefaultModel(models).ToList(), DefaultModelLabel(c.Meta.Provider, models,
+                c.IsReplica ? null : accounts.Find(c.Meta.AccountId), c.IsReplica)),
             ["commands"] = new JArray(commands.Select(x => new JObject
             {
                 ["name"] = x.Name,

@@ -130,11 +130,19 @@ public class GrokRulesTests
         snake.ToolCallId.Should().Be("call-bg");
         snake.Description.Should().Be("sleep 30");
         snake.WillWake.Should().BeNull();
+        snake.OutputFile.Should().BeNull();
         GrokAcpRules.TryParseBackground(JObject.Parse("""{"taskId":"bg2","toolCallId":"c2","monitorDescription":"看日誌","willWake":false}"""), "x.ai/task_completed", out var camel).Should().BeTrue();
         (camel.Kind, camel.TaskId, camel.ToolCallId, camel.Description, camel.WillWake).Should().Be(("task_completed", "bg2", "c2", "看日誌", false));
         GrokAcpRules.TryParseBackground(JObject.Parse("""{"sessionUpdate":"task_completed","will_wake":true,"task_snapshot":{"task_id":"bg3","description":"寫標記","exit_code":0}}"""), "x.ai/task_completed", out var snap).Should().BeTrue();
         (snap.Kind, snap.TaskId, snap.ToolCallId, snap.Description, snap.WillWake).Should().Be(("task_completed", "bg3", null, "寫標記", true));
         GrokAcpRules.TryParseBackground(JObject.Parse("""{"sessionUpdate":"task_backgrounded"}"""), null, out _).Should().BeFalse();
+        GrokAcpRules.TryParseBackground(JObject.Parse("""{"sessionUpdate":"task_backgrounded","task_id":"bg4","output_file":"C:\\logs\\a.log","task_snapshot":{"output_file":"C:\\other.log"}}"""), null, out var fileNote).Should().BeTrue();
+        fileNote.OutputFile.Should().Be(@"C:\logs\a.log");
+        GrokAcpRules.TryParseBackground(JObject.Parse("""{"sessionUpdate":"task_backgrounded","task_id":"bg5","task_snapshot":{"output_file":"videos/1.log"}}"""), null, out var snapFile).Should().BeTrue();
+        snapFile.OutputFile.Should().Be("videos/1.log");
+        GrokAcpRules.AcceptOutputFile(@"C:\logs\a.log").Should().Be(@"C:\logs\a.log");
+        GrokAcpRules.AcceptOutputFile(@"\\server\share\a.log").Should().BeNull();
+        GrokAcpRules.AcceptOutputFile("videos/1.log").Should().BeNull();
     }
 
     [Theory]
@@ -739,4 +747,72 @@ public class GrokRulesTests
             GrokAcpRules.ParseDeviceCode(new Uri(bad), now).Should().BeNull(bad);
         GrokAcpRules.ParseDeviceCode(null, now).Should().BeNull();
     }
+
+    [Fact]
+    public void 工具卡_子代理流程與排程用中文名稱()
+    {
+        GrokAcpRules.DescribeTool(Tool("spawn_subagent")).Should().BeEquivalentTo(new { Name = "子代理", Kind = "agent" }, opts => opts.ExcludingMissingMembers());
+        GrokAcpRules.DescribeTool(Tool("workflow")).Kind.Should().Be("other");
+        GrokAcpRules.DescribeTool(Tool("workflow")).Name.Should().Be("流程");
+        GrokAcpRules.DescribeTool(Tool("scheduler_create")).Name.Should().Be("排程");
+        GrokAcpRules.DescribeTool(Tool("scheduler_create")).Kind.Should().Be("other");
+        GrokAcpRules.DescribeTool(Tool("scheduler_list")).Name.Should().Be("排程清單");
+        GrokAcpRules.DescribeTool(Tool("scheduler_delete")).Name.Should().Be("取消排程");
+    }
+
+    [Fact]
+    public void 背景輸出_只讀本機檔尾_缺檔是空的_其他IO給中文()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "myriagent-grok-bg-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "out.log");
+            File.WriteAllText(path, "a\r\nb");
+            var read = GrokAcpRules.ReadBackgroundOutput(path);
+            read.Output.Should().Be("a\nb");
+            read.Error.Should().BeNull();
+            read.Truncated.Should().BeFalse();
+            read.TotalBytes.Should().Be(new FileInfo(path).Length);
+
+            var big = Path.Combine(dir, "big.log");
+            File.WriteAllText(big, new string('x', ClaudeControlRules.MaxTaskOutputChars + 20) + "TAIL");
+            var tail = GrokAcpRules.ReadBackgroundOutput(big);
+            tail.Truncated.Should().BeTrue();
+            tail.Output.Should().EndWith("TAIL");
+            tail.Output!.Length.Should().Be(ClaudeControlRules.MaxTaskOutputChars);
+            tail.TotalBytes.Should().Be(new FileInfo(big).Length);
+
+            var missing = GrokAcpRules.ReadBackgroundOutput(Path.Combine(dir, "missing.log"));
+            missing.Output.Should().BeEmpty();
+            missing.Error.Should().BeNull();
+
+            GrokAcpRules.ReadBackgroundOutput(@"\\server\share\a.log").Error.Should().Be("這個背景工作沒有本機的輸出檔");
+            GrokAcpRules.ReadBackgroundOutput(dir).Error.Should().StartWith("讀不到這個背景工作的輸出：");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void 分叉_參數照實測的形狀_回應取newSessionId()
+    {
+        // 1.0.70 實測（tools/probes/grok/fork_probe.py）：兩個 id 都是來源、兩個 cwd 相同、不帶 targetPromptIndex（整份複製）
+        var fork = GrokAcpRules.BuildForkParams("sid", @"C:\w", "new-id");
+        fork.Properties().Select(p => p.Name).Should().Equal("sessionId", "sourceSessionId", "sourceCwd", "newCwd", "newSessionId");
+        fork.Value<string>("sessionId").Should().Be("sid");
+        fork.Value<string>("sourceSessionId").Should().Be("sid");
+        fork.Value<string>("sourceCwd").Should().Be(fork.Value<string>("newCwd"));
+        fork["targetPromptIndex"].Should().BeNull();
+
+        GrokAcpRules.ParseForkSessionId(JObject.Parse("""{"newSessionId":"child","chatMessagesCopied":6,"parentSessionId":"sid"}""")).Should().Be("child");
+        GrokAcpRules.ParseForkSessionId(JObject.Parse("""{}""")).Should().BeNull();
+        GrokAcpRules.ParseForkSessionId(JObject.Parse("""{"newSessionId":""}""")).Should().BeNull();
+        GrokAcpRules.ParseForkSessionId(null).Should().BeNull();
+    }
+
+    private static JObject Tool(string name)
+        => JObject.Parse("""{"title":"TOOL","_meta":{"x.ai/tool":{"name":"TOOL"}}}""".Replace("TOOL", name));
 }

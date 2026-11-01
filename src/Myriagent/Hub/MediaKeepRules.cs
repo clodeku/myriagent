@@ -21,19 +21,30 @@ internal static class MediaKeepRules
 
     /// <summary>
     /// 要留的原檔（正規化後的完整路徑，依出現順序、不重複）：本機磁碟（UNC 一律不認）、畫面能直接顯示的圖片與影片、
-    /// 不在這個對話資料夾裡（附件本來就是對話自己的）、還沒留過的
+    /// 不在這個對話資料夾裡（附件本來就是對話自己的）、還沒留過的。
+    /// <paramref name="onlyUnder"/>＝只留這個資料夾底下的（延伸對話補留其他對話資料夾裡的媒體，見 <see cref="NeedsForkKeep"/>；寫法不合格就一個都不留），
+    /// <paramref name="exceptUnder"/>＝這個資料夾底下的不留（延伸對話的工作資料夾：遠端本來就放行、之後也繼續用它）
     /// </summary>
-    public static List<string> Candidates(IEnumerable<string?> paths, string conversationDirectory, IEnumerable<string>? alreadyKept)
+    public static List<string> Candidates(IEnumerable<string?> paths, string conversationDirectory, IEnumerable<string>? alreadyKept,
+        string? onlyUnder = null, string? exceptUnder = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
         var done = new HashSet<string>(alreadyKept ?? [], StringComparer.OrdinalIgnoreCase);
         var own = Normalize(conversationDirectory);
+        var only = onlyUnder is null ? null : Normalize(onlyUnder);
+        var except = exceptUnder is null ? null : Normalize(exceptUnder);
         var result = new List<string>();
+        if (onlyUnder is not null && only is null)
+            return result;
         foreach (var path in paths)
         {
             if (Normalize(path) is not { } normalized || !AgentAttachmentRules.IsDisplayableMedia(normalized))
                 continue;
             if (own is not null && IsUnder(normalized, own))
+                continue;
+            if (only is not null && !IsUnder(normalized, only))
+                continue;
+            if (except is not null && IsUnder(normalized, except))
                 continue;
             if (done.Add(normalized))
                 result.Add(normalized);
@@ -41,6 +52,27 @@ internal static class MediaKeepRules
 
         return result;
     }
+
+    /// <summary>
+    /// 延伸出來的對話裡，這一筆要不要補留其他對話資料夾裡的媒體（UI 執行緒的粗篩，真正要留哪些由 <see cref="Candidates"/> 決定）：
+    /// 2026-11-01 實機：原對話的代理把圖存在自己的對話資料夾（<c>conversations\{原}\caption-demo\</c>，不在 attachments\），延伸只複製 attachments\，
+    /// 新對話引用的是別的對話資料夾的檔——遠端守門員只放行對話自己的資料夾，瀏覽器版與其他電腦一律破圖，刪掉原對話後連這台也破圖。
+    /// 要的是：代理媒體有在 <paramref name="conversationsRoot"/> 底下、不在自己資料夾與工作資料夾、還沒留過的；
+    /// 或回覆文字有圖片語法（Markdown 引用的路徑要背景解析才知道）
+    /// </summary>
+    public static bool NeedsForkKeep(AgentChatItem item, string conversationsRoot, string ownDirectory, string? workingDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (MarkdownTextOf(item) is not null)
+            return true;
+        if (item.MediaPaths is not { Count: > 0 } media)
+            return false;
+        return Candidates(media, ownDirectory, item.KeptMedia?.Keys, conversationsRoot, workingDirectory).Count > 0;
+    }
+
+    /// <summary>要找 Markdown 引用的本機圖片的回覆文字（同中樞回覆完成時：只有回覆、而且有圖片語法）；其他回 null</summary>
+    public static string? MarkdownTextOf(AgentChatItem item)
+        => item.Kind == AgentItemKind.Assistant && item.Text is { } text && text.Contains("![", StringComparison.Ordinal) ? text : null;
 
     /// <summary>大小合格才複製（空檔不留：多半是還沒寫完或寫壞的）</summary>
     public static bool ShouldCopy(long length) => length > 0 && length <= MaxBytes;

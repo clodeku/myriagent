@@ -1,3 +1,4 @@
+using Myriagent.Agents;
 using Myriagent.Hub;
 
 namespace Myriagent.Tests.Hub;
@@ -29,6 +30,53 @@ public sealed class MediaKeepRulesTests
             [@"C:\repo\out\KEPT.jpg"]);
 
         result.Should().Equal(@"C:\repo\out\a.png", @"C:\repo\out\b.MP4");
+    }
+
+    [Fact]
+    public void 延伸對話補留_只留conversations底下的_工作資料夾與自己的不留()
+    {
+        var result = MediaKeepRules.Candidates(
+            [
+                @"C:\data\conversations\src\caption-demo\a.png",
+                @"C:\data\conversations\src\workspace\shot.png",
+                @"C:\data\conversations\c1\attachments\b.png",
+                @"C:\repo\out\c.png",
+                @"C:\data\conversations\grand\d.webp",
+            ],
+            Conversation, null, onlyUnder: @"C:\data\conversations", exceptUnder: @"C:\data\conversations\src\workspace");
+
+        result.Should().Equal([@"C:\data\conversations\src\caption-demo\a.png", @"C:\data\conversations\grand\d.webp"],
+            "原對話資料夾與更早的對話（原對話也是延伸來的）留；工作資料夾（原對話的工作區）遠端本來就放行、conversations 以外照一般的規則");
+    }
+
+    [Fact]
+    public void 延伸對話補留_範圍資料夾寫法不合格_一個都不留()
+    {
+        MediaKeepRules.Candidates([@"C:\repo\a.png"], Conversation, null, onlyUnder: @"\\server\share\conversations").Should().BeEmpty();
+        MediaKeepRules.Candidates([@"C:\repo\a.png"], Conversation, null, exceptUnder: @"\\server\share").Should().Equal([@"C:\repo\a.png"], "排除的寫法不合格＝不排除");
+    }
+
+    [Fact]
+    public void 延伸對話要不要補留_其他對話資料夾的代理媒體或有圖片語法的回覆()
+    {
+        const string root = @"C:\data\conversations";
+        const string card = @"C:\data\conversations\src\caption-demo\a.png";
+        var tool = new AgentChatItem { Kind = AgentItemKind.Tool, MediaPaths = [card] };
+        MediaKeepRules.NeedsForkKeep(tool, root, Conversation, @"C:\repo").Should().BeTrue();
+
+        tool.KeptMedia = new Dictionary<string, string> { [card] = @"attachments\.kept\0123456789abcdef\a.png" };
+        MediaKeepRules.NeedsForkKeep(tool, root, Conversation, @"C:\repo").Should().BeFalse("已經留過");
+
+        MediaKeepRules.NeedsForkKeep(new AgentChatItem { Kind = AgentItemKind.Tool, MediaPaths = [@"C:\repo\out\a.png"] }, root, Conversation, @"C:\repo")
+            .Should().BeFalse("conversations 以外的照一般的留存規則（回覆完成時留）");
+        MediaKeepRules.NeedsForkKeep(new AgentChatItem { Kind = AgentItemKind.Tool, MediaPaths = [@"C:\data\conversations\src\workspace\s.png"] },
+            root, Conversation, @"C:\data\conversations\src\workspace").Should().BeFalse("工作資料夾裡的不補");
+
+        MediaKeepRules.NeedsForkKeep(new AgentChatItem { Kind = AgentItemKind.Assistant, Text = "看 ![字卡](caption-demo/a.png)" }, root, Conversation, null)
+            .Should().BeTrue("Markdown 引用的路徑要背景解析才知道");
+        MediaKeepRules.NeedsForkKeep(new AgentChatItem { Kind = AgentItemKind.Assistant, Text = "沒有圖" }, root, Conversation, null).Should().BeFalse();
+        MediaKeepRules.NeedsForkKeep(new AgentChatItem { Kind = AgentItemKind.User, Text = "![x](C:/data/conversations/src/a.png)" }, root, Conversation, null)
+            .Should().BeFalse("只有回覆的 Markdown 會畫成圖");
     }
 
     [Fact]

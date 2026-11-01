@@ -218,6 +218,49 @@ public sealed class AgentHubMediaKeepTests
         result!.Keys.Should().Equal(small);
     }
 
+    /// <summary>修正之前延伸出來的對話（2026-11-01 實機）：載入紀錄時補留其他對話資料夾裡的媒體，每次執行只看一次</summary>
+    [Fact]
+    public void 修正之前延伸出來的對話_載入紀錄時補留其他對話資料夾裡的媒體_工作資料夾的不補()
+    {
+        var sourceId = Guid.NewGuid().ToString("N");
+        var forkId = Guid.NewGuid().ToString("N");
+        string card = "", inWorkspace = "";
+        using var h = new HubHarness(seedStore: store =>
+        {
+            var sourceDir = store.GetConversationDirectory(sourceId);
+            var workspace = Path.Combine(sourceDir, "workspace");
+            card = Path.Combine(sourceDir, "caption-demo", "contact.png");
+            inWorkspace = Path.Combine(workspace, "shot.png");
+            Directory.CreateDirectory(Path.GetDirectoryName(card)!);
+            Directory.CreateDirectory(workspace);
+            File.WriteAllBytes(card, Png);
+            File.WriteAllBytes(inWorkspace, Png);
+            store.SaveConversation(new AgentConversation { Id = sourceId, AccountId = "acc-codex", Provider = AgentProvider.Codex, Title = "原對話", SessionId = "s0" });
+            store.SaveConversation(new AgentConversation
+            {
+                Id = forkId, AccountId = "acc-codex", Provider = AgentProvider.Codex, Title = "原對話（延伸）", SessionId = "s1",
+                WorkingDirectory = workspace, ForkedFrom = sourceId, ForkedFromTitle = "原對話",
+            });
+            store.SaveItems(forkId,
+            [
+                new AgentChatItem { Id = "tool-1", Kind = AgentItemKind.Tool, Status = AgentItemStatus.Done, Text = "做字卡", MediaPaths = [card, inWorkspace] },
+                new AgentChatItem { Id = "user-1", Kind = AgentItemKind.User, Status = AgentItemStatus.Done, Text = "好" },
+            ]);
+        });
+        h.OnUi(() => { h.Hub.AttachMediaKeeper(); return 0; });
+
+        h.Items(forkId).Should().HaveCount(2);
+        WaitKept(h);
+
+        var tool = Item(h, forkId, i => i.Id == "tool-1");
+        tool.KeptMedia!.Keys.Should().Equal([card], "工作資料夾（原對話的工作區）遠端本來就放行");
+        File.ReadAllBytes(MediaKeepRules.KeptPath(tool.KeptMedia, h.Store.GetConversationDirectory(forkId), card)!).Should().Equal(Png);
+        h.OnUi(() => h.Hub.MediaKeeperForTests!.Done).Should().Be(1, "只排了要補的那一筆");
+
+        h.Items(forkId);
+        h.OnUi(() => h.Hub.MediaKeeperForTests!.Done).Should().Be(1, "同一次執行不再看");
+    }
+
     [Fact]
     public void 遠端取檔_項目已載入與沒載入_都給副本_副本不在給原檔()
     {

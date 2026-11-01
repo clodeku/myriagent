@@ -1,3 +1,4 @@
+using Myriagent.Accounts;
 using Myriagent.Agents;
 using Myriagent.Core;
 using Newtonsoft.Json;
@@ -244,7 +245,9 @@ public class AgentHubConversationDefaultsTests
         h.Command(h.Main, "ready", new { mode = "main" });
         var defaults = h.Main.Last("init")!["settings"]!["conversationDefaults"]!;
         defaults["Claude"]!["autoCompactRange"]!.Value<long>("min").Should().Be(67_000);
-        defaults["Grok"]!["autoCompactRange"]!.Type.Should().Be(JTokenType.Null, "Grok 只有百分比，不提供");
+        defaults["Grok"]!["autoCompactRange"]!.Type.Should().Be(JTokenType.Null, "Grok 只有百分比");
+        defaults["Grok"]!["autoCompactPercentRange"]!.Value<int>("max").Should().Be(95);
+        defaults["Claude"]!["autoCompactPercentRange"]!.Type.Should().Be(JTokenType.Null);
         defaults["Antigravity"]!["autoCompactRange"]!.Type.Should().Be(JTokenType.Null);
         var (id, session) = h.StartConversation(h.Main, h.Claude);
         session.Sent.All[^1].Settings.AutoCompactTokens.Should().BeNull("預設照 CLI");
@@ -268,5 +271,51 @@ public class AgentHubConversationDefaultsTests
         h.OnUi(() => h.Settings.ConversationDefaults!["Grok"].AutoCompactTokens).Should().BeNull();
         h.Command(h.Main, "setConversationDefault", new { provider = "Claude", key = "autoCompact", value = "" });
         h.OnUi(() => h.Settings.ConversationDefaults!["Claude"].AutoCompactTokens).Should().BeNull("清空回到 CLI 預設");
+    }
+
+    [Fact]
+    public void 自動壓縮門檻百分比_只有Grok_夾進範圍_送出時帶給Grok()
+    {
+        using var h = new HubHarness();
+        h.Command(h.Main, "setConversationDefault", new { provider = "Grok", key = "autoCompactPercent", value = "70%" });
+        h.OnUi(() => h.Settings.ConversationDefaults!["Grok"].AutoCompactPercent).Should().Be(70);
+        h.Main.Last("settings")!["settings"]!["conversationDefaults"]!["Grok"]!.Value<int?>("autoCompactPercent").Should().Be(70);
+
+        var grokAccount = new AgentAccount { Id = "acc-grok", Provider = AgentProvider.Grok, Label = "Grok", ConfigDirectory = h.Temp.Combine("grok") };
+        h.Ui.Invoke(() => h.Accounts.Seed([h.Claude, h.Claude2, h.Codex, grokAccount], AccountStatus.Ready));
+        var (_, grok) = h.StartConversation(h.Main, grokAccount);
+        grok.Sent.All[^1].Settings.AutoCompactPercent.Should().Be(70);
+        var (_, claude) = h.StartConversation(h.Main, h.Claude);
+        claude.Sent.All[^1].Settings.AutoCompactPercent.Should().BeNull("只有 Grok");
+
+        h.Command(h.Main, "setConversationDefault", new { provider = "Grok", key = "autoCompactPercent", value = "5" });
+        h.OnUi(() => h.Settings.ConversationDefaults!["Grok"].AutoCompactPercent).Should().Be(20, "夾進範圍");
+        h.Command(h.Main, "setConversationDefault", new { provider = "Grok", key = "autoCompactPercent", value = "70.5" });
+        h.OnUi(() => h.Settings.ConversationDefaults!["Grok"].AutoCompactPercent).Should().Be(20, "看不懂的不改");
+        h.Command(h.Main, "setConversationDefault", new { provider = "Claude", key = "autoCompactPercent", value = "70" });
+        h.OnUi(() => h.Settings.ConversationDefaults!["Claude"].AutoCompactPercent).Should().BeNull("Claude 不以百分比設定");
+        h.Command(h.Main, "setConversationDefault", new { provider = "Grok", key = "autoCompactPercent", value = "" });
+        h.OnUi(() => h.Settings.ConversationDefaults!["Grok"].AutoCompactPercent).Should().BeNull();
+    }
+
+    [Fact]
+    public void 預設模型_標頭與設定頁的default帶實際的模型()
+    {
+        using var h = new HubHarness();
+        var efforts = new[] { "low", "high" };
+        h.Ui.Invoke(() => h.Settings.Models[h.Claude.Id] = new List<AgentModelOption>
+        {
+            new("default", "Default (recommended)", "Opus 5.5 · Best for everyday, complex tasks", efforts),
+            new("opus", "Opus 5.5", null, efforts), new("sonnet", "Sonnet 5.5", null, efforts),
+        });
+        h.Command(h.Main, "ready", new { mode = "main" });
+        var claude = h.Main.Last("init")!["settings"]!["conversationDefaults"]!["Claude"]!["models"]!;
+        claude[0]!.Value<string>("resolved").Should().Be("Opus 5.5");
+        claude[1]!["resolved"].Should().BeNull("只有 default 那一項有");
+
+        var (id, _) = h.StartConversation(h.Main, h.Claude);
+        var header = h.Main.Last("conversation", id)!["header"]!["models"]!;
+        header[0]!.Value<string>("value").Should().Be("default");
+        header[0]!.Value<string>("resolved").Should().Be("Opus 5.5");
     }
 }

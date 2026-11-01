@@ -66,6 +66,10 @@ internal sealed class AgentRestartInProgressException : InvalidOperationExceptio
 /// 自動壓縮上限（token，AutoCompactRules）：Claude 以 --settings 的 env 帶 CLAUDE_CODE_AUTO_COMPACT_WINDOW（上限＋緩衝）、
 /// Codex 以「-c model_auto_compact_token_limit」帶；改變時重開程序。null＝CLI 預設（其他代理忽略）
 /// </param>
+/// <param name="AutoCompactPercent">
+/// 自動壓縮門檻（上下文視窗的百分比，AutoCompactRules）：Grok 以環境變數 GROK_AUTO_COMPACT_THRESHOLD_PERCENT 帶；改變時重開程序。
+/// null＝CLI 預設（其他代理忽略）
+/// </param>
 internal sealed record AgentSessionSettings(
     string? SessionId,
     bool SessionStarted,
@@ -93,7 +97,8 @@ internal sealed record AgentSessionSettings(
     string? CodexServiceTier = null,
     IReadOnlyList<AgentSkillSelection>? CodexSkills = null,
     string? DelegationMcpPipeName = null,
-    long? AutoCompactTokens = null)
+    long? AutoCompactTokens = null,
+    int? AutoCompactPercent = null)
 {
     /// <summary>啟動程序前取得共用設定的啟動參數（背景執行緒；不共用回 None）</summary>
     public async Task<AgentSharedLaunch> PrepareSharedAsync()
@@ -440,6 +445,12 @@ internal interface IAgentSession : IDisposable
     /// （實測 2.1.310 同一個程序第二次問一律回第一次的標題）、失敗都回 null，中樞改用短命的 CLI。只有 Claude 支援
     /// </summary>
     Task<string?> GenerateTitleAsync(string description) => Task.FromResult<string?>(null);
+
+    /// <summary>
+    /// 延伸成新對話時以 CLI 自己的分叉複製這段對話（Grok 的 _x.ai/session/fork）：成功回新對話的 session id（有完整的前文），
+    /// 不支援、還沒建立過對話或失敗回 null（中樞改附前文節錄）。Claude 以逐字稿副本分支，不經這裡
+    /// </summary>
+    Task<string?> ForkSessionAsync(string newSessionId, AgentSessionSettings settings) => Task.FromResult<string?>(null);
 
     /// <summary>現在能以活著的程序產生標題（Claude、程序開著）：中樞只在這時先試 GenerateTitleAsync</summary>
     bool CanGenerateTitle => false;

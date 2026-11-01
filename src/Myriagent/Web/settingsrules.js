@@ -54,6 +54,32 @@ export function parseTokens(text) {
   return tokens > 0 ? tokens : undefined;
 }
 
+/**
+ * 自動壓縮門檻的百分比（同宿主的 AutoCompactRules.TryParsePercent）：空白或 default＝CLI 預設（null）；整數，可帶 %（例如 70、70%）。
+ * 小數、0、負數、看不懂的回 undefined。範圍由宿主夾
+ */
+export function parsePercent(text) {
+  let s = foldText(text).trim();
+  if (!s || s === 'default') return null;
+  if (s.endsWith('%')) s = s.slice(0, -1).trimEnd();
+  if (!/^\d{1,4}$/.test(s)) return undefined;
+  const n = Number(s);
+  return n > 0 ? n : undefined;
+}
+
+/** 百分比的顯示：70 → 70%；null 是空字串 */
+export const fmtPercent = (n) => (n == null || !Number.isFinite(n) ? '' : n + '%');
+
+/**
+ * 模型在選單與按鈕上的名稱：「預設」那一項宿主知道實際是哪個模型時（resolved，DefaultModelRules）寫成「預設（Opus 5.5）」，
+ * 其他照 label（沒有 label 用 value）
+ */
+export function modelText(m) {
+  if (!m) return '';
+  if (m.value === 'default' && m.resolved) return '預設（' + m.resolved + '）';
+  return m.label || m.value;
+}
+
 /** token 數的短寫：400000 → 400k、1500000 → 1.5M、367500 → 367.5k、999 → 999；null 是空字串 */
 export function fmtTokens(n) {
   if (n == null || !Number.isFinite(n)) return '';

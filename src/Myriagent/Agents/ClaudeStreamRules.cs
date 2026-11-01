@@ -250,6 +250,9 @@ internal static partial class ClaudeStreamRules
     /// <summary>立即重開時被中斷的工具卡的輸出</summary>
     public const string InterruptedToolOutput = "Claude Code 重新啟動，這個工具被中斷，結果未知";
 
+    /// <summary>串流在途中斷、CLI 重送請求：被丟下的那則回應裡的工具不會執行（重試的回應是新的訊息與新的工具 id）</summary>
+    public const string AbandonedToolOutput = "連線中斷，Claude Code 重新送出請求，這個工具沒有執行";
+
     /// <summary>
     /// 「本對話都允許」按鈕的文字：照 CLI 的建議說清楚放行的範圍。
     /// 編輯類在每步詢問模式下 CLI 建議 setMode acceptEdits（同 VS Code 的「之後的編輯都接受」）：改為自動接受編輯，
@@ -1900,6 +1903,13 @@ internal sealed partial class ClaudeStreamParser
     private readonly HashSet<string> finishedTools = new(StringComparer.Ordinal);
     private readonly HashSet<string> cardToolIds = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// 只在串流裡開始（content_block_start）、還沒收到完整 assistant 區塊的主對話工具 → 所在的訊息。串流在途中斷、CLI 重送請求時（api_retry），
+    /// 被丟下的那則回應不會有 assistant 區塊、工具也不會有結果，重試的回應是新的訊息與新的工具 id：主對話的下一則訊息開始時還留著的就拿掉，
+    /// 不然這一輪剩下的時間都算工具在執行、等不到安全點（2026-10-31 實機：ECONNRESET 重試之後換版排空 35 分鐘找不到安全點而放棄）
+    /// </summary>
+    private readonly Dictionary<string, string> streamOnlyTools = new(StringComparer.Ordinal);
+
     /// <summary>子代理過程最多留幾行（工具卡的輸出本來就只留結尾，這裡只是不讓很久的子代理無限累積）</summary>
     internal const int MaxSubagentSteps = 200;
 
@@ -2007,6 +2017,7 @@ internal sealed partial class ClaudeStreamParser
         foreach (var id in runningTools)
             finishedTools.Add(id);
         runningTools.Clear();
+        streamOnlyTools.Clear();
         return events;
     }
 
@@ -2174,6 +2185,7 @@ internal sealed partial class ClaudeStreamParser
                 foreach (var id in runningTools)
                     finishedTools.Add(id);
                 runningTools.Clear();
+                streamOnlyTools.Clear();
                 // stop_reason 只屬於這一輪：下一輪送出後、第一則 assistant 訊息之前被重開，不能拿上一輪的 end_turn 當成「已回覆完」
                 LastStopReason = null;
                 CloseTurnTokens(message, result);
@@ -2428,6 +2440,7 @@ internal sealed partial class ClaudeStreamParser
             case "message_start":
                 currentMessageId = (ev["message"] as JObject)?["id"]?.ToString() ?? Guid.NewGuid().ToString("N");
                 streamedMessageIds.Add(currentMessageId);
+                DropAbandonedStreamTools(currentMessageId, result);
                 blocks.Clear();
                 LastStopReason = null;
                 if ((ev["message"] as JObject)?["model"] is JValue { Type: JTokenType.String } startModel)
@@ -2457,7 +2470,11 @@ internal sealed partial class ClaudeStreamParser
                     if (state.ToolUseId != null && state.ToolName != null)
                         toolNames[state.ToolUseId] = state.ToolName;
                     if (kind == "tool_use")
+                    {
                         MarkToolRunning(state.ToolUseId);
+                        if (state.ToolUseId != null && runningTools.Contains(state.ToolUseId))
+                            streamOnlyTools.TryAdd(state.ToolUseId, currentMessageId);
+                    }
                 }
                 else if (kind == "text")
                 {
@@ -2559,6 +2576,7 @@ internal sealed partial class ClaudeStreamParser
                         break;
                     if (name != null)
                         toolNames[id] = name;
+                    streamOnlyTools.Remove(id);
                     if (block.Value<string>("type") == "tool_use")
                         MarkToolRunning(id);
                     if (!startedToolIds.Contains(id))
@@ -2608,6 +2626,28 @@ internal sealed partial class ClaudeStreamParser
         if (d.Kind == "agent")
             agentCardIds.Add(toolUseId);
         result.Events.Add(new AgentToolStartedEvent(toolUseId, d.DisplayName, d.Kind, d.Title, d.Detail, d.FilePath, d.Diff));
+    }
+
+    /// <summary>
+    /// 主對話的下一則訊息開始了：之前的訊息裡只在串流開始、一直沒有 assistant 區塊也沒有結果的工具是被丟下的（串流中斷、CLI 重送請求），
+    /// 不再算工具在執行；畫了卡的（content_block_stop 的退路）改為已取消。主對話的工具都有結果才會送下一個請求，正常的工具這時早已拿掉
+    /// </summary>
+    private void DropAbandonedStreamTools(string messageId, ClaudeParseResult result)
+    {
+        if (streamOnlyTools.Count == 0)
+            return;
+        foreach (var (id, owner) in streamOnlyTools.ToList())
+        {
+            if (string.Equals(owner, messageId, StringComparison.Ordinal))
+                continue;
+            streamOnlyTools.Remove(id);
+            if (!runningTools.Remove(id))
+                continue;
+            finishedTools.Add(id);
+            openCardTools.Remove(id);
+            if (cardToolIds.Contains(id))
+                result.Events.Add(new AgentToolCompletedEvent(id, AgentItemStatus.Cancelled, ClaudeStreamRules.AbandonedToolOutput, Array.Empty<string>()));
+        }
     }
 
     /// <summary>主對話的工具開始執行（content_block_start 或 assistant 的 tool_use）；已經有結果的不再加回</summary>
@@ -2678,6 +2718,7 @@ internal sealed partial class ClaudeStreamParser
             // 安全點：這個工具執行完了（問卷、計畫確認、待辦工具也一樣，先於下面略過它們的卡片）
             result.TurnActivity = true;
             runningTools.Remove(toolUseId);
+            streamOnlyTools.Remove(toolUseId);
             finishedTools.Add(toolUseId);
             // 放到背景的工具在結果之前就送了 task_started（已記進 taskTools）；之後不會再有工作對到它
             openCardTools.Remove(toolUseId);

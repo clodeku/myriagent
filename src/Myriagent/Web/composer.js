@@ -3,6 +3,7 @@
 import { h, iconButton, debounce, highlight, reconcile, extOf, fmtBytes, fmtReset, replayClass, setHidden, setAcc } from './util.js';
 import { icon, FILE_ICON } from './icons.js';
 import { post, postWithFiles, state, accountOf, EFFORT_LABEL, EFFORT_DESC, permissionTone, nextRequestId, isHub, isCollaborator, newId, peerId } from './store.js';
+import { modelText } from './settingsrules.js';
 import { openMenu, openDialog, confirmDialog, toast, spinner, hasLayer } from './ui.js';
 import { codexShown } from './codexrules.js';
 import { openCodexMenu, refreshCodexPanel } from './codexcontrols.js';
@@ -883,8 +884,8 @@ export class Composer {
 
     const models = hd.models || [];
     const m = models.find((x) => x.value === (hd.model || 'default'));
-    this.modelBtn.querySelector('.pick-label').textContent = m ? m.label : (hd.model && hd.model !== 'default' ? hd.model : '預設模型');
-    this.modelBtn.title = '模型：' + (m ? m.label + (m.description ? '（' + m.description + '）' : '') : (hd.model || '預設'));
+    this.modelBtn.querySelector('.pick-label').textContent = m ? modelText(m) : (hd.model && hd.model !== 'default' ? hd.model : '預設模型');
+    this.modelBtn.title = '模型：' + (m ? modelText(m) + (m.description ? '（' + m.description + '）' : '') : (hd.model || '預設'));
     this.modelBtn.hidden = !models.length;
 
     const ef = this.currentEffort();
@@ -1060,7 +1061,7 @@ export class Composer {
     if (!hd) return;
     const models = (hd.models || []).slice();
     const cur = hd.model || 'default';
-    const items = models.map((m) => ({ label: m.label || m.value, desc: m.description, checked: m.value === cur, onSelect: () => this.setOption('model', m.value) }));
+    const items = models.map((m) => ({ label: modelText(m), desc: m.description, checked: m.value === cur, onSelect: () => this.setOption('model', m.value) }));
     if (!models.some((m) => m.value === 'default')) items.unshift({ label: '預設', desc: '帳戶預設模型', checked: cur === 'default', onSelect: () => this.setOption('model', 'default') });
     if (cur !== 'default' && !models.some((m) => m.value === cur)) items.push({ label: cur, desc: '目前使用中', checked: true, onSelect: () => {} });
     // Claude 的主代理與輸出風格：選了預設以外的值才有自己的晶片，平常從這裡進入

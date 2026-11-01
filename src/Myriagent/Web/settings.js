@@ -24,7 +24,7 @@ import { voiceSupported, voiceOn, setVoiceOn, voiceTuning, setVoiceTuning } from
 import { SPEED_MIN, SPEED_MAX, SPEED_STEP, PITCH_MIN, PITCH_MAX, normSpeed, normPitch, fmtSpeed, fmtPitch } from './voicerules.js';
 import { pairCountdown, countdownCells, deviceLed, rangeFill, rangeTicks } from './fxrules.js';
 import { setDecodedText } from './textfx.js';
-import { SETTING_KEYWORDS, searchSettings, searchTerms, highlightParts, snippet, tabKeyTarget, tabHitCounts, normalizeHubUrl, parseTokens, fmtTokens } from './settingsrules.js';
+import { SETTING_KEYWORDS, searchSettings, searchTerms, highlightParts, snippet, tabKeyTarget, tabHitCounts, normalizeHubUrl, parseTokens, fmtTokens, parsePercent, fmtPercent, modelText } from './settingsrules.js';
 import { collaboratorsSection, myAccountSection, canManageCollaborators, isCollaborator } from './collab.js';
 
 let open = null; // { d, refresh, browser, refreshApp }
@@ -682,18 +682,18 @@ function conversationDefaults() {
       b.block.dataset.available = String(!!cd);
       if (!cd) continue;
       const cm = cd.model ? (cd.models || []).find((m) => m.value === cd.model) : null;
-      const modelText = !cd.model ? LAST_MODEL : cm ? cm.label || cm.value : cd.model;
-      setPick(b.model, modelText, b.p.name + ' 的預設模型');
+      const shownModel = !cd.model ? LAST_MODEL : cm ? modelText(cm) : cd.model;
+      setPick(b.model, shownModel, b.p.name + ' 的預設模型');
       const mode = (cd.permissionModes || []).find((m) => m.value === cd.permission);
       const permText = mode ? mode.label || mode.value : cd.permission || '';
       const permColor = mode ? toneColor(permissionTone(mode)) : null;
       setPick(b.perm, permText, b.p.name + ' 的預設權限模式', permColor);
       // 子分頁上的摘要：目前的預設模型，前面是權限模式的色點（同權限模式按鈕）
-      b.tab.querySelector('.set-subtab-model').textContent = modelText;
+      b.tab.querySelector('.set-subtab-model').textContent = shownModel;
       const dot = b.tab.querySelector('.set-pick-dot');
       dot.hidden = !permColor;
       if (permColor) dot.style.setProperty('--acc', permColor);
-      b.tab.title = '模型：' + modelText + (permText ? '\n權限模式：' + permText : '');
+      b.tab.title = '模型：' + shownModel + (permText ? '\n權限模式：' + permText : '');
       reconcile(b.models, cd.models || [], (m) => m.value, (m) => createModelRow(b.p.key, m), updateModelRow);
       if (b.fallback) {
         const fb = state.settings.claudeFallbackModel || null;
@@ -717,37 +717,52 @@ function conversationDefaults() {
 }
 
 /**
- * 自動壓縮上限：一個短的輸入框（例如 400k；留空＝CLI 預設）。離開輸入框（Enter 也是）時送 setConversationDefault 的 autoCompact，
- * 宿主夾進範圍後重送設定、輸入框換成宿主的值；看不懂的值標成錯誤、不送。Esc 還原。refresh(cd)：沒有 autoCompactRange 的代理整列藏起來
+ * 自動壓縮上限：一個短的輸入框（例如 400k；Grok 是百分比，例如 70%；留空＝CLI 預設）。離開輸入框（Enter 也是）時送 setConversationDefault 的 autoCompact，
+ * 宿主夾進範圍後重送設定、輸入框換成宿主的值；看不懂的值標成錯誤、不送。Esc 還原。refresh(cd)：兩種範圍都沒有的代理整列藏起來
  */
 function autoCompactEditor(p) {
-  const input = h('input', { type: 'text', class: 'input set-tokens', inputmode: 'decimal', spellcheck: 'false', autocomplete: 'off', placeholder: 'CLI 預設', 'aria-label': p.name + ' 的自動壓縮上限' });
-  const node = row('自動壓縮上限', '', input, null, 'autoCompact');
+  const input = h('input', { type: 'text', class: 'input set-tokens', inputmode: 'decimal', spellcheck: 'false', autocomplete: 'off', placeholder: 'CLI 預設' });
+  const label = h('div', { class: 'set-label' });
   const desc = h('div', { class: 'set-desc' });
-  node.querySelector('.set-text').append(desc);
+  const node = h('div', { class: 'set-row', dataset: { kw: 'autoCompact' } }, h('div', { class: 'set-text' }, label, desc), h('div', { class: 'set-ctl' }, input));
   node.hidden = true;
+  // 兩種單位：token 數（Claude、Codex：autoCompact／autoCompactRange）或上下文視窗的百分比（Grok：autoCompactPercent／autoCompactPercentRange）
+  const UNITS = {
+    tokens: { key: 'autoCompact', parse: parseTokens, fmt: fmtTokens, label: '自動壓縮上限', inputmode: 'decimal' },
+    percent: { key: 'autoCompactPercent', parse: parsePercent, fmt: fmtPercent, label: '自動壓縮門檻', inputmode: 'numeric' },
+  };
+  let unit = UNITS.tokens;
   let cur = null;
-  const show = () => { input.value = fmtTokens(cur); input.removeAttribute('aria-invalid'); };
+  const show = () => { input.value = unit.fmt(cur); input.removeAttribute('aria-invalid'); };
   const commit = () => {
-    const v = parseTokens(input.value);
+    const v = unit.parse(input.value);
     if (v === undefined) { input.setAttribute('aria-invalid', 'true'); return; }
     input.removeAttribute('aria-invalid');
     if (v === cur) { show(); return; }
-    post({ cmd: 'setConversationDefault', provider: p.key, key: 'autoCompact', value: v == null ? '' : String(v) });
+    post({ cmd: 'setConversationDefault', provider: p.key, key: unit.key, value: v == null ? '' : String(v) });
   };
   input.addEventListener('blur', commit);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); input.blur(); }   // 離開輸入框才儲存，宿主送回來的值才換得上去
-    else if (e.key === 'Escape' && input.value !== fmtTokens(cur)) { e.preventDefault(); e.stopPropagation(); show(); }
+    else if (e.key === 'Escape' && input.value !== unit.fmt(cur)) { e.preventDefault(); e.stopPropagation(); show(); }
   });
   input.addEventListener('input', () => input.removeAttribute('aria-invalid'));
   const refresh = (cd) => {
-    const range = cd && cd.autoCompactRange;
-    node.hidden = !range;
-    if (!range) return;
-    cur = cd.autoCompact == null ? null : cd.autoCompact;
-    desc.textContent = '上下文用到這麼多 token 時，CLI 自動壓縮較早的對話（例如 400k）；留空是 CLI 預設。可設 '
-      + fmtTokens(range.min) + '～' + fmtTokens(range.max) + '，超出的自動調到範圍內；比模型的上下文視窗大時照 CLI 預設。已開的對話下一則訊息起套用。';
+    const tokens = cd && cd.autoCompactRange;
+    const percent = cd && cd.autoCompactPercentRange;
+    node.hidden = !tokens && !percent;
+    if (node.hidden) return;
+    unit = tokens ? UNITS.tokens : UNITS.percent;
+    const range = tokens || percent;
+    cur = cd[unit.key] == null ? null : cd[unit.key];
+    label.textContent = unit.label;
+    input.inputMode = unit.inputmode;
+    input.setAttribute('aria-label', p.name + ' 的' + unit.label);
+    desc.textContent = tokens
+      ? '上下文用到這麼多 token 時，CLI 自動壓縮較早的對話（例如 400k）；留空是 CLI 預設。可設 '
+        + fmtTokens(range.min) + '～' + fmtTokens(range.max) + '，超出的自動調到範圍內；比模型的上下文視窗大時照 CLI 預設。已開的對話下一則訊息起套用。'
+      : '上下文用到視窗的這個百分比時，CLI 自動壓縮較早的對話（例如 70%）；留空是 CLI 預設（模型的設定，通常是 80%）。可設 '
+        + range.min + '%～' + range.max + '%，超出的自動調到範圍內；太低會每一輪都壓縮。已開的對話下一則訊息起套用。';
     if (document.activeElement !== input) show();
   };
   return { row: node, refresh };
@@ -778,7 +793,7 @@ function createModelRow(provider, m) {
 
 function updateModelRow(row, m) {
   row._model = m;
-  const name = m.label || m.value;
+  const name = modelText(m);
   row.querySelector('.set-label').textContent = name;
   row.querySelector('.set-desc').textContent = name !== m.value ? m.value : '';   // 別名與完整 id 並列時分得出來
   const efforts = m.efforts || [];
@@ -802,7 +817,7 @@ function openModelMenu(provider, btn) {
   if (!cd) return;
   const models = cd.models || [];
   const items = [{ label: LAST_MODEL, desc: '每個帳戶沿用上次在對話裡選的模型', checked: !cd.model, onSelect: () => setDefault(provider, 'model', '') }];
-  for (const m of models) items.push({ label: m.label || m.value, desc: m.description, checked: m.value === cd.model, onSelect: () => setDefault(provider, 'model', m.value) });
+  for (const m of models) items.push({ label: modelText(m), desc: m.description, checked: m.value === cd.model, onSelect: () => setDefault(provider, 'model', m.value) });
   if (cd.model && !models.some((m) => m.value === cd.model)) items.push({ label: cd.model, desc: '目前的設定（這一家的帳戶都沒有回報這個模型）', checked: true, onSelect: () => {} });
   openMenu(btn, items, { placement: 'bottom-end', minWidth: 280 });
 }

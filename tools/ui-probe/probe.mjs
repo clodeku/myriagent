@@ -628,6 +628,10 @@ class FakeHost {
           if (!p.autoCompactRange) break;
           const n = m.value ? Number(m.value) : null;
           p.autoCompact = n == null ? null : Math.min(p.autoCompactRange.max, Math.max(p.autoCompactRange.min, n));
+        } else if (m.key === 'autoCompactPercent') {
+          if (!p.autoCompactPercentRange) break;
+          const n = m.value ? Number(m.value) : null;
+          p.autoCompactPercent = n == null ? null : Math.min(p.autoCompactPercentRange.max, Math.max(p.autoCompactPercentRange.min, n));
         }
         this.send({ type: 'settings', settings: this.settings });
         break;

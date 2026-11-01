@@ -6,7 +6,8 @@ namespace Myriagent.Hub;
 
 /// <summary>
 /// 延伸成新對話（web-protocol 的 forkConversation，2026-10-25 使用者要求）：複製這個對話的項目與附件，開一個由新的代理接手的對話，
-/// 之後兩邊各自進行。Claude 以原對話逐字稿當下的副本 --fork-session 分支（新的代理帶著完整的前文），其他代理第一則訊息附前文節錄
+/// 之後兩邊各自進行。Claude 以原對話逐字稿當下的副本 --fork-session 分支（新的代理帶著完整的前文）。
+/// Grok 已建立的對話呼叫 _x.ai/session/fork（完整紀錄含工具結果）；失敗或還沒建立過就同其他代理，第一則訊息附前文節錄
 /// （<see cref="ConversationForkRules"/>）。只有桌面這台的正式對話；原對話執行中也可以延伸（進行中的部分在新對話算已中斷）
 /// </summary>
 internal sealed partial class AgentHub
@@ -43,19 +44,29 @@ internal sealed partial class AgentHub
         var sourceRunning = source.Running;
         var workingDirectory = GetWorkingDirectory(source);
         var transcript = ForkTranscriptOf(source);
+        // 在其他對話資料夾裡的媒體（原對話的代理存在自己資料夾的截圖，或原對話自己也是延伸來的）：新對話自己留一份，
+        // 遠端只放行對話自己的資料夾，刪掉原對話之後這台也看得到（AgentHub.MediaKeep.cs 的 ForkKeepJob）
+        var forkDirectory = store.GetConversationDirectory(forkId);
+        var keepJobs = items.Where(i => MediaKeepRules.NeedsForkKeep(i, store.RootDirectory, forkDirectory, workingDirectory))
+            .Select(i => ForkKeepJob(forkId, i, forkDirectory, workingDirectory))
+            .ToList();
         var snapshotPath = transcript == null
             ? null
             : Path.Combine(store.GetConversationDirectory(forkId), ConversationForkRules.SourceFolderName, Path.GetFileName(transcript));
 
         source.Forking = true;
         string? snapshot;
+        Dictionary<string, Dictionary<string, string>> kept;
+        string? grokForkId = null;
         try
         {
-            snapshot = await Task.Run(() =>
+            (snapshot, kept) = await Task.Run(() =>
             {
                 CopyForkAttachments(fromAttachments, toAttachments);
-                return transcript != null ? SnapshotTranscript(transcript, snapshotPath!) : null;
+                var keptMedia = KeepForkMedia(keepJobs, forkDirectory);
+                return (transcript != null ? SnapshotTranscript(transcript, snapshotPath!) : null, keptMedia);
             });
+            grokForkId = await TryForkNativeSessionAsync(source);
         }
         catch (Exception ex)
         {
@@ -69,9 +80,18 @@ internal sealed partial class AgentHub
         }
         if (disposed)
             return;
+        foreach (var item in items)
+        {
+            if (!kept.TryGetValue(item.Id, out var map))
+                continue;
+            item.KeptMedia ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (original, relative) in map)
+                item.KeptMedia[original] = relative;
+        }
 
-        // 有逐字稿的副本：新對話已經「建立」過，第一次啟動從副本分支成事先決定的 sid；沒有就同換帳戶，第一則訊息附前文節錄
-        bool native = snapshot != null;
+        // 有逐字稿的副本或 Grok 分叉成功：新對話的 CLI 對話已經在；沒有就同換帳戶，第一則訊息附前文節錄
+        bool grokNative = grokForkId != null;
+        bool native = snapshot != null || grokNative;
         var now = DateTime.Now;
         var fork = new AgentConversation
         {
@@ -79,12 +99,12 @@ internal sealed partial class AgentHub
             Title = ConversationForkRules.Title(meta.Title),
             AccountId = meta.AccountId,
             Provider = meta.Provider,
-            SessionId = native ? Guid.NewGuid().ToString() : InitialSessionId(meta.Provider),
+            SessionId = grokNative ? grokForkId! : native ? Guid.NewGuid().ToString() : InitialSessionId(meta.Provider),
             SessionStarted = native,
             SessionAccountId = native ? meta.AccountId : null,
-            // 原對話回溯過、還沒送出：分支點照樣帶過去（從副本的那裡分支）
-            ResumeAt = native ? meta.ResumeAt : null,
-            ForkSourceTranscript = snapshot,
+            // 原對話回溯過、還沒送出：Claude 分支點照樣帶過去。Grok 分叉是整份，不帶 ResumeAt、也不留逐字稿副本
+            ResumeAt = grokNative ? null : native ? meta.ResumeAt : null,
+            ForkSourceTranscript = grokNative ? null : snapshot,
             Model = meta.Model,
             Effort = meta.Effort,
             Agent = meta.Agent,
@@ -143,8 +163,39 @@ internal sealed partial class AgentHub
     }
 
     /// <summary>
+    /// 以 CLI 自己的分叉整份複製已建立的對話（目前只有 Grok 的 _x.ai/session/fork，<see cref="IAgentSession.ForkSessionAsync"/>）。
+    /// 成功回新的 session id（來源的 id 與程序都不換）。不支援、失敗、沒有帳戶或還沒建立過回 null（改附前文節錄，不讓整次延伸失敗）
+    /// </summary>
+    private async Task<string?> TryForkNativeSessionAsync(ConversationState source)
+    {
+        switch (source.Meta.Provider)
+        {
+            case AgentProvider.Grok:
+                break;
+            case AgentProvider.Claude:
+                // 以逐字稿副本 --fork-session 分支（ForkTranscriptOf）
+            case AgentProvider.Codex:
+            case AgentProvider.Antigravity:
+                return null;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(source), source.Meta.Provider, "未知的代理種類");
+        }
+        if (!source.Meta.SessionStarted || accounts.Find(source.Meta.AccountId) == null)
+            return null;
+        try
+        {
+            return await EnsureSession(source).ForkSessionAsync(Guid.NewGuid().ToString(), BuildSessionSettings(source, historyRecap: null));
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"延伸對話 {source.Meta.Id}：Grok 分叉失敗（{ex.Message}），改附前文節錄");
+            return null;
+        }
+    }
+
+    /// <summary>
     /// 延伸時要分支的 Claude 逐字稿：CLI 端建立過、帳戶還在的 Claude 對話（開著程序時是它寫的那份，原對話自己是還沒分支的延伸對話時是它的副本）；
-    /// 其他回 null（改用前文節錄）
+    /// 其他回 null（改用前文節錄；Grok 走 <see cref="TryForkNativeSessionAsync"/>）
     /// </summary>
     private string? ForkTranscriptOf(ConversationState c)
     {
@@ -159,6 +210,25 @@ internal sealed partial class AgentHub
             Log.Warn($"延伸對話 {c.Meta.Id}：找不到 Claude 逐字稿（{ex.Message}），改附前文節錄");
             return null;
         }
+    }
+
+    /// <summary>
+    /// 延伸時補留的媒體（背景；新對話還沒登記，直接複製、不經 MediaKeeper 的排程）：先建好新對話的資料夾（複製不重建不存在的資料夾），
+    /// 回傳項目 id → 留下的（原檔 → 副本相對路徑）。個別檔案複製不了就略過（那張照舊指到原檔）
+    /// </summary>
+    private static Dictionary<string, Dictionary<string, string>> KeepForkMedia(IReadOnlyList<MediaKeeper.Job> jobs, string forkDirectory)
+    {
+        var result = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        if (jobs.Count == 0)
+            return result;
+        Directory.CreateDirectory(forkDirectory);
+        foreach (var job in jobs)
+        {
+            var kept = MediaKeeper.Keep(job, Log.Warn);
+            if (kept.Count > 0)
+                result[job.ItemId] = kept;
+        }
+        return result;
     }
 
     /// <summary>附件資料夾整份複製（含給模型看的圖、回覆媒體的副本）；個別檔案複製不了就略過（那個附件在新對話顯示不出來）</summary>

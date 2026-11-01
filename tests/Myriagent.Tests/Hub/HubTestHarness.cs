@@ -699,6 +699,17 @@ internal sealed class FakeSession : IAgentSession
         return Task.FromResult(string.IsNullOrEmpty(LiveTitle) ? null : LiveTitle);
     }
 
+    /// <summary>中樞要求的 CLI 分叉（新 session id 的提議、當時的設定）；<see cref="ForkResult"/>＝回傳的新 session id（null＝失敗）</summary>
+    public Recorder<(string NewSessionId, AgentSessionSettings Settings)> Forks { get; } = new();
+
+    public string? ForkResult { get; set; }
+
+    public Task<string?> ForkSessionAsync(string newSessionId, AgentSessionSettings settings)
+    {
+        Forks.Add((newSessionId, settings));
+        return Task.FromResult(ForkResult);
+    }
+
     /// <summary>中樞要求的工作階段改名</summary>
     public Recorder<string> Renames { get; } = new();
 

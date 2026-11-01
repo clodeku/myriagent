@@ -10,6 +10,7 @@ namespace Myriagent.Hub;
 /// <item>Claude：原對話的逐字稿當下複製一份（<c>conversations\{新}\fork-source\</c>），新對話第一次啟動以
 /// <c>--resume &lt;副本&gt; --fork-session --session-id &lt;新的 sid&gt;</c> 分支（實測 E-4，protocol-notes），新的代理帶著完整的前文（含工具結果）；
 /// 副本凍結在延伸的那一刻，原對話之後的內容不會跑進來</item>
+/// <item>Grok：CLI 對話已建立就呼叫 _x.ai/session/fork，新對話的 session 是回傳的 id（完整紀錄含工具結果）；失敗或還沒建立過，同下面的前文節錄</item>
 /// <item>其他代理（與找不到逐字稿的 Claude 對話）：新對話的 CLI 對話還沒建立（SessionStarted＝false），第一則訊息附上前文節錄（同換帳戶）</item>
 /// </list>
 /// </summary>
@@ -63,7 +64,7 @@ internal static partial class ConversationForkRules
     /// <summary>
     /// 新對話的提示（加在複製過來的項目之後）：從哪裡延伸、新的代理看得到多少前情、原對話當時是不是還在執行
     /// </summary>
-    /// <param name="nativeContext">Claude 以逐字稿副本分支（新的代理帶著完整的前文）；false＝第一則訊息附前文節錄</param>
+    /// <param name="nativeContext">Claude 以逐字稿副本分支，或 Grok 以 ACP 分叉（新的代理帶著完整的前文）；false＝第一則訊息附前文節錄</param>
     public static string Notice(string? sourceTitle, bool nativeContext, bool sourceRunning)
     {
         var title = string.IsNullOrWhiteSpace(sourceTitle) ? "原對話" : sourceTitle.Trim();

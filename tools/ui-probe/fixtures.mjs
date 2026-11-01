@@ -190,7 +190,7 @@ export const CODEX_MODES = [
   { value: 'FullAccess', label: '完全自動', description: '不詢問、不限制檔案存取（danger-full-access）' },
 ];
 const CLAUDE_MODELS = [
-  { value: 'default', label: '預設（建議）', description: '帳戶預設模型', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'] },
+  { value: 'default', label: '預設（建議）', description: '帳戶預設模型', resolved: 'Opus 5.5', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'] },
   { value: 'opus', label: 'Opus 5.5', description: '最強的推理與程式能力', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'] },
   { value: 'sonnet', label: 'Sonnet 5', description: '速度與能力平衡', efforts: ['low', 'medium', 'high'] },
   { value: 'haiku', label: 'Haiku 5', description: '最快、最省額度', efforts: [] },
@@ -218,7 +218,7 @@ export const GROK_MODES = [
 ];
 // grok 1.0.52 實測的模型清單（initialize 的 modelState；預設取 currentModelId 的思考強度）
 const GROK_MODELS = [
-  { value: 'default', label: '預設', description: 'grok 的預設模型（目前是 Grok 4.7）', efforts: ['low', 'medium', 'high', 'xhigh'] },
+  { value: 'default', label: '預設', description: 'grok 的預設模型（目前是 Grok 4.7）', resolved: 'Grok 4.7', efforts: ['low', 'medium', 'high', 'xhigh'] },
   { value: 'grok-4.7', label: 'Grok 4.7', description: 'latest frontier model', efforts: ['low', 'medium', 'high', 'xhigh'] },
   { value: 'grok-4.6', label: 'Grok 4.6', description: null, efforts: ['low', 'medium', 'high', 'xhigh'] },
   { value: 'grok-4.5', label: 'Grok 4.5', description: null, efforts: ['low', 'medium', 'high'] },
@@ -235,11 +235,11 @@ const CODEX_MODELS = [
 export function makeConversationDefaults() {
   const rows = (models, efforts) => models.map((m) => Object.assign({}, m, { effort: efforts[m.value] || null }));
   return {
-    // 自動壓縮上限（AutoCompactRules）：只有 Claude、Codex 有範圍
-    Claude: { model: 'opus', permission: 'Auto', permissionModes: CLAUDE_MODES, models: rows(CLAUDE_MODELS, { default: 'high', opus: 'max' }), autoCompact: null, autoCompactRange: { min: 67000, max: 967000 } },
-    Codex: { model: null, permission: 'Ask', permissionModes: CODEX_MODES, models: rows(CODEX_MODELS, { 'gpt-6-astra': 'ultra' }), autoCompact: 200000, autoCompactRange: { min: 20000, max: 2000000 } },
-    Antigravity: { model: null, permission: 'AcceptEdits', permissionModes: AGY_MODES, models: rows(AGY_MODELS, {}), autoCompact: null, autoCompactRange: null },
-    Grok: { model: null, permission: 'Ask', permissionModes: GROK_MODES, models: rows(GROK_MODELS, {}), autoCompact: null, autoCompactRange: null },
+    // 自動壓縮上限（AutoCompactRules）：Claude、Codex 以 token 數、Grok 以百分比，Antigravity 沒有
+    Claude: { model: 'opus', permission: 'Auto', permissionModes: CLAUDE_MODES, models: rows(CLAUDE_MODELS, { default: 'high', opus: 'max' }), autoCompact: null, autoCompactRange: { min: 67000, max: 967000 }, autoCompactPercent: null, autoCompactPercentRange: null },
+    Codex: { model: null, permission: 'Ask', permissionModes: CODEX_MODES, models: rows(CODEX_MODELS, { 'gpt-6-astra': 'ultra' }), autoCompact: 200000, autoCompactRange: { min: 20000, max: 2000000 }, autoCompactPercent: null, autoCompactPercentRange: null },
+    Antigravity: { model: null, permission: 'AcceptEdits', permissionModes: AGY_MODES, models: rows(AGY_MODELS, {}), autoCompact: null, autoCompactRange: null, autoCompactPercent: null, autoCompactPercentRange: null },
+    Grok: { model: null, permission: 'Ask', permissionModes: GROK_MODES, models: rows(GROK_MODELS, {}), autoCompact: null, autoCompactRange: null, autoCompactPercent: null, autoCompactPercentRange: { min: 20, max: 95 } },
   };
 }
 

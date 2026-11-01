@@ -41,6 +41,34 @@ internal sealed partial class AgentHub
     }
 
     /// <summary>
+    /// 延伸出來的對話補留其他對話資料夾裡的媒體（<see cref="MediaKeepRules.NeedsForkKeep"/>）：只留 conversations 底下、
+    /// 不在自己資料夾與工作資料夾裡的（工作資料夾是原對話的工作區時，遠端本來就放行、新對話之後也繼續用它）
+    /// </summary>
+    private MediaKeeper.Job ForkKeepJob(string conversationId, AgentChatItem item, string conversationDirectory, string? workingDirectory)
+        => new(conversationId, item.Id, conversationDirectory, item.MediaPaths?.ToList() ?? [], MediaKeepRules.MarkdownTextOf(item), workingDirectory,
+            item.KeptMedia?.Keys.ToList() ?? [], OnlyUnder: store.RootDirectory, ExceptUnder: workingDirectory);
+
+    /// <summary>這次執行看過的延伸對話（每個對話只補一次）</summary>
+    private readonly HashSet<string> forkMediaChecked = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 修正之前延伸出來的對話（2026-11-01）：載入紀錄時，引用其他對話資料夾裡媒體的項目排進背景補留一份（同延伸時的 <see cref="ForkKeepJob"/>），
+    /// 留好照常經 <see cref="OnMediaKept"/> 記進項目；之後遠端取檔與縮圖給的是副本。每次執行每個對話只看一次；沒有接上（測試）不做
+    /// </summary>
+    private void RepairForkMediaLater(ConversationState c)
+    {
+        if (mediaKeeper is null || disposed || c.IsDraft || c.IsReplica || c.Meta.ForkedFrom is null || !forkMediaChecked.Add(c.Meta.Id))
+            return;
+        var directory = store.GetConversationDirectory(c.Meta.Id);
+        var workingDirectory = GetWorkingDirectory(c);
+        foreach (var item in c.Items)
+        {
+            if (item is not null && MediaKeepRules.NeedsForkKeep(item, store.RootDirectory, directory, workingDirectory))
+                mediaKeeper.Enqueue(ForkKeepJob(c.Meta.Id, item, directory, workingDirectory));
+        }
+    }
+
+    /// <summary>
     /// 背景留好了（UI 執行緒）：記進項目、重送給開著的畫面（網址換成副本；線上的內容沒變，不經同步的掛鉤），這一輪結束了就在背景存紀錄
     /// （執行中的由定期維護存）。對話已經刪掉、項目已經不在或紀錄沒載入就不記（副本留在資料夾裡，跟著對話一起刪）
     /// </summary>

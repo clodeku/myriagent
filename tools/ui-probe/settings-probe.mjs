@@ -231,7 +231,7 @@ export async function runSettings(ctx, vp) {
       for (const p of ['Claude', 'Codex', 'Antigravity', 'Grok']) {
         const rowEl = document.querySelector(`.dlg-settings .set-prov[data-provider="${p}"] .set-row[data-kw="autoCompact"]`);
         const input = rowEl && rowEl.querySelector('.set-tokens');
-        r[p] = rowEl ? { hidden: rowEl.hidden, value: input.value, invalid: input.getAttribute('aria-invalid') === 'true', desc: rowEl.querySelector('.set-desc').textContent } : null;
+        r[p] = rowEl ? { hidden: rowEl.hidden, value: input.value, invalid: input.getAttribute('aria-invalid') === 'true', label: rowEl.querySelector('.set-label').textContent, desc: rowEl.querySelector('.set-desc').textContent } : null;
       }
       return r;
     };
@@ -256,7 +256,34 @@ export async function runSettings(ctx, vp) {
     await page.press(claudeInput, 'Enter');
     const cleared = await until(() => host.last('setConversationDefault', (m) => m.key === 'autoCompact' && m.value === ''), 2000);
     const k4 = await until(async () => { const r = await page.evaluate(compactOf); return r.Claude.value === '' && !r.Claude.invalid ? r : null; }, 2000) || await page.evaluate(compactOf);
-    check('settingsAutoCompact', !k0.Claude.hidden && k0.Claude.value === '' && !k0.Codex.hidden && k0.Codex.value === '200k' && k0.Antigravity.hidden && k0.Grok.hidden
+    // Grok 是百分比：打 10% 送 10、宿主夾成 20 後顯示 20%；小數標成錯誤、不送
+    await page.click('.dlg-settings .set-subtab[data-provider="Grok"]');
+    const grokInput = '.dlg-settings .set-prov[data-provider="Grok"] .set-tokens';
+    await page.fill(grokInput, '10%');
+    await page.press(grokInput, 'Enter');
+    const sentPct = await until(() => host.last('setConversationDefault', (m) => m.key === 'autoCompactPercent' && m.provider === 'Grok'), 2000);
+    const g1 = await until(async () => { const r = await page.evaluate(compactOf); return r.Grok.value === '20%' ? r : null; }, 2000) || await page.evaluate(compactOf);
+    await page.fill(grokInput, '70%');
+    await page.press(grokInput, 'Enter');
+    const g2 = await until(async () => { const r = await page.evaluate(compactOf); return r.Grok.value === '70%' ? r : null; }, 2000) || await page.evaluate(compactOf);
+    await shot(page, 'settings-autocompact-grok-' + tag);
+    const beforePct = host.received.filter((m) => m.cmd === 'setConversationDefault').length;
+    await page.fill(grokInput, '70.5');
+    await page.press(grokInput, 'Enter');
+    await sleep(150);
+    const g3 = await page.evaluate(compactOf);
+    const sentBadPct = host.received.filter((m) => m.cmd === 'setConversationDefault').length - beforePct;
+    // 「預設」實際是哪個模型（宿主的 resolved）：推理強度那一列與預設模型選單都寫成「預設（Grok 4.7）」
+    const grokDefaultRow = await page.$eval('.dlg-settings .set-prov[data-provider="Grok"] .set-model[data-model="default"] .set-label', (e) => e.textContent);
+    await page.click('.dlg-settings .set-prov[data-provider="Grok"] .set-defmodel');
+    const grokMenu = await page.$$eval('.menu .menu-item .mi-label', (els) => els.map((e) => e.textContent));
+    await page.click('.menu .menu-item:has(.mi-label:text-is("沿用上次選擇"))');   // 關掉選單（原本就是它，不改設定；Esc 會連設定一起關）
+    check('settingsDefaultModelResolved', grokDefaultRow === '預設（Grok 4.7）' && grokMenu.includes('預設（Grok 4.7）'), { grokDefaultRow, grokMenu });
+    check('settingsAutoCompactPercent', !k0.Grok.hidden && k0.Grok.value === '' && k0.Grok.label === '自動壓縮門檻' && /20%～95%/.test(k0.Grok.desc)
+      && k0.Claude.label === '自動壓縮上限' && !!sentPct && sentPct.value === '10' && g1.Grok.value === '20%' && g2.Grok.value === '70%'
+      && g3.Grok.invalid && sentBadPct === 0,
+    { initial: k0.Grok, sentPct, clamped: g1.Grok, set70: g2.Grok, invalid: g3.Grok, sentBadPct });
+    check('settingsAutoCompact', !k0.Claude.hidden && k0.Claude.value === '' && !k0.Codex.hidden && k0.Codex.value === '200k' && k0.Antigravity.hidden
       && /67k～967k/.test(k0.Claude.desc) && /20k～2M/.test(k0.Codex.desc)
       && !!sent400 && sent400.value === '400000' && k1.Claude.value === '400k' && k2.Claude.value === '967k'
       && k3.Claude.invalid && sentBad === 0 && !!cleared && k4.Claude.value === '',

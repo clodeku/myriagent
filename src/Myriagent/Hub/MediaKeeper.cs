@@ -17,8 +17,10 @@ internal sealed class MediaKeeper : IDisposable
     /// <param name="MarkdownText">回覆的 Markdown（找引用的本機圖片；沒有圖片語法時是 null）</param>
     /// <param name="WorkingDirectory">Markdown 相對路徑的基準（同渲染）</param>
     /// <param name="AlreadyKept">項目已經留過的原檔（正規化後）</param>
+    /// <param name="OnlyUnder">只留這個資料夾底下的（延伸對話補留其他對話資料夾裡的媒體；null＝不限）</param>
+    /// <param name="ExceptUnder">這個資料夾底下的不留（null＝不排除）</param>
     public sealed record Job(string ConversationId, string ItemId, string ConversationDirectory, IReadOnlyList<string> MediaPaths,
-        string? MarkdownText, string? WorkingDirectory, IReadOnlyCollection<string> AlreadyKept);
+        string? MarkdownText, string? WorkingDirectory, IReadOnlyCollection<string> AlreadyKept, string? OnlyUnder = null, string? ExceptUnder = null);
 
     private readonly object gate = new();
     private readonly Action<string, string, IReadOnlyDictionary<string, string>> kept;
@@ -129,7 +131,7 @@ internal sealed class MediaKeeper : IDisposable
             Dictionary<string, string>? result = null;
             try
             {
-                result = Keep(job);
+                result = Keep(job, warn);
             }
             catch (Exception ex)
             {
@@ -157,8 +159,11 @@ internal sealed class MediaKeeper : IDisposable
         }
     }
 
-    /// <summary>一個項目：找出要留的檔、逐一複製；回傳這次留的（原檔 → 副本相對路徑）</summary>
-    private Dictionary<string, string> Keep(Job job)
+    /// <summary>
+    /// 一個項目：找出要留的檔、逐一複製；回傳這次留的（原檔 → 副本相對路徑）。背景執行緒用，延伸對話也在它自己的背景工作裡直接呼叫
+    /// （新對話還沒登記，不經排程與回呼）
+    /// </summary>
+    internal static Dictionary<string, string> Keep(Job job, Action<string> warn)
     {
         var paths = new List<string?>(job.MediaPaths);
         if (!string.IsNullOrEmpty(job.MarkdownText))
@@ -177,7 +182,7 @@ internal sealed class MediaKeeper : IDisposable
         }
 
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var original in MediaKeepRules.Candidates(paths, job.ConversationDirectory, job.AlreadyKept))
+        foreach (var original in MediaKeepRules.Candidates(paths, job.ConversationDirectory, job.AlreadyKept, job.OnlyUnder, job.ExceptUnder))
         {
             // 對話已經刪掉或搬進回收區：不做（不重建資料夾）
             if (!Directory.Exists(job.ConversationDirectory))

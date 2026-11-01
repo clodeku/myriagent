@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using Newtonsoft.Json;
 using Myriagent.Usage;
 using Newtonsoft.Json.Linq;
@@ -18,8 +19,11 @@ internal enum GrokAcpMessageKind
     Notification,
 }
 
-/// <summary>背景工作通知：Kind 是 task_backgrounded 或 task_completed。WillWake 沒有欄位時是 null（不另外叫醒，避免和 grok 自己的續接重疊）</summary>
-internal readonly record struct GrokBackgroundNote(string Kind, string TaskId, string? ToolCallId, string? Description, bool? WillWake);
+/// <summary>
+/// 背景工作通知：Kind 是 task_backgrounded 或 task_completed。WillWake 沒有欄位時是 null（不另外叫醒，避免和 grok 自己的續接重疊）。
+/// OutputFile 是 grok 寫的輸出檔路徑（可能是 UNC 或相對路徑；呼叫端只留本機磁碟）
+/// </summary>
+internal readonly record struct GrokBackgroundNote(string Kind, string TaskId, string? ToolCallId, string? Description, bool? WillWake, string? OutputFile);
 
 /// <summary>JSON-RPC 的錯誤：Text 是給人看的完整說明（message 加上 data）</summary>
 /// <param name="DataCode">data.code（grok 的錯誤分類，例如 FS_NOT_FOUND）；沒有為 null</param>
@@ -200,8 +204,11 @@ internal static class GrokAcpRules
     /// <summary>手動壓縮（斜線指令 /compact 由會話攔截後送這個方法，不當成一般提示）</summary>
     public const string MethodCompact = "_x.ai/compact_conversation";
 
-    /// <summary>壓縮成功的提示（AgentNoticeEvent）</summary>
+    /// <summary>壓縮成功的提示（AgentNoticeEvent）。手動 /compact 與 grok 自己的 auto_compact_completed 用同一句</summary>
     public const string CompactedNotice = "已壓縮較早的對話內容";
+
+    /// <summary>把目前這段 grok 對話整份複製成新的 session（省略 targetPromptIndex）</summary>
+    public const string MethodFork = "_x.ai/session/fork";
 
     /// <summary>grok 拒絕產生影片時的英文原文（工具輸出含這句就改發中文說明）</summary>
     public const string ZeroRetentionMarker = "Video generation tools are unavailable under zero data retention (ZDR)";
@@ -827,6 +834,11 @@ internal static class GrokAcpRules
         ["todo_write"] = ("待辦清單", "todo"),
         ["todowrite"] = ("待辦清單", "todo"),
         ["task"] = ("子代理", "agent"),
+        ["spawn_subagent"] = ("子代理", "agent"),
+        ["workflow"] = ("流程", "other"),
+        ["scheduler_create"] = ("排程", "other"),
+        ["scheduler_list"] = ("排程清單", "other"),
+        ["scheduler_delete"] = ("取消排程", "other"),
         ["skill"] = ("技能", "other"),
         ["image_gen"] = ("產生圖片", "image"),
         ["image_edit"] = ("修改圖片", "image"),
@@ -1017,8 +1029,52 @@ internal static class GrokAcpRules
         if (string.IsNullOrEmpty(description) && snapshot != null)
             description = First(snapshot, "monitor_description", "monitorDescription", "description")?.Trim();
         bool? willWake = (body["will_wake"] ?? body["willWake"]) is JValue { Type: JTokenType.Boolean } flag ? flag.Value<bool>() : null;
-        note = new GrokBackgroundNote(kind, taskId, string.IsNullOrEmpty(toolCallId) ? null : toolCallId, string.IsNullOrEmpty(description) ? null : description, willWake);
+        var outputFile = First(body, "output_file", "outputFile")?.Trim();
+        if (string.IsNullOrEmpty(outputFile) && snapshot != null)
+            outputFile = First(snapshot, "output_file", "outputFile")?.Trim();
+        note = new GrokBackgroundNote(kind, taskId, string.IsNullOrEmpty(toolCallId) ? null : toolCallId,
+            string.IsNullOrEmpty(description) ? null : description, willWake, string.IsNullOrEmpty(outputFile) ? null : outputFile);
         return true;
+    }
+
+    /// <summary>只留磁碟代號開頭的絕對路徑。UNC、相對路徑（videos/1.log）不讀，避免對別台主機發起連線</summary>
+    public static string? AcceptOutputFile(string? path)
+        => AgentAttachmentRules.IsLocalDrivePath(path) ? path : null;
+
+    /// <summary>
+    /// 讀背景工作的輸出檔尾端。檔案不在回空字串（還在建立）；不是本機路徑回錯誤。超過 <see cref="ClaudeControlRules.MaxTaskOutputChars"/> 只留尾端
+    /// </summary>
+    public static AgentTaskOutput ReadBackgroundOutput(string? path)
+    {
+        if (AcceptOutputFile(path) == null)
+            return new AgentTaskOutput(null, 0, false, "這個背景工作沒有本機的輸出檔");
+        try
+        {
+            using var stream = new FileStream(path!, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            long length = stream.Length;
+            int cap = ClaudeControlRules.MaxTaskOutputChars;
+            int maxBytes = cap * 4;
+            long start = length > maxBytes ? length - maxBytes : 0;
+            stream.Position = start;
+            var buffer = new byte[length - start];
+            stream.ReadExactly(buffer);
+            var text = Encoding.UTF8.GetString(buffer).Replace("\r\n", "\n").Replace('\r', '\n');
+            bool truncated = start > 0;
+            if (text.Length > cap)
+            {
+                text = text[^cap..];
+                truncated = true;
+            }
+            return new AgentTaskOutput(text, length, truncated, null);
+        }
+        catch (FileNotFoundException)
+        {
+            return new AgentTaskOutput(string.Empty, 0, false, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new AgentTaskOutput(null, 0, false, "讀不到這個背景工作的輸出：" + ex.Message);
+        }
     }
 
     private static void WalkMedia(JToken? token, Action<string?> add)
@@ -1103,4 +1159,23 @@ internal static class GrokAcpRules
             .ToList() ?? new List<AgentPlanStep>();
 
     internal static string FormatTokens(long tokens) => tokens.ToString("N0", CultureInfo.InvariantCulture);
+
+    // ───────────────────────────── 分叉（1.0.70 實測，tools/probes/grok/fork_probe.py） ─────────────────────────────
+
+    /// <summary>
+    /// 來源就是目前續接中的 session。sessionId 與 sourceSessionId 都填它；newCwd 沿用來源的工作資料夾。不帶 targetPromptIndex（整份複製）
+    /// </summary>
+    public static JObject BuildForkParams(string sessionId, string workingDirectory, string newSessionId)
+        => new()
+        {
+            ["sessionId"] = sessionId,
+            ["sourceSessionId"] = sessionId,
+            ["sourceCwd"] = workingDirectory,
+            ["newCwd"] = workingDirectory,
+            ["newSessionId"] = newSessionId,
+        };
+
+    public static string? ParseForkSessionId(JToken? result)
+        => (result as JObject)?.Value<string>("newSessionId") is { Length: > 0 } id ? id : null;
+
 }

@@ -1,5 +1,8 @@
+using Myriagent.Accounts;
 using Myriagent.Agents;
+using Myriagent.Core;
 using Myriagent.Hub;
+using Myriagent.Sync;
 using Myriagent.Tests.TestSupport;
 using Newtonsoft.Json.Linq;
 
@@ -110,6 +113,44 @@ public class AgentHubForkTests
     }
 
     [Fact]
+    public async Task Grok_CLI分叉成功_新對話續接回傳的session_不附前文節錄_失敗改附前文節錄()
+    {
+        using var h = new HubHarness();
+        var grok = new AgentAccount { Id = "acc-grok", Provider = AgentProvider.Grok, Label = "Grok", ConfigDirectory = h.Temp.Combine("grok") };
+        h.Ui.Invoke(() => h.Accounts.Seed([h.Claude, h.Claude2, h.Codex, grok], AccountStatus.Ready));
+        var (id, session) = h.StartConversation(h.Main, grok, "整理報表");
+        h.Raise(session, new AgentTextCompletedEvent("b1", "已經整理好 A 表"));
+        h.CompleteTurn(session);
+        var sourceSession = h.Conversation(id)!.SessionId;
+        session.ForkResult = "grok-fork-1";
+
+        var forkId = await ForkAsync(h, id);
+
+        session.Forks.Count.Should().Be(1, "以原對話的會話分叉");
+        session.Forks.All.Single().Settings.SessionId.Should().Be(sourceSession);
+        var fork = h.Conversation(forkId)!;
+        fork.SessionId.Should().Be("grok-fork-1");
+        fork.SessionStarted.Should().BeTrue("CLI 那邊已經有這段對話");
+        fork.ForkSourceTranscript.Should().BeNull();
+        h.Conversation(id)!.SessionId.Should().Be(sourceSession, "原對話照舊");
+        h.Items(forkId).Last().Text.Should().NotContain("前文節錄");
+
+        var before = h.Sessions.Count;
+        h.Send(h.Main, forkId, "接著做 B 表");
+        await h.WaitUntilAsync(() => h.Sessions.Count == before + 1 && h.Sessions[^1].Sent.Count == 1, "延伸的對話開自己的會話送出");
+        var sent = h.Sessions[^1].Sent.All.Single();
+        sent.Input.Text.Should().Be("接著做 B 表", "新的代理已經有完整的前文，不附節錄");
+        sent.Settings.SessionId.Should().Be("grok-fork-1");
+        sent.Settings.SessionStarted.Should().BeTrue();
+
+        // CLI 分叉失敗（續接不了、回應不對）：同其他代理，第一則訊息附前文節錄
+        session.ForkResult = null;
+        var second = await ForkAsync(h, id, "fork-t2");
+        h.Conversation(second)!.SessionStarted.Should().BeFalse();
+        h.Items(second).Last().Text.Should().Contain("前文節錄");
+    }
+
+    [Fact]
     public async Task 附件資料夾複製過去_路徑改到新對話()
     {
         using var h = new HubHarness();
@@ -133,6 +174,50 @@ public class AgentHubForkTests
         File.ReadAllText(Path.Combine(to, ".kept", "k1", "s.png")).Should().Be("kept");
         h.Items(forkId).First(i => i.Kind == AgentItemKind.User).Attachments.Single().StoredPath.Should().Be(Path.Combine(to, "a.png"));
         h.Items(id).First(i => i.Kind == AgentItemKind.User).Attachments.Single().StoredPath.Should().Be(Path.Combine(dir, "a.png"), "原對話不動");
+    }
+
+    /// <summary>
+    /// 2026-11-01 實機：原對話的代理把圖存在自己的對話資料夾（不在 attachments\），延伸只複製 attachments\，新對話引用的是別的對話資料夾的檔：
+    /// 遠端守門員只放行對話自己的資料夾（瀏覽器版與其他電腦破圖、縮圖每次連線重試），刪掉原對話後連這台也破圖
+    /// </summary>
+    [Fact]
+    public async Task 原對話資料夾裡的媒體_新對話留一份_遠端取檔給副本_原檔刪掉後畫面照樣是副本()
+    {
+        byte[] png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7];
+        using var h = new HubHarness();
+        var (id, session) = h.StartConversation(h.Main, h.Codex, "做字卡");
+        var sourceDir = h.Store.GetConversationDirectory(id);
+        var card = Path.Combine(sourceDir, "caption-demo", "contact.png");
+        var inline = Path.Combine(sourceDir, "caption-demo", "inline.png");
+        var outside = h.Temp.WriteFile(@"out\outside.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(card)!);
+        foreach (var path in new[] { card, inline, outside })
+            File.WriteAllBytes(path, png);
+        h.Raise(session, new AgentToolStartedEvent("t1", "Bash", "execute", "做字卡", null));
+        h.Raise(session, new AgentToolCompletedEvent("t1", AgentItemStatus.Done, "ok", [card, outside]));
+        h.Raise(session, new AgentTextCompletedEvent("m:1", $"![字卡](<{inline.Replace('\\', '/')}>)"));
+        h.CompleteTurn(session);
+
+        var forkId = await ForkAsync(h, id);
+
+        var forkDir = h.Store.GetConversationDirectory(forkId);
+        var tool = h.Items(forkId).Single(i => i.Kind == AgentItemKind.Tool);
+        tool.KeptMedia!.Keys.Should().Equal([card], "conversations 以外的照一般的留存規則");
+        var keptCard = MediaKeepRules.KeptPath(tool.KeptMedia, forkDir, card)!;
+        keptCard.Should().StartWith(h.Store.GetAttachmentDirectory(forkId));
+        File.ReadAllBytes(keptCard).Should().Equal(png);
+        var reply = h.Items(forkId).Single(i => i.Kind == AgentItemKind.Assistant);
+        File.Exists(MediaKeepRules.KeptPath(reply.KeptMedia, forkDir, inline)).Should().BeTrue("回覆 Markdown 引用的圖也留");
+        h.Items(id).Single(i => i.Kind == AgentItemKind.Tool).KeptMedia.Should().BeNull("原對話不動");
+
+        // 遠端（瀏覽器版、其他電腦）取這張：給的是新對話自己的副本（守門員放行自己的 attachments\）
+        var scope = h.OnUi(() => ((IMediaScopeSource)h.Hub).GetMediaScope(
+            new MediaScopeQuery(ConversationIds.ToWire(forkId)!, tool.Id, null, card, "d_01J9Q0000000000000000000ME")));
+        scope!.KeptPath.Should().Be(keptCard);
+
+        // 原檔不在了（例如刪掉原對話）：這台的畫面照樣是副本
+        File.Delete(card);
+        h.OnUi(() => h.Hub.RenderItemForTests(forkId, tool.Id))["media"]![0]!.Value<string>("path").Should().Be(keptCard);
     }
 
     [Fact]

@@ -22,9 +22,10 @@ public sealed class GrokSessionFakeCliTests : IDisposable
     /// twice＝連續兩次編輯，其他＝資料夾內的編輯），拒絕時照實測以 stopReason cancelled＋PermissionRejected 結束；question＝提問；plan＝計畫確認，同意後送
     /// current_mode_update default 再要求一次編輯；hang＝指令執行中等 session/cancel；hangstuck＝不理 session/cancel；restart＝第一個程序同 hang、之後同 basic；
     /// notfound＝session/resume 回 FS_NOT_FOUND；auth＝session/new 回 Authentication required；slowconfig＝同 basic，session/set_config_option 記錄後過 1.5 秒才回應。
-    /// images＝initialize 宣告 promptCapabilities.image；quota＝_x.ai/billing 回鎖定；compact＝記 compact 並以 end_turn 結束；
-    /// background＝先送 task_backgrounded、等 work\bg-go.txt 再送 will_wake false 的 task_completed；background_idle＝開一個 ping 子程序（PID 寫進
-    /// work\bg-pid.txt）並送 task_backgrounded，這一輪照常結束、背景工作一直不結束。未鎖定的 billing 不寫記錄
+    /// images＝initialize 宣告 promptCapabilities.image；quota＝_x.ai/billing 回鎖定；compact＝記 compact、先送 auto_compact_completed 再以 end_turn 結束；
+    /// autocompact＝一般的一輪，但結束前先送 auto_compact_completed（tokens_after 120）；background＝先送 task_backgrounded、等 work\bg-go.txt 再送 will_wake false 的 task_completed；
+    /// background_idle＝開一個 ping 子程序（PID 寫進 work\bg-pid.txt）、把輸出寫進 work\bg.log 並在 task_backgrounded 帶 output_file，這一輪照常結束、背景工作一直不結束。
+    /// rewind/points、rewind/execute、session/fork 都有回應（rewindfail 的 execute 失敗、forkfail 的 fork 回錯誤）。未鎖定的 billing 不寫記錄
     /// </summary>
     private const string FakeGrok = """"
         $ErrorActionPreference = 'Stop'
@@ -239,7 +240,22 @@ public sealed class GrokSessionFakeCliTests : IDisposable
                 }
             } elseif ($m.method -eq '_x.ai/compact_conversation') {
                 Log ('compact sid=' + $m.params.sessionId)
+                Send ([ordered]@{ jsonrpc = '2.0'; method = '_x.ai/session_notification'; params = [ordered]@{ sessionId = $script:sid; update = [ordered]@{ sessionUpdate = 'auto_compact_completed'; tokens_before = 100; tokens_after = 120; summary_preview = $null } } })
                 Result $m.id ([ordered]@{ stopReason = 'end_turn' })
+            } elseif ($m.method -eq '_x.ai/rewind/points') {
+                Log ('rewind/points sid=' + $m.params.sessionId)
+                Result $m.id ([ordered]@{ rewind_points = @(([ordered]@{ prompt_index = 0; prompt_preview = 'keep me...' })) })
+            } elseif ($m.method -eq '_x.ai/rewind/execute') {
+                Log ('rewind/execute sid=' + $m.params.sessionId + ' index=' + $m.params.targetPromptIndex + ' mode=' + $m.params.mode + ' force=' + $m.params.force)
+                if ($scenario -eq 'rewindfail' -or $m.params.targetPromptIndex -eq 99) {
+                    Result $m.id ([ordered]@{ success = $false })
+                } else {
+                    Result $m.id ([ordered]@{ success = $true; prompt_text = 'kept' })
+                }
+            } elseif ($m.method -eq '_x.ai/session/fork') {
+                Log ('fork new=' + $m.params.newSessionId + ' source=' + $m.params.sourceSessionId + ' sid=' + $m.params.sessionId)
+                if ($scenario -eq 'forkfail') { Fail $m.id -32603 'fork failed' $null }
+                else { Result $m.id ([ordered]@{ newSessionId = $m.params.newSessionId; chatMessagesCopied = 2; updatesCopied = 4 }) }
             } else {
                 Log ('unknown ' + $m.method)
                 Fail $m.id -32601 'Method not found' $null
@@ -264,8 +280,14 @@ public sealed class GrokSessionFakeCliTests : IDisposable
                 elseif ($scenario -eq 'background_idle') {
                     $child = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\PING.EXE') -ArgumentList '-n', '120', '127.0.0.1' -WindowStyle Hidden -PassThru
                     [IO.File]::WriteAllText((Join-Path $work 'bg-pid.txt'), [string]$child.Id)
-                    Update ([ordered]@{ sessionUpdate = 'task_backgrounded'; task_id = 'bg1'; tool_call_id = 'call-bg'; monitor_description = 'ping -n 120' })
+                    $bgLog = Join-Path $work 'bg.log'
+                    [IO.File]::WriteAllText($bgLog, ('hello' + [char]13 + [char]10 + 'bg'), $utf8)
+                    Update ([ordered]@{ sessionUpdate = 'task_backgrounded'; task_id = 'bg1'; tool_call_id = 'call-bg'; monitor_description = 'ping -n 120'; output_file = $bgLog })
                     Log 'backgrounded'
+                    Basic $m.id
+                }
+                elseif ($scenario -eq 'autocompact') {
+                    Send ([ordered]@{ jsonrpc = '2.0'; method = '_x.ai/session_notification'; params = [ordered]@{ sessionId = $script:sid; update = [ordered]@{ sessionUpdate = 'auto_compact_completed'; tokens_before = 100; tokens_after = 120; summary_preview = $null } } })
                     Basic $m.id
                 }
                 elseif ($scenario -eq 'background') {
@@ -811,8 +833,8 @@ public sealed class GrokSessionFakeCliTests : IDisposable
 
         var turn = await TurnAsync(session, events, fake.Settings(), "/compact");
 
-        turn.OfType<AgentNoticeEvent>().Should().Contain(e => e.Message == GrokAcpRules.CompactedNotice && !e.IsError);
-        turn.OfType<AgentContextUsageEvent>().Should().Contain(e => e.Compacted);
+        turn.OfType<AgentNoticeEvent>().Count(e => e.Message == GrokAcpRules.CompactedNotice && !e.IsError).Should().Be(1);
+        turn.OfType<AgentContextUsageEvent>().Count(e => e.Compacted).Should().Be(1);
         turn.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Completed);
         session.IsRunning.Should().BeFalse();
         fake.Log().Should().Contain(l => l.StartsWith("p1:compact sid=", StringComparison.Ordinal));
@@ -889,6 +911,112 @@ public sealed class GrokSessionFakeCliTests : IDisposable
         session.HasLiveProcess.Should().BeFalse();
         (await TakeUntilAsync(events, e => e is AgentBackgroundWorkEvent { Count: 0 })).Should().NotBeEmpty();
         session.IsRunning.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 自動壓縮_通知發已壓縮_不把tokens_after當上下文()
+    {
+        var fake = new Fake(temp, "autocompact");
+        using var session = new GrokAgentSession();
+        var events = Collect(session);
+
+        var turn = await TurnAsync(session, events, fake.Settings(), "繼續");
+
+        turn.OfType<AgentNoticeEvent>().Count(e => e.Message == GrokAcpRules.CompactedNotice).Should().Be(1);
+        turn.OfType<AgentContextUsageEvent>().Count(e => e.Compacted).Should().Be(1);
+        turn.OfType<AgentContextUsageEvent>().Should().NotContain(e => e.UsedTokens == 120 || e.UsedTokens == 100);
+        turn.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Completed);
+    }
+
+    [Fact]
+    public async Task 背景工作輸出_讀本機檔尾_結束的id沒有輸出()
+    {
+        var fake = new Fake(temp, "background_idle");
+        using var session = new GrokAgentSession();
+        var events = Collect(session);
+
+        await session.SendAsync(Input("放背景"), fake.Settings());
+        await TakeUntilAsync(events, e => e is AgentTurnCompletedEvent);
+        session.HasLiveBackgroundWork.Should().BeTrue();
+
+        var output = await session.GetTaskOutputAsync("bg1");
+        output.Error.Should().BeNull();
+        output.Output.Should().Be("hello\nbg");
+        output.Truncated.Should().BeFalse();
+        output.TotalBytes.Should().Be(new FileInfo(Path.Combine(fake.Work, "bg.log")).Length);
+        (await session.GetTaskOutputAsync("gone")).Error.Should().Be("這個背景工作已經結束了");
+
+        (await session.StopBackgroundWorkAsync(null)).Stopped.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task 分叉_程序開著_在同一個程序分叉_回新id且來源不變()
+    {
+        var fake = new Fake(temp, "basic");
+        using var session = new GrokAgentSession();
+        var events = Collect(session);
+        await TurnAsync(session, events, fake.Settings(), "第一則");
+        session.IsRunning.Should().BeFalse();
+
+        var proposed = Guid.NewGuid().ToString();
+        var child = await session.ForkSessionAsync(proposed, fake.Settings(started: true));
+        child.Should().Be(proposed);
+        fake.Log().Should().Contain($"p1:fork new={proposed} source=s-pre sid=s-pre");
+        fake.Log().Count(l => l.Contains("session/new", StringComparison.Ordinal)).Should().Be(1);
+        session.HasLiveProcess.Should().BeTrue();
+        session.IsRunning.Should().BeFalse("分叉不是一輪");
+    }
+
+    [Fact]
+    public async Task 分叉_沒有程序_先接上續接再分叉_之後送出沿用同一個程序與對話()
+    {
+        var fake = new Fake(temp, "basic");
+        using var session = new GrokAgentSession();
+        var events = Collect(session);
+
+        var proposed = Guid.NewGuid().ToString();
+        var child = await session.ForkSessionAsync(proposed, fake.Settings(sessionId: "s-saved", started: true));
+        child.Should().Be(proposed);
+        session.IsRunning.Should().BeFalse();
+
+        await TurnAsync(session, events, fake.Settings(sessionId: "s-saved", started: true), "接著做");
+        fake.Log().Should().ContainInOrder(
+            "p1:session/resume sid=s-saved yolo=False cwdOk=True",
+            $"p1:fork new={proposed} source=s-saved sid=s-saved",
+            "p1:prompt text=接著做");
+        fake.Log().Count(l => l.Contains("session/resume", StringComparison.Ordinal)).Should().Be(1, "接上的對話直接用");
+        fake.Log().Should().NotContain(l => l.Contains("session/new", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task 分叉_原本的對話續接不了_不分叉_下一次送出帶背景說明與前文節錄()
+    {
+        // 子代理審查（2026-11-01）：接上時續接失敗改開了新的對話，分叉出來的會是空的；那次新對話的旗標也不能丟，不然原對話下一則不帶說明與前文
+        var fake = new Fake(temp, "notfound");
+        using var session = new GrokAgentSession();
+        var events = Collect(session);
+
+        var child = await session.ForkSessionAsync(Guid.NewGuid().ToString(), fake.Settings(sessionId: "s-gone", started: true));
+        child.Should().BeNull("新開的對話沒有前文，改附前文節錄");
+        fake.Log().Should().NotContain(l => l.Contains("fork new=", StringComparison.Ordinal));
+
+        await TurnAsync(session, events, fake.Settings(sessionId: "s-gone", started: true), "還記得嗎");
+        fake.Log().Count(l => l.Contains("session/new", StringComparison.Ordinal)).Should().Be(1, "沿用接上時開的那個新對話");
+        fake.Log().Should().Contain(@"p1:prompt text=<myriagent_instructions>\n測試說明\n</myriagent_instructions>\n\n（前文節錄）\n\n還記得嗎");
+    }
+
+    [Fact]
+    public async Task 分叉失敗_回null不丟例外()
+    {
+        var fake = new Fake(temp, "forkfail");
+        using var session = new GrokAgentSession();
+        var events = Collect(session);
+        await TurnAsync(session, events, fake.Settings(), "第一則");
+
+        var child = await session.ForkSessionAsync(Guid.NewGuid().ToString(), fake.Settings(started: true));
+        child.Should().BeNull();
+        session.IsRunning.Should().BeFalse();
+        session.HasLiveProcess.Should().BeTrue();
     }
 
     private static AgentRestartRequest Restart(AgentRestartMode mode, AgentSessionSettings? settings, string? continuation = null)

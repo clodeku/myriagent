@@ -262,6 +262,88 @@ public class ClaudeStreamParserTests
         parser.Parse("""{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10}""").Events.OfType<AgentNoticeEvent>().Should().ContainSingle("新的一輪又遇到重試");
     }
 
+    /// <summary>
+    /// 2026-10-31 實機：送出請求 1.2 秒後連線中斷（ECONNRESET），CLI 送 api_retry 並重送請求；被丟下的那則回應已經送了工具的 content_block_start，
+    /// 重試的回應是新的訊息與新的工具 id。舊的工具一直算在執行，這一輪剩下的時間都等不到安全點（換版排空 35 分鐘後放棄）
+    /// </summary>
+    [Fact]
+    public void 串流中斷重送_被丟下的那則回應裡的工具_下一則訊息開始時不再算執行中()
+    {
+        var parser = new ClaudeStreamParser();
+        var events = new List<AgentEvent>();
+        void Feed(string line) => events.AddRange(parser.Parse(line).Events);
+
+        Feed("""{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_lost"}},"parent_tool_use_id":null}""");
+        Feed("""{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_lost","name":"Read","input":{}}},"parent_tool_use_id":null}""");
+        parser.ToolRunning.Should().BeTrue("串流到的工具從 content_block_start 起算執行中");
+
+        Feed("""{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"retry_delay_ms":618,"error_status":null,"error":"unknown"}""");
+        parser.ToolRunning.Should().BeTrue("背景子代理的重試也送 api_retry，重試本身不拿掉主對話的工具");
+
+        Feed("""{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_retry"}},"parent_tool_use_id":null}""");
+        parser.ToolRunning.Should().BeFalse("重試的回應開始了：被丟下的那則回應的工具不會執行，也不會有結果");
+
+        Feed("""{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_new","name":"Read","input":{}}},"parent_tool_use_id":null}""");
+        Feed("""{"type":"assistant","message":{"id":"msg_retry","role":"assistant","content":[{"type":"tool_use","id":"toolu_new","name":"Read","input":{"file_path":"note.txt"}}]},"parent_tool_use_id":null}""");
+        Feed("""{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}""");
+        parser.ToolRunning.Should().BeTrue();
+
+        Feed("""{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok","tool_use_id":"toolu_new"}]},"parent_tool_use_id":null}""");
+        parser.ToolRunning.Should().BeFalse("重試後的工具照常以結果結束：這時就是安全點");
+
+        events.OfType<AgentToolStartedEvent>().Select(e => e.ToolId).Should().Equal("toolu_new");
+        events.OfType<AgentToolCompletedEvent>().Select(e => e.ToolId).Should().Equal(new[] { "toolu_new" }, "沒畫卡的工具不發結束事件");
+
+        // 被丟下的工具之後不會再被加回（例如晚到的重複行）
+        Feed("""{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_next"}},"parent_tool_use_id":null}""");
+        Feed("""{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_lost","name":"Read","input":{}}},"parent_tool_use_id":null}""");
+        parser.ToolRunning.Should().BeFalse();
+    }
+
+    [Fact]
+    public void 串流中斷重送_被丟下的工具已畫卡_改為已取消()
+    {
+        // 沒收到 assistant 區塊、只到 content_block_stop 的退路會畫卡；那則回應被丟下時卡片不能一直顯示執行中
+        var parser = new ClaudeStreamParser();
+        var events = new List<AgentEvent>();
+        void Feed(string line) => events.AddRange(parser.Parse(line).Events);
+
+        Feed("""{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_lost"}},"parent_tool_use_id":null}""");
+        Feed("""{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_lost","name":"Bash","input":{}}},"parent_tool_use_id":null}""");
+        Feed("""{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"command\": \"echo hi\"}"}},"parent_tool_use_id":null}""");
+        Feed("""{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}""");
+        events.OfType<AgentToolStartedEvent>().Should().ContainSingle(e => e.ToolId == "toolu_lost");
+
+        Feed("""{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10}""");
+        Feed("""{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_retry"}},"parent_tool_use_id":null}""");
+
+        parser.ToolRunning.Should().BeFalse();
+        var done = events.OfType<AgentToolCompletedEvent>().Single();
+        done.ToolId.Should().Be("toolu_lost");
+        done.Status.Should().Be(AgentItemStatus.Cancelled);
+        done.Output.Should().Be(ClaudeStreamRules.AbandonedToolOutput);
+    }
+
+    [Fact]
+    public void assistant區塊確認過的工具_下一則訊息開始也照樣算執行中()
+    {
+        // 正常的工具一定有 assistant 區塊；只有被丟下的回應才沒有。確認過的要等自己的結果（或這一輪結束）
+        var parser = new ClaudeStreamParser();
+        parser.Parse("""{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_A"}},"parent_tool_use_id":null}""");
+        parser.Parse("""{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_a","name":"Bash","input":{}}},"parent_tool_use_id":null}""");
+        parser.Parse("""{"type":"assistant","message":{"id":"msg_A","role":"assistant","content":[{"type":"tool_use","id":"toolu_a","name":"Bash","input":{"command":"sleep 60"}}]},"parent_tool_use_id":null}""");
+        parser.Parse("""{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}""");
+
+        // 子代理的串流（parent_tool_use_id 有值）與另一則主對話訊息的開始都不影響它
+        parser.Parse("""{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_sub"}},"parent_tool_use_id":"toolu_a"}""");
+        parser.ToolRunning.Should().BeTrue();
+        parser.Parse("""{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_B"}},"parent_tool_use_id":null}""");
+        parser.ToolRunning.Should().BeTrue();
+
+        parser.Parse("""{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"done","tool_use_id":"toolu_a"}]},"parent_tool_use_id":null}""");
+        parser.ToolRunning.Should().BeFalse();
+    }
+
     [Fact]
     public void Init每輪都送_API計費提醒只提示一次_重開程序時可以把已提示帶給新的解析器()
     {
