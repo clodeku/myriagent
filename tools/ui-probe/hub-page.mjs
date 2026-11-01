@@ -273,6 +273,18 @@ export function probeInit(opts) {
       return ok ? Promise.resolve() : Promise.reject(new DOMException('探針：剪貼簿被拒絕', 'NotAllowedError'));
     },
     readText() { return Promise.reject(new DOMException('探針：不讀剪貼簿', 'NotAllowedError')); },
+    // 圖片（mediamenu.js 的複製圖片）：記下每個項目的型別與內容大小（ClipboardItem 的值可以是 Promise，等它解開再記）
+    write(items) {
+      const ok = window.__probeClipboard !== 'deny';
+      const rec = { at: Date.now(), items: null, ok };
+      window.__clipboard.push(rec);
+      if (!ok) return Promise.reject(new DOMException('探針：剪貼簿被拒絕', 'NotAllowedError'));
+      return Promise.all(Array.from(items || []).map(async (it) => {
+        const types = Array.from(it.types || []);
+        const blobs = await Promise.all(types.map((t) => it.getType(t)));
+        return { types, blobTypes: blobs.map((b) => b.type), sizes: blobs.map((b) => b.size) };
+      })).then((list) => { rec.items = list; });
+    },
   };
   Object.defineProperty(Navigator.prototype, 'clipboard', { configurable: true, get() { return fakeClipboard; } });
 

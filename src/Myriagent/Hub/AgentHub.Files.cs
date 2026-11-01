@@ -349,6 +349,40 @@ internal sealed partial class AgentHub
             Toast($"已另存：{Path.GetFileName(destination)}", view: view);
     }
 
+    /// <summary>
+    /// 「複製」（燈箱、影片播放器、對話裡的圖片與影片的右鍵選單；2026-11-01）：把畫面上出現過的本機檔案（同 <see cref="SaveFileAsync"/>）
+    /// 以檔案清單放進剪貼簿。影片一律走這裡（瀏覽器的剪貼簿放不了影片）；圖片網頁先自己寫 PNG，寫不進去才送。提示只給發起的視窗
+    /// </summary>
+    private async Task CopyMediaAsync(IAgentView view, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+        if (!AgentAttachmentRules.IsLocalDrivePath(path) || !mediaUrls.IsSaveAllowed(path))
+        {
+            Toast("只能複製回覆或預覽中出現的本機檔案", isError: true, view: view);
+            return;
+        }
+        var kind = await ProbeLocalPathAsync(path);
+        if (disposed)
+            return;
+        switch (kind)
+        {
+            case null:
+                Toast($"無法存取（逾時）：{path}", isError: true, view: view);
+                return;
+            case LocalPathKind.Missing:
+                Toast($"找不到檔案：{path}", isError: true, view: view);
+                return;
+            case LocalPathKind.Directory:
+                Toast($"這是資料夾，不能複製：{path}", isError: true, view: view);
+                return;
+        }
+        if (host.CopyFile(path))
+            Toast($"已複製 {Path.GetFileName(path)}，可以貼到檔案總管或其他程式", view: view);
+        else
+            Toast("剪貼簿正被其他程式使用，請再試一次", isError: true, view: view);
+    }
+
     /// <summary>複製到目的資料夾的暫存檔再取代目的檔；失敗時刪掉暫存檔，原本的目的檔保留</summary>
     private static void CopyReplacing(string source, string destination)
     {

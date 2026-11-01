@@ -236,6 +236,19 @@ internal sealed class FakeHost : IAgentHost
         Copied.Add(text);
     }
 
+    public Recorder<string> CopiedFiles { get; } = new();
+
+    /// <summary>設定成 false 時 CopyFile 回 false（剪貼簿被別的程式佔著）</summary>
+    public bool CopyFileSucceeds { get; set; } = true;
+
+    public bool CopyFile(string path)
+    {
+        if (!CopyFileSucceeds)
+            return false;
+        CopiedFiles.Add(path);
+        return true;
+    }
+
     public void OpenPopout(string conversationId) => Popouts.Add(conversationId);
 
     public Recorder<string> Deleted { get; } = new();

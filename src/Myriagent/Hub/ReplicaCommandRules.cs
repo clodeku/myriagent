@@ -24,7 +24,7 @@ internal static class ReplicaCommandRules
         [
             "chooseFolder", "attach", "addFiles", "addPathAttachment", "pasteImage",
             "cliContinue", "cliApplyNow", "syncSetConversationPolicy",
-            "openFolder", "openPath", "revealPath", "saveFile",
+            "openFolder", "openPath", "revealPath", "saveFile", "copyMedia",
         ];
         var writes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var spec in RemoteCommandCatalog.All)

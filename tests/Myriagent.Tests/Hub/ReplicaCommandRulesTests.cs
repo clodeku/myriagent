@@ -14,7 +14,7 @@ public sealed class ReplicaCommandRulesTests
     [
         "chooseFolder", "attach", "addFiles", "addPathAttachment", "pasteImage",
         "cliContinue", "cliApplyNow", "syncSetConversationPolicy",
-        "openFolder", "openPath", "revealPath", "saveFile",
+        "openFolder", "openPath", "revealPath", "saveFile", "copyMedia",
     ];
 
     [Fact]

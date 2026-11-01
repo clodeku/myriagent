@@ -78,9 +78,64 @@ test('雙點：300 毫秒、30px 以內才算；第一下（沒有上一下）�
   assert.equal(V.isDoubleTap(t0, { t: 900, x: 100, y: 100 }), false);
 });
 
-test('viewerrules.js 沒有 import、沒有 HTML 寫入點；viewer.js 也沒有 HTML 寫入點', () => {
+test('拖曳關閉：只在沒有放大時', () => {
+  assert.equal(V.canSwipeDismiss(0.25, 0.25), true);
+  assert.equal(V.canSwipeDismiss(0.2, 0.25), true);
+  assert.equal(V.canSwipeDismiss(0.3, 0.25), false);
+});
+
+test('拖曳關閉的進度：對舞台短邊的 40%（至少 120px），到 1 為止', () => {
+  assert.equal(V.dismissProgress(0, 0, 390, 700), 0);
+  assert.ok(near(V.dismissProgress(78, 0, 390, 700), 0.5));
+  assert.ok(near(V.dismissProgress(0, -78, 390, 700), 0.5));
+  assert.equal(V.dismissProgress(400, 0, 390, 700), 1);
+  assert.ok(near(V.dismissProgress(60, 0, 100, 100), 0.5), '小舞台的參考距離至少 120px');
+});
+
+test('放開時關不關：拖過短邊的 18%（至少 80px），或往拖的方向甩出去', () => {
+  // 手機（390 寬）：門檻 80px
+  assert.equal(V.shouldDismiss(79, 0, 0, 0, 390, 700), false);
+  assert.equal(V.shouldDismiss(-81, 0, 0, 0, 390, 700), true);
+  assert.equal(V.shouldDismiss(60, 60, 0, 0, 390, 700), true, '斜的也算距離');
+  // 平板（1024×768）：門檻 768×0.18 ≈ 138px
+  assert.equal(V.shouldDismiss(120, 0, 0, 0, 1024, 768), false);
+  assert.equal(V.shouldDismiss(140, 0, 0, 0, 1024, 768), true);
+  // 甩出去：距離不夠但速度夠快、同方向
+  assert.equal(V.shouldDismiss(40, 0, 1.2, 0, 390, 700), true);
+  assert.equal(V.shouldDismiss(40, 0, -1.2, 0, 390, 700), false, '往回拉的不算');
+  assert.equal(V.shouldDismiss(40, 0, 0.3, 0, 390, 700), false, '太慢');
+  assert.equal(V.shouldDismiss(10, 0, 3, 0, 390, 700), false, '幾乎沒拖動（點一下的抖動）不算');
+});
+
+test('放開前的速度：取最後 100 毫秒的頭尾；停住再放開是 0', () => {
+  const s = [{ t: 0, x: 0, y: 0 }, { t: 50, x: 10, y: 0 }, { t: 150, x: 60, y: 20 }, { t: 200, x: 110, y: 40 }];
+  const v = V.releaseVelocity(s);
+  assert.ok(near(v.vx, 1) && near(v.vy, 0.4), JSON.stringify(v));
+  assert.deepEqual(V.releaseVelocity([{ t: 0, x: 0, y: 0 }, { t: 300, x: 50, y: 0 }]), { vx: 0, vy: 0 });
+  assert.deepEqual(V.releaseVelocity([{ t: 0, x: 0, y: 0 }]), { vx: 0, vy: 0 });
+  assert.deepEqual(V.releaseVelocity(null), { vx: 0, vy: 0 });
+});
+
+test('關閉時飛出去：沿拖曳方向、距離是舞台對角線；沒有位移往下', () => {
+  const o = V.flingOffset(30, -40, 300, 400);
+  assert.ok(near(o.x, 300) && near(o.y, -400), JSON.stringify(o));
+  assert.deepEqual(V.flingOffset(0, 0, 300, 400), { x: 0, y: 500 });
+});
+
+test('長按：移動超過 10px 就不是長按；自己送過之後 1 秒內瀏覽器再送的 contextmenu 略過', () => {
+  assert.equal(V.LONG_PRESS_MS, 500);
+  assert.equal(V.longPressMoved(6, 4), false);
+  assert.equal(V.longPressMoved(6, 5), true);
+  assert.equal(V.duplicateContextMenu(-Infinity, 1000), false);
+  assert.equal(V.duplicateContextMenu(1000, 1500), true);
+  assert.equal(V.duplicateContextMenu(1000, 2000), false);
+  assert.equal(V.duplicateContextMenu(1000, 900), false, '時鐘倒退（不同的時間來源）不算');
+});
+
+test('viewerrules.js 沒有 import、沒有 HTML 寫入點；viewer.js、mediamenu.js 也沒有 HTML 寫入點', () => {
   assert.ok(!/^\s*import\s/m.test(source));
   const sink = /innerHTML|outerHTML|insertAdjacentHTML|document\.write|setHtml|patchHtml/;
   assert.ok(!sink.test(source));
   assert.ok(!sink.test(readFileSync(path.join(webDir, 'viewer.js'), 'utf8')));
+  assert.ok(!sink.test(readFileSync(path.join(webDir, 'mediamenu.js'), 'utf8')));
 });

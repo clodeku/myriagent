@@ -541,6 +541,9 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                 case "saveFile":
                     _ = SaveFileAsync(view, Str("path"));
                     break;
+                case "copyMedia":
+                    _ = CopyMediaAsync(view, Str("path"));
+                    break;
                 case "copyText":
                     if (Str("text") is { } text)
                         host.CopyText(text);

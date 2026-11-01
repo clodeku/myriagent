@@ -782,6 +782,24 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         }
     }
 
+    public bool CopyFile(string path)
+    {
+        try
+        {
+            var data = new DataObject();
+            data.SetFileDropList([path]);
+            // 貼上時是複製、不是搬移（DROPEFFECT_COPY）
+            data.SetData("Preferred DropEffect", new MemoryStream(BitConverter.GetBytes(1)));
+            Clipboard.SetDataObject(data, copy: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or ThreadStateException)
+        {
+            Log.Warn($"複製檔案失敗：{ex.Message}");
+            return false;
+        }
+    }
+
     public void OpenPopout(string conversationId) => OpenPopout(conversationId, null);
 
     /// <param name="bounds">app 更新前的位置與大小（x, y, w, h）；不在任何螢幕的工作區內就用預設位置</param>

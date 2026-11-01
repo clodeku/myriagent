@@ -11,13 +11,15 @@
 // 焦點移進 iframe 時頁面的 window 會收到 blur：theme.js 看焦點是不是在這裡的 iframe；iframe 失焦而整個視窗也沒焦點時轉一個 blur 給頁面
 import { h } from './util.js';
 import { reportMediaError } from './errorreport.js';
+import { longPressAsContextMenu } from './longpress.js';
 
 /** 開啟時的連點（雙擊開啟播放器的第二下）落在 iframe 裡的影片上會切換播放：這段時間內 iframe 裡的點按不算 */
 const OPEN_GUARD_MS = 500;
 
 /**
  * 建立放在 iframe 裡的影片。o：src、cls（iframe 的 class）、title、autoplay、playsinline、time（從哪一秒開始）、
- * outline（false：影片不畫焦點框）、guardOpen（開啟時的連點不算）、onError(video)。
+ * outline（false：影片不畫焦點框）、guardOpen（開啟時的連點不算）、onError(video)、bindDoc(doc, video)（每次建好影片時呼叫：在 iframe 的文件上掛自己的事件）。
+ * 觸控長按影片一律轉成右鍵（longpress.js：在 iframe 裡派送 contextmenu，再照下面的轉送到 iframe 元素上），頁面的媒體選單照常處理
  * 回傳 { el: iframe, video(): 目前的影片（還沒建立時 null）, currentTime() }
  */
 export function framedVideo(o) {
@@ -36,6 +38,10 @@ export function framedVideo(o) {
     const v = doc.createElement('video');
     for (const [k, val] of [['display', 'block'], ['width', '100%'], ['height', '100%'], ['background', '#000']]) v.style.setProperty(k, val);
     if (o.outline === false) v.style.setProperty('outline', 'none');
+    // 長按不出 iOS 的「儲存影片」浮出選單、不選取文字：長按交給頁面的媒體選單
+    v.style.setProperty('-webkit-touch-callout', 'none');
+    v.style.setProperty('-webkit-user-select', 'none');
+    v.style.setProperty('user-select', 'none');
     v.controls = true;
     v.preload = 'metadata';
     if (o.playsinline) v.playsInline = true;
@@ -50,6 +56,7 @@ export function framedVideo(o) {
       if (o.onError) o.onError(v);
     });
     forwardEvents(el, doc);
+    longPressAsContextMenu(doc, (t) => t === v);
     if (o.guardOpen) {
       const swallow = (e) => { if (performance.now() - created < OPEN_GUARD_MS) { e.preventDefault(); e.stopPropagation(); } };
       for (const type of ['mousedown', 'mouseup', 'click', 'dblclick']) doc.addEventListener(type, swallow, true);
@@ -57,6 +64,7 @@ export function framedVideo(o) {
     v.src = o.src;
     doc.body.append(v);
     video = v;
+    if (o.bindDoc) o.bindDoc(doc, v);
   }
 
   // 插進頁面時瀏覽器建立 about:blank 並觸發 load（搬到別的位置時也會）

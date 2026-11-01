@@ -961,6 +961,278 @@ async function runDesktopLightboxTouch() {
   await HP.closePage(app);
 }
 
+// ───── 燈箱與影片播放器：右上角的關閉鈕、觸控拖到旁邊關閉、右鍵與長按的媒體選單（2026-11-01 使用者要求；viewer.js、mediamenu.js、longpress.js）─────
+
+/** 檢視器（sel：'.lb'／'.vp'）右上角的關閉鈕：位置、大小、正中心點得到的是不是它 */
+const closeBtnState = (app, sel) => app.page.evaluate((q) => {
+  const b = document.querySelector(q + ':not(.leaving) .lb-close');
+  if (!b) return null;
+  const r = b.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), vw: innerWidth,
+    hit: !!hit && b.contains(hit), label: b.getAttribute('aria-label') };
+}, sel);
+/** 關閉鈕在視窗的右上角（右緣離視窗右緣 24px 內、在工具列的高度內）、至少 34px、點得到 */
+const closeBtnOk = (c) => !!c && c.hit && c.right <= c.vw && c.right >= c.vw - 24 && c.top >= 0 && c.bottom <= 64 && c.w >= 34;
+
+/** 媒體選單的項目（沒開時 null） */
+const mediaMenuState = (app) => app.page.evaluate(() => {
+  const m = document.querySelector('.menu.media-menu');
+  return m ? [...m.querySelectorAll('.menu-item')].map((n) => ({ label: n.querySelector('.mi-label').textContent, disabled: n.disabled })) : null;
+});
+const menuLabels = (m) => (m || []).map((x) => x.label);
+
+/** CDP 的觸控（Playwright 的 touchscreen 只有 tap）：drag 每一步隔 stepMs、拖到一半時呼叫 mid()；hold 按著 ms 毫秒、放開前呼叫 during() */
+async function touchKit(page) {
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p) => ({ x: p.x, y: p.y, id: 0 })) });
+  return {
+    async drag(p, dx, dy, steps = 8, stepMs = 16, mid = null) {
+      await touch('touchStart', [p]);
+      let seen = null;
+      for (let i = 1; i <= steps; i++) {
+        await touch('touchMove', [{ x: p.x + dx * i / steps, y: p.y + dy * i / steps }]);
+        await sleep(stepMs);
+        if (mid && i === Math.ceil(steps / 2)) seen = await mid();
+      }
+      await touch('touchEnd', []);
+      return seen;
+    },
+    async hold(p, ms = 700, during = null) {
+      await touch('touchStart', [p]);
+      await sleep(ms);
+      const seen = during ? await during() : null;
+      await touch('touchEnd', []);
+      return seen;
+    },
+    detach: () => cdp.detach().catch(() => {}),
+  };
+}
+
+/**
+ * 觸控螢幕上的燈箱：右上角的關閉鈕；拖一小段放開放回原位；長按圖片開媒體選單（放開手指不關燈箱、圖片沒動），
+ * 選「複製圖片」以 PNG 寫進剪貼簿（SVG 在 canvas 上轉）；往旁邊拖，拖到一半圖片跟著手指走、背景與工具列變淡，放開就關閉。
+ * save 是選單裡另存的字（瀏覽器版「下載」、桌面「另存新檔」）
+ */
+async function lightboxSwipeMenu(app, thumb, shotName, save) {
+  const { page } = app;
+  await page.tap(thumb);
+  const fit = await until(() => lbView(app), 4000);
+  const k = await touchKit(page);
+  const r = { fit };
+  if (fit) {
+    const st = fit.stage;
+    const c = { x: st.x + fit.left + fit.width / 2, y: st.y + fit.top + fit.height / 2 };
+    r.close = await closeBtnState(app, '.lb');
+    await shot(app, shotName + '-close');
+    // 1. 往右慢慢拖 40px 放開：沒拖夠遠，放回原位、燈箱還開著
+    await k.drag(c, 40, 0, 6, 45);
+    await sleep(350);
+    const back = await until(() => lbView(app), 2000);
+    r.short = { open: await lightboxOpen(app), dx: back && back.left - fit.left, dy: back && back.top - fit.top,
+      bg: await page.evaluate(() => document.querySelector('.lb').style.backgroundColor) };
+    // 2. 長按圖片：開媒體選單；放開手指後燈箱還開著、圖片沒動；選「複製圖片」
+    const w0 = (await HP.clipboardWrites(app)).length;
+    r.holdMenu = await k.hold(c, 700, () => mediaMenuState(app));
+    await sleep(300);
+    r.menu = await mediaMenuState(app);
+    r.openAfterHold = await lightboxOpen(app);
+    const still = await lbView(app);
+    r.holdMoved = still ? Math.abs(still.left - fit.left) + Math.abs(still.top - fit.top) : null;
+    await shot(app, shotName + '-menu');
+    if (r.menu) await page.locator('.media-menu .menu-item', { hasText: '複製圖片' }).tap();
+    r.clip = await until(async () => (await HP.clipboardWrites(app)).slice(w0).find((x) => x.items) || null, 3000);
+    r.toast = await until(async () => (await HP.domToasts(app)).find((t) => t === '已複製圖片') || null, 2000);
+    r.menuClosed = !(await mediaMenuState(app));
+    r.openAfterCopy = await lightboxOpen(app);
+    // 3. 往右拖 180px：拖到一半圖片跟著手指走、背景與工具列變淡；放開就關閉
+    r.mid = await k.drag(c, 180, 0, 8, 16, () => page.evaluate(() => {
+      const lb = document.querySelector('.lb');
+      return { left: lb.querySelector('.lb-img').getBoundingClientRect().left, bg: lb.style.backgroundColor, bar: Number(getComputedStyle(lb.querySelector('.lb-bar')).opacity) };
+    }));
+    if (r.mid) r.mid.dx = r.mid.left - (st.x + fit.left);
+    r.closedBySwipe = !!(await until(async () => ((await lightboxOpen(app)) ? null : true), 2000));
+  }
+  await k.detach();
+  const clip = r.clip && r.clip.items && r.clip.items[0];
+  const ok = !!fit && closeBtnOk(r.close)
+    && r.short.open && Math.abs(r.short.dx) < 1 && Math.abs(r.short.dy) < 1 && r.short.bg === ''
+    && !!r.holdMenu && JSON.stringify(menuLabels(r.menu).slice(0, 2)) === JSON.stringify(['複製圖片', save]) && r.openAfterHold && r.holdMoved < 1
+    && !!clip && r.clip.ok && clip.types[0] === 'image/png' && clip.blobTypes[0] === 'image/png' && clip.sizes[0] > 100 && !!r.toast && r.menuClosed && r.openAfterCopy
+    && !!r.mid && r.mid.dx > 60 && r.mid.bar < 0.95 && /rgba/.test(r.mid.bg) && r.closedBySwipe;
+  return { ok, result: r };
+}
+
+async function runMobileLightboxSwipeMenu() {
+  // 手機（390×844、觸控）：瀏覽器版對話的大圖（/m/k3b，SVG）
+  const id = LF.CONV.idle;
+  const app = await openWithLayout('mobile-lightbox-swipe', layoutOf([[[id], id]]), { open: { vp: { w: 390, h: 844 }, hasTouch: true, media: bigImageAt('/m/k3b') } });
+  await waitLoaded(app, [id]);
+  await app.page.click('#btnSidebar');
+  await sleep(300);
+  const t = await lightboxSwipeMenu(app, itemSel(id, 'i2') + ' .media .mimg', 'hub-mobile-lightbox-swipe', '下載');
+  check('hubMobileLightboxSwipeMenu', t.ok, t.result);
+  await HP.closePage(app);
+}
+
+async function runDesktopLightboxSwipeMenu() {
+  // 桌面 app 在觸控筆電上（1440×900、觸控）：本機對話 c1 的圖片（/media）；另存是「另存新檔」
+  const app = await openDesktopLive('desktop-lightbox-swipe', { init: { layout: desktopLayout(['c1']) }, vp: { w: 1440, h: 900 }, hasTouch: true, media: bigImageAt('/media') });
+  const thumb = convSel('c1') + ':not(.loading) .it[data-id="l2"] .mimg';
+  await until(() => app.page.evaluate((s) => !!document.querySelector(s), thumb), 4000);
+  const t = await lightboxSwipeMenu(app, thumb, 'desktop-lightbox-swipe', '另存新檔');
+  check('desktopLightboxSwipeMenu', t.ok, t.result);
+  await HP.closePage(app);
+}
+
+/** 對話裡有圖片與影片的那一則（瀏覽器版的網址） */
+const MEDIA_ITEMS = (now) => [
+  { id: 'v1', kind: 'User', status: 'Done', time: now - 3 * LF.MIN, html: '<p>錄一段畫面給我看</p>', attachments: [], seq: 1 },
+  { id: 'v2', kind: 'Assistant', status: 'Done', time: now - 2 * LF.MIN, html: '<p>錄好了：</p>', seq: 2,
+    media: [{ url: '/m/d_A-img1', kind: 'image', name: '畫面.png' }, { url: '/m/d_A-vid1', kind: 'video', name: '操作錄影.mp4' }] },
+];
+
+/** 對話裡的影片（iframe）在畫面上的位置 */
+const frameRect = (app, sel) => app.page.evaluate((q) => {
+  const f = document.querySelector(q);
+  if (!f) return null;
+  const r = f.getBoundingClientRect();
+  return { x: r.left, y: r.top, w: r.width, h: r.height };
+}, sel);
+
+async function runMobileMediaTouch() {
+  // 手機（390×844、觸控）：對話裡的圖片與影片長按開媒體選單（不打開燈箱、不播放）；播放器右上角有關閉鈕、拖一小段放回原位、拖到旁邊關閉
+  const id = LF.CONV.idle;
+  const app = await openWithLayout('mobile-media-touch', layoutOf([[[id], id]]), {
+    open: {
+      vp: { w: 390, h: 844 }, hasTouch: true,
+      hub: (hub) => hub.onCmd('open', (cmd) => ({ push: [LF.conversationMessage(NOW, cmd.conversationId, TITLE_OF[cmd.conversationId] || '對話', { items: MEDIA_ITEMS(NOW) })] })),
+    },
+  });
+  // 探針的 /m/ 一律回 PNG：影片放不出來（只要 iframe 與影片元素在就驗得了手勢）
+  app.expect((m) => /\/m\/d_A-vid1/.test(m.text || '') || /\/m\/d_A-vid1/.test(m.url || ''), '探針的影片網址回 PNG，影片放不出來');
+  const { page } = app;
+  await waitLoaded(app, [id]);
+  await page.click('#btnSidebar');
+  await sleep(300);
+  const k = await touchKit(page);
+  const r = {};
+  // 1. 長按對話裡的圖片：媒體選單（複製圖片、下載），不打開燈箱
+  const img = await frameRect(app, itemSel(id, 'v2') + ' .media .mimg');
+  await page.evaluate((q) => document.querySelector(q).scrollIntoView({ block: 'center' }), itemSel(id, 'v2') + ' .media');
+  await sleep(200);
+  const imgAt = await frameRect(app, itemSel(id, 'v2') + ' .media .mimg');
+  if (imgAt) {
+    await k.hold({ x: imgAt.x + imgAt.w / 2, y: imgAt.y + imgAt.h / 2 }, 700);
+    await sleep(400);
+    r.imageMenu = await mediaMenuState(app);
+    r.lightboxAfterImageHold = await lightboxOpen(app);
+    await shot(app, 'hub-mobile-media-image-menu');
+    await page.keyboard.press('Escape');
+    await sleep(150);
+  }
+  // 2. 長按對話裡的影片（iframe 裡）：媒體選單（複製影片停用、說明要下載；下載）
+  const vf = await frameRect(app, itemSel(id, 'v2') + ' .mvid iframe.vframe');
+  if (vf) {
+    await k.hold({ x: vf.x + vf.w / 2, y: vf.y + vf.h * 0.35 }, 700);
+    await sleep(400);
+    r.videoMenu = await mediaMenuState(app);
+    r.videoMenuDesc = await page.evaluate(() => { const d = document.querySelector('.media-menu .menu-item .mi-desc'); return d ? d.textContent : null; });
+    await shot(app, 'hub-mobile-media-video-menu');
+    await page.keyboard.press('Escape');
+    await sleep(150);
+  }
+  // 3. 放大播放：右上角的關閉鈕
+  await page.tap(itemSel(id, 'v2') + ' .mvid-cap button[aria-label="放大播放"]');
+  await page.waitForSelector('.vp:not(.leaving) iframe.vframe');
+  await sleep(300);
+  r.close = await closeBtnState(app, '.vp');
+  await shot(app, 'hub-mobile-video-player');
+  // 4. 在影片上（控制列以外）往右慢慢拖 40px：放回原位、播放器還開著；長按影片開媒體選單
+  const pv = await frameRect(app, '.vp iframe.vframe');
+  if (pv) {
+    const c = { x: pv.x + pv.w / 2, y: pv.y + pv.h * 0.35 };
+    await k.drag(c, 40, 0, 6, 45);
+    await sleep(350);
+    r.short = await page.evaluate(() => { const vp = document.querySelector('.vp:not(.leaving)'); return vp ? { open: true, transform: vp.querySelector('iframe.vframe').style.transform, bg: vp.style.backgroundColor } : { open: false }; });
+    await k.hold(c, 700);
+    await sleep(300);
+    r.playerMenu = await mediaMenuState(app);
+    await page.keyboard.press('Escape');
+    await sleep(150);
+    // 5. 往右拖 200px：拖到一半影片跟著手指走，放開就關閉
+    r.mid = await k.drag(c, 200, 0, 8, 16, () => frameRect(app, '.vp iframe.vframe'));
+    if (r.mid) r.mid.dx = r.mid.x - pv.x;
+    r.closedBySwipe = !!(await until(() => page.evaluate(() => (document.querySelector('.vp') ? null : true)), 2000));
+  }
+  await k.detach();
+  check('hubMobileMediaLongPress', JSON.stringify(menuLabels(r.imageMenu)) === JSON.stringify(['複製圖片', '下載']) && r.lightboxAfterImageHold === false
+    && JSON.stringify(menuLabels(r.videoMenu)) === JSON.stringify(['複製影片', '下載']) && r.videoMenu[0].disabled && /下載/.test(r.videoMenuDesc || ''),
+  { imageMenu: r.imageMenu, lightbox: r.lightboxAfterImageHold, videoMenu: r.videoMenu, desc: r.videoMenuDesc, img });
+  check('hubMobileVideoSwipe', closeBtnOk(r.close) && !!r.short && r.short.open && !r.short.transform && !r.short.bg
+    && JSON.stringify(menuLabels(r.playerMenu)) === JSON.stringify(['複製影片', '下載'])
+    && !!r.mid && r.mid.dx > 60 && r.closedBySwipe,
+  { close: r.close, short: r.short, playerMenu: r.playerMenu, mid: r.mid, closed: r.closedBySwipe });
+  await HP.closePage(app);
+}
+
+async function runDesktopMediaMenu() {
+  // 桌面（滑鼠）：對話裡的圖片與影片按右鍵開媒體選單（不打開燈箱），選項帶這台的路徑與對話 id；燈箱與播放器右上角的關閉鈕，視窗窄到 420px 也在
+  const lv = { id: 'lv', kind: 'Assistant', status: 'Done', time: NOW - LF.MIN, html: '<p>錄好了</p>',
+    media: [{ url: '/media?p=vid', kind: 'video', name: '操作錄影.mp4', path: 'C:\\repo\\demo\\操作錄影.mp4' }] };
+  const app = await openDesktopLive('desktop-media-menu', { init: { layout: desktopLayout(['c1']) }, vp: { w: 1440, h: 900 },
+    host: { items: (cid) => (cid === 'c1' ? LF.desktopItems(NOW, 'l').concat([lv]) : undefined) } });
+  const { page } = app;
+  const thumb = convSel('c1') + ':not(.loading) .it[data-id="l2"] .mimg';
+  const vsel = convSel('c1') + ' .it[data-id="lv"] .mvid iframe.vframe';
+  await until(() => page.evaluate((s) => !!document.querySelector(s), vsel), 4000);
+  const r = {};
+  // 1. 圖片按右鍵：複製圖片、另存新檔、用預設程式開啟、在檔案總管顯示；不打開燈箱；另存新檔送 saveFile（路徑＋對話 id）
+  await page.click(thumb, { button: 'right' });
+  r.imageMenu = await until(() => mediaMenuState(app), 2000);
+  r.lightbox = await lightboxOpen(app);
+  await shot(app, 'desktop-media-image-menu');
+  const s0 = postedOf(app, 'saveFile').length;
+  if (r.imageMenu) await page.locator('.media-menu .menu-item', { hasText: '另存新檔' }).click();
+  r.save = await until(() => postedOf(app, 'saveFile').slice(s0)[0] || null, 2000);
+  // 2. 影片（iframe 裡）按右鍵：複製影片送 copyMedia
+  await page.evaluate((q) => document.querySelector(q).scrollIntoView({ block: 'center' }), vsel);
+  await sleep(150);
+  const vf = await frameRect(app, vsel);
+  if (vf) await page.mouse.click(vf.x + vf.w / 2, vf.y + vf.h * 0.35, { button: 'right' });
+  r.videoMenu = await until(() => mediaMenuState(app), 2000);
+  const c0 = postedOf(app, 'copyMedia').length;
+  if (r.videoMenu) await page.locator('.media-menu .menu-item', { hasText: '複製影片' }).click();
+  r.copy = await until(() => postedOf(app, 'copyMedia').slice(c0)[0] || null, 2000);
+  // 3. 燈箱右上角的關閉鈕：1440 寬、窄到 420 寬（工具列收成只有圖示）都在，點了就關
+  await page.click(thumb);
+  await until(() => lbView(app), 4000);
+  r.lbWide = await closeBtnState(app, '.lb');
+  await page.setViewportSize({ width: 420, height: 800 });
+  await sleep(250);
+  r.lbNarrow = await closeBtnState(app, '.lb');
+  r.narrowLabels = await page.evaluate(() => [...document.querySelectorAll('.lb .lb-btn > span')].some((s) => getComputedStyle(s).display !== 'none'));
+  await shot(app, 'desktop-lightbox-close-420');
+  if (r.lbNarrow) await page.click('.lb .lb-close');
+  r.lbClosed = !!(await until(() => page.evaluate(() => (document.querySelector('.lb') ? null : true)), 2000));
+  // 4. 播放器（420 寬）的關閉鈕
+  await page.evaluate((q) => document.querySelector(q).scrollIntoView({ block: 'center' }), vsel);
+  await page.click(convSel('c1') + ' .it[data-id="lv"] .mvid-cap button[aria-label="放大播放"]');
+  await page.waitForSelector('.vp:not(.leaving)');
+  await sleep(200);
+  r.vpNarrow = await closeBtnState(app, '.vp');
+  await shot(app, 'desktop-video-close-420');
+  await page.keyboard.press('Escape');
+  check('desktopMediaContextMenu', JSON.stringify(menuLabels(r.imageMenu)) === JSON.stringify(['複製圖片', '另存新檔', '用預設程式開啟', '在檔案總管顯示']) && r.lightbox === false
+    && !!r.save && r.save.path === 'C:\\repo\\demo\\shot.png' && r.save.conversationId === 'c1'
+    && JSON.stringify(menuLabels(r.videoMenu)) === JSON.stringify(['複製影片', '另存新檔', '用預設程式開啟', '在檔案總管顯示']) && !r.videoMenu[0].disabled
+    && !!r.copy && r.copy.path === 'C:\\repo\\demo\\操作錄影.mp4' && r.copy.conversationId === 'c1',
+  { imageMenu: r.imageMenu, lightbox: r.lightbox, save: r.save, videoMenu: r.videoMenu, copy: r.copy });
+  check('desktopViewerCloseTopRight', closeBtnOk(r.lbWide) && closeBtnOk(r.lbNarrow) && !r.narrowLabels && r.lbClosed && closeBtnOk(r.vpNarrow),
+    { lbWide: r.lbWide, lbNarrow: r.lbNarrow, narrowLabels: r.narrowLabels, closed: r.lbClosed, vpNarrow: r.vpNarrow });
+  await HP.closePage(app);
+}
+
 // ───── 手機版的側欄抽屜（2026-10-23：帳戶區預設收起、左右滑收起與展開、點對話那一側或清單裡的對話就收起；drawer.js、drawerrules.js）─────
 
 /** 抽屜與帳戶區的狀態：app 的 class、側欄的位置與 visibility、遮罩、帳戶區的展開鈕、清單的位置、存在這個瀏覽器的版面 */
@@ -3030,7 +3302,7 @@ function desktopHost(o = {}) {
       case 'open':
         if (!c) return;
         if (c.deviceId) host.send(LF.replicaMessage(NOW, c.id, c.title, c.deviceId, Object.assign({ running: c.running, waiting: c.waiting, items: LF.desktopItems(NOW, 'r') }, (o.replica && o.replica(c.id)) || {})));
-        else host.send(LF.localMessage(NOW, c.id, c.title, { conversationSync: syncOf(c.id) }));
+        else host.send(LF.localMessage(NOW, c.id, c.title, Object.assign({ conversationSync: syncOf(c.id) }, o.items && o.items(c.id) ? { items: o.items(c.id) } : {})));
         break;
       case 'syncSetConversationPolicy': {
         if (!c || c.deviceId) return;
@@ -5625,6 +5897,10 @@ const SCENARIOS = [
   { checks: ['hubTabletAcctsFolded', 'hubTabletSwipePanels'], run: runTabletPanels },
   { checks: ['desktopTabletAcctsFolded', 'desktopTouchSwipePanels'], run: runDesktopTouchPanels },
   { checks: ['desktopLightboxTouch'], run: runDesktopLightboxTouch },
+  { checks: ['hubMobileLightboxSwipeMenu'], run: runMobileLightboxSwipeMenu },
+  { checks: ['desktopLightboxSwipeMenu'], run: runDesktopLightboxSwipeMenu },
+  { checks: ['hubMobileMediaLongPress', 'hubMobileVideoSwipe'], run: runMobileMediaTouch },
+  { checks: ['desktopMediaContextMenu', 'desktopViewerCloseTopRight'], run: runDesktopMediaMenu },
   { checks: ['hubPhoneAcctsFolded', 'hubPhoneSwipeLeftCloses', 'hubPhoneSwipeLeftMonitor', 'hubPhoneSwipeIgnored', 'hubPhoneDragFollowsFinger', 'hubPhoneSwipeRightOpens', 'hubPhoneTapChatCloses', 'hubPhonePickCloses', 'hubPhoneDrawerNoHScroll', 'hubPhoneSearchBottomLeft', 'hubPhoneWideUnchanged', 'hubPhoneBrandRunMatches'], run: runPhoneDrawer },
   { checks: ['hubSendTrackedDone', 'hubRttReadout'], run: runSendDone },
   { checks: ['hubSendRejectedRestores'], run: runSendRejected },

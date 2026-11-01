@@ -65,6 +65,8 @@ public sealed class SyncCoordinatorLocalViewTests
 
         public void CopyText(string text) => inner.CopyText(text);
 
+        public bool CopyFile(string path) => inner.CopyFile(path);
+
         public void OpenPopout(string conversationId) => inner.OpenPopout(conversationId);
 
         public void ConversationDeleted(string conversationId) => inner.ConversationDeleted(conversationId);

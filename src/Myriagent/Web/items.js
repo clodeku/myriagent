@@ -1402,6 +1402,7 @@ export function attachmentTile(a, ctx, opts = {}) {
     if (composer) tile.append(h('span', { class: 'att-cap', text: a.name || '' }));
   } else if (a.kind === 'Video') {
     tile = h('button', { type: 'button', class: 'att att-vid', title });
+    markVideo(tile, a.url, a.name, a.path);
     if (a.thumbUrl) tile.append(fadeInImg(h('img', { src: a.thumbUrl, alt: '', loading: 'lazy', decoding: 'async', draggable: 'false' })));
     tile.append(h('span', { class: 'att-play' }, icon('play')));
     const info = a.videoInfo || a.size;
@@ -1427,6 +1428,15 @@ export function attachmentTile(a, ctx, opts = {}) {
   const wrap = h('div', { class: 'chip-att', dataset: { key: a.id } }, tile);
   if (opts.onRemove) wrap.append(iconButton('x', '移除附件', () => opts.onRemove(a), 'chip-x'));
   return wrap;
+}
+
+/** 影片的右鍵選單（mediamenu.js 的 mediaOfTarget）讀的網址、名稱、路徑；沒有網址的不標（沒有東西可以複製或下載） */
+function markVideo(el, url, name, path) {
+  if (!url) return;
+  el.dataset.mediaKind = 'video';
+  el.dataset.mediaUrl = url;
+  el.dataset.mediaName = name || '';
+  if (path) el.dataset.mediaPath = path;
 }
 
 export function renderMedia(media, ctx) {
@@ -1463,6 +1473,7 @@ export function renderMedia(media, ctx) {
       }, 'sm'),
       m.path ? iconButton('folderOpen', '在檔案總管顯示', () => post(pathCmd('revealPath', m.path, ctx)), 'sm') : null);
     wrap = h('div', { class: 'mvid' }, fv.el, cap);
+    markVideo(wrap, m.url, m.name || baseName(m.path), m.path);
     box.append(wrap);
   }
   return box;

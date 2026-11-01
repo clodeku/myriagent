@@ -18,6 +18,7 @@ import { mentionPlain } from './accountmentions.js';
 import { Composer } from './composer.js';
 import { FileDrawer } from './files.js';
 import { openLightbox, openVideo } from './viewer.js';
+import { mediaOfTarget, openMediaMenu } from './mediamenu.js';
 import { enumKey, restartStateOf, restartIcon, restartText, restartWaitText, versionArrow, confirmApplyNowConversation } from './hotupdate.js';
 import { gitView, gitKey } from './gitrules.js';
 import { LaunchBar } from './launchbar.js';
@@ -535,6 +536,14 @@ export class ConvView {
       const scope = this.composer.el.contains(t) ? this.composer.el : this.thread;
       const list = Array.from(scope.querySelectorAll('[data-lb-url]'));
       openLightbox(list.map((n) => ({ url: n.dataset.lbUrl, name: n.dataset.lbName || '', path: n.dataset.lbPath || null, conversationId: this.id })), Math.max(0, list.indexOf(t)), t);
+    });
+    // 圖片與影片上按右鍵或觸控長按（app.js 的 longPressAsContextMenu 轉成 contextmenu；對話裡的影片在 iframe 裡，framedvideo.js 轉出來）：
+    // 媒體選單（複製、另存新檔、用預設程式開啟、在檔案總管顯示）
+    this.root.addEventListener('contextmenu', (e) => {
+      const m = mediaOfTarget(e.target);
+      if (!m) return;
+      e.preventDefault();
+      openMediaMenu(Object.assign(m, { conversationId: this.id }), { x: e.clientX, y: e.clientY });
     });
 
     // 拖放檔案到窗格＝附件（分頁拖曳由 workspace 處理）。

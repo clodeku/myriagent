@@ -73,6 +73,10 @@
 /* 關閉時縮回縮圖（viewer.js 的 zoom-back）：圖片自己以 Web Animations 縮回去（只動 transform），底色淡掉、工具列與左右鈕先收 */
 .lb.leaving.zoom-back { opacity: 1; background-color: rgba(9, 9, 10, 0); transition: background-color 200ms ease; }
 .lb.zoom-back :is(.lb-bar, .lb-nav, .lb-loading, .lb-error) { opacity: 0; transition: opacity 100ms ease; }
+/* 觸控拖曳關閉（viewer.js）：拖動中背景與工具列的淡出由 JS 逐格設；甩出去時整個淡出得慢一點，看得到圖片往外飛；沒拖夠遠時背景與工具列淡回來 */
+.lb.leaving.flinging, .vp.leaving.flinging { transition-duration: 200ms; }
+:is(.lb, .vp).swipe-back { transition: background-color 180ms ease; }
+:is(.lb, .vp).swipe-back :is(.lb-bar, .lb-nav) { transition: opacity 180ms ease; }
 .lb:focus, .vp:focus { outline: none; }
 /* 燈箱的捏合、拖曳與雙點都由 viewer.js 自己處理：手指落在工具列或左右鈕上，瀏覽器也不接手（不整頁放大、不送 pointercancel） */
 .lb { touch-action: none; }
@@ -80,7 +84,22 @@
 .lb-info { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 12px; }
 .lb-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: #f2f2f2; }
 .lb-count { flex: none; font-size: 12px; color: #a3a3a3; font-variant-numeric: tabular-nums; }
-.lb-tools { display: flex; align-items: center; gap: 2px; flex: none; }
+.lb-tools { display: flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+/* 右上角的關閉鈕（viewer.js 的 closeButton）：在工具列之外，放不下時收的是工具列（窄的畫面只留圖示，見下面），關閉鈕一定看得到 */
+.lb .lb-close, .vp .lb-close { width: 34px; height: 34px; margin-left: 2px; border-radius: 50%; background: rgba(255, 255, 255, .1); color: #f2f2f2; }
+.lb .lb-close .ic, .vp .lb-close .ic { width: 18px; height: 18px; }
+.lb .lb-close:hover, .vp .lb-close:hover { background: rgba(255, 255, 255, .2); color: #fff; }
+@media (pointer: coarse) { .lb .lb-close, .vp .lb-close { width: 40px; height: 40px; } }
+@media (max-width: 760px) {
+  .lb-btn { padding: 0 7px; }
+  .lb-btn > span { display: none; }
+  .lb-res { display: none; }
+}
+@media (max-width: 520px) {
+  .lb-bar { gap: 8px; padding-left: 12px; padding-right: 6px; }
+  .lb-zbtn, .lb-div { display: none; }
+  .lb-zoom { min-width: 46px; }
+}
 .lb .ibtn, .vp .ibtn { color: #cfcfcf; }
 .lb .ibtn:hover:not(:disabled), .vp .ibtn:hover:not(:disabled) { background: rgba(255, 255, 255, .1); color: #fff; }
 .lb-zoom { min-width: 54px; height: 28px; border-radius: 6px; font-size: 12px; color: #e6e6e6; font-variant-numeric: tabular-nums; text-align: center; }
@@ -106,7 +125,11 @@
 .lb-nav .ic { width: 20px; height: 20px; }
 .lb-loading, .lb-error { position: absolute; inset: 48px 0 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: #b5b5b5; pointer-events: none; }
 .lb-loading .spin { width: 20px; height: 20px; color: #d0d0d0; }
-.vp-stage { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 6px 32px 32px; }
+.vp-stage { touch-action: none; position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 6px 32px 32px; }
 .vp-video { width: min(1280px, 100%); max-height: 100%; border-radius: 8px; background: #000; box-shadow: 0 18px 52px rgba(0, 0, 0, .6); outline: none; }
 .vp-ic { width: 16px; height: 16px; color: #9a9a9a; align-self: center; }
 .vp-error { position: absolute; bottom: 44px; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 6px; background: rgba(0, 0, 0, .6); color: #f3a4a4; font-size: 12.5px; }
+
+/* 圖片與影片上的長按交給媒體選單（longpress.js、mediamenu.js）：不出 iOS 的「儲存影像」浮出選單、不選取文字 */
+:is(.mimg, .att-img, .att-vid, .md-img, .mvid > .vframe, .lb-img) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+@media (pointer: coarse) { .media-menu .menu-item { min-height: 40px; } }

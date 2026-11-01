@@ -88,6 +88,9 @@ internal interface IAgentHost
 
     void CopyText(string text);
 
+    /// <summary>把檔案放進剪貼簿（檔案清單，貼到檔案總管或其他程式就是複製這個檔）；剪貼簿被別的程式佔著時回 false</summary>
+    bool CopyFile(string path);
+
     /// <summary>在新視窗開這個對話</summary>
     void OpenPopout(string conversationId);
 

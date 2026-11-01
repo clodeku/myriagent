@@ -62,6 +62,8 @@ import { onExternalConversations } from './importconv.js';
 import { updateTabBadge } from './favbadge.js';
 import { applyCollaborators, onCollabResult, applyViewerChrome, isCollaborator } from './collab.js';
 import { initSpotlight } from './spotlight.js';
+import { longPressAsContextMenu } from './longpress.js';
+import { isMediaTarget } from './mediamenu.js';
 
 // 錯誤回報最先裝上（之後的初始化出錯也收得到）
 installErrorReporting();
@@ -768,6 +770,9 @@ document.addEventListener('drop', (e) => {
   e.preventDefault();
   if (!e.target.closest || !e.target.closest('.conv')) toast('把檔案拖到對話窗格上就能附加');
 });
+
+// 觸控長按圖片與影片＝右鍵（longpress.js；iOS 長按不送 contextmenu）：對話與燈箱照右鍵開媒體選單
+longPressAsContextMenu(document, isMediaTarget);
 
 // 預設右鍵選單只留給可編輯欄位與選取的文字
 document.addEventListener('contextmenu', (e) => {

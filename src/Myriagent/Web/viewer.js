@@ -1,19 +1,44 @@
-// 圖片燈箱（滾輪以游標為中心縮放、拖曳平移、雙擊切換符合視窗／100%、左右切換；觸控：兩指捏合縮放、單指平移、雙點切換）與影片播放器
+// 圖片燈箱（滾輪以游標為中心縮放、拖曳平移、雙擊切換符合視窗／100%、左右切換；觸控：兩指捏合縮放、單指平移、雙點切換、
+// 沒有放大時單指拖到旁邊放開就關閉）與影片播放器（觸控同樣拖到旁邊關閉）。右上角一律有關閉鈕（窄的畫面工具列收成只有圖示，關閉鈕不會被擠出去）；
+// 圖片與影片上按右鍵或觸控長按開媒體選單（mediamenu.js：複製、另存新檔）
 import { h, iconButton, clamp, replayClass } from './util.js';
 import { icon } from './icons.js';
 import { post, isHub } from './store.js';
 import { pushLayer, removeLayer } from './ui.js';
 import { calmMotion } from './theme.js';
-import { zoomRange, tapSlop, pinchStart, pinchMove, snapBackAfterPinch, isDoubleTap, imageInfoLabel } from './viewerrules.js';
+import { zoomRange, tapSlop, pinchStart, pinchMove, snapBackAfterPinch, isDoubleTap, imageInfoLabel,
+  canSwipeDismiss, dismissProgress, shouldDismiss, releaseVelocity, flingOffset } from './viewerrules.js';
 import { framedVideo } from './framedvideo.js';
+import { mediaPathCmd as pathCmd, openMediaMenu, canSaveMedia, saveMedia } from './mediamenu.js';
 
 // ───── 共用 ─────
-/**
- * openPath／revealPath 的訊息：對話裡開的（燈箱、影片）帶 conversationId（WP4.6 步 10），
- * 宿主才認得出是其他電腦的副本、不開這台的同名路徑
- */
-function pathCmd(cmd, path, conversationId) {
-  return conversationId ? { cmd, path, conversationId } : { cmd, path };
+/** 拖曳關閉時背景跟著變淡、工具列與左右鈕跟著收（progress 0～1；null＝還原） */
+function swipeFade(el, fading, progress) {
+  if (progress == null) {
+    el.style.removeProperty('background-color');
+    for (const n of fading) n.style.removeProperty('opacity');
+    return;
+  }
+  el.style.setProperty('background-color', 'rgba(9, 9, 10, ' + (0.965 * (1 - 0.8 * progress)).toFixed(3) + ')');
+  for (const n of fading) n.style.setProperty('opacity', (1 - progress).toFixed(3));
+}
+
+/** 放開前的軌跡：只留最後幾點（releaseVelocity 只看最後 100 毫秒） */
+function pushSample(samples, t, x, y) {
+  samples.push({ t, x, y });
+  if (samples.length > 12) samples.shift();
+}
+
+/** 工具列的文字按鈕：窄的畫面只留圖示（media.css），所以 title、aria-label 一律帶文字 */
+function lbBtn(iconName, text, field) {
+  const b = h('button', { type: 'button', class: 'lb-btn', title: text, 'aria-label': text }, icon(iconName), h('span', { text }));
+  if (field) b.dataset.field = field;
+  return b;
+}
+
+/** 右上角的關閉鈕：在工具列之外、固定在最右邊（工具列放不下時收的是工具列，不是它） */
+function closeButton(onClick) {
+  return iconButton('x', '關閉（Esc）', onClick, 'lb-close');
 }
 
 /** 檢視器開著時把背後的介面設成 inert：Tab 不會跑到被遮罩蓋住、看不見的按鈕上 */
@@ -64,17 +89,18 @@ function createLightbox() {
   const errEl = h('div', { class: 'lb-error', hidden: true }, icon('warning'), h('span', { text: '圖片無法載入' }));
   const prev = h('button', { type: 'button', class: 'lb-nav prev', title: '上一張（←）', 'aria-label': '上一張' }, icon('chevLeft'));
   const next = h('button', { type: 'button', class: 'lb-nav next', title: '下一張（→）', 'aria-label': '下一張' }, icon('chevRight'));
-  const openBtn = h('button', { type: 'button', class: 'lb-btn' }, icon('popout'), h('span', { text: '用預設程式開啟' }));
-  const saveBtn = h('button', { type: 'button', class: 'lb-btn', dataset: { field: 'mediaSave' } }, icon('download'), h('span', { text: isHub ? '下載' : '另存新檔' }));
-  const revealBtn = h('button', { type: 'button', class: 'lb-btn' }, icon('folderOpen'), h('span', { text: '在檔案總管顯示' }));
+  const openBtn = lbBtn('popout', '用預設程式開啟');
+  const saveBtn = lbBtn('download', isHub ? '下載' : '另存新檔', 'mediaSave');
+  const revealBtn = lbBtn('folderOpen', '在檔案總管顯示');
   const bar = h('div', { class: 'lb-bar' },
     h('div', { class: 'lb-info' }, nameEl, countEl, resEl),
     h('div', { class: 'lb-tools' },
-      iconButton('zoomOut', '縮小（-）', () => S.zoomBy(1 / 1.25)), zoomLabel, iconButton('zoomIn', '放大（+）', () => S.zoomBy(1.25)),
-      iconButton('fit', '符合視窗（0）', () => S.fit()),
-      h('span', { class: 'lb-div' }), saveBtn, openBtn, revealBtn,
-      iconButton('x', '關閉（Esc）', () => S.close(), 'lb-close')));
+      iconButton('zoomOut', '縮小（-）', () => S.zoomBy(1 / 1.25), 'lb-zbtn'), zoomLabel, iconButton('zoomIn', '放大（+）', () => S.zoomBy(1.25), 'lb-zbtn'),
+      iconButton('fit', '符合視窗（0）', () => S.fit(), 'lb-zbtn'),
+      h('span', { class: 'lb-div' }), saveBtn, openBtn, revealBtn),
+    closeButton(() => S.close()));
   const el = h('div', { class: 'lb', role: 'dialog', 'aria-modal': 'true', 'aria-label': '圖片檢視', tabIndex: -1 }, bar, stage, loadingEl, errEl, prev, next);
+  const fading = [bar, prev, next];
   const guard = guardOpeningClicks(el);
   // 按著的指標（舞台上的，以及觸控落在左右鈕上的；pointerId → 相對舞台的 { x, y }）；單指拖曳、兩指捏合、這一串有沒有用過兩指、
   // 上一下點擊（觸控雙點用）、最後按下的指標種類
@@ -92,7 +118,8 @@ function createLightbox() {
       clearTimeout(S.closeTimer);
       if (!el.contains(document.activeElement)) S.prevFocus = document.activeElement;
       if (!el.isConnected) document.body.append(el);
-      el.classList.remove('leaving', 'zoom-back');
+      el.classList.remove('leaving', 'zoom-back', 'flinging', 'swipe-back');
+      swipeFade(el, fading, null);
       for (const a of img.getAnimations()) a.cancel();
       pushLayer(S.layer);
       setBackdropInert(true);
@@ -107,7 +134,7 @@ function createLightbox() {
       countEl.textContent = S.list.length > 1 ? '第 ' + (S.index + 1) + '／' + S.list.length + ' 張' : '';
       prev.hidden = next.hidden = S.list.length < 2;
       openBtn.disabled = revealBtn.disabled = !it.path;
-      saveBtn.hidden = !it.onDownload && (isHub || !it.path);
+      saveBtn.hidden = !canSaveMedia(it);
       errEl.hidden = true;
       resEl.textContent = '';
       loadingEl.hidden = false;
@@ -190,24 +217,41 @@ function createLightbox() {
       if (Math.abs(S.scale - S.fitScale) < 0.001) S.zoomAt(S.fitScale >= 1 ? 2 : 1, px, py);
       else S.fit();
     },
-    close() {
+    /** 拖曳關閉沒拖夠遠（或第二指放下改成捏合）：圖片回到拖曳開始的位置、背景與工具列還原 */
+    swipeBack(d, animate = true) {
+      const from = img.style.transform;
+      S.tx = d.tx; S.ty = d.ty;
+      S.apply();
+      swipeFade(el, fading, null);
+      if (!animate || calmMotion()) return;
+      img.animate([{ transform: from }, { transform: img.style.transform }], { duration: 180, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+      replayClass(el, 'swipe-back', 200);
+    },
+    /** opts.flingTo：拖曳關閉時圖片沿著拖的方向飛出去的位置（{ tx, ty }） */
+    close(opts = {}) {
       if (!S.open) return;
       S.open = false;
       removeLayer(S.layer);
       setBackdropInert(false); // 先解除 inert，焦點才放得回縮圖
-      // 沒有放大過、還是打開的那一張、縮圖還在畫面上：圖片縮回縮圖的位置、底色淡掉（media.css 的 .lb.zoom-back）；否則整個淡出
-      const r = Math.abs(S.scale - S.fitScale) < 1e-3 && img.style.visibility !== 'hidden' ? S.originRect() : null;
+      const fling = opts.flingTo && !calmMotion() ? opts.flingTo : null;
+      // 沒有放大過、還是打開的那一張、縮圖還在畫面上：圖片縮回縮圖的位置、底色淡掉（media.css 的 .lb.zoom-back）；拖曳關閉的往外飛；否則整個淡出
+      const r = !opts.flingTo && Math.abs(S.scale - S.fitScale) < 1e-3 && img.style.visibility !== 'hidden' ? S.originRect() : null;
       el.classList.add('leaving');
-      if (r) {
+      if (fling) {
+        el.classList.add('flinging');
+        img.animate([{ transform: img.style.transform }, { transform: 'translate(' + fling.tx.toFixed(1) + 'px,' + fling.ty.toFixed(1) + 'px) scale(' + S.scale.toFixed(4) + ')' }],
+          { duration: 200, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' });
+      } else if (r) {
         el.classList.add('zoom-back');
         img.animate([{ transform: img.style.transform }, { transform: S.originTransform(r), opacity: 0.5 }], { duration: 200, easing: 'cubic-bezier(.4, 0, .8, .6)', fill: 'forwards' });
       }
       S.closeTimer = setTimeout(() => {
         el.remove();
-        el.classList.remove('zoom-back');
+        el.classList.remove('zoom-back', 'flinging');
+        swipeFade(el, fading, null);
         for (const a of img.getAnimations()) a.cancel();
         img.removeAttribute('src');
-      }, r ? 210 : 140);
+      }, r || fling ? 210 : 140);
       if (S.prevFocus && S.prevFocus.isConnected) { try { S.prevFocus.focus({ preventScroll: true }); } catch { /* 忽略 */ } }
     },
   };
@@ -247,10 +291,19 @@ function createLightbox() {
     if (pts.size === 1) {
       multi = false;
       drag = null;
-      if (onStage) startDrag(pts.get(e.pointerId), false);
+      if (onStage) {
+        startDrag(pts.get(e.pointerId), false);
+        // 觸控、沒有放大：單指拖曳是拖曳關閉（拖到旁邊放開就關）
+        if (e.pointerType !== 'mouse' && canSwipeDismiss(S.scale, S.fitScale)) {
+          drag.dismiss = true;
+          drag.samples = [];
+          pushSample(drag.samples, e.timeStamp, drag.x, drag.y);
+        }
+      }
     } else if (pts.size === 2) {
-      // 第二指放下：從拖曳改成捏合，這一串放開時不算點一下
+      // 第二指放下：從拖曳改成捏合，這一串放開時不算點一下（拖曳關閉拖到一半的先放回原位）
       multi = true;
+      if (drag && drag.dismiss && drag.moved) S.swipeBack(drag, false);
       drag = null;
       startPinch();
     }
@@ -272,6 +325,16 @@ function createLightbox() {
     if (!drag) return;
     const dx = p.x - drag.x, dy = p.y - drag.y;
     if (Math.abs(dx) + Math.abs(dy) > tapSlop(e.pointerType)) drag.moved = true;
+    if (drag.dismiss) {
+      // 拖曳關閉：圖片跟著手指走（不受 constrain 限制），背景跟著變淡；還在點一下的範圍內不動（點背景關閉、雙點、長按照舊）
+      pushSample(drag.samples, e.timeStamp, p.x, p.y);
+      if (!drag.moved) return;
+      const st = S.stageSize();
+      S.tx = drag.tx + dx; S.ty = drag.ty + dy;
+      S.apply();
+      swipeFade(el, fading, dismissProgress(dx, dy, st.w, st.h));
+      return;
+    }
     S.tx = drag.tx + dx; S.ty = drag.ty + dy;
     S.constrain();
     S.apply();
@@ -289,6 +352,20 @@ function createLightbox() {
     }
     if (pts.size > 0) return;
     stage.classList.remove('dragging');
+    if (drag && drag.dismiss && drag.moved) {
+      // 拖曳關閉放開：拖得夠遠或往外甩就關（圖片沿著拖的方向飛出去），否則放回原位
+      const d = drag;
+      drag = null;
+      lastTap = null;
+      const st = S.stageSize();
+      const dx = S.tx - d.tx, dy = S.ty - d.ty;
+      const v = releaseVelocity(d.samples);
+      if (e.type === 'pointerup' && shouldDismiss(dx, dy, v.vx, v.vy, st.w, st.h)) {
+        const f = flingOffset(dx, dy, st.w, st.h);
+        S.close({ flingTo: { tx: d.tx + f.x, ty: d.ty + f.y } });
+      } else S.swipeBack(d);
+      return;
+    }
     const wasClick = !!drag && !drag.moved && !multi && e.type === 'pointerup';
     drag = null;
     if (!wasClick) { lastTap = null; return; }
@@ -311,10 +388,16 @@ function createLightbox() {
   next.addEventListener('click', () => S.go(1));
   zoomLabel.addEventListener('click', () => { const st = S.stageSize(); S.toggleZoom(st.w / 2, st.h / 2); });
   openBtn.addEventListener('click', () => { const it = S.list[S.index]; if (it.path) post(pathCmd('openPath', it.path, it.conversationId)); });
-  saveBtn.addEventListener('click', () => {
+  saveBtn.addEventListener('click', () => saveMedia(S.list[S.index]));
+  // 圖片上按右鍵或觸控長按（longpress.js 轉成 contextmenu）：媒體選單。長按時這一串手勢不再拖曳、放開也不算點一下
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (e.target !== img || img.style.visibility === 'hidden' || !errEl.hidden) return;
+    if (drag && drag.dismiss && drag.moved) S.swipeBack(drag, false);
+    drag = null;
+    lastTap = null;
     const it = S.list[S.index];
-    if (it.onDownload) it.onDownload();
-    else if (!isHub && it.path) post(pathCmd('saveFile', it.path, it.conversationId));
+    openMediaMenu(Object.assign({ kind: 'image' }, it), { x: e.clientX, y: e.clientY });
   });
   revealBtn.addEventListener('click', () => { const it = S.list[S.index]; if (it.path) post(pathCmd('revealPath', it.path, it.conversationId)); });
   el.addEventListener('keydown', (e) => {
@@ -338,39 +421,120 @@ export function openVideo(m) {
   // 〔遠端〕m.errorText：瀏覽器版那台的政策是 Off 時「只能看縮圖」的說明（WP4.6 步 11）
   const errEl = h('div', { class: 'vp-error', hidden: true, dataset: { field: 'videoError' } }, icon('warning'), h('span', { text: m.errorText || '影片無法播放，可以改用預設程式開啟' }));
   // 有控制列的影片放在 iframe 裡（framedvideo.js）；雙擊開啟時的第二下落在 iframe 裡，由它自己擋
-  const fv = framedVideo({ src: m.url, cls: 'vp-video', title: '影片：' + (m.name || ''), autoplay: true, time: m.time, outline: false, guardOpen: true, onError: () => { errEl.hidden = false; } });
+  const fv = framedVideo({ src: m.url, cls: 'vp-video', title: '影片：' + (m.name || ''), autoplay: true, time: m.time, outline: false, guardOpen: true,
+    onError: () => { errEl.hidden = false; }, bindDoc: (doc, v) => bindFrameSwipe(doc, v) });
   const pauseVideo = () => { const v = fv.video(); if (v) v.pause(); };
-  const openBtn = h('button', { type: 'button', class: 'lb-btn', disabled: !m.path }, icon('popout'), h('span', { text: '用預設程式開啟' }));
-  const saveBtn = h('button', { type: 'button', class: 'lb-btn', hidden: !m.onDownload && (isHub || !m.path), dataset: { field: 'mediaSave' } }, icon('download'), h('span', { text: isHub ? '下載' : '另存新檔' }));
-  const revealBtn = h('button', { type: 'button', class: 'lb-btn', disabled: !m.path }, icon('folderOpen'), h('span', { text: '在檔案總管顯示' }));
+  const media = Object.assign({ kind: 'video' }, m);
+  const openBtn = lbBtn('popout', '用預設程式開啟');
+  const saveBtn = lbBtn('download', isHub ? '下載' : '另存新檔', 'mediaSave');
+  const revealBtn = lbBtn('folderOpen', '在檔案總管顯示');
+  openBtn.disabled = revealBtn.disabled = !m.path;
+  saveBtn.hidden = !canSaveMedia(media);
   openBtn.addEventListener('click', () => { pauseVideo(); post(pathCmd('openPath', m.path, m.conversationId)); });
-  saveBtn.addEventListener('click', () => {
-    if (m.onDownload) m.onDownload();
-    else if (!isHub && m.path) post(pathCmd('saveFile', m.path, m.conversationId));
-  });
+  saveBtn.addEventListener('click', () => saveMedia(media));
   revealBtn.addEventListener('click', () => post(pathCmd('revealPath', m.path, m.conversationId)));
   const stage = h('div', { class: 'vp-stage' }, fv.el, errEl);
-  const el = h('div', { class: 'vp', role: 'dialog', 'aria-modal': 'true', 'aria-label': '影片播放', tabIndex: -1 },
-    h('div', { class: 'lb-bar' }, h('div', { class: 'lb-info' }, icon('video', 'vp-ic'), h('span', { class: 'lb-name', text: m.name || '', title: m.path || '' })),
-      h('div', { class: 'lb-tools' }, saveBtn, openBtn, revealBtn, iconButton('x', '關閉（Esc）', () => close(), 'lb-close'))),
-    stage);
+  const bar = h('div', { class: 'lb-bar' }, h('div', { class: 'lb-info' }, icon('video', 'vp-ic'), h('span', { class: 'lb-name', text: m.name || '', title: m.path || '' })),
+    h('div', { class: 'lb-tools' }, saveBtn, openBtn, revealBtn), closeButton(() => close()));
+  const el = h('div', { class: 'vp', role: 'dialog', 'aria-modal': 'true', 'aria-label': '影片播放', tabIndex: -1 }, bar, stage);
   guardOpeningClicks(el);
   const prevFocus = document.activeElement;
   const layer = { dismissable: true, close: () => close() };
   let closed = false;
-  function close() {
+
+  // 觸控拖曳關閉：手指在影片上（控制列以外）或影片外的背景上拖到旁邊放開就關閉。
+  // 座標一律用 screenX／screenY：影片的 iframe 跟著手指移動，iframe 裡的 clientX 不會變
+  let sw = null; // { id, x, y, moved, samples }
+  const swStart = (e) => {
+    sw = e.pointerType === 'mouse' || !e.isPrimary ? null : { id: e.pointerId, x: e.screenX, y: e.screenY, moved: false, samples: [] };
+    if (sw) pushSample(sw.samples, e.timeStamp, e.screenX, e.screenY);
+  };
+  const swMove = (e) => {
+    if (!sw || e.pointerId !== sw.id) return;
+    const dx = e.screenX - sw.x, dy = e.screenY - sw.y;
+    pushSample(sw.samples, e.timeStamp, e.screenX, e.screenY);
+    if (!sw.moved && Math.abs(dx) + Math.abs(dy) <= tapSlop('touch')) return;
+    sw.moved = true;
+    const r = stage.getBoundingClientRect();
+    fv.el.style.setProperty('transform', 'translate(' + dx.toFixed(1) + 'px,' + dy.toFixed(1) + 'px)');
+    swipeFade(el, [bar], dismissProgress(dx, dy, r.width, r.height));
+  };
+  const swBack = (animate) => {
+    const from = fv.el.style.transform;
+    fv.el.style.removeProperty('transform');
+    swipeFade(el, [bar], null);
+    if (animate && from && !calmMotion()) {
+      fv.el.animate([{ transform: from }, { transform: 'none' }], { duration: 180, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+      replayClass(el, 'swipe-back', 200);
+    }
+  };
+  const swEnd = (e) => {
+    if (!sw || e.pointerId !== sw.id) return;
+    const s = sw;
+    sw = null;
+    if (!s.moved) return;
+    const dx = e.screenX - s.x, dy = e.screenY - s.y;
+    const r = stage.getBoundingClientRect();
+    const v = releaseVelocity(s.samples);
+    if (e.type === 'pointerup' && shouldDismiss(dx, dy, v.vx, v.vy, r.width, r.height)) close({ fling: flingOffset(dx, dy, r.width, r.height) });
+    else swBack(true);
+  };
+  const swCancel = () => { if (sw && sw.moved) swBack(false); sw = null; };
+  /** iframe 裡的影片：控制列（下緣 64px）與全螢幕時不拖，免得搶了進度條 */
+  function bindFrameSwipe(doc, v) {
+    v.style.setProperty('touch-action', 'none');
+    doc.addEventListener('pointerdown', (e) => {
+      sw = null;
+      if (e.target !== v || doc.fullscreenElement || v.webkitDisplayingFullscreen) return;
+      if (e.clientY > doc.documentElement.clientHeight - 64) return;
+      swStart(e);
+    });
+    doc.addEventListener('pointermove', swMove);
+    doc.addEventListener('pointerup', swEnd);
+    doc.addEventListener('pointercancel', swEnd);
+  }
+  stage.addEventListener('pointerdown', (e) => {
+    if (e.target !== stage) return;
+    swStart(e);
+    if (sw) { try { stage.setPointerCapture(e.pointerId); } catch { /* 忽略 */ } }
+  });
+  stage.addEventListener('pointermove', swMove);
+  stage.addEventListener('pointerup', swEnd);
+  stage.addEventListener('pointercancel', swEnd);
+  // 影片上按右鍵或觸控長按（iframe 裡的轉成 iframe 元素上的 contextmenu，framedvideo.js）：媒體選單
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (e.target !== fv.el) return;
+    swCancel();
+    openMediaMenu(media, { x: e.clientX, y: e.clientY });
+  });
+
+  /** opts.fling：拖曳關閉時影片沿著拖的方向飛出去的總位移（{ x, y }） */
+  function close(opts = {}) {
     if (closed) return;
     closed = true;
     removeLayer(layer);
     setBackdropInert(false); // 先解除 inert，焦點才放得回縮圖
     const video = fv.video();
-    if (video) {
-      try { video.pause(); } catch { /* 忽略 */ }
+    const fling = opts.fling && !calmMotion() ? opts.fling : null;
+    const release = () => {
+      if (!video) return;
       video.removeAttribute('src');
       try { video.load(); } catch { /* 忽略 */ }
-    }
+    };
+    if (video) { try { video.pause(); } catch { /* 忽略 */ } }
+    // 飛出去時影片最後一格留在畫面上，移除時才放掉
+    if (!fling) release();
     el.classList.add('leaving');
-    setTimeout(() => el.remove(), 140);
+    if (fling) {
+      el.classList.add('flinging');
+      fv.el.animate([{ transform: fv.el.style.transform || 'none' }, { transform: 'translate(' + fling.x.toFixed(1) + 'px,' + fling.y.toFixed(1) + 'px)' }],
+        { duration: 200, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' });
+    }
+    setTimeout(() => {
+      if (fling) release();
+      el.remove();
+    }, fling ? 210 : 140);
     vp = null;
     if (prevFocus && prevFocus.isConnected) { try { prevFocus.focus({ preventScroll: true }); } catch { /* 忽略 */ } }
   }

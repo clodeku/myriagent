@@ -113,6 +113,8 @@ internal sealed class HeadlessHost : IAgentHost, IDisposable
     {
     }
 
+    public bool CopyFile(string path) => false;
+
     public void OpenPopout(string conversationId)
     {
     }

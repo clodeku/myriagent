@@ -55,3 +55,82 @@ export function imageInfoLabel(nw, nh, nameOrUrl) {
   const m = /\.([a-z0-9]{2,5})(?:$|[?#])/i.exec(typeof nameOrUrl === 'string' ? nameOrUrl : '');
   return nw + ' × ' + nh + (m ? '・' + m[1].toUpperCase() : '');
 }
+
+// ───── 拖曳關閉（觸控：沒有放大時單指把圖片或影片拖到旁邊放開就關閉）─────
+
+/** 拖曳關閉只在沒有放大時（符合視窗或更小）：放大後單指拖曳照舊是平移 */
+export function canSwipeDismiss(scale, fitScale) {
+  return scale <= fitScale + 0.001;
+}
+
+/** 拖到這麼遠才算數的參考距離：舞台短邊的 40%，至少 120px */
+function dismissRef(w, h) {
+  return Math.max(120, Math.min(w, h) * 0.4);
+}
+
+/** 拖曳關閉的進度 0～1（背景跟著變淡、工具列跟著收）：拖動距離對參考距離的比例 */
+export function dismissProgress(dx, dy, w, h) {
+  const d = Math.hypot(dx, dy);
+  return d > 0 ? Math.min(1, d / dismissRef(w, h)) : 0;
+}
+
+/** 甩出去：放開前的速度至少這麼快（px／ms），而且已經拖了一段距離、方向和位移相同 */
+export const FLING_SPEED = 0.6;
+export const FLING_MIN_PX = 24;
+
+/**
+ * 放開時要不要關閉：拖過舞台短邊的 18%（至少 80px），或往拖的方向甩出去。
+ * dx、dy 是放開時的位移，vx、vy 是放開前的速度（px／ms，releaseVelocity），w、h 是舞台大小
+ */
+export function shouldDismiss(dx, dy, vx, vy, w, h) {
+  const d = Math.hypot(dx, dy);
+  if (d >= Math.max(80, Math.min(w, h) * 0.18)) return true;
+  if (d < FLING_MIN_PX) return false;
+  const speed = Math.hypot(vx, vy);
+  // 速度在位移方向上的分量：往回拉的不算甩出去
+  const along = (vx * dx + vy * dy) / d;
+  return speed >= FLING_SPEED && along >= FLING_SPEED * 0.7;
+}
+
+/**
+ * 放開前的速度（px／ms）：samples 是依時間排序的 { t, x, y }，取最後 100 毫秒內的頭尾相減；
+ * 停在原地超過 100 毫秒才放開（只剩一點）是 0
+ */
+export function releaseVelocity(samples, windowMs = 100) {
+  if (!samples || samples.length < 2) return { vx: 0, vy: 0 };
+  const last = samples[samples.length - 1];
+  let first = last;
+  for (let i = samples.length - 2; i >= 0; i--) {
+    if (last.t - samples[i].t > windowMs) break;
+    first = samples[i];
+  }
+  const dt = last.t - first.t;
+  if (!(dt > 0)) return { vx: 0, vy: 0 };
+  return { vx: (last.x - first.x) / dt, vy: (last.y - first.y) / dt };
+}
+
+/** 關閉時沿著拖曳的方向飛出舞台：從原位算起的總位移（距離是舞台的對角線，一定飛得出去）；沒有位移時往下 */
+export function flingOffset(dx, dy, w, h) {
+  const d = Math.hypot(dx, dy);
+  const far = Math.hypot(w, h);
+  if (!(d > 0)) return { x: 0, y: far };
+  return { x: dx / d * far, y: dy / d * far };
+}
+
+// ───── 長按（觸控長按＝右鍵選單）─────
+
+/** 按著不動這麼久（毫秒）就是長按 */
+export const LONG_PRESS_MS = 500;
+
+/** 長按期間手指移動超過這個距離（|dx|+|dy|，同觸控的 tapSlop）就不是長按（是捲動或拖曳） */
+export function longPressMoved(dx, dy) {
+  return Math.abs(dx) + Math.abs(dy) > tapSlop('touch');
+}
+
+/**
+ * 這次的 contextmenu 要不要略過：長按時自己送過一次（firedAt），瀏覽器（Android、Windows 觸控）在 windowMs 內又送一次原生的。
+ * firedAt 是上次自己送的時間（沒有時 -Infinity），now 是現在
+ */
+export function duplicateContextMenu(firedAt, now, windowMs = 1000) {
+  return now - firedAt >= 0 && now - firedAt < windowMs;
+}
