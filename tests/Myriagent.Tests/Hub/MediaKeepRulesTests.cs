@@ -80,6 +80,17 @@ public sealed class MediaKeepRulesTests
     }
 
     [Fact]
+    public void 對話資料夾裡attachments以外的媒體照留_代理之後可能清掉暫存檔()
+    {
+        // 2026-11-02 實機：代理把預覽圖寫在 conversations\{id}\d11\，之後刪掉，回覆就破圖。只有 attachments\（附件與副本）是 app 自己管的
+        MediaKeepRules.Candidates(
+            [@"C:\data\conversations\c1\d11\_sheet.png", @"C:\data\conversations\c1\workspace\shot.png",
+             @"C:\data\conversations\c1\attachments\.kept\0123456789abcdef\a.png", @"C:\data\conversations\c1\attachmentsX\b.png"],
+            Conversation, null)
+            .Should().Equal(@"C:\data\conversations\c1\d11\_sheet.png", @"C:\data\conversations\c1\workspace\shot.png", @"C:\data\conversations\c1\attachmentsX\b.png");
+    }
+
+    [Fact]
     public void 對話資料夾以分隔字元為界_名字開頭相同的別的資料夾照留()
     {
         MediaKeepRules.Candidates([@"C:\data\conversations\c10\x.png"], Conversation, null).Should().Equal(@"C:\data\conversations\c10\x.png");

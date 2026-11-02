@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using Myriagent.Agents;
 using Myriagent.Core;
 using Myriagent.Files;
 using Myriagent.Media;
@@ -157,7 +158,10 @@ internal sealed class ThumbnailPublisher : IDisposable
             var opened = await resolver.Guard.OpenAsync(path, RemoteFilePurpose.Thumb, scope, long.MaxValue, ct).ConfigureAwait(false);
             if (opened.File is not { } file)
             {
-                if (opened.Reason == RemoteFileGuardReasons.NotFound)
+                // 在別的對話資料夾裡（延伸對話引用的）的檔，守門員先判範圍、回 forbidden，不看在不在：已經被刪掉的也照「原檔不在」記下來，
+                // 不然每次連線、每 6 小時都再試一次（2026-11-02 實機）。forbidden 一定是本機的固定或抽取式磁碟（網路磁碟先判成 drive），看在不在不會對外連線
+                bool vanished = opened.Reason == RemoteFileGuardReasons.Forbidden && AgentAttachmentRules.IsLocalDrivePath(path) && !File.Exists(path);
+                if (opened.Reason == RemoteFileGuardReasons.NotFound || vanished)
                 {
                     // 原檔已經被刪掉（回覆的媒體沒有留存的副本）：不是暫時的，記下來一段時間內不再試
                     Drop(row, $"守門員拒絕（{opened.Reason}）：原檔已經不在，{ThumbnailPublishRules.GoneRetryAfter.TotalDays:0} 天內不再試", path);

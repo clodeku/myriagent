@@ -228,6 +228,33 @@ public sealed class ThumbnailPublisherTests : IDisposable
         relay.Requests.Should().BeEmpty("縮圖超過 512 KB 不送");
     }
 
+    /// <summary>
+    /// 2026-11-02 實機：延伸對話引用別的對話資料夾裡的檔，守門員先判範圍回 forbidden、不看在不在——被刪掉的檔每 6 小時都再試一次。
+    /// 不在了照「原檔不在」記下來；還在的照舊丟掉、之後再試（之後可能補留了副本）
+    /// </summary>
+    [Fact]
+    public async Task 上傳_別的對話資料夾裡被刪掉的檔_回Gone_還在的照舊之後再試()
+    {
+        var other = files.Write(Path.Combine("data", "conversations", "other0000000000000000000000000001", "caption-demo", "here.png"), MediaTestFiles.Png);
+        var gone = Path.Combine(Path.GetDirectoryName(other)!, "deleted.png");
+        var called = 0;
+        thumbnail = (_, _, _) =>
+        {
+            Interlocked.Increment(ref called);
+            return Task.FromResult<byte[]?>(MediaTestFiles.Png);
+        };
+        var p = Publisher();
+
+        answer = _ => files.Snapshot(resolved: (gone, "deleted.png"));
+        (await p.PublishAsync(Row(), DeviceId, CancellationToken.None)).Should().Be(ThumbOutcome.Gone);
+
+        answer = _ => files.Snapshot(resolved: (other, "here.png"));
+        (await p.PublishAsync(Row(), DeviceId, CancellationToken.None)).Should().Be(ThumbOutcome.Dropped, "還在的是範圍不對，不是不在");
+
+        called.Should().Be(0);
+        relay.Requests.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task 上傳_原檔已經不在_回Gone_不產縮圖也不送()
     {

@@ -262,6 +262,28 @@ public sealed class AgentHubMediaKeepTests
     }
 
     [Fact]
+    public async Task 代理寫在對話資料夾裡的圖_也留一份_暫存檔刪掉後畫面照樣顯示()
+    {
+        using var h = new HubHarness();
+        h.OnUi(() => { h.Hub.AttachMediaKeeper(); return 0; });
+        var (id, s) = h.StartConversation(h.Main, h.Claude);
+        var sheet = Path.Combine(h.Store.GetConversationDirectory(id), "d11", "_sheet.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(sheet)!);
+        File.WriteAllBytes(sheet, Png);
+
+        h.Raise(s, new AgentTextCompletedEvent("m:1", $"![預覽](<{sheet.Replace('\\', '/')}>)"));
+        WaitKept(h);
+
+        var item = Item(h, id, i => i.Kind == AgentItemKind.Assistant);
+        var kept = MediaKeepRules.KeptPath(item.KeptMedia, h.Store.GetConversationDirectory(id), sheet)!;
+        File.Exists(kept).Should().BeTrue();
+        File.Delete(sheet);
+        var shown = await h.Main.WaitForAsync("item", m => m["item"]!.Value<string>("id") == item.Id
+            && m["item"]!.Value<string>("html")!.Contains(Uri.EscapeDataString(kept)), conversationId: id);
+        shown.Should().NotBeNull();
+    }
+
+    [Fact]
     public void 遠端取檔_項目已載入與沒載入_都給副本_副本不在給原檔()
     {
         using var h = new HubHarness();

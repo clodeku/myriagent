@@ -21,7 +21,8 @@ internal static class MediaKeepRules
 
     /// <summary>
     /// 要留的原檔（正規化後的完整路徑，依出現順序、不重複）：本機磁碟（UNC 一律不認）、畫面能直接顯示的圖片與影片、
-    /// 不在這個對話資料夾裡（附件本來就是對話自己的）、還沒留過的。
+    /// 不在這個對話的 attachments\ 裡（附件與副本是 app 自己管的、不會不見）、還沒留過的。對話資料夾的其他地方照留：代理常把截圖、預覽圖寫在
+    /// 對話資料夾（<c>conversations\{id}\d11\_sheet.png</c>）之後又清掉暫存檔（2026-11-02 實機：4 個對話、31 張回覆的圖因此破圖）。
     /// <paramref name="onlyUnder"/>＝只留這個資料夾底下的（延伸對話補留其他對話資料夾裡的媒體，見 <see cref="NeedsForkKeep"/>；寫法不合格就一個都不留），
     /// <paramref name="exceptUnder"/>＝這個資料夾底下的不留（延伸對話的工作資料夾：遠端本來就放行、之後也繼續用它）
     /// </summary>
@@ -30,7 +31,7 @@ internal static class MediaKeepRules
     {
         ArgumentNullException.ThrowIfNull(paths);
         var done = new HashSet<string>(alreadyKept ?? [], StringComparer.OrdinalIgnoreCase);
-        var own = Normalize(conversationDirectory);
+        var own = Normalize(conversationDirectory) is { } directory ? Path.Combine(directory, "attachments") : null;
         var only = onlyUnder is null ? null : Normalize(onlyUnder);
         var except = exceptUnder is null ? null : Normalize(exceptUnder);
         var result = new List<string>();
