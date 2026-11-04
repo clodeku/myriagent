@@ -1,7 +1,6 @@
 using Myriagent.Agents;
 using Myriagent.Core;
 using Myriagent.Files;
-using Myriagent.Preview;
 using Newtonsoft.Json.Linq;
 
 namespace Myriagent.Hub;
@@ -150,9 +149,6 @@ internal sealed partial class AgentHub
         foreach (var e in entries)
         {
             bool media = e.Kind is "image" or "video";
-            // PDF：網頁以 /media 預覽（2026-11-01），先登記成畫面上出現過的檔
-            if (AgentAttachmentRules.IsPdf(e.Path) || DocPreviewRules.KindOf(e.Path) != null)
-                mediaUrls.AllowDocument(e.Path);
             list.Add(new JObject
             {
                 ["name"] = e.Name,

@@ -1,4 +1,5 @@
 using System.Text;
+using Myriagent.Agents;
 using Myriagent.Core;
 using Myriagent.Sync;
 using Newtonsoft.Json.Linq;
@@ -32,6 +33,8 @@ internal sealed partial class AgentHub
         }
 
         var name = command.Value<string>("name");
+        // Word、Excel、PowerPoint、PDF（網頁帶 open:true，2026-11-05）：下載完用這台的預設程式開；白名單以外的照舊只在檔案總管顯示（同 openPath）
+        bool open = command["open"] is JValue { Type: JTokenType.Boolean } flag && (bool)flag.Value!;
         var downloads = PeerDownloadsForTest ?? PeerFileRules.DownloadsFolder();
         var viewId = view.Id;
         _ = Task.Run(async () =>
@@ -51,11 +54,14 @@ internal sealed partial class AgentHub
             {
                 if (disposed)
                     return;
-                if (saved != null)
+                bool opened = saved != null && open && AgentAttachmentRules.IsSafeToOpen(saved);
+                if (opened)
+                    host.OpenWithShell(saved!);
+                else if (saved != null)
                     host.RevealInExplorer(saved);
                 if (views.TryGetValue(viewId, out var v))
                     Post(v, saved != null
-                        ? PeerFileRules.Toast("已下載到「" + Path.GetFileName(saved) + "」", "success")
+                        ? PeerFileRules.Toast("已下載到「" + Path.GetFileName(saved) + "」" + (opened ? "，用預設程式開啟" : ""), "success")
                         : PeerFileRules.Toast("下載失敗：讀不到這個檔案，請重新讀取一次", "error"));
             });
         });

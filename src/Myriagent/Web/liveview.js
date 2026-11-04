@@ -13,6 +13,8 @@ import * as ws from './workspace.js';
 import * as synclog from './synclog.js';
 import { uploadsInProgress } from './composer.js';
 import * as voice from './voice.js';
+import { fileRefAction } from './filelinkrules.js';
+import { isHandheld } from './voicemsgrules.js';
 
 /** app.js 不認得的宿主訊息；commandResult 以外的只有瀏覽器版有，遠端操作紀錄與回收區只有桌面有（設定頁的對話框，synclog.js） */
 export function handle(m) {
@@ -336,6 +338,27 @@ function onFileRef(m) {
   }
   const name = e.body.querySelector('.file-ref-name');
   if (name) { name.textContent = v.name; name.title = v.name; }
+  // Word、Excel、PowerPoint、PDF 交給裝置自己的程式（2026-11-05）
+  const action = fileRefAction({ name: v.name, hub: isHub, handheld: handheldDevice() });
+  if (action === 'peerOpen') {
+    post({ cmd: 'peerFileSave', conversationId: e.conversationId, url: v.url, name: v.name, open: true });
+    e.dialog.close();
+    return;
+  }
+  if (action === 'download') {
+    downloadNow(v.url, v.name);
+    e.dialog.close();
+    toast('已開始下載「' + v.name + '」', 'success');
+    return;
+  }
+  if (action === 'deviceOpen') {
+    const open = h('a', { class: 'btn primary', href: v.url, download: v.name, rel: 'noopener noreferrer', dataset: { field: 'fileRefDeviceOpen' } }, icon('popout'), h('span', { text: '用裝置上的程式開啟' }));
+    open.addEventListener('click', () => setTimeout(() => e.dialog.close(), 0));
+    e.body.append(h('div', { class: 'file-ref-result' },
+      h('p', { class: 'confirm-detail', dataset: { field: 'fileRefInfo' }, text: (v.sizeText ? v.sizeText + '・' : '') + '交給這台裝置上能開這個檔案的程式（15 分鐘內有效）。' }),
+      h('div', { class: 'file-ref-acts' }, open)));
+    return;
+  }
   if (!isHub) {
     // 〔桌面遠端操作〕/f/ 要擁有者的 cookie，桌面改由宿主以裝置的存取權杖下載到「下載」資料夾並在檔案總管顯示（peerFileSave）
     const save = h('button', { type: 'button', class: 'btn primary', dataset: { field: 'fileRefSave' } }, icon('download'), h('span', { text: '下載到這台' }));
@@ -354,6 +377,21 @@ function onFileRef(m) {
   e.body.append(h('div', { class: 'file-ref-result' },
     h('p', { class: 'confirm-detail', dataset: { field: 'fileRefInfo' }, text: (v.sizeText ? v.sizeText + '・' : '') + until + '；文字檔在新分頁預覽，其他檔案會下載。' }),
     h('div', { class: 'file-ref-acts' }, link)));
+}
+
+/** 手機與平板（同 composer 的判斷：粗指標、行動裝置的 UA、iPadOS 的觸控點） */
+function handheldDevice() {
+  const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+  return isHandheld({ coarsePointer: coarse, userAgent: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints });
+}
+
+/** 瀏覽器版直接下載同站的 /f/ 網址（沒掛進文件的 <a download>，點擊不會冒泡到 app.js 的連結處理） */
+function downloadNow(url, name) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name || '';
+  a.rel = 'noopener';
+  a.click();
 }
 
 /** 〔桌面遠端操作〕桌面上可以操作的副本（liverules.controllable） */

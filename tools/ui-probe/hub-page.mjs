@@ -28,10 +28,10 @@ export const DESKTOP_ORIGIN = RF.DESKTOP_ORIGIN;
 export const HUB_URL = 'wss://hub.probe.local/hubs/v1/browser';
 // 伺服器的 CSP：SecurityHeaderRules.ContentSecurityPolicy("https://hub.probe.local")（src/MyriagentHub/Hosting/SecurityHeaders.cs）。
 // 這一行要和伺服器的結果逐字相同（tests/MyriagentHub.Tests/Web/LiveProbeCspTests）
-export const HUB_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' wss://hub.probe.local; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'; object-src 'none'; worker-src 'none'";
+export const HUB_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' wss://hub.probe.local; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; worker-src 'none'";
 // 桌面宿主回應 index.html 時帶的 CSP（同 probe.mjs、remote-probe.mjs）
 export const DESKTOP_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; " +
-  "font-src 'self' data:; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'";
+  "font-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'";
 // index.html 載入網頁主程式的那一行（AssetServerRules.Anchor）：傳輸腳本插在它前面
 const ANCHOR = '<script type="module" src="app.js"></script>';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8' };
@@ -197,11 +197,7 @@ async function serveHub(route, o, api, seen) {
     const r = typeof o.media === 'function' ? o.media(p) : null;
     return r ? route.fulfill(r) : mediaResponse(route);
   }
-  if (p.startsWith('/f/')) {
-    // o.media(路徑) 也管 /f/（例如文件預覽的 PDF）；null 照常回文字
-    const r = typeof o.media === 'function' ? o.media(p) : null;
-    return r ? route.fulfill(r) : route.fulfill({ status: 200, headers: { 'Content-Type': MIME['.txt'], 'Cache-Control': 'no-store' }, body: FILE_BODY });
-  }
+  if (p.startsWith('/f/')) return route.fulfill({ status: 200, headers: { 'Content-Type': MIME['.txt'], 'Cache-Control': 'no-store' }, body: FILE_BODY });
   if (p === '/') return route.fulfill({ status: 200, headers: { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store', 'Content-Security-Policy': HUB_CSP }, body: AUTH_PAGE });
   if (p === '/transport-hub.js') return fileResponse(route, path.join(WWWROOT, 'transport-hub.js'));
   if (p.startsWith('/lib/')) {
@@ -448,7 +444,7 @@ async function serveDesktop(route, o = {}) {
   // 本機的 /media、/thumb 與副本的媒體（ReplicaMediaUrls：https://myriagent.local/m/{key}、/t/{key}?s=320，WP4.7 的 ReplicaMediaRoute）；
   // o.media(路徑) 同 serveHub：回 route.fulfill 的選項就照它回，null 照常回 PNG
   if (url.pathname === '/media' || url.pathname === '/thumb' || url.pathname.startsWith('/m/') || url.pathname.startsWith('/t/')) {
-    const r = typeof o.media === 'function' ? o.media(url.pathname, url) : null;
+    const r = typeof o.media === 'function' ? o.media(url.pathname) : null;
     return r ? route.fulfill(r) : mediaResponse(route);
   }
   const name = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));

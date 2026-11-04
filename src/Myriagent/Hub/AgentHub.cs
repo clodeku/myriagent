@@ -541,10 +541,6 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                 case "saveFile":
                     _ = SaveFileAsync(view, Str("path"));
                     break;
-                case "docPreview":
-                    // Word、Excel、PowerPoint 的預覽（AgentHub.DocPreview.cs）：轉成 PDF 後回 docPreview
-                    _ = DocPreviewAsync(view, Str("requestId"), Str("path"));
-                    break;
                 case "copyMedia":
                     _ = CopyMediaAsync(view, Str("path"));
                     break;

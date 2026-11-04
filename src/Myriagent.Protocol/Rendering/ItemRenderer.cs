@@ -62,9 +62,6 @@ internal sealed class ItemRenderer
     /// <summary>附件（使用者訊息與輸入框的附件列）：圖片與影片有縮圖，可直接顯示或播放的另有媒體網址</summary>
     public JObject RenderAttachment(AgentAttachment a)
     {
-        // 文件附件：桌面登記成畫面上出現過的檔（另存、PDF 預覽）；輸出不變
-        if (!string.IsNullOrEmpty(a.StoredPath) && !AgentAttachmentRules.IsDisplayableMedia(a.StoredPath))
-            urls.AllowDocument(a.StoredPath);
         string? thumb = a.Kind switch
         {
             AgentAttachmentKind.Image => urls.ThumbUrl(a.StoredPath, 320),

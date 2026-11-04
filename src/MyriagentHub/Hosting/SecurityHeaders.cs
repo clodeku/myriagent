@@ -24,18 +24,8 @@ internal static partial class SecurityHeaderRules
         var wss = "wss://" + publicOrigin[(publicOrigin.IndexOf("://", StringComparison.Ordinal) + 3)..];
         return "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; "
             + $"font-src 'self' data:; connect-src 'self' {wss}; manifest-src 'self'; base-uri 'none'; form-action 'self'; "
-            + "frame-src 'self'; frame-ancestors 'none'; object-src 'none'; worker-src 'none'";
+            + "frame-ancestors 'none'; object-src 'none'; worker-src 'none'";
     }
-
-    /// <summary>
-    /// X-Frame-Options：一律 DENY；只有媒體端點回的 PDF 給 SAMEORIGIN——網頁以同源的 iframe 開 /f/ 的 PDF 預覽（2026-11-01，
-    /// 實測 Chrome 的檢視器不受媒體 CSP 的 sandbox 影響，只會被 DENY 擋下）
-    /// </summary>
-    public static string FrameOptionsFor(PathString path, string? contentType) =>
-        IsMediaPath(path) && contentType is not null
-        && contentType.Split(';')[0].Trim().Equals(Myriagent.Agents.AgentAttachmentRules.PdfContentType, StringComparison.OrdinalIgnoreCase)
-            ? "SAMEORIGIN"
-            : "DENY";
 
     /// <summary>
     /// 媒體的路徑（WP4.7 計畫 D9）：<c>/m/</c>、<c>/t/</c>、<c>/f/</c> 與桌面複本的代理 <c>/api/v1/device/media/</c>，以路徑段比對、不分大小寫
@@ -90,7 +80,7 @@ internal sealed class SecurityHeadersMiddleware(RequestDelegate next, string pub
             headers.ContentSecurityPolicy = SecurityHeaderRules.ContentSecurityPolicyFor(ctx.Request.Path, policy);
             headers.XContentTypeOptions = "nosniff";
             headers["Referrer-Policy"] = "no-referrer";
-            headers.XFrameOptions = SecurityHeaderRules.FrameOptionsFor(ctx.Request.Path, ctx.Response.ContentType);
+            headers.XFrameOptions = "DENY";
             headers["Cross-Origin-Opener-Policy"] = "same-origin";
             headers["Cross-Origin-Resource-Policy"] = "same-origin";
             headers["Permissions-Policy"] = SecurityHeaderRules.PermissionsPolicy;

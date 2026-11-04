@@ -3,7 +3,7 @@
 // 圖片與影片上按右鍵或觸控長按開媒體選單（mediamenu.js：複製、另存新檔）
 import { h, iconButton, clamp, replayClass } from './util.js';
 import { icon } from './icons.js';
-import { post, isHub, onHostMessage } from './store.js';
+import { post, isHub } from './store.js';
 import { pushLayer, removeLayer } from './ui.js';
 import { calmMotion } from './theme.js';
 import { zoomRange, tapSlop, pinchStart, pinchMove, snapBackAfterPinch, isDoubleTap, imageInfoLabel,
@@ -547,111 +547,4 @@ export function openVideo(m) {
   el.focus({ preventScroll: true });
   vp = { el, close };
   return vp;
-}
-
-// ───── 文件檢視（PDF、Word、Excel、PowerPoint；2026-11-01）─────
-// PDF 放在同源的 iframe 給瀏覽器內建的檢視器（WebView2、Chrome、Edge、Safari）；Word、Excel、PowerPoint 先請桌面以 Office 轉成 PDF（docPreview），
-// 轉好再同樣顯示。瀏覽器沒有內建的檢視器（Android 的 Chrome：navigator.pdfViewerEnabled 是 false）時不放 iframe，改說明並給下載或開啟
-let dv = null;
-const docRequests = new Map(); // requestId → (reply) => void
-
-onHostMessage((msg) => {
-  if (!msg || msg.type !== 'docPreview' || typeof msg.requestId !== 'string') return;
-  const fn = docRequests.get(msg.requestId);
-  if (!fn) return;
-  docRequests.delete(msg.requestId);
-  fn(msg);
-});
-
-/**
- * 開文件檢視。m：{ name, path（這台的路徑）, conversationId, url（PDF 的同源網址；有就直接顯示）, convert（Office 文件：先送 docPreview）, onDownload }
- */
-export function openDocument(m) {
-  if (!m || (!m.url && !(m.convert && m.path))) return null;
-  if (dv) dv.close();
-  const media = Object.assign({ kind: 'document' }, m);
-  const status = h('div', { class: 'dv-status', dataset: { field: 'docStatus' } });
-  const stage = h('div', { class: 'dv-stage' }, status);
-  const openBtn = lbBtn('popout', '用預設程式開啟');
-  const saveBtn = lbBtn('download', isHub ? '下載' : '另存新檔', 'mediaSave');
-  const revealBtn = lbBtn('folderOpen', '在檔案總管顯示');
-  openBtn.disabled = revealBtn.disabled = !m.path || isHub;
-  saveBtn.hidden = !canSaveMedia(media);
-  openBtn.addEventListener('click', () => post(pathCmd('openPath', m.path, m.conversationId)));
-  saveBtn.addEventListener('click', () => saveMedia(media));
-  revealBtn.addEventListener('click', () => post(pathCmd('revealPath', m.path, m.conversationId)));
-  const bar = h('div', { class: 'lb-bar' }, h('div', { class: 'lb-info' }, icon('fileDoc', 'vp-ic'), h('span', { class: 'lb-name', text: m.name || '', title: m.path || m.name || '' })),
-    h('div', { class: 'lb-tools' }, saveBtn, openBtn, revealBtn), closeButton(() => close()));
-  const el = h('div', { class: 'vp dv', role: 'dialog', 'aria-modal': 'true', 'aria-label': '文件預覽', tabIndex: -1 }, bar, stage);
-  guardOpeningClicks(el);
-  const prevFocus = document.activeElement;
-  const layer = { dismissable: true, close: () => close() };
-  let closed = false;
-  let requestId = null;
-
-  /** 狀態列：轉換中（轉圈）、說明（錯誤）；actions 是說明下面的按鈕 */
-  const showStatus = (text, busy, actions) => {
-    status.replaceChildren(busy ? h('span', { class: 'spin' }) : icon('warning'), h('span', { class: 'dv-text', text }));
-    if (actions && actions.length) status.append(h('div', { class: 'dv-acts' }, ...actions));
-    status.classList.toggle('err', !busy);
-    status.hidden = false;
-  };
-  const fallbackActions = (url) => {
-    const acts = [];
-    if (canSaveMedia(media)) {
-      const b = h('button', { type: 'button', class: 'btn primary', dataset: { field: 'docSave' } }, icon('download'), h('span', { text: isHub ? '下載' : '另存新檔' }));
-      b.addEventListener('click', () => saveMedia(media));
-      acts.push(b);
-    }
-    if (isHub && url) acts.push(h('a', { class: 'btn', href: url, target: '_blank', rel: 'noopener noreferrer', dataset: { field: 'docOpenTab' } }, icon('popout'), h('span', { text: '在新分頁開啟' })));
-    if (!isHub && m.path) {
-      const b = h('button', { type: 'button', class: 'btn', dataset: { field: 'docOpenPath' } }, icon('popout'), h('span', { text: '用預設程式開啟' }));
-      b.addEventListener('click', () => post(pathCmd('openPath', m.path, m.conversationId)));
-      acts.push(b);
-    }
-    return acts;
-  };
-  /** 放 PDF：沒有內建檢視器的瀏覽器改說明 */
-  const showPdf = (url) => {
-    if (navigator.pdfViewerEnabled === false) {
-      showStatus('這個瀏覽器不能在頁面裡顯示 PDF，請下載或在新分頁開啟', false, fallbackActions(url));
-      return;
-    }
-    status.hidden = true;
-    const frame = h('iframe', { class: 'dv-frame', src: url, title: '文件：' + (m.name || ''), dataset: { field: 'docFrame' } });
-    stage.append(frame);
-  };
-
-  if (m.url) showPdf(m.url);
-  else {
-    showStatus('正在轉成 PDF…（第一次開 Word、Excel、PowerPoint 檔需要幾秒）', true);
-    requestId = 'doc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
-    docRequests.set(requestId, (reply) => {
-      if (closed) return;
-      if (typeof reply.url === 'string' && reply.url && !reply.error) showPdf(reply.url);
-      else showStatus(typeof reply.error === 'string' && reply.error ? reply.error : '無法預覽這個檔案', false, fallbackActions(null));
-    });
-    post(Object.assign(pathCmd('docPreview', m.path, m.conversationId), { requestId }));
-  }
-
-  function close() {
-    if (closed) return;
-    closed = true;
-    if (requestId) docRequests.delete(requestId);
-    removeLayer(layer);
-    setBackdropInert(false);
-    el.classList.add('leaving');
-    setTimeout(() => el.remove(), 140);
-    dv = null;
-    if (prevFocus && prevFocus.isConnected) { try { prevFocus.focus({ preventScroll: true }); } catch { /* 忽略 */ } }
-  }
-  el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } });
-  // 點文件外的背景＝關閉（同影片播放器）
-  stage.addEventListener('mousedown', (e) => { if (e.target === stage) close(); });
-  document.body.append(el);
-  pushLayer(layer);
-  setBackdropInert(true);
-  el.focus({ preventScroll: true });
-  dv = { el, close };
-  return dv;
 }

@@ -375,12 +375,6 @@ internal static class AgentAttachmentRules
         _ => null,
     };
 
-    /// <summary>PDF 的型別（預覽：桌面的 /media、伺服器的 /f/ 以它 inline 回應，瀏覽器內建的檢視器顯示）</summary>
-    public const string PdfContentType = "application/pdf";
-
-    /// <summary>副檔名是 .pdf（只看字串、不碰檔案系統）</summary>
-    public static bool IsPdf(string? path) => Path.GetExtension(path ?? string.Empty).Equals(".pdf", StringComparison.OrdinalIgnoreCase);
-
     public static string FormatSize(long bytes)
     {
         if (bytes < 1024)

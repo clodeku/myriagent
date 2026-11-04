@@ -3,9 +3,9 @@ import { h, baseName } from './util.js';
 import { icon } from './icons.js';
 import { post, isHub } from './store.js';
 import { openDialog, toast } from './ui.js';
-import { openLightbox, openVideo, openDocument } from './viewer.js';
+import { openLightbox, openVideo } from './viewer.js';
 import { fetchFile } from './liveview.js';
-import { fileLink, filePreviewKind, docPreviewKind, localMediaUrl } from './filelinkrules.js';
+import { fileLink, filePreviewKind, localMediaUrl, isOfficeOrPdf } from './filelinkrules.js';
 
 /** 處理成功回 true；一般連結交回 app.js 原本的連結流程。 */
 export function openFileLink(anchor) {
@@ -14,14 +14,12 @@ export function openFileLink(anchor) {
   const conversationId = anchor.closest('.conv')?.dataset.conv || null;
   const name = baseName(link.path);
   const preview = filePreviewKind(link.path);
-  const doc = docPreviewKind(link.path);
   if (isHub) {
-    // 圖片、影片與 PDF 拿到短效網址後直接顯示（附「下載」），其他檔案（含 Word、Excel、PowerPoint：要那台電腦轉檔，網頁版還不支援）在框裡給「開啟」
-    const onReady = preview || doc === 'pdf' ? (v) => {
+    // 圖片與影片拿到短效網址後直接顯示（附「下載」），其他檔案在框裡給「開啟」
+    const onReady = preview ? (v) => {
       const media = { url: v.url, name: v.name, conversationId, onDownload: () => downloadUrl(v.url, v.name) };
       if (preview === 'image') openLightbox([media], 0);
-      else if (preview === 'video') openVideo(media);
-      else openDocument(media);
+      else openVideo(media);
     } : null;
     if (!conversationId || !fetchFile(conversationId, link.path, name, { onReady })) toast('目前無法讀取檔案，請稍後再試', 'error');
     return true;
@@ -33,9 +31,8 @@ export function openFileLink(anchor) {
   const media = { url: localMediaUrl(link.path), path: link.path, name, conversationId };
   if (preview === 'image') openLightbox([media], 0);
   else if (preview === 'video') openVideo(media);
-  // PDF 直接預覽；Word、Excel、PowerPoint 請這台轉成 PDF 再預覽（docPreview）
-  else if (doc === 'pdf') openDocument(media);
-  else if (doc === 'office') openDocument({ path: link.path, name, conversationId, convert: true });
+  // Word、Excel、PowerPoint、PDF：不問另存或開啟，直接用這台的預設程式開（宿主照白名單決定開或只在檔案總管選取）
+  else if (isOfficeOrPdf(link.path)) post(conversationId ? { cmd: 'openPath', path: link.path, conversationId } : { cmd: 'openPath', path: link.path });
   else openLocalFile(link.path, conversationId);
   return true;
 }

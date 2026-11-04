@@ -60,8 +60,6 @@ public class WebViewRulesTests
         AgentWebView.ContentSecurityPolicy.Should().NotContain("'unsafe-eval'");
         AgentWebView.ContentSecurityPolicy.Should().Contain("default-src 'none'");
         AgentWebView.ContentSecurityPolicy.Should().Contain("img-src 'self' data: blob:");
-        AgentWebView.ContentSecurityPolicy.Split(';').Single(p => p.Trim().StartsWith("frame-src", StringComparison.Ordinal))
-            .Trim().Should().Be("frame-src 'self'", "PDF 預覽只以同源的 iframe 開 /media（2026-11-01）");
         AgentWebView.ContentSecurityPolicy.Split(';').Single(p => p.Trim().StartsWith("script-src", StringComparison.Ordinal))
             .Should().NotContain("unsafe-inline", "inline script 要被 CSP 擋下");
     }

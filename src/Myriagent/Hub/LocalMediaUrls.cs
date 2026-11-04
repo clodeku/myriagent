@@ -31,18 +31,6 @@ internal sealed class LocalMediaUrls : IMediaUrlBuilder
     /// <summary>「另存新檔」（saveFile）只複製畫面上出現過的檔案：回覆中的本機檔案連結與媒體端點登記過的檔案</summary>
     public bool IsSaveAllowed(string path) => NormalizePath(path) is { } p && (allowedLinks.Contains(p) || allowedMedia.Contains(p));
 
-    /// <summary>
-    /// PDF 預覽（/media 以 application/pdf 回應，2026-11-01）：畫面上出現過的 PDF——回覆中的檔案連結、文件附件、檔案瀏覽器列出的——同「另存新檔」的白名單
-    /// </summary>
-    public bool IsPdfAllowed(string path) => AgentAttachmentRules.IsPdf(path) && IsSaveAllowed(path);
-
-    /// <summary>不能直接顯示的檔案出現在畫面上（文件附件、檔案瀏覽器列出的 PDF）：登記成可另存與 PDF 預覽</summary>
-    public void AllowDocument(string path)
-    {
-        if (NormalizePath(path) is { } normalized)
-            allowedLinks.Add(normalized);
-    }
-
     /// <summary>登記與查詢一律用正規化後的完整路徑（正斜線、.. 等寫法視為同一個檔案；Windows 外殼也只認反斜線）</summary>
     internal static string? NormalizePath(string? path)
     {
@@ -127,12 +115,11 @@ internal sealed class LocalMediaUrls : IMediaUrlBuilder
             allowedMedia.Add(normalized);
     }
 
-    /// <summary>檔案已不在畫面上（例如移除附件）：撤銷媒體、縮圖與文件（另存、PDF 預覽）的登記</summary>
+    /// <summary>檔案已不在畫面上（例如移除附件）：撤銷媒體與縮圖的登記</summary>
     public void Revoke(string path)
     {
         var normalized = NormalizePath(path) ?? path;
         allowedMedia.Remove(normalized);
         allowedThumbs.Remove(normalized);
-        allowedLinks.Remove(normalized);
     }
 }

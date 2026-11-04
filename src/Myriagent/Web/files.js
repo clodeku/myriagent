@@ -8,9 +8,7 @@ import { icon, FILE_ICON } from './icons.js';
 import { post, nextRequestId, isHub } from './store.js';
 import { controllable, listFailText } from './liverules.js';
 import { openMenu, toast, spinner } from './ui.js';
-import { openLightbox, openVideo, openDocument } from './viewer.js';
-import { docPreviewKind } from './filelinkrules.js';
-import { downloadUrl } from './mediamenu.js';
+import { openLightbox, openVideo } from './viewer.js';
 import { track } from './cmdtrack.js';
 
 let lastWidth = 340;
@@ -403,11 +401,7 @@ export class FileDrawer {
 
   /** 〔遠端〕瀏覽器版的檔案：fileFetch 預覽或下載（D34；電腦檢查範圍、大小與憑證） */
   fetchEntry(e) {
-    // 瀏覽器版的 PDF：拿到短效網址後直接預覽（附下載）；其他照舊在框裡給「開啟」
-    const opts = isHub && docPreviewKind(e.path) === 'pdf'
-      ? { onReady: (v) => openDocument({ url: v.url, name: v.name, conversationId: this.conv.id, onDownload: () => downloadUrl(v.url, v.name) }) }
-      : undefined;
-    if (!this.conv.ctx.fetchFile || !this.conv.ctx.fetchFile(e.path, e.name, opts)) toast('現在不能讀取這個檔案', 'error');
+    if (!this.conv.ctx.fetchFile || !this.conv.ctx.fetchFile(e.path, e.name)) toast('現在不能讀取這個檔案', 'error');
   }
 
   activate(e) {
@@ -421,8 +415,6 @@ export class FileDrawer {
     }
     if (e.kind === 'video' && e.url) { openVideo({ url: e.url, name: e.name, path: e.path, conversationId: this.conv.id }); return; }
     if (this.remote()) { this.fetchEntry(e); return; }
-    // PDF、Word、Excel、PowerPoint：在這台直接預覽
-    if (this.conv.ctx.openDocument && this.conv.ctx.openDocument({ path: e.path, name: e.name })) return;
     post({ cmd: 'openPath', path: e.path, conversationId: this.conv.id });
   }
 

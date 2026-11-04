@@ -11,7 +11,6 @@ using Myriagent.Git;
 using Myriagent.Health;
 using Myriagent.Hub;
 using Myriagent.Launch;
-using Myriagent.Preview;
 using Myriagent.RemoteExec;
 using Myriagent.Speech;
 using Myriagent.SystemStatus;
@@ -143,9 +142,6 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         Hub.AttachScheduleTranscripts(Hub.DefaultTranscriptRoots);
         // 輸入區的語音訊息：錄音在這台以 faster-whisper 轉成逐字稿，連錄音檔交給代理（不呼叫 Windows 的語音輸入）
         Hub.AttachVoice(voiceTranscriber);
-        // 文件預覽：Word、Excel、PowerPoint 以這台的 Office（沒有就 LibreOffice）轉成 PDF，快取在 cache\doc-preview
-        var docPreviewCache = Path.Combine(AppPaths.CacheDirectory, "doc-preview");
-        Hub.AttachDocPreview(new OfficePdfConverter(Path.Combine(docPreviewCache, "work")), docPreviewCache);
         // 回覆裡顯示的圖片與影片在對話資料夾留一份（attachments\.kept\）：原檔之後被刪或被覆寫，對話裡照樣看得到當時那一張
         Hub.AttachMediaKeeper();
         // 上次下載或匯入網頁上傳途中被關閉（當機、重開機）留下的暫存：同步還沒接上、沒有任何上傳在下載，在背景清掉（WP4.7 合併前審查 R6）

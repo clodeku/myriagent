@@ -168,6 +168,43 @@ public sealed class AgentHubPeerExtrasTests
         h.Main.Messages("toast", mark).Single().Value<string>("level").Should().Be("success");
     }
 
+    /// <summary>2026-11-05 使用者要求：Word、Excel、PowerPoint、PDF 一律用這台的預設程式開（網頁帶 open:true）；白名單以外（含巨集的）照舊只在檔案總管顯示</summary>
+    [Theory]
+    [InlineData("季報.xlsx", true)]
+    [InlineData("簡報.pptx", true)]
+    [InlineData("合約.pdf", true)]
+    [InlineData("巨集.xlsm", false)]
+    public async Task peerFileSave_帶open_白名單內的下載後用預設程式開(string fileName, bool opens)
+    {
+        using var h = new HubHarness();
+        var (id, _) = LiveReplica(h);
+        var downloads = h.Temp.Combine("Downloads");
+        h.Hub.PeerDownloadsForTest = downloads;
+        h.Hub.PeerFileSourceForTest = new FakeFiles(new PeerFile("doc"u8.ToArray(), fileName));
+        var key = OtherDevice + "-" + MediaRef;
+        var cid = NewId();
+        h.Command(h.Main, "fileFetch", new { conversationId = id, requestId = "r1", path = fileName, commandId = cid });
+        h.Ui.Invoke(() => h.Hub.OnPeerReply(cid, new JObject { ["type"] = "fileRef", ["requestId"] = "r1", ["conversationId"] = id, ["url"] = "/f/" + key, ["name"] = fileName }));
+        var mark = h.Main.Mark();
+
+        h.Command(h.Main, "peerFileSave", new { conversationId = id, url = "/f/" + key, name = fileName, open = true });
+        await h.WaitUntilAsync(() => h.Main.Messages("toast", mark).Count > 0, "提示");
+
+        var saved = Path.Combine(downloads, fileName);
+        File.Exists(saved).Should().BeTrue();
+        if (opens)
+        {
+            h.Host.Opened.All.Should().Equal(saved);
+            h.Host.Revealed.All.Should().BeEmpty();
+            h.Main.Messages("toast", mark).Single().Value<string>("text").Should().Contain("用預設程式開啟");
+        }
+        else
+        {
+            h.Host.Opened.All.Should().BeEmpty("含巨集的不直接開（同 openPath 的白名單）");
+            h.Host.Revealed.All.Should().Equal(saved);
+        }
+    }
+
     [Fact]
     public async Task peerFileSave_沒登記過的鍵不下載()
     {

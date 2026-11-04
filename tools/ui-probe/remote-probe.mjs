@@ -29,10 +29,10 @@ const DESKTOP_ORIGIN = RF.DESKTOP_ORIGIN;
 const HUB_URL = 'wss://hub.probe.local/hubs/v1/browser';
 // 伺服器的 CSP：SecurityHeaderRules.ContentSecurityPolicy("https://hub.probe.local")（src/MyriagentHub/Hosting/SecurityHeaders.cs）。
 // 這一行要和伺服器的結果逐字相同（tests/MyriagentHub.Tests/Web/TransportHubFileTests 的 remote_probe的CSP與伺服器相同）
-const HUB_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' wss://hub.probe.local; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'; object-src 'none'; worker-src 'none'";
+const HUB_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' wss://hub.probe.local; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; worker-src 'none'";
 // 桌面宿主回應 index.html 時帶的 CSP（同 probe.mjs）
 const DESKTOP_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; " +
-  "font-src 'self' data:; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'";
+  "font-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'";
 // index.html 載入網頁主程式的那一行（AssetServerRules.Anchor）：傳輸腳本插在它前面
 const ANCHOR = '<script type="module" src="app.js"></script>';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8' };

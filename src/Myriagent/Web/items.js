@@ -1420,8 +1420,6 @@ export function attachmentTile(a, ctx, opts = {}) {
       h('span', { class: 'att-meta' }, h('span', { class: 'att-name', text: a.name || '' }), voiceWave(a.wave) || h('span', { class: 'att-size', text: a.size || '' })));
     if (a.wave) tile.classList.add('att-voice');
     tile.addEventListener('click', () => {
-      // PDF、Word、Excel、PowerPoint 在這台直接預覽（conversation.js 的 openDocument；其他電腦的對話回 false，照舊開檔）
-      if (a.path && ctx && ctx.openDocument && ctx.openDocument({ path: a.path, name: a.name })) return;
       if (a.path) post(pathCmd('openPath', a.path, ctx));
       else if (remoteOnly && !composer) toast(REMOTE_ATTACHMENT_TEXT);
     });

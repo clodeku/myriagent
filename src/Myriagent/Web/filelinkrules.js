@@ -32,13 +32,23 @@ export function filePreviewKind(path) {
 }
 
 /**
- * 文件預覽（2026-11-01）：'pdf' 交給瀏覽器內建的 PDF 檢視器；'office'（Word、Excel、PowerPoint）由桌面先轉成 PDF（docPreview）。
- * 副檔名和宿主的 DocPreviewRules.KindOf 同一組；其他回 null
+ * Word、Excel、PowerPoint、PDF（2026-11-05 使用者要求：一律交給裝置自己的程式，不在 app 裡轉檔或顯示）。
+ * 桌面以這台的預設程式開（宿主的 openPath 另有安全白名單：舊格式與含巨集的只在檔案總管選取），瀏覽器版在電腦上直接下載、
+ * 手機與平板給「用裝置上的程式開啟」
  */
-export function docPreviewKind(path) {
-  if (/\.pdf$/i.test(path || '')) return 'pdf';
-  if (/\.(docx?|docm|dotx?|rtf|odt|xlsx?|xlsm|xlsb|ods|pptx?|pptm|ppsx?|odp)$/i.test(path || '')) return 'office';
-  return null;
+export function isOfficeOrPdf(path) {
+  return /\.(pdf|docx?|rtf|odt|xlsx?|ods|pptx?|odp)$/i.test(path || '');
+}
+
+/**
+ * fileRef 到了之後怎麼做（liveview.onFileRef）：'peerOpen'＝桌面看其他電腦的對話，下載到這台並用預設程式開；
+ * 'download'＝瀏覽器版在電腦上，直接下載；'deviceOpen'＝手機與平板，給「用裝置上的程式開啟」（系統要使用者親手點，才肯交給其他程式）；
+ * null＝不是這幾類，照舊
+ */
+export function fileRefAction({ name, hub, handheld } = {}) {
+  if (!isOfficeOrPdf(name)) return null;
+  if (!hub) return 'peerOpen';
+  return handheld ? 'deviceOpen' : 'download';
 }
 
 export function localMediaUrl(path) {
