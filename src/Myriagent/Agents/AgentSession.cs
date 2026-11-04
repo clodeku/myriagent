@@ -329,7 +329,8 @@ internal interface IAgentSession : IDisposable
     /// <summary>停止這一輪；準備期間（訊息還沒送出）按停止，SendAsync 送出前會放棄並回報已停止。RestartAsync 進行中按停止＝不接續</summary>
     Task InterruptAsync();
 
-    Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers);
+    /// <param name="notes">每題的補充說明（題目 id → 文字；QuestionNoteRules，2026-11-05）：Claude、Grok 放進作答的 annotations.notes，Codex 併進答案；沒有是 null</param>
+    Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes = null);
 
     Task DeclineQuestionAsync(string requestKey);
 

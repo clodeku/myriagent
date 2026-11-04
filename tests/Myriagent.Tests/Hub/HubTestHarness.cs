@@ -587,8 +587,12 @@ internal sealed class FakeSession : IAgentSession
         return Task.CompletedTask;
     }
 
-    public Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers)
+    /// <summary>每次作答帶的補充說明（沒有是 null）</summary>
+    public Recorder<IReadOnlyDictionary<string, string>?> AnswerNotes { get; } = new();
+
+    public Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes = null)
     {
+        AnswerNotes.Add(notes);
         Answers.Add((requestKey, answers));
         return Task.CompletedTask;
     }

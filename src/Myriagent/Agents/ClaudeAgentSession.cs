@@ -2228,7 +2228,7 @@ internal sealed class ClaudeAgentSession : IAgentSession
             waiter.TrySetResult(null);
     }
 
-    public async Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers)
+    public async Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes = null)
     {
         var (request, target) = TakePending(requestKey);
         if (request == null || target == null)
@@ -2242,7 +2242,7 @@ internal sealed class ClaudeAgentSession : IAgentSession
                 Raise(new AgentNoticeEvent(error, IsError: true));
             return;
         }
-        var input = ClaudeStreamRules.BuildQuestionAnswerInput(request.Input, answers);
+        var input = ClaudeStreamRules.BuildQuestionAnswerInput(request.Input, answers, notes);
         await target.WriteLineAsync(ClaudeStreamRules.BuildSuccessResponse(requestKey, ClaudeStreamRules.Allow(input)));
     }
 

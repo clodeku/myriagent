@@ -79,6 +79,55 @@ public sealed class AgentHubRemoteAnswerTests
         s.Sent.Count.Should().Be(1, "Claude 的問卷直接回 CLI，不當成訊息");
     }
 
+    /// <summary>每題的補充說明（2026-11-05）：本機與遠端都交給會話（Claude 放進 annotations.notes），畫面與存檔多一筆「補充說明：…」</summary>
+    [Fact]
+    public async Task answer帶補充說明_本機與遠端都交給會話_畫面多一筆補充()
+    {
+        using var h = new HubHarness();
+        var (id, s, card) = ClaudeAsked(h);
+
+        h.Command(h.Main, "answer", new { conversationId = id, itemId = card.Id, answers = new Dictionary<string, string[]> { ["要怎麼彙總？"] = ["依日期"] },
+            notes = new Dictionary<string, string[]> { ["要怎麼彙總？"] = ["  只要上個月  "] } });
+        await h.WaitUntilAsync(() => s.Answers.Count == 1, "本機作答");
+        s.Answers.All.Single().Answers["要怎麼彙總？"].Should().Equal(["依日期"], "答案本身不混進補充");
+        s.AnswerNotes.All.Single().Should().BeEquivalentTo(new Dictionary<string, string> { ["要怎麼彙總？"] = "只要上個月" });
+        Card(h, id, card.Id).Answers["要怎麼彙總？"].Should().Equal("依日期", QuestionNoteRules.DisplayPrefix + "只要上個月");
+
+        using var h2 = new HubHarness();
+        var (id2, s2, card2) = ClaudeAsked(h2);
+        var outcome = await RemoteEntrySamples.RunAsync(h2, RemoteEntrySamples.Body(RemoteEntrySamples.Cmd("answer", id2,
+            new { itemId = card2.Id, answers = new Dictionary<string, string[]> { ["要怎麼彙總？"] = ["依月份"] },
+                notes = new Dictionary<string, string[]> { ["要怎麼彙總？"] = ["含退貨"] }, requestDigest = card2.RequestDigest })));
+        outcome.State.Should().Be(RemoteResultStates.Done, outcome.Message);
+        s2.AnswerNotes.All.Single().Should().BeEquivalentTo(new Dictionary<string, string> { ["要怎麼彙總？"] = "含退貨" });
+
+        // 補充對不回題目：整個 answer 不收
+        using var h3 = new HubHarness();
+        var (id3, s3, card3) = ClaudeAsked(h3);
+        var bad = await RemoteEntrySamples.RunAsync(h3, RemoteEntrySamples.Body(RemoteEntrySamples.Cmd("answer", id3,
+            new { itemId = card3.Id, answers = new Dictionary<string, string[]> { ["要怎麼彙總？"] = ["依月份"] },
+                notes = new Dictionary<string, string[]> { ["不是這題"] = ["x"] }, requestDigest = card3.RequestDigest })));
+        bad.State.Should().NotBe(RemoteResultStates.Done);
+        s3.Answers.Count.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task answer帶補充說明_當成訊息送出時併進訊息_密碼題不收補充()
+    {
+        using var h = new HubHarness();
+        var (id, s, card) = CodexAsked(h);
+        h.CompleteTurn(s);
+        var before = s.Sent.Count;
+
+        h.Command(h.Main, "answer", new { conversationId = id, itemId = card.Id, answers = new Dictionary<string, string[]> { ["user"] = ["alice"], ["pwd"] = ["p@ss"] },
+            notes = new Dictionary<string, string[]> { ["user"] = ["是測試帳號"], ["pwd"] = ["不該出現"] } });
+        await h.WaitUntilAsync(() => s.Sent.Count == before + 1, "答案當成下一則訊息送出");
+
+        var text = s.Sent.All[^1].Input.Text;
+        text.Should().Contain("帳號：alice、" + QuestionNoteRules.DisplayPrefix + "是測試帳號");
+        text.Should().NotContain("不該出現");
+    }
+
     [Fact]
     public async Task 遠端answer_遮蔽過的題目id對回原題_原文的id對不到()
     {

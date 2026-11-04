@@ -1321,8 +1321,10 @@ internal static partial class ClaudeStreamRules
 
     /// <summary>
     /// AskUserQuestion 作答：原輸入加上 answers（題目文字 → 答案；多選以「, 」串接，與 Claude Code 自己的介面相同）。
+    /// 有補充說明時另加 annotations（題目文字 → {notes}；實測 2.1.316，tools/probes/claude_question_notes_probe.py：CLI 交給模型
+    /// 「"題目"="選項" notes: …」）
     /// </summary>
-    public static JObject BuildQuestionAnswerInput(JObject originalInput, IReadOnlyDictionary<string, IReadOnlyList<string>> answers)
+    public static JObject BuildQuestionAnswerInput(JObject originalInput, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes = null)
     {
         var updated = (JObject)(originalInput ?? new JObject()).DeepClone();
         var answerObject = new JObject();
@@ -1337,6 +1339,14 @@ internal static partial class ClaudeStreamRules
         }
 
         updated["answers"] = answerObject;
+        var annotations = new JObject();
+        foreach (var (question, note) in notes ?? new Dictionary<string, string>())
+        {
+            if (answerObject.ContainsKey(question) && !string.IsNullOrWhiteSpace(note))
+                annotations[question] = new JObject { ["notes"] = note.Trim() };
+        }
+        if (annotations.Count > 0)
+            updated["annotations"] = annotations;
         return updated;
     }
 

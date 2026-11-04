@@ -421,7 +421,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                     _ = StopAsync(Conv());
                     break;
                 case "answer":
-                    _ = AnswerAsync(Conv(), Str("itemId"), command["answers"] as JObject);
+                    _ = AnswerAsync(Conv(), Str("itemId"), command["answers"] as JObject, notesJson: command["notes"] as JObject);
                     break;
                 case "skipQuestion":
                     _ = SkipQuestionAsync(Conv(), Str("itemId"));
@@ -1810,7 +1810,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
     // ───────────────────────────── 問卷、核准、計畫 ─────────────────────────────
 
     /// <param name="remoteOrigin">遠端的 answer（WP4.4 計畫 D21）：當成訊息送出的回答是代理輸入，入列與送出都帶著這個來源（取出時照樣重查）</param>
-    private async Task AnswerAsync(ConversationState? c, string? itemId, JObject? answersJson, RemoteOrigin? remoteOrigin = null)
+    private async Task AnswerAsync(ConversationState? c, string? itemId, JObject? answersJson, RemoteOrigin? remoteOrigin = null, JObject? notesJson = null)
     {
         var item = c == null ? null : FindItem(c, itemId);
         if (c == null || item == null || item.Kind != AgentItemKind.Question || item.Status != AgentItemStatus.Waiting || RejectStaleCard(c, item))
@@ -1830,9 +1830,12 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             Toast("請先選擇或輸入答案");
             return;
         }
+        // 每題的補充說明（2026-11-05）：Claude、Grok 以 annotations.notes 交給 CLI；畫面、存檔、Codex 與答案當下一則訊息的都併成多一筆「補充說明：…」
+        var notes = QuestionNoteRules.Parse(item.Questions, notesJson);
+        var shown = QuestionNoteRules.Merge(answers, notes);
 
         // 密碼類題目（Codex isSecret）的答案只送給代理、不留在畫面與存檔
-        item.Answers = answers.ToDictionary(
+        item.Answers = shown.ToDictionary(
             a => a.Key,
             a => item.Questions.Any(q => q.Id == a.Key && q.IsSecret) ? new List<string> { "（已隱藏）" } : a.Value.ToList());
         item.Status = AgentItemStatus.Done;
@@ -1842,7 +1845,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         if (item.AnswerAsMessage)
         {
             // CLI 收原文；畫面、存檔、佇列快照與同步只看秘密答案換成「（已隱藏）」的文字（設計 14.11 D20、契約 R3）
-            var (message, display) = AnswerMessageRules.Compose(item.Questions, answers);
+            var (message, display) = AnswerMessageRules.Compose(item.Questions, shown);
             if (c.Meta.Provider == AgentProvider.Antigravity
                 && AntigravityStreamRules.TryResolvePlanFeedbackDecision(item.Questions, answers, out var targetMode, out var planCliMessage)
                 && !string.IsNullOrWhiteSpace(planCliMessage))
@@ -1872,7 +1875,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         SetStatus(c, "回覆中…");
         try
         {
-            await c.Session.AnswerQuestionAsync(item.RequestKey, answers);
+            await c.Session.AnswerQuestionAsync(item.RequestKey, answers, notes.Count > 0 ? notes : null);
         }
         catch (Exception ex)
         {

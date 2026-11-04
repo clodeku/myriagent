@@ -14,6 +14,7 @@ import { commandLang, commandParts, detailLang, outputLang, guessLang } from './
 import { enhanceMermaidBlock, queueMermaid, flushMermaid } from './mermaid.js';
 import { framedVideo } from './framedvideo.js';
 import { agentUsageView } from './claudeoptrules.js';
+import { noteFieldShown, buildNotes, splitAnswer, NOTE_MAX } from './questionrules.js';
 
 const DIFF_LIMIT = 1200;
 const COPY_FX_MS = 900; // 複製成功的閃光（fx.css 的 .fx-copied）
@@ -852,8 +853,8 @@ function cancelledTag(item) {
 function qState(ctx, item) {
   let s = ctx.qstate.get(item.id);
   if (!s) {
-    s = { sel: {}, other: {}, active: 0 };
-    for (const q of item.questions || []) { s.sel[q.id] = []; s.other[q.id] = ''; }
+    s = { sel: {}, other: {}, note: {}, active: 0 };
+    for (const q of item.questions || []) { s.sel[q.id] = []; s.other[q.id] = ''; s.note[q.id] = ''; }
     ctx.qstate.set(item.id, s);
   }
   return s;
@@ -914,6 +915,20 @@ function createQuestion(item, ctx) {
       });
       other.addEventListener('focus', () => setActive(qi));
       block.append(h('div', { class: 'q-other-row' }, q.secret ? icon('lock', 'q-lock') : null, other));
+    }
+    // 補充說明（2026-11-05）：選了選項之後另外補一段，和「其他（自行輸入）」互不清除；Claude、Grok 以 annotations.notes 交給 CLI
+    if (noteFieldShown(q, asker)) {
+      const note = h('input', {
+        type: 'text', class: 'q-note input', placeholder: '補充說明（選填）', maxLength: NOTE_MAX, autocomplete: 'off', spellcheck: 'false',
+        dataset: { field: 'questionNote' }, 'aria-label': '補充說明（選填）',
+      });
+      note.value = st.note[q.id] || '';
+      note.addEventListener('input', () => { st.note[q.id] = note.value; });
+      note.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); }
+      });
+      note.addEventListener('focus', () => setActive(qi));
+      block.append(h('div', { class: 'q-note-row' }, icon('edit', 'q-note-ic'), note));
     }
     block.addEventListener('pointerdown', () => setActive(qi));
     blocks.push(block);
@@ -976,7 +991,9 @@ function createQuestion(item, ctx) {
       blocks[missing].scrollIntoView({ block: 'nearest' });
       return;
     }
-    sendCard(n, item, ctx, 'answer', withDigest({ itemId: item.id, answers }, item));
+    // 補充說明只在有填時才帶（舊版的電腦不認得 notes，帶了會拒絕整個回答）
+    const notes = buildNotes(qs, st.note, asker);
+    sendCard(n, item, ctx, 'answer', withDigest(notes ? { itemId: item.id, answers, notes } : { itemId: item.id, answers }, item));
   }
 
   n.addEventListener('keydown', (e) => {
@@ -998,13 +1015,15 @@ function answeredView(item) {
   if (item.decision === 'skip' || item.status === 'Declined') return resultTag('已略過', 'gray');
   const box = h('div', { class: 'answered' });
   for (const q of item.questions || []) {
-    const a = (item.answers && item.answers[q.id]) || [];
+    // 補充說明（宿主併成「補充說明：…」那一筆）另起一行，不畫成答案的晶片
+    const { answers: a, notes } = splitAnswer((item.answers && item.answers[q.id]) || []);
     const row = h('div', { class: 'ans-row' }, h('span', { class: 'ans-q', text: q.text || q.header || '' }));
     const vals = h('span', { class: 'ans-v' });
     if (!a.length) vals.append(h('span', { class: 'ans-none', text: '未回答' }));
     for (const v of a) vals.append(h('span', { class: 'ans-chip', text: q.secret ? '••••••' : v }));
     row.append(vals);
     box.append(row);
+    for (const note of q.secret ? [] : notes) box.append(h('div', { class: 'ans-note', dataset: { field: 'answerNote' } }, icon('edit', 'ans-note-ic'), h('span', { text: note })));
   }
   appendResolvedBy(box, item);
   return box;

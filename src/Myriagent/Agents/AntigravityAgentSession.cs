@@ -909,7 +909,7 @@ internal sealed class AntigravityAgentSession : IAgentSession
         return Task.CompletedTask;
     }
 
-    public Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers) => Task.CompletedTask;
+    public Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes = null) => Task.CompletedTask;
 
     public Task DeclineQuestionAsync(string requestKey) => Task.CompletedTask;
 

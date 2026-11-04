@@ -750,9 +750,9 @@ internal static class GrokAcpRules
 
     /// <summary>
     /// 問卷的答案 → {outcome:"accepted", answers:{題目:[選項…]}, annotations:{題目:{notes}}}。
-    /// 不是選項的文字（使用者自填）照 grok 的格式寫成 "Other"，文字放進 annotations 的 notes
+    /// 不是選項的文字（使用者自填）照 grok 的格式寫成 "Other"，文字放進 annotations 的 notes；每題的補充說明（2026-11-05）也接在 notes 後面
     /// </summary>
-    public static JObject BuildQuestionAnswer(IReadOnlyList<AgentQuestion> questions, IReadOnlyDictionary<string, IReadOnlyList<string>> answers)
+    public static JObject BuildQuestionAnswer(IReadOnlyList<AgentQuestion> questions, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? extraNotes = null)
     {
         var answerJson = new JObject();
         var annotations = new JObject();
@@ -777,6 +777,8 @@ internal static class GrokAcpRules
             }
             if (labels.Count == 0)
                 continue;
+            if (extraNotes != null && extraNotes.TryGetValue(question.Id, out var extra) && !string.IsNullOrWhiteSpace(extra))
+                notes.Add(extra.Trim());
             answerJson[question.Id] = labels;
             if (notes.Count > 0)
                 annotations[question.Id] = new JObject { ["notes"] = string.Join("\n", notes) };

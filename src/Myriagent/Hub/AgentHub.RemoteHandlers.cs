@@ -374,9 +374,11 @@ internal sealed partial class AgentHub
         }
 
         JObject? answers = null;
+        JObject? notes = null;
         if (cmd == "answer")
         {
-            if (!RemoteCardRules.TryMapAnswers(item, command["answers"] as JObject, out var mapped))
+            if (!RemoteCardRules.TryMapAnswers(item, command["answers"] as JObject, out var mapped)
+                || !RemoteCardRules.TryMapNotes(item, command["notes"] as JObject, out notes))
             {
                 context.Reject(RemoteResultCodes.Invalid, "沒有任何答案，或答案對不回問卷的題目", RemoteGateSteps.Handler);
                 return;
@@ -393,7 +395,7 @@ internal sealed partial class AgentHub
         {
             "approve" => ApproveAsync(c, itemId, choice, message, origin),
             "approvePlan" => ApprovePlanAsync(c, itemId, choice, message),
-            "answer" => AnswerAsync(c, itemId, answers, origin),
+            "answer" => AnswerAsync(c, itemId, answers, origin, notes),
             _ => throw new ArgumentOutOfRangeException(nameof(cmd), cmd, "不是卡片指令"),
         };
         if (task.IsFaulted)

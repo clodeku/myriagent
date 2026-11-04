@@ -39,9 +39,39 @@ internal static class RemoteCardRules
             return RemoteResultCodes.Stale;
         if (cmd == "approve" && command.Value<string>("choice") == "allowSession" && !card.CanAllowForSession)
             return RemoteResultCodes.Invalid;
-        if (cmd == "answer" && !TryMapAnswers(card, command["answers"] as JObject, out _))
+        if (cmd == "answer" && (!TryMapAnswers(card, command["answers"] as JObject, out _) || !TryMapNotes(card, command["notes"] as JObject, out _)))
             return RemoteResultCodes.Invalid;
         return null;
+    }
+
+    /// <summary>
+    /// 遠端的補充說明（選用，形狀同 answers）→ 以原本的題目 id 為鍵的 JObject（交給 QuestionNoteRules.Parse）。沒帶是空的；
+    /// 不認得的鍵、遮蔽後分不出是哪一題、同一題兩次、值不是字串陣列都回 false
+    /// </summary>
+    public static bool TryMapNotes(AgentChatItem card, JObject? notes, [NotNullWhen(true)] out JObject? mapped)
+    {
+        mapped = new JObject();
+        if (notes == null)
+            return true;
+        var byMasked = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var question in card.Questions ?? [])
+        {
+            if (question?.Id == null)
+                continue;
+            var masked = CredentialLeakRules.Mask(question.Id);
+            byMasked[masked] = byMasked.ContainsKey(masked) ? null : question.Id;
+        }
+        foreach (var property in notes.Properties())
+        {
+            if (!byMasked.TryGetValue(property.Name, out var original) || original == null || mapped.ContainsKey(original)
+                || property.Value is not JArray array || array.Any(v => !RemoteCommandShapeRules.IsString(v, out _)))
+            {
+                mapped = null;
+                return false;
+            }
+            mapped[original] = array.DeepClone();
+        }
+        return true;
     }
 
     /// <summary>

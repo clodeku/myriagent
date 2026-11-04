@@ -214,7 +214,8 @@ internal static class RemoteCommandCatalog
         yield return Owner("send", 1, [Text("text", RemoteCommandShapeRules.MaxAgentTextLength)], ["sendRejected", "toast"]);
         yield return Owner("cancelQueued", 1, [Item("id")]);
         yield return Owner(Stop, 0, []);
-        yield return Owner("answer", 1, [Item(), new("answers", RemoteFieldKind.Answers), Digest()], ["sendRejected", "toast"]);
+        // notes：每題的補充說明（2026-11-05，選用；形狀同 answers，QuestionNoteRules）
+        yield return Owner("answer", 1, [Item(), new("answers", RemoteFieldKind.Answers), new("notes", RemoteFieldKind.Answers, false), Digest()], ["sendRejected", "toast"]);
         yield return Owner("skipQuestion", 1, [Item()]);
         yield return Owner("approve", 1, [Item(), Choice("choice", true, false, "allow", "allowSession", "deny"),
             Text("message", RemoteCommandShapeRules.MaxAgentTextLength, required: false, nullable: true), Digest()]);

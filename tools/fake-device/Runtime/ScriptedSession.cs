@@ -351,7 +351,7 @@ internal sealed class ScriptedSession(AgentProvider provider, Action<Action> pos
         return Task.CompletedTask;
     }
 
-    public Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers)
+    public Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes = null)
     {
         calls?.Answer();
         return Resolve(requestKey);

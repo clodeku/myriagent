@@ -217,7 +217,8 @@ public sealed class RemoteCardRulesTests
         // WP4.3 步 6（契約 R3）把中樞 AnswerAsync 自己組的那一段換成 Compose；CLI 收到的內容與舊的組法逐位元組相同，
         // 由 AgentHubSecretAnswerTests.一般題目_CLI文字與舊的組法逐位元組相同 證明
         var hub = File.ReadAllText(Path.Combine(TestSupport.MyriagentHubExe.RepoRoot(), "src", "Myriagent", "Hub", "AgentHub.cs"));
-        hub.Should().Contain("AnswerMessageRules.Compose(item.Questions, answers)");
+        // 2026-11-05 起傳的是併進補充說明的答案（QuestionNoteRules.Merge；沒有補充時和 answers 相同）
+        hub.Should().Contain("AnswerMessageRules.Compose(item.Questions, shown)");
         hub.Should().NotContain("$\"{q.Text}：{string.Join(\"、\", ", "舊的組法（項目與佇列也用含秘密原文的文字）已換掉");
     }
 }

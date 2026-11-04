@@ -1067,6 +1067,12 @@ async function runMain(vp, full) {
   const q = `${convSel('c1')} .it[data-id="i19"]`;
   await page.click(`${q} .card-head`);
   await page.keyboard.press('2');
+  // 補充說明（2026-11-05）：單選題選了之後再補一段，選項不會被清掉；密碼題沒有補充欄
+  await page.fill(`${q} .q-block[data-qi="0"] .q-note`, '要等網路恢復再試');
+  const noteState = await page.evaluate((sel) => ({
+    q1Selected: [...document.querySelectorAll(sel + ' .q-block[data-qi="0"] .opt.sel .opt-label')].map((x) => x.textContent),
+    secretNote: !!document.querySelector(sel + ' .q-block[data-qi="2"] .q-note'),
+  }), q);
   await page.click(`${q} .q-block[data-qi="1"] .opt >> nth=0`);
   await page.click(`${q} .q-block[data-qi="1"] .opt >> nth=1`);
   await page.fill(`${q} .q-block[data-qi="2"] .q-other`, 'sk-test-123');
@@ -1075,6 +1081,8 @@ async function runMain(vp, full) {
   if (full) {
     const a = ans && ans.answers;
     check('questionAnswer', !!a && a.q1 && a.q1[0] === '5 分鐘' && a.q2 && a.q2.join('|') === '逾時回報|關閉視窗後重新檢查' && a.q3 && a.q3[0] === 'sk-test-123', ans);
+    check('questionAnswerNote', !!ans && JSON.stringify(ans.notes) === JSON.stringify({ q1: ['要等網路恢復再試'] }) && noteState.q1Selected.join('|') === '5 分鐘' && !noteState.secretNote,
+      { notes: ans && ans.notes, noteState });
   }
 
   // 核准：否＋告訴代理改怎麼做

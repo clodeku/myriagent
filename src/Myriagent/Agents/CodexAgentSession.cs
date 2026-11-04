@@ -1453,14 +1453,14 @@ internal sealed partial class CodexAgentSession : IAgentSession
 
     public Task<bool> ReattachRemoteControlAsync(AgentSessionSettings settings) => Task.FromResult(false);
 
-    public async Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers)
+    public async Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes = null)
     {
         var (request, target) = TakePending(requestKey);
         if (request == null || target == null)
             return;
         try
         {
-            await target.WriteLineAsync(CodexAppServerRules.BuildResult(request.Id, CodexAppServerRules.BuildUserInputResponse(answers)));
+            await target.WriteLineAsync(CodexAppServerRules.BuildResult(request.Id, CodexAppServerRules.BuildUserInputResponse(QuestionNoteRules.Merge(answers, notes))));
         }
         finally
         {

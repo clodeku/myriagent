@@ -1361,12 +1361,12 @@ internal sealed class GrokAgentSession : IAgentSession
         PublishSafePoint();
     }
 
-    public async Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers)
+    public async Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes = null)
     {
         var request = TakePending(requestKey, PendingKind.Question);
         if (request?.Questions == null)
             return;
-        await RespondQuietlyAsync(request.Process, request.Id, GrokAcpRules.BuildQuestionAnswer(request.Questions, answers));
+        await RespondQuietlyAsync(request.Process, request.Id, GrokAcpRules.BuildQuestionAnswer(request.Questions, answers, notes));
         PublishSafePoint();
     }
 
