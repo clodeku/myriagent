@@ -71,3 +71,29 @@ test('插入記號的 x：插在第 i 個前面是它的左緣、插在最後是
   assert.equal(R.insertMarkX(tabs, 9), 259, '超過也是最後');
   assert.equal(R.insertMarkX([], 0), 0, '沒有分頁');
 });
+
+test('分頁放左側：選了左側而且窗格夠寬才側排，窄了照用上方的橫排，看不到（寬度 0）時沿用', () => {
+  assert.equal(R.sideTabsOn('top', 1200, false), false, '沒選左側');
+  assert.equal(R.sideTabsOn('left', R.SIDE_TABS_MIN_WIDTH, false), true, '剛好夠寬');
+  assert.equal(R.sideTabsOn('left', R.SIDE_TABS_MIN_WIDTH - 1, true), false, '窄了改回橫排（手機、分很多格）');
+  assert.equal(R.sideTabsOn('left', 0, true), true, '切到儀表板時工作區看不到：沿用，回來時不會閃一下橫排');
+  assert.equal(R.sideTabsOn('left', 0, false), false);
+  assert.ok(R.SIDE_TABS_MIN_WIDTH > R.SIDE_TABS_WIDTH * 2, '側欄之外的對話區至少比分頁欄寬');
+});
+
+test('側排的插入位置：同一套算法換成上下（上緣、下緣當成 left、right）', () => {
+  const rows = [{ left: 35, right: 67 }, { left: 67, right: 99 }];
+  assert.equal(R.dropIndexAt([51, 83], 60), 1, '游標的 y 過了第一個的中線');
+  assert.equal(R.insertMarkX(rows, 1), 65);
+  assert.equal(R.insertMarkX(rows, 2), 97, '最後一個的下緣');
+});
+
+test('分頁欄的寬度：夾在最窄最寬之間、留給對話區至少 SIDE_CHAT_MIN、不認得的值用預設', () => {
+  assert.equal(R.clampSideWidth(250, 1000), 250);
+  assert.equal(R.clampSideWidth(80, 1000), R.SIDE_TABS_MIN, '最窄');
+  assert.equal(R.clampSideWidth(900, 2000), R.SIDE_TABS_MAX, '最寬');
+  assert.equal(R.clampSideWidth(300, 520), 520 - R.SIDE_CHAT_MIN, '窗格變窄時先縮分頁欄，對話區至少留著');
+  assert.equal(R.clampSideWidth(300, R.SIDE_TABS_MIN_WIDTH), R.SIDE_TABS_WIDTH, '剛好能側排的寬度：分頁欄是預設寬');
+  assert.equal(R.clampSideWidth(NaN, 1000), R.SIDE_TABS_WIDTH, '沒調過是預設');
+  assert.equal(R.clampSideWidth(250.6, 0), 251, '不知道窗格寬度：只夾最窄最寬、取整數');
+});

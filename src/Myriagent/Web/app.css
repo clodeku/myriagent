@@ -654,6 +654,32 @@ input[type="search"]::-webkit-search-cancel-button { filter: grayscale(1); opaci
 .strip-actions { display: flex; align-items: center; gap: 1px; padding: 0 5px; flex: none; }
 .strip-actions .ibtn { width: 26px; height: 26px; }
 .strip-actions .ibtn .ic { width: 15px; height: 15px; }
+/* 分頁放左側（2026-11-05 使用者要求；workspace.js 的 applyTabsSide 在窗格夠寬時加 .tabs-left，窄了照用上方的橫排）：
+   窗格改成左右排，分頁列是一欄（寬 tabdragrules.SIDE_TABS_WIDTH）、按鈕在最上面、分頁上下排可捲；作用中的分頁左緣一條線、右緣接到對話區 */
+.strip-side.on { color: var(--text-hi); }
+.pane.tabs-left { flex-direction: row; }
+.pane.tabs-left .strip { width: var(--side-w, 184px); height: auto; flex-direction: column; border-bottom: 0; border-right: 1px solid var(--border); }
+.pane.tabs-left .strip-actions { order: -1; height: 35px; justify-content: flex-end; border-bottom: 1px solid var(--border); }
+.pane.tabs-left .tabs { flex: 1; min-height: 0; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
+.pane.tabs-left .tab { height: 32px; flex: none; min-width: 0; max-width: none; border-right: 0; border-bottom: 1px solid var(--border); }
+.pane.tabs-left .tab.active::after { left: auto; right: -1px; top: 0; bottom: 0; width: 1px; height: auto; }
+.pane.tabs-left .tab.active::before { right: auto; top: 0; bottom: 0; width: 1px; height: auto; }
+.pane.tabs-left .tab.focused::before { width: 2px; }
+.pane.tabs-left .tab.ins-before { box-shadow: inset 0 2px 0 var(--focus); }
+.pane.tabs-left .tab.ins-after { box-shadow: inset 0 -2px 0 var(--focus); }
+/* 分頁欄右緣的把手（workspace.js 的 bindSideGrip）：只在側排時有，寬 7px、跨在邊框上；滑過、拖曳中、鍵盤焦點時亮一條焦點色的線 */
+.strip-grip { display: none; }
+.pane.tabs-left .strip-grip {
+  display: block; position: absolute; top: 0; bottom: 0; right: -4px; width: 7px; z-index: 4; cursor: col-resize; touch-action: none;
+}
+.pane.tabs-left .strip-grip::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background-color 120ms;
+}
+.pane.tabs-left .strip-grip:hover::after, .pane.tabs-left .strip-grip:focus-visible::after, .pane.tabs-left .strip-grip.on::after {
+  width: 2px; left: 2px; background: var(--focus);
+}
+.pane.tabs-left .strip-grip:focus-visible { outline: none; }
+body.side-resizing { cursor: col-resize; user-select: none; }
 
 /* ───── 選單 ───── */
 .menu {

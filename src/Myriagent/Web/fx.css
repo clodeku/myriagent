@@ -1351,6 +1351,9 @@ textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
   filter: drop-shadow(0 0 3px var(--drag-acc, var(--focus)));
 }
 .strip.ins-on .tab-ins { display: block; }
+/* 側排的分頁列（.pane.tabs-left）：插入位置是一條橫的，跟著游標上下移（workspace.js 的 showInsertMark 改用 translateY） */
+.pane.tabs-left .tab-ins { left: 6px; right: 6px; top: 0; bottom: auto; width: auto; height: 3px;
+  background: repeating-linear-gradient(to right, var(--drag-acc, var(--focus)) 0 3px, transparent 3px 5px); }
 .strip.ins-on .tab.ins-before, .strip.ins-on .tab.ins-after { box-shadow: none; }
 /* 問卷卡的數字鍵（items.js 的 .opt-key.fx-press）：按下時亮起帳戶色（動畫在下面的一次性段落） */
 .opt-key.fx-press { border-color: var(--acc); color: var(--text-hi); background: color-mix(in srgb, var(--acc) 30%, transparent); box-shadow: 0 0 6px color-mix(in srgb, var(--acc) 55%, transparent); }

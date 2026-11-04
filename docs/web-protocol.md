@@ -1480,7 +1480,11 @@ CLI 卡的「立即套用」（cliApplyNow {provider}）在 `runningOnOldVersion
 ### Layout（網頁擁有、宿主只負責保存）
 ```jsonc
 {
-  "panes": [ { "id": "p1", "tabs": ["c1", "c2"], "active": "c1" }, { "id": "p2", "tabs": ["c3"], "active": "c3" } ],
+  "panes": [ { "id": "p1", "tabs": ["c1", "c2"], "active": "c1", "tabsSide": "left" }, { "id": "p2", "tabs": ["c3"], "active": "c3" } ],
+                                        // tabsSide（選用，2026-11-05）："left"＝這個窗格的分頁放在左側（窗格按鈕列的切換鈕）；省略＝上方的橫排（舊版忽略）。
+                                        //   窗格不到 460px 寬時照用橫排（tabdragrules.sideTabsOn），偏好不變；分割出來的窗格沿用。
+                                        //   tabsWidth（選用，整數）：拖曳分頁欄右緣的把手調過的寬度（120～360，顯示時另依窗格寬度夾住、對話區至少留 276px；
+                                        //   tabdragrules.clampSideWidth）；沒調過或雙擊恢復預設（184）時省略
   "focusedPane": "p1",
   "sidebarCollapsed": false,
   "view": "chat",                       // "chat" | "dashboard" | "schedules"（2026-10-26 起；舊版讀到不認得的當成 chat，宿主沒掛排程讀取器時網頁也當成 chat）

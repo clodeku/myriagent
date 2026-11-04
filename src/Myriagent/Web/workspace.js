@@ -9,7 +9,7 @@ import { moveInputHistory } from './composer.js';
 import { keepOnRestore, awaitsList, isDraftId, draftCarryOver, layoutDeviceFields, backgroundWaiting } from './liverules.js';
 import * as live from './liveview.js';
 import { isFlashing, stopFlash } from './attnflash.js';
-import { tabDragHold, dropIndexAt, insertMarkX, EXTERNAL_DRAG_MS } from './tabdragrules.js';
+import { tabDragHold, dropIndexAt, insertMarkX, EXTERNAL_DRAG_MS, sideTabsOn, clampSideWidth, SIDE_TABS_MIN, SIDE_TABS_MAX } from './tabdragrules.js';
 
 const MAX_PANES = 12;
 const TAB_MIME = 'application/x-myriagent-tab';
@@ -163,13 +163,19 @@ function newPaneId() {
 
 // ───── 窗格 ─────
 function createPane(id) {
-  const p = { id, tabs: [], active: null, mru: [], insAt: -1, dragGeo: null };
+  const p = { id, tabs: [], active: null, mru: [], insAt: -1, dragGeo: null, tabsSide: 'top', tabsWidth: null, width: 0 };
   p.tabsEl = h('div', { class: 'tabs', role: 'tablist', 'aria-label': '分頁' });
   p.newBtn = iconButton('plus', '在這個窗格開新對話（Ctrl+N）', () => newConversation(currentAccountOf(p), p.id));
   p.newBtn.classList.add('owner-only'); // 多人協作：協作人不能開新對話
   p.splitBtn = iconButton('split', '分割窗格（Ctrl+\\）', () => splitPane(p.id));
   p.closeBtn = iconButton('x', '關閉窗格', () => closePane(p.id));
-  p.strip = h('div', { class: 'strip' }, p.tabsEl, h('div', { class: 'strip-actions' }, p.newBtn, p.splitBtn, p.closeBtn));
+  // 分頁放上方或左側（2026-11-05 使用者要求）：每個窗格各自記在版面（layout 的 panes[].tabsSide）
+  p.sideBtn = iconButton('sidebar', '分頁改到左側', () => toggleTabsSide(p.id), 'strip-side');
+  // 側排時分頁欄右緣的把手：左右拖曳調整寬度（雙擊恢復預設、左右鍵每次 8px；2026-11-05 使用者要求）
+  p.sideGrip = h('div', { class: 'strip-grip', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': '分頁欄寬度',
+    'aria-valuemin': String(SIDE_TABS_MIN), 'aria-valuemax': String(SIDE_TABS_MAX), tabIndex: 0, title: '拖曳調整分頁欄的寬度（雙擊恢復預設）' });
+  p.strip = h('div', { class: 'strip' }, p.tabsEl, h('div', { class: 'strip-actions' }, p.newBtn, p.sideBtn, p.splitBtn, p.closeBtn), p.sideGrip);
+  bindSideGrip(p);
   p.emptyEl = h('div', { class: 'pane-empty', hidden: true },
     h('div', { class: 'pane-empty-title', text: '這個窗格沒有開著的對話' }),
     h('div', { class: 'pane-empty-sub', text: isCollaborator() ? '從左側選一個分享給你的對話。' : '從左側歷史選一個對話，或開始新的對話。' }),
@@ -181,13 +187,104 @@ function createPane(id) {
   // 分頁多到溢出時（捲軸是隱藏的）：滾輪上下捲＝分頁列左右捲
   p.tabsEl.addEventListener('wheel', (e) => {
     const el = p.tabsEl;
+    if (sideTabs(p)) return; // 側排：原生的上下捲
     if (e.ctrlKey || !e.deltaY || Math.abs(e.deltaX) > Math.abs(e.deltaY) || el.scrollWidth <= el.clientWidth) return;
     e.preventDefault();
     el.scrollLeft += e.deltaY;
   }, { passive: false });
   p.tabsEl.addEventListener('scroll', () => { p.dragGeo = null; }, { passive: true });
   bindTabDrop(p);
+  paneSizes.observe(p.el);
+  applyTabsSide(p);
   return p;
+}
+
+// ───── 分頁側排（2026-11-05） ─────
+/** 窗格的寬度變了：窄到放不下就改回上方的橫排（tabdragrules.sideTabsOn） */
+const paneSizes = new ResizeObserver((entries) => {
+  for (const en of entries) {
+    const p = panes.find((x) => x.el === en.target);
+    if (!p) continue;
+    p.width = en.contentRect.width;
+    applyTabsSide(p);
+  }
+});
+
+/** 依偏好與窗格寬度切換側排（.pane.tabs-left）；切換鈕的說明跟著偏好；分頁欄的寬度依窗格寬度夾住（--side-w） */
+function applyTabsSide(p) {
+  const left = p.tabsSide === 'left';
+  const on = sideTabsOn(p.tabsSide, p.width, p.el.classList.contains('tabs-left'));
+  applySideWidth(p);
+  p.sideBtn.title = left ? '分頁改回上方' : '分頁改到左側';
+  p.sideBtn.setAttribute('aria-label', p.sideBtn.title);
+  p.sideBtn.setAttribute('aria-pressed', String(left));
+  p.sideBtn.classList.toggle('on', left);
+  if (p.el.classList.contains('tabs-left') === on) return;
+  p.el.classList.toggle('tabs-left', on);
+  p.dragGeo = null;
+  p.revealed = null;
+  revealActiveTab(p);
+}
+
+/** 分頁欄顯示的寬度：使用者調的（沒調過是預設）依窗格寬度夾住；值沒變不寫（每次寫 style 都要重算樣式） */
+function applySideWidth(p) {
+  const w = clampSideWidth(p.tabsWidth ?? NaN, p.width);
+  if (p.sideW === w) return;
+  p.sideW = w;
+  p.el.style.setProperty('--side-w', w + 'px');
+  p.sideGrip.setAttribute('aria-valuenow', String(w));
+  p.dragGeo = null;
+}
+
+/** 設定使用者調的寬度（null＝恢復預設）並記進版面（save＝false：拖曳中，放開才存） */
+function setSideWidth(p, w, save) {
+  p.tabsWidth = w == null ? null : clampSideWidth(w, p.width);
+  applySideWidth(p);
+  if (save) scheduleLayout();
+}
+
+function bindSideGrip(p) {
+  const g = p.sideGrip;
+  let drag = null;
+  g.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || !sideTabs(p)) return;
+    e.preventDefault();
+    g.setPointerCapture(e.pointerId);
+    drag = { x: e.clientX, w: p.sideW };
+    g.classList.add('on');
+    document.body.classList.add('side-resizing');
+  });
+  g.addEventListener('pointermove', (e) => { if (drag) setSideWidth(p, drag.w + (e.clientX - drag.x), false); });
+  const end = () => {
+    if (!drag) return;
+    drag = null;
+    g.classList.remove('on');
+    document.body.classList.remove('side-resizing');
+    scheduleLayout();
+  };
+  g.addEventListener('pointerup', end);
+  g.addEventListener('pointercancel', end);
+  g.addEventListener('lostpointercapture', end);
+  g.addEventListener('dblclick', () => setSideWidth(p, null, true));
+  g.addEventListener('keydown', (e) => {
+    const step = e.key === 'ArrowLeft' ? -8 : e.key === 'ArrowRight' ? 8 : 0;
+    if (!step) return;
+    e.preventDefault();
+    setSideWidth(p, p.sideW + (e.shiftKey ? step * 4 : step), true);
+  });
+}
+
+export function toggleTabsSide(id) {
+  const p = paneById(id);
+  if (!p) return;
+  p.tabsSide = p.tabsSide === 'left' ? 'top' : 'left';
+  applyTabsSide(p);
+  scheduleLayout();
+}
+
+/** 這個窗格的分頁現在是側排（拖放與捲動依上下位置） */
+function sideTabs(p) {
+  return p.el.classList.contains('tabs-left');
 }
 
 function addPane(afterId) {
@@ -228,6 +325,7 @@ export function splitPane(fromId) {
   if (panes.length >= MAX_PANES) return;
   const from = paneById(fromId) || focusedPane();
   const p = addPane(from ? from.id : null);
+  if (from && from.tabsSide === 'left') { p.tabsSide = 'left'; p.tabsWidth = from.tabsWidth; applyTabsSide(p); }
   focusPane(p.id);
   newConversation(currentAccountOf(from), p.id);
   scheduleLayout();
@@ -275,9 +373,14 @@ function revealActiveTab(p) {
   if (p.revealed === p.active) return;
   const el = Array.from(p.tabsEl.children).find((t) => t.dataset.key === p.active);
   const box = p.tabsEl.getBoundingClientRect();
-  if (!el || !box.width) return; // 儀表板檢視時工作區是隱藏的：等看得到再捲
+  if (!el || !box.width || !box.height) return; // 儀表板檢視時工作區是隱藏的：等看得到再捲
   p.revealed = p.active;
   const r = el.getBoundingClientRect();
+  if (sideTabs(p)) {
+    if (r.top < box.top) p.tabsEl.scrollTop -= box.top - r.top;
+    else if (r.bottom > box.bottom) p.tabsEl.scrollTop += Math.min(r.bottom - box.bottom, r.top - box.top);
+    return;
+  }
   if (r.left < box.left) p.tabsEl.scrollLeft -= box.left - r.left;
   else if (r.right > box.right) p.tabsEl.scrollLeft += Math.min(r.right - box.right, r.left - box.left);
 }
@@ -693,10 +796,16 @@ function clearDropMarks() {
  */
 function stripGeometry(p) {
   const g = p.dragGeo;
-  if (g && g.gen === dragGen && g.n === p.tabsEl.childElementCount) return g;
-  const left = p.strip.getBoundingClientRect().left;
-  const tabs = Array.from(p.tabsEl.children, (t) => { const r = t.getBoundingClientRect(); return { left: r.left - left, right: r.right - left }; });
-  p.dragGeo = { gen: dragGen, n: tabs.length, tabs, mids: tabs.map((t) => left + (t.left + t.right) / 2) };
+  const vertical = sideTabs(p);
+  if (g && g.gen === dragGen && g.n === p.tabsEl.childElementCount && g.vertical === vertical) return g;
+  // 側排：同一套算法換成上下（left／right 存的是上緣、下緣，mids 是 y）
+  const box = p.strip.getBoundingClientRect();
+  const start = vertical ? box.top : box.left;
+  const tabs = Array.from(p.tabsEl.children, (t) => {
+    const r = t.getBoundingClientRect();
+    return vertical ? { left: r.top - start, right: r.bottom - start } : { left: r.left - start, right: r.right - start };
+  });
+  p.dragGeo = { gen: dragGen, n: tabs.length, vertical, tabs, mids: tabs.map((t) => start + (t.left + t.right) / 2) };
   return p.dragGeo;
 }
 
@@ -706,7 +815,8 @@ function stripGeometry(p) {
  */
 function showInsertMark(p, i) {
   if (!p.insMark) { p.insMark = h('span', { class: 'tab-ins', 'aria-hidden': 'true' }); p.strip.append(p.insMark); }
-  p.insMark.style.transform = 'translateX(' + insertMarkX(stripGeometry(p).tabs, i) + 'px)';
+  const g = stripGeometry(p);
+  p.insMark.style.transform = (g.vertical ? 'translateY(' : 'translateX(') + insertMarkX(g.tabs, i) + 'px)';
   markDrop(p.strip, 'ins-on');
 }
 
@@ -716,7 +826,8 @@ function dropSettle(p) {
 }
 
 function dropIndex(p, e) {
-  return dropIndexAt(stripGeometry(p).mids, e.clientX);
+  const g = stripGeometry(p);
+  return dropIndexAt(g.mids, g.vertical ? e.clientY : e.clientX);
 }
 
 function bindTabDrop(p) {
@@ -960,6 +1071,8 @@ export function restore(layout, restoredDrafts, opts = {}) {
   const src = layout && Array.isArray(layout.panes) ? layout.panes.slice(0, MAX_PANES) : [];
   for (const lp of src) {
     const p = createPane(lp.id && !paneById(lp.id) ? String(lp.id) : newPaneId());
+    if (Number.isFinite(lp.tabsWidth)) p.tabsWidth = clampSideWidth(lp.tabsWidth, 0);
+    if (lp.tabsSide === 'left') { p.tabsSide = 'left'; applyTabsSide(p); }
     const inList = (id) => state.convMap.has(id) || restoring.has(id);
     const tabs = (lp.tabs || []).filter((id) => keepOnRestore(id, inList(id), mode, opts.replicasPending) && !seen.has(id));
     tabs.forEach((id) => { seen.add(id); if (awaitsList(id, inList(id), mode, opts.replicasPending)) awaitingList.add(id); });
@@ -1058,7 +1171,9 @@ export function restorePopout(id) {
 
 export function layoutPayload() {
   return {
-    panes: panes.map((p) => ({ id: p.id, tabs: p.tabs.slice(), active: p.active })),
+    // tabsSide：分頁放左側才帶（'left'；2026-11-05），放上方省略；tabsWidth：拖曳調過的分頁欄寬度（沒調過省略）
+    panes: panes.map((p) => ({ id: p.id, tabs: p.tabs.slice(), active: p.active, ...(p.tabsSide === 'left' ? { tabsSide: 'left' } : {}),
+      ...(p.tabsWidth != null ? { tabsWidth: p.tabsWidth } : {}) })),
     focusedPane: focusedId,
     sidebarCollapsed: !!state.sidebarCollapsed,
     view: state.view,

@@ -67,6 +67,7 @@ const CODEX_ONLY = process.argv.includes('--codex');
 const CLAUDEOPT_ONLY = process.argv.includes('--claudeopt'); // 只跑 Claude 對話的選項與操作（claudeopt-probe.mjs）
 const REPLICA_RESTORE_ONLY = process.argv.includes('--replica-restore'); // 只跑還原版面時等其他電腦的對話清單（runReplicaRestore）
 const FORK_ONLY = process.argv.includes('--fork'); // 只跑延伸成新對話（fork-probe.mjs）
+const SIDETABS_ONLY = process.argv.includes('--side-tabs'); // 只跑分頁放左側（runSideTabs）
 const LOGIN_ONLY = process.argv.includes('--login'); // 只跑登入到期的檢查（runLoginExpiry）
 const CONTEXT_ONLY = process.argv.includes('--context'); // 只跑輸入框的上下文用量提示（runContext）
 const BG_ONLY = process.argv.includes('--bg'); // 只跑等背景工作回報的樣貌（runBackgroundWait）
@@ -1879,6 +1880,99 @@ async function runLight(vp) {
   const dashTitle = await page.title();
   check(`windowTitleAppFirst_${tag}`, chatTitle === 'Clode Myriagent － 修正登入流程卡住並補上單元測試' && dashTitle === 'Clode Myriagent － 儀表板', { chatTitle, dashTitle });
   await shot(page, `dashboard-light-${tag}`);
+  await closeApp(app);
+}
+
+// ───── 分頁放左側（2026-11-05 使用者要求：窗格上方的橫式分頁也可以改成左邊側排）─────
+/** 每個窗格的分頁排法：側排與否、偏好（切換鈕）、分頁列的大小、各分頁的位置 */
+function sideTabsState() {
+  return Array.from(document.querySelectorAll('#workspace .pane')).map((p) => {
+    const strip = p.querySelector('.strip').getBoundingClientRect();
+    const body = p.querySelector('.pane-body').getBoundingClientRect();
+    const btn = p.querySelector('.strip-side');
+    const tabs = Array.from(p.querySelectorAll('.tab')).map((t) => { const r = t.getBoundingClientRect(); return { key: t.dataset.key, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width) }; });
+    return { id: p.dataset.pane, left: p.classList.contains('tabs-left'), pressed: btn.getAttribute('aria-pressed') === 'true', title: btn.title,
+      stripW: Math.round(strip.width), stripH: Math.round(strip.height), bodyLeft: Math.round(body.left), stripRight: Math.round(strip.right), tabs };
+  });
+}
+
+async function runSideTabs(vp) {
+  // 還原：p1 存的是左側（layout 的 panes[].tabsSide）、p2 照舊在上方
+  const app = await openApp('side-tabs', { vp, layout: { panes: [
+    { id: 'p1', tabs: ['c2', 'c5', 'c6'], active: 'c2', tabsSide: 'left', tabsWidth: 160 },
+    { id: 'p2', tabs: ['c3'], active: 'c3' },
+  ], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' } });
+  const { page, host } = app;
+  await waitConv(page, 'c2');
+  await settle(page, 300);
+  let st = await page.evaluate(sideTabsState);
+  const [a, b] = st;
+  const column = a.tabs.length === 3 && a.tabs.every((t) => t.x === a.tabs[0].x) && a.tabs[0].y < a.tabs[1].y && a.tabs[1].y < a.tabs[2].y;
+  check('sideTabsRestore', a.left && a.pressed && a.title === '分頁改回上方' && a.stripW === 160 && column && a.bodyLeft >= a.stripRight - 1
+    && !b.left && !b.pressed && b.title === '分頁改到左側' && b.stripH === 35, st);
+  await shot(page, 'side-tabs-' + vp.w);
+
+  // 側排時上下拖曳排序：c6 放到 c2 上半部＝插在最前面；存回的版面還是左側
+  await page.dragAndDrop('#workspace .pane[data-pane="p1"] .tab[data-key="c6"]', '#workspace .pane[data-pane="p1"] .tab[data-key="c2"]', { targetPosition: { x: 40, y: 4 } });
+  const reo = await until(() => { const l = host.last('layout'); const p1 = l && l.layout.panes.find((x) => x.id === 'p1'); return p1 && p1.tabs.join(',') === 'c6,c2,c5' ? p1 : null; }, 2500);
+  check('sideTabsReorder', !!reo && reo.tabsSide === 'left', reo || host.last('layout'));
+
+  // 拖曳右緣的把手調寬度（2026-11-05 使用者要求）：拖 30px、放開才存；拖過頭被夾在「窗格寬－對話區最窄」；雙擊恢復預設（存回的版面省略 tabsWidth）；左右鍵每次 8px
+  const grip = '#workspace .pane[data-pane="p1"] .strip-grip';
+  const dragGrip = async (dx) => {
+    const r = await page.locator(grip).boundingBox();
+    const x = r.x + r.width / 2, y = r.y + 200;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx / 2, y, { steps: 3 });
+    await page.mouse.move(x + dx, y, { steps: 3 });
+    await page.mouse.up();
+  };
+  const p1Of = () => { const l = host.last('layout'); return l && l.layout.panes.find((x) => x.id === 'p1'); };
+  const widthOf = async () => (await page.evaluate(sideTabsState))[0];
+  await dragGrip(30);
+  const w1 = await widthOf();
+  const saved1 = await until(() => { const p1 = p1Of(); return p1 && p1.tabsWidth === 190 ? p1 : null; }, 2500);
+  await dragGrip(400);
+  const w2 = await widthOf();
+  const paneW = await page.evaluate(() => Math.round(document.querySelector('#workspace .pane[data-pane="p1"]').getBoundingClientRect().width));
+  const saved2 = await until(() => { const p1 = p1Of(); return p1 && p1.tabsWidth === w2.stripW ? p1 : null; }, 2500);
+  await page.dblclick(grip);
+  const w3 = await widthOf();
+  const saved3 = await until(() => { const p1 = p1Of(); return p1 && p1.tabsSide === 'left' && !('tabsWidth' in p1) ? p1 : null; }, 2500);
+  await page.focus(grip);
+  await page.keyboard.press('ArrowLeft');
+  const w4 = await widthOf();
+  const saved4 = await until(() => { const p1 = p1Of(); return p1 && p1.tabsWidth === 176 ? p1 : null; }, 2500);
+  const cursor = await page.evaluate((sel) => getComputedStyle(document.querySelector(sel)).cursor, grip);
+  check('sideTabsResize', w1.stripW === 190 && !!saved1 && w2.stripW === paneW - 276 && w2.bodyLeft >= w2.stripRight - 1 && !!saved2
+    && w3.stripW === 184 && !!saved3 && w4.stripW === 176 && !!saved4 && cursor === 'col-resize',
+    { w1: w1.stripW, w2: w2.stripW, paneW, w3: w3.stripW, w4: w4.stripW, cursor, saved: [saved1, saved2, saved3, saved4].map((x) => x && x.tabsWidth) });
+  await shot(page, 'side-tabs-resized-' + vp.w);
+
+  // 切換：p2 改到左側、p1 改回上方，各自記進版面（上方的省略 tabsSide）
+  await page.click('#workspace .pane[data-pane="p2"] .strip-side');
+  await page.click('#workspace .pane[data-pane="p1"] .strip-side');
+  const saved = await until(() => { const l = host.last('layout'); if (!l) return null; const [x, y] = l.layout.panes; return x && y && !('tabsSide' in x) && y.tabsSide === 'left' ? l.layout.panes : null; }, 2500);
+  st = await page.evaluate(sideTabsState);
+  check('sideTabsToggle', !!saved && !st[0].left && st[0].stripH === 35 && st[1].left && st[1].pressed, { saved, st });
+
+  // 窄到放不下（窗格不到 460px）：照用上方的橫排，偏好不變；再變寬就回到側排
+  await page.setViewportSize({ width: 1100, height: vp.h });
+  await settle(page, 300);
+  const narrow = (await page.evaluate(sideTabsState))[1];
+  await page.setViewportSize({ width: vp.w, height: vp.h });
+  await settle(page, 300);
+  const wide = (await page.evaluate(sideTabsState))[1];
+  check('sideTabsNarrowFallback', !narrow.left && narrow.pressed && narrow.stripH === 35 && wide.left && wide.pressed, { narrow, wide });
+
+  // 分割：新的窗格沿用原窗格的排法
+  await page.click('#workspace .pane[data-pane="p2"] .strip-actions .ibtn[title^="分割窗格"]');
+  const split = await until(async () => { const s2 = await page.evaluate(sideTabsState); return s2.length === 3 ? s2 : null; }, 2500);
+  check('sideTabsSplitInherits', !!split && split[2].pressed, split);
+  // 橫排時沒有把手
+  const gripTop = await page.evaluate(() => getComputedStyle(document.querySelector('#workspace .pane[data-pane="p1"] .strip-grip')).display);
+  check('sideTabsGripOnlySide', gripTop === 'none', gripTop);
   await closeApp(app);
 }
 
@@ -6354,6 +6448,7 @@ try {
     if (CODEX_ONLY) { if (full) await runCodex(searchCtx, vp); continue; }
     if (CLAUDEOPT_ONLY) { if (full) await runClaudeOpt(searchCtx, vp); continue; }
     if (FORK_ONLY) { if (full) await runFork(searchCtx, vp); continue; }
+    if (SIDETABS_ONLY) { if (full) await runSideTabs(vp); continue; }
     if (REPLICA_RESTORE_ONLY) { if (full) await runReplicaRestore(vp); continue; }
     if (FX_ONLY) { if (full) await runFx(searchCtx, vp); continue; }
     if (SETTINGS_ONLY) { if (full) await runSettings(searchCtx, vp); continue; }
@@ -6370,7 +6465,7 @@ try {
     if (!HOT_ONLY && !SYNC_ONLY) {
       await runMain(vp, full);
       await runPopout(vp, full);
-      if (full) { await runExtras(vp); await runNoLayout(vp); await runDraftRestore(vp); await runReplicaRestore(vp); await runLight(vp); await runVisualChecks(); }
+      if (full) { await runExtras(vp); await runSideTabs(vp); await runNoLayout(vp); await runDraftRestore(vp); await runReplicaRestore(vp); await runLight(vp); await runVisualChecks(); }
       if (full) await runDashboard(vp);
       if (full) await runDashGrid();
       if (full) await runTokens(vp);
