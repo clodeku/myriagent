@@ -878,7 +878,7 @@ async function runBrowserSettings(ctx, vp, csp) {
     await sleep(300);
     const settled = await readSettingsDialog(page);
     const dialogs = await page.$$eval('.dlg-back:not(.leaving) .dlg-settings', (ns) => ns.length);
-    check('browserLateInitRebuilds', !!before && before.tabs.length === 6 && before.desktopNodes > 0
+    check('browserLateInitRebuilds', !!before && before.tabs.length === 7 && before.desktopNodes > 0
       && !!after && !!settled && same(settled.tabs.map((t) => t.id), ['general', 'chat']) && settled.desktopNodes === 0 && sameSet(settled.rows.map((x) => x.setting), [...ROAMING, 'voiceLocal', 'continueLocal'])
       && dialogs === 1 && desktopOnlySent(host).length === 0,
     { before: before && before.tabs.map((t) => t.id), after: settled && { tabs: settled.tabs.map((t) => t.id), rows: settled.rows, desktopNodes: settled.desktopNodes }, dialogs });

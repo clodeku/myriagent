@@ -1355,9 +1355,9 @@ async function runMain(vp, full) {
     const r = document.querySelector('.dlg-settings .set-sec[data-sec="system"]').getBoundingClientRect();
     return r.height > 0 && r.top >= s.top - 1 && r.top < s.bottom - 40;
   });
-  if (full) check('settingsTabs', same(tb0.labels, ['一般', '對話', '模型設定', 'CLI', '多電腦同步', '版本與更新']) && tabIs(tb0, 'general', ['look', 'system', 'notify'], 3) && tb0.focus
-    && tabIs(tb1, 'chat', ['chat', 'quota', 'remote', 'instr'], 4) && tb1.focus && tabIs(tb2, 'app', ['app'], 0) && tb2.focus
-    && tabIs(tb3, 'general', ['look', 'system', 'notify'], 3) && tb3.focus && tabIs(tb4, 'app', ['app'], 0) && tb4.focus
+  if (full) check('settingsTabs', same(tb0.labels, ['一般', '對話', '模型設定', 'CLI', '多電腦同步', '版本與更新', '協作人']) && tabIs(tb0, 'general', ['look', 'system', 'notify'], 3) && tb0.focus
+    && tabIs(tb1, 'chat', ['chat', 'quota', 'remote', 'instr'], 4) && tb1.focus && tabIs(tb2, 'collab', ['collab'], 0) && tb2.focus
+    && tabIs(tb3, 'general', ['look', 'system', 'notify'], 3) && tb3.focus && tabIs(tb4, 'collab', ['collab'], 0) && tb4.focus
     && tabIs(tb5, 'chat', ['chat', 'quota', 'remote', 'instr'], 4) && scrolled > 0 && tabIs(tb6, 'defaults', ['defaults'], 0) && scrollAfterSwitch === 0
     && [tb1, tb2, tb3, tb4, tb5, tb6].every((t) => t.height === tb0.height && t.barTop === tb0.barTop)
     && tabIs(tb7, 'defaults', ['defaults'], 0) && tb7.focus && tabIs(tb8, 'general', ['look', 'system', 'notify'], 3) && sysVisible,
