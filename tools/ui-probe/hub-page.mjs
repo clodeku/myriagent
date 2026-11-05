@@ -21,8 +21,9 @@ import { fakeMic } from './fake-mic.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO = path.resolve(here, '..', '..');
-export const WEB = path.join(REPO, 'src', 'Myriagent', 'Web');
-export const WWWROOT = path.join(REPO, 'src', 'MyriagentHub', 'wwwroot');
+// MYRIAGENT_PROBE_HUB_WEB／MYRIAGENT_PROBE_HUB_WWWROOT：改用別的版本的網頁與 wwwroot（git archive 出來的舊版，做前後比較；open-cost.mjs）
+export const WEB = process.env.MYRIAGENT_PROBE_HUB_WEB || path.join(REPO, 'src', 'Myriagent', 'Web');
+export const WWWROOT = process.env.MYRIAGENT_PROBE_HUB_WWWROOT || path.join(REPO, 'src', 'MyriagentHub', 'wwwroot');
 export const ORIGIN = RF.ORIGIN;
 export const DESKTOP_ORIGIN = RF.DESKTOP_ORIGIN;
 export const HUB_URL = 'wss://hub.probe.local/hubs/v1/browser';

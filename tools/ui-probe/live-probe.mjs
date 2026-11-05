@@ -5000,6 +5000,12 @@ async function runMobileScrollSteady() {
     time: NOW - (60 - k) * LF.MIN, html: '<p>' + ('第 ' + k + ' 則，往上滑看歷史。').repeat(k % 2 ? 24 : 2) + '</p>', attachments: [] }));
   const app = await openWithLayout('mobile-scroll', layoutOf([[[id], id]]), {
     open: { vp: { w: 390, h: 844 }, hasTouch: true,
+      // 載入時有沒有出現過先不排版的項目（it-lazy）
+      initScript: () => {
+        window.__sawLazy = 0;
+        new MutationObserver((rs) => { for (const r of rs) for (const n of r.addedNodes) if (n.nodeType === 1 && n.classList.contains('it-lazy')) window.__sawLazy++; })
+          .observe(document, { childList: true, subtree: true });
+      },
       hub: (hub) => hub.onCmd('open', (cmd) => ({ push: [LF.conversationMessage(NOW, cmd.conversationId, TITLE_OF[cmd.conversationId] || '對話', { items, hasMore: true })] })) },
   });
   const { hub, page } = app;
@@ -5016,8 +5022,13 @@ async function runMobileScrollSteady() {
   const topOf = (itemId) => page.evaluate(([s, iid]) => { const n = document.querySelector(s + ' .it[data-id="' + iid + '"]'); return n ? Math.round(n.getBoundingClientRect().top) : null; }, [sel, itemId]);
 
   // 一
+  // 載入時先不排版的項目（it-lazy）畫好之後都換回實際高度：等它們換完再看
+  await until(() => page.evaluate((s) => !document.querySelector(s + ' .it-lazy')), 3000);
   const cv = await page.evaluate((s) => [...document.querySelectorAll(s + ' .items > .it')].map((n) => getComputedStyle(n).contentVisibility), sel);
-  check('hubMobileItemsFullHeight', cv.length === items.length && cv.every((v) => v === 'visible'), { count: cv.length, values: [...new Set(cv)] });
+  const lazy = await page.evaluate((s) => document.querySelectorAll(s + ' .it-lazy').length, sel);
+  check('hubMobileItemsFullHeight', cv.length === items.length && cv.every((v) => v === 'visible') && lazy === 0, { count: cv.length, values: [...new Set(cv)], lazy });
+  const sawLazy = await page.evaluate(() => window.__sawLazy);
+  check('hubMobileLazyLoad', sawLazy > 0, { sawLazy });
 
   // 二：貼底中，從畫面中間往下拖 40px、不放開（Chrome 的觸控起滑距離之後只捲動二十幾 px，離底還不到 80px）
   await until(async () => ((await scroll()).dist <= 4 ? true : null), 2000);
@@ -5992,7 +6003,7 @@ const SCENARIOS = [
   // 合併前審查的回歸
   { checks: ['hubCardGateUnlistedOnLoad'], run: runReviewCardGateUnlisted },
   { checks: ['hubOlderStaleIgnored'], run: runReviewOlderStale },
-  { checks: ['hubMobileItemsFullHeight', 'hubTouchUnsticks', 'hubTouchOlderDeferred', 'hubMobileSafeArea'], run: runMobileScrollSteady },
+  { checks: ['hubMobileItemsFullHeight', 'hubMobileLazyLoad', 'hubTouchUnsticks', 'hubTouchOlderDeferred', 'hubMobileSafeArea'], run: runMobileScrollSteady },
   { checks: ['hubMobileRunningSteady'], run: runMobileRunningScroll },
   { checks: ['hubUnsolicitedConversationAfterClose'], run: runReviewUnsolicitedAfterClose },
   { checks: ['hubCardTextsKeptOnReload'], run: runReviewCardTexts },

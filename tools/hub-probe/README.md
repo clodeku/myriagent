@@ -99,3 +99,13 @@ MyriagentHub.ProbeClient load --base https://127.0.0.1:<埠> --owner-origin <Pub
   - **備份**：照 `BackupService.SnapshotDatabase`，在背景模式的執行緒上（`THREAD_MODE_BACKGROUND_BEGIN`，同服務）`VACUUM INTO`、對快照 `integrity_check`、快照的 SHA-256，連線套 MyriagentHub 的 PRAGMA、命令逾時照 `BackupTimeoutRules`（同樣是連結的檔）。
   - **命令逾時**（`B6-command-timeout`）：以 1 秒的命令逾時對第一個大小的檔跑一次 `VACUUM INTO` 與 `integrity_check`，看 Microsoft.Data.Sqlite 的逾時會不會中斷執行中的單一敘述（`limitsLongStatement`；`conclusive` 是兩個都超過 1.5 秒，太快的那個不能判斷）。
   - 資料夾或它的上層是 MyriagentHub 的資料根（有 `status\service.lock` 或 `db\hub.db`）時拒絕（結束碼 2），不會碰到正式的資料。在 Hub 主機跑的程序與時段見 `docs/hub-setup.md` 第 8 節。
+
+## 開啟對話的 Hub 端成本（`snapshot_cost.py`、`SnapshotRenderBench`）
+
+對象是 sync.db 的複本（例如 Hub 的每日備份 `backups\daily\<日期>\sync.db`，只讀；內容是真的對話，複本放暫存資料夾、量完刪掉）：
+
+```bash
+python -X utf8 tools/hub-probe/snapshot_cost.py <sync.db 的複本>      # ReadSnapshot 的查詢：每個對話最後一頁的耗時、原始大小、查詢計畫
+MYRIAGENT_SNAPSHOT_BENCH=<sync.db 的複本> [MYRIAGENT_SNAPSHOT_DUMP=<暫存資料夾>] dotnet test tests/MyriagentHub.Tests/MyriagentHub.Tests.csproj -c Release --filter "FullyQualifiedName~SnapshotRenderBench" --logger "console;verbosity=detailed"
+# 以真的 HubItemRenderer 渲染每個對話的第一頁（備份不含 blob，參照 blob 的變成佔位：量到的是下限）；DUMP 另把最大的 8 頁寫成瀏覽器的 items 陣列，給 tools/ui-probe/open-cost.mjs
+```

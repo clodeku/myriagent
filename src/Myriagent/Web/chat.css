@@ -192,6 +192,9 @@
    （2026-10-25 使用者回報：手機、平板往上滑一直閃、不順暢）。桌面照舊省下畫面外項目的排版與繪製 */
 @media (pointer: coarse) { .it { content-visibility: visible; } }
 @supports not (overflow-anchor: auto) { .it { content-visibility: visible; } }
+/* 例外：載入對話的那一下（conversation.js 的 it-lazy，只有觸控的瀏覽器版）。剛建的項目先不排版畫面外的，第一個畫面不必等整批排版完
+   ；畫好之後不在觸控捲動時逐批拿掉，往上滑之前項目已經是實際的高度 */
+.it.it-lazy { content-visibility: auto; }
 .it:first-child { margin-top: 0; }
 .it-step { margin-top: 10px; padding-left: 20px; contain-intrinsic-size: auto 30px; }
 .it-step + .it-step { margin-top: 0; }

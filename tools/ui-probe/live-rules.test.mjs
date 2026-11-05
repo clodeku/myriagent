@@ -1739,3 +1739,14 @@ test('liverules：標頭的來源晶片——委派寫主對話、延伸寫原�
   assert.equal(L.originLink({ id: 'n' }, byId), null);
   assert.equal(L.originLink(null, byId), null);
 });
+
+test('openOrder_先聚焦窗格作用中的分頁_再其他窗格作用中的_最後其餘的', () => {
+  const panes = [{ id: 'p1', tabs: ['a', 'b', 'c'], active: 'c' }, { id: 'p2', tabs: ['d', 'e'], active: 'd' }];
+  assert.deepEqual(L.openOrder(panes, 'p2'), ['d', 'c', 'a', 'b', 'e']);
+  assert.deepEqual(L.openOrder(panes, 'p1'), ['c', 'd', 'a', 'b', 'e']);
+  // 聚焦的窗格不存在、作用中的分頁不在分頁裡：照窗格順序；重複的 id 只一次；壞的窗格與 id 略過
+  assert.deepEqual(L.openOrder([{ id: 'p1', tabs: ['a', 'b'], active: 'x' }, null, { id: 'p2', tabs: ['b', 3, 'c'], active: 'c' }], 'nope'), ['c', 'a', 'b']);
+  assert.deepEqual(L.openOrder(null, 'p1'), []);
+  // 手機常見：一個窗格、看得到的是最後一個分頁
+  assert.deepEqual(L.openOrder([{ id: 'p1', tabs: ['a', 'b', 'c', 'd'], active: 'd' }], 'p1'), ['d', 'a', 'b', 'c']);
+});

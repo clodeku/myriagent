@@ -1266,10 +1266,35 @@ export function mediaPolicyNote(device) {
   return isObj(device) && device.level === 'Off' ? '這台電腦的遠端政策是關閉，只能看縮圖' : null;
 }
 
+// ───── 一次 open 很多分頁的順序 ─────
+
+/**
+ * 瀏覽器版還原版面與重連（reopenAll）時每個分頁都送 open，伺服器對同一條連線照收到的順序一個一個回（送出佇列滿一半就等網頁收完），
+ * 網頁收到一個就建一個：看得到的分頁排在後面就要等前面的都下載、畫完（手機的分頁越開越多，回到 app 載入就越來越久）。
+ * 回傳送 open 的順序：先聚焦窗格作用中的分頁、再其他窗格作用中的分頁（窗格順序），最後其餘的分頁（窗格與分頁原本的順序）；
+ * 每個 id 只出現一次。panes＝[{ id, tabs, active }]，壞的窗格與不是字串的 id 略過
+ */
+export function openOrder(panes, focusedPaneId) {
+  const list = Array.isArray(panes) ? panes.filter((p) => p && Array.isArray(p.tabs)) : [];
+  const out = [];
+  const seen = new Set();
+  const add = (id) => { if (typeof id === 'string' && id && !seen.has(id)) { seen.add(id); out.push(id); } };
+  const focused = list.find((p) => p.id === focusedPaneId);
+  if (focused && focused.tabs.includes(focused.active)) add(focused.active);
+  for (const p of list) if (p.tabs.includes(p.active)) add(p.active);
+  for (const p of list) for (const id of p.tabs) add(id);
+  return out;
+}
+
 // ───── 大對話的分批載入（D39，步 12） ─────
 
 /** 瀏覽器版載入對話時每批放進 DOM 的項目數 */
 export const LOAD_CHUNK = 20;
+/**
+ * 觸控的瀏覽器版載入時先不排版的項目（.it-lazy，conversation.js 的 nextLazy）每個影格換回實際高度幾則：
+ * 量法見 tools/ui-probe/open-cost.mjs
+ */
+export const LAZY_BATCH = 6;
 
 /**
  * 載入對話時分批放進 DOM 的範圍（D39）：桌面一次全放；瀏覽器版先放最後 chunk 筆，其餘每個影格往前補 chunk 筆

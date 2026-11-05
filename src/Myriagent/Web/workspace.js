@@ -6,7 +6,7 @@ import { post, state, accountOf, summaryOf, emit, on as onEvent, isHub, isCollab
 import { spinner } from './ui.js';
 import { ConvView } from './conversation.js';
 import { moveInputHistory } from './composer.js';
-import { keepOnRestore, awaitsList, isDraftId, draftCarryOver, layoutDeviceFields, backgroundWaiting } from './liverules.js';
+import { keepOnRestore, awaitsList, isDraftId, draftCarryOver, layoutDeviceFields, backgroundWaiting, openOrder } from './liverules.js';
 import * as live from './liveview.js';
 import { isFlashing, stopFlash } from './attnflash.js';
 import { tabDragHold, dropIndexAt, insertMarkX, EXTERNAL_DRAG_MS, sideTabsOn, clampSideWidth, SIDE_TABS_MIN, SIDE_TABS_MAX } from './tabdragrules.js';
@@ -1092,20 +1092,22 @@ export function restore(layout, restoredDrafts, opts = {}) {
     if (!fp.active) fp.active = id;
   }
   renderPanes();
+  // 還原的草稿由宿主自己送 conversation：不送 open，只記著在等回覆（回覆到達前就關掉分頁時，晚到的回覆照常丟掉）。
+  // 桌面只 open 各窗格作用中的分頁，其他的切過去才 open（deferredOpen）；瀏覽器版照舊全部 open（伺服器以 open 追蹤這條連線開著的對話），
+  // 看得到的先送（liverules.openOrder：伺服器照順序回）
+  const activeIds = new Set(panes.map((p) => p.active));
+  for (const id of openOrder(panes, focusedId)) {
+    if (restoring.has(id)) bump(awaitingReply, id, 1);
+    else if (awaitingList.has(id)) continue; // 等清單：到了由 settleAwaiting 決定送 open 或等切過去
+    else if (!isHub && !activeIds.has(id)) deferredOpen.add(id);
+    else {
+      // 〔遠端〕存下的版面裡的草稿：伺服器重開過（換版後網頁自動重新載入）就不在了，輸入框有字時照 recreateDraft 重開
+      if (isHub && isDraftId(id)) reopenedDrafts.add(id);
+      postOpen(id);
+    }
+  }
   for (const p of panes) {
     renderTabs(p);
-    // 還原的草稿由宿主自己送 conversation：不送 open，只記著在等回覆（回覆到達前就關掉分頁時，晚到的回覆照常丟掉）。
-    // 桌面只 open 各窗格作用中的分頁，其他的切過去才 open（deferredOpen）；瀏覽器版照舊全部 open（伺服器以 open 追蹤這條連線開著的對話）
-    for (const id of p.tabs) {
-      if (restoring.has(id)) bump(awaitingReply, id, 1);
-      else if (awaitingList.has(id)) continue; // 等清單：到了由 settleAwaiting 決定送 open 或等切過去
-      else if (!isHub && id !== p.active) deferredOpen.add(id);
-      else {
-        // 〔遠端〕存下的版面裡的草稿：伺服器重開過（換版後網頁自動重新載入）就不在了，輸入框有字時照 recreateDraft 重開
-        if (isHub && isDraftId(id)) reopenedDrafts.add(id);
-        postOpen(id);
-      }
-    }
     if (p.active) activateTab(p.id, p.active, false);
   }
   if (!seen.size && opts.autoNew !== false) newConversation(null, panes[0].id);
@@ -1119,11 +1121,10 @@ export function restore(layout, restoredDrafts, opts = {}) {
  * 每個分頁（含草稿）重送 open，再重送一次 visible（內容相同也送：新的連線還不知道這條連線看得到哪些）
  */
 export function reopenAll() {
-  for (const p of panes) {
-    for (const id of p.tabs) {
-      if (isDraftId(id)) reopenedDrafts.add(id);
-      postOpen(id);
-    }
+  // 看得到的先送（liverules.openOrder）
+  for (const id of openOrder(panes, focusedId)) {
+    if (isDraftId(id)) reopenedDrafts.add(id);
+    postOpen(id);
   }
   lastVisible = null;
   reportVisible(false);

@@ -6,7 +6,7 @@ import { canManageCollaborators, openShareDialog } from './collab.js';
 import { sharedWith } from './collabrules.js';
 import { openMenu, openDialog, confirmDialog, choiceDialog, toast, spinner } from './ui.js';
 import {
-  originOf, deviceOf, deviceLine, statusLine, composerGate, cardGate, deleteConfirmText, deleteProgramsCheckbox, policyChoices, needsLocalOnlyConfirm, LOCAL_ONLY_CONFIRM_TEXT, loadChunks,
+  originOf, deviceOf, deviceLine, statusLine, composerGate, cardGate, deleteConfirmText, deleteProgramsCheckbox, policyChoices, needsLocalOnlyConfirm, LOCAL_ONLY_CONFIRM_TEXT, loadChunks, LAZY_BATCH,
   attachGate, folderPickerGate, ownerRunning, mediaPolicyNote, peerOf, controllable, peerDraftDevices, peerDraftAccount, clearBoundary,
   latestPrompt, promptHistory, promptLine, itemTimeText, itemTimeTitle, dayKey, backgroundLine, backgroundStopMenu, detailTasks, programsView, mergeHeaderLists, touchUnsticks, touchScrolling,
   remoteAccountMenu, headerAccountId, findAccount, originLink,
@@ -37,6 +37,15 @@ import { goalSummary, GOAL_STATUS } from './codexrules.js';
 import { openCodexPanel } from './codexcontrols.js';
 import { openRewind } from './rewind.js';
 import { openTaskDetail } from './taskdetail.js';
+
+/**
+ * 項目照實際高度排版的瀏覽器（同 chat.css 的 .it：觸控裝置、不支援捲動錨定的）。每次載入時才問（平板接上或拆下鍵盤會變）
+ */
+function fullLayout() {
+  const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+  const anchors = typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('overflow-anchor', 'auto');
+  return coarse || !anchors;
+}
 
 const NEAR_BOTTOM = 4;   // 視為「在最底下」
 const LEAVE_BOTTOM = 80; // 離底部超過這個距離才停止自動捲動
@@ -82,6 +91,10 @@ export class ConvView {
     // 〔遠端〕瀏覽器版分批載入大對話（D39）：還沒建節點的較早項目 { list, ranges }（liverules.loadChunks）與下一批的 rAF
     this.chunks = null;
     this.chunkRaf = 0;
+    // 〔遠端〕觸控的瀏覽器版載入時先不排版的項目（.it-lazy）：[{ i, node }]，載入完之後由 nextLazy 逐批換回實際高度；與下一批的 rAF
+    this.lazyNodes = null;
+    this.lazyRaf = 0;
+    this.lazyLoad = false;
     this.hasMore = false;
     this.loadingOlder = false;
     // /clear 的分界（liverules.clearBoundary；order 的索引，-1＝沒有藏）與這個分頁按過「顯示清除前的對話」（applyClear）
@@ -594,6 +607,7 @@ export class ConvView {
     else if (this.savedTop !== null) this.scroller.scrollTop = this.savedTop;
     this.minimap.request();
     this.tick(Date.now());
+    this.scheduleLazy(); // 在背景載入的分頁：切過來才把先不排版的項目換回實際高度
   }
 
   hide() {
@@ -618,6 +632,7 @@ export class ConvView {
     cancelAnimationFrame(this.olderRaf);
     this.anchor.destroy();
     this.cancelChunks();
+    this.cancelLazy();
     for (const s of this.sending) clearTimeout(s.timer);
     this.sending = [];
     this.resizeObs.disconnect();
@@ -704,6 +719,10 @@ export class ConvView {
     clearTimeout(this.loadingTimer);
     if (this.loadingEl) { this.loadingEl.remove(); this.loadingEl = null; }
     this.cancelChunks();
+    this.cancelLazy();
+    // 觸控的瀏覽器版（項目一律照實際高度排版，chat.css）：載入時新建的項目先帶 it-lazy（content-visibility: auto，畫面外的先不排版），
+    // 第一個畫面不必等整批排版完；之後 nextLazy 逐批換回實際高度
+    this.lazyLoad = isHub && fullLayout();
     this.stopPeek();
     this.items.clear();
     this.nodes.clear();
@@ -743,6 +762,7 @@ export class ConvView {
     requestAnimationFrame(() => { if (this.stick) this.scrollToBottom(); });
     this.maybeFocusCard();
     if (this.chunks) this.chunkRaf = requestAnimationFrame(() => this.nextChunk());
+    this.scheduleLazy();
   }
 
   /** 建 list[start, end) 的節點（登記到 nodes），回傳待插入的片段 */
@@ -751,6 +771,10 @@ export class ConvView {
     for (let i = start; i < end; i++) {
       const node = createItem(list[i], this.ctx);
       if (i < this.clearAt) node.classList.add('pre-clear');
+      if (this.lazyLoad) {
+        node.classList.add('it-lazy');
+        (this.lazyNodes || (this.lazyNodes = [])).push({ i, node });
+      }
       this.nodes.set(list[i].id, node);
       frag.append(node);
     }
@@ -782,6 +806,33 @@ export class ConvView {
     if (this.chunkRaf) cancelAnimationFrame(this.chunkRaf);
     this.chunkRaf = 0;
     this.chunks = null;
+  }
+
+  /** 還有先不排版的項目：下一個影格開始換回（看不到時等 show） */
+  scheduleLazy() {
+    if (this.lazyNodes && !this.lazyRaf && this.visible) this.lazyRaf = requestAnimationFrame(() => this.nextLazy());
+  }
+
+  /**
+   * 先不排版的項目換回實際高度的下一批（liverules.LAZY_BATCH 則，從最新的往前：貼底時畫面上方最先捲到的那幾則先換）。
+   * 分批載入還沒補完、觸控捲動中（換回時上方項目的高度會變，同分批載入）、看不到時先不換；高度變了由 ConvView 的 ResizeObserver 維持貼底、
+   * 沒貼底時由 scrollanchor.js 補位置（同延遲載入的圖片）
+   */
+  nextLazy() {
+    this.lazyRaf = 0;
+    const list = this.lazyNodes;
+    if (!list || !this.visible) return;
+    if (this.chunks || this.isTouchScrolling()) { this.scheduleLazy(); return; }
+    list.sort((a, b) => a.i - b.i);
+    for (const { node } of list.splice(Math.max(0, list.length - LAZY_BATCH))) node.classList.remove('it-lazy');
+    if (!list.length) this.lazyNodes = null;
+    else this.scheduleLazy();
+  }
+
+  cancelLazy() {
+    if (this.lazyRaf) cancelAnimationFrame(this.lazyRaf);
+    this.lazyRaf = 0;
+    this.lazyNodes = null;
   }
 
   /** 把較早的節點插到最前面：貼底的照舊貼底，往上捲過的停在原本看的位置 */
