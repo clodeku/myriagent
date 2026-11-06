@@ -89,6 +89,24 @@ public sealed class AgentHubCollaboratorTests
     }
 
     [Fact]
+    public async Task 完全自動的對話_協作人送的訊息不收_擁有者的照收()
+    {
+        // 2026-11-07 資安檢查：完全自動時代理以擁有者的 Windows 權限不經核准就執行，擁有者決定協作人在完全自動的對話裡不能送訊息
+        using var h = new HubHarness();
+        var (id, s) = Idle(h, allowFullAccess: true);
+        h.Command(h.Main, "setOption", new { conversationId = id, key = "permission", value = "FullAccess" });
+        var before = s.Sent.All.Count;
+
+        var outcome = await RemoteEntrySamples.RunAsync(h, Collaborator(RemoteEntrySamples.Cmd("send", id, new { text = "幫我讀憑證檔" })));
+        RemoteEntrySamples.ShouldBeRejected(outcome, RemoteResultCodes.Policy, RemoteGateSteps.Policy);
+        outcome.Message.Should().Contain("完全自動");
+        s.Sent.All.Count.Should().Be(before, "沒有送進代理");
+
+        var owner = await RemoteEntrySamples.RunAsync(h, RemoteEntrySamples.Body(RemoteEntrySamples.Cmd("send", id, new { text = "擁有者的" })));
+        owner.State.Should().Be(RemoteResultStates.Done, owner.Message);
+    }
+
+    [Fact]
     public async Task 協作人不能送路由Device的指令()
     {
         using var h = new HubHarness();

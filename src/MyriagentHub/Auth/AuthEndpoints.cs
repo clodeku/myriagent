@@ -60,7 +60,11 @@ internal static class AuthEndpoints
         var user = name is not null && PasswordRules.IsCandidate(body.Password) ? await users.FindByNameAsync(name) : null;
         // 協作人（多人協作）：名冊裡啟用中的才收；停用的回同樣的 login_failed（不洩漏帳號存在）
         var collaborator = user is not null && !OwnerAccount.IsOwner(user) ? collaborators.Find(user.Id) : null;
-        if (user is null || (!OwnerAccount.IsOwner(user) && collaborator is not { Disabled: false }) || !await users.CheckPasswordAsync(user, body.Password!))
+        var known = user is not null && (OwnerAccount.IsOwner(user) || collaborator is { Disabled: false });
+        // 不存在、停用的帳號也做一次同樣成本的密碼雜湊比對：失敗的回應時間一樣，量時間猜不出哪些協作人帳號存在（2026-11-07 資安檢查）
+        if (!known && PasswordRules.IsCandidate(body.Password))
+            EqualizeFailureTiming(users, body.Password!);
+        if (!known || !await users.CheckPasswordAsync(user!, body.Password!))
         {
             guard.RecordFailure(partition);
             // 不記輸入的帳號：常有人把密碼打進帳號欄
@@ -80,6 +84,19 @@ internal static class AuthEndpoints
         await SessionRotation.RetireOldSessionAsync(http, sessions);
         await audit.WriteAsync(new AuditEntry(AuditActors.Owner, null, http.ClientIp(), AuditActions.Login, OwnerAccount.UserName, AuditOutcomes.Ok, new { ua = http.UserAgentSummary() }));
         return Results.Ok(new { ok = true, role = Roles.Owner });
+    }
+
+    private static readonly Lazy<(IdentityUser User, string Hash)> TimingDummy = new(() =>
+    {
+        var dummy = new IdentityUser("timing-dummy");
+        return (dummy, new PasswordHasher<IdentityUser>().HashPassword(dummy, Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16))));
+    });
+
+    /// <summary>以登入用的雜湊器比對一份固定的假雜湊（結果不用）：花的時間和真的比對一樣</summary>
+    private static void EqualizeFailureTiming(UserManager<IdentityUser> users, string password)
+    {
+        var (dummy, hash) = TimingDummy.Value;
+        users.PasswordHasher.VerifyHashedPassword(dummy, hash, password);
     }
 
     private static async Task<IResult> LogoutAsync(SignInManager<IdentityUser> signIn, AuditLog audit, HttpContext http)

@@ -85,6 +85,16 @@ internal static class CollaboratorRules
         "addUploaded", "removeAttachment", "listFiles", "fileSearch", "fileFetch",
     };
 
+    /// <summary>
+    /// 協作人發起的事能不能用到完全自動（2026-11-07 資安檢查，擁有者決定「只擋完全自動」）：完全自動的對話裡，代理以擁有者的 Windows 權限
+    /// 不經核准就執行任何指令——協作人送的訊息（含語音、作答）不收，完全自動之外照舊可以對話與核准。
+    /// 閘門以算出的層級的 FullAccess 查（RemoteTierRules），送進代理之前（RemoteQueueRules.CanDequeue）以當時的模式再查一次
+    /// </summary>
+    public static bool AllowsFullAccess(bool collaborator, bool fullAccess) => !(collaborator && fullAccess);
+
+    /// <summary>完全自動的對話拒絕協作人時的說明</summary>
+    public const string FullAccessRejected = "這個對話是完全自動，協作人送的訊息不會交給代理（擁有者把對話改成其他權限模式之後才收）";
+
     /// <summary>協作人的介面設定能存的鍵（各自一份，存在伺服器、不同步給電腦）：同漫遊偏好的四個鍵</summary>
     public static IReadOnlyList<string> PrefKeys => PrefsRules.Keys;
 

@@ -22,8 +22,16 @@ internal static class SessionRotation
     /// <summary>cookie 處理常式放在 cookie 票證裡的工作階段 key claim</summary>
     private const string SessionIdClaim = "Microsoft.AspNetCore.Authentication.Cookies-SessionId";
 
-    public static bool IsSignInRequest(HttpRequest request) =>
-        HttpMethods.IsPost(request.Method) && SignInPaths.Any(p => request.Path.Equals(p, StringComparison.OrdinalIgnoreCase));
+    /// <summary>結尾的「/」不算（端點路由把 /api/v1/auth/login/ 也送到登入，沒認出來就不會換新的工作階段 key，2026-11-07 資安檢查）</summary>
+    public static bool IsSignInRequest(HttpRequest request)
+    {
+        if (!HttpMethods.IsPost(request.Method))
+            return false;
+        var path = request.Path.Value ?? string.Empty;
+        if (path.Length > 1)
+            path = path.TrimEnd('/');
+        return SignInPaths.Any(p => string.Equals(path, p, StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>登入成功、新 cookie 已簽發後呼叫：刪除舊工作階段</summary>
     public static async Task RetireOldSessionAsync(HttpContext context, ITicketStore store)

@@ -159,6 +159,9 @@ try {
   await P.fill('#login-password', DEFAULT_PASSWORD);
   await P.click('#btn-login');
   let lastPasswordAt = Date.now();
+  // 網址帶的碼只填進欄位、不自動查（2026-11-07 資安檢查）：等核准頁出現、按「查詢」
+  await waitFor(async () => { const s = await authState(P); return s.view === 'pair' ? s : null; }, 10000);
+  await P.click('#btn-pair-lookup');
   const pairViewA = await waitFor(async () => { const s = await authState(P); return s.view === 'pair' && s.detail ? s : null; }, 10000);
   const approvedA = pairViewA ? await approveOn(P) : null;
   if (approvedA?.passwordAt) lastPasswordAt = approvedA.passwordAt;

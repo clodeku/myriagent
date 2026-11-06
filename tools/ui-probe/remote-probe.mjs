@@ -2234,7 +2234,14 @@ async function runAuthPair() {
   expectApiErrors(app, /\/api\/v1\/pair\/pending/, '刻意的 404 not_found');
   const { page, api } = app;
 
-  // 網址帶碼：直接查，欄位照字面顯示、大字指紋
+  // 網址帶碼：只填進欄位、出現提醒、不自動查（2026-11-07 資安檢查：代理回覆裡帶攻擊者配對碼的連結點了就出現攻擊者的電腦等著核准）；
+  // 按「查詢」才查，欄位照字面顯示、大字指紋
+  await sleep(600);
+  const prefilled = await page.evaluate(() => ({ code: document.getElementById('pair-code').value, warn: !document.getElementById('pair-link-warn').hidden,
+    detail: !document.getElementById('pair-detail').hidden }));
+  const autoLookups = api.requests.filter((r) => r.path === '/api/v1/pair/pending').length;
+  check('authPairLinkNoAutoLookup', prefilled.code === 'MTLZ-XFCH' && prefilled.warn && !prefilled.detail && autoLookups === 0, { prefilled, autoLookups });
+  await page.click('#btn-pair-lookup');
   const shown = await until(async () => { const s = await authState(page); return s.detail ? s : null; }, 4000);
   const lookups = api.requests.filter((r) => r.path === '/api/v1/pair/pending').map((r) => r.query);
   check('authPairLookup', !!shown && shown.view === 'pair' && shown.code === 'MTLZ-XFCH' && shown.fp === 'ABCD-EFGH-JKMN-PQRS' && shown.device === '筆電 ' + RF.XSS
@@ -2302,6 +2309,7 @@ async function runAuthPair() {
   // 點擊劫持（DoubleClickjacking）的防線：細節一出現就點、視窗剛拿回焦點就點，都不跳密碼框、不送任何請求；1 秒後真的移動滑鼠才按得下去，
   // 按下去也只是跳密碼框，取消（Esc）不送核准
   const g = await openAuth('auth-pair-guard', ORIGIN + '/#pair=MTLZ-XFCH', loggedInApi({ pending: [{ status: 200, body: PENDING() }], approve: [OK] }));
+  await g.page.click('#btn-pair-lookup');
   const shownG = await until(async () => { const s = await authState(g.page); return s.detail ? s : null; }, 4000, 10);
   const shownAt = Date.now();
   const g0 = g.api.requests.length;
@@ -2344,6 +2352,7 @@ async function runAuthPair() {
 
   // 手機（390px、觸控）：核准頁不水平捲動；觸控的點按沒有 pointermove，1 秒內點不理、1 秒後同一下點按就跳密碼框
   const phone = await openAuth('auth-pair-390', ORIGIN + '/#pair=MTLZ-XFCH', loggedInApi({ pending: [{ status: 200, body: PENDING() }] }), { w: 390, h: 844 }, true);
+  await phone.page.tap('#btn-pair-lookup');
   await until(async () => { const s = await authState(phone.page); return s.detail ? s : null; }, 4000);
   const tapAt = await centerOf(phone.page, '#btn-pair-approve');
   if (tapAt) await phone.page.touchscreen.tap(tapAt.x, tapAt.y);
@@ -2413,7 +2422,7 @@ async function runAuthLogin() {
     { before: { view: before.view, loginHint: before.loginHint }, url, logins });
   await closePage(app);
 
-  // 從配對網址來：登入頁多一行提示；登入後留在核准頁（不去 /app/）並查詢配對碼
+  // 從配對網址來：登入頁多一行提示；登入後留在核准頁（不去 /app/），按「查詢」查配對碼
   const pair = await openAuth('auth-login-pair', ORIGIN + '/#pair=MTLZ-XFCH', loggedOutApi({ pending: [{ status: 200, body: PENDING() }] }));
   expectApiErrors(pair, /\/api\/v1\/(auth\/me|sessions)/, '登入之前的 401');
   const before2 = await authState(pair.page);
@@ -2421,6 +2430,9 @@ async function runAuthLogin() {
   await pair.page.fill('#login-user', 'admin');
   await pair.page.fill('#login-password', 'pw-probe');
   await pair.page.click('#btn-login');
+  // 登入後留在核准頁、碼填在欄位裡；不自動查（2026-11-07 資安檢查），按「查詢」才查
+  await until(async () => { const s = await authState(pair.page); return s.view === 'pair' ? s : null; }, 4000);
+  await pair.page.click('#btn-pair-lookup');
   const after2 = await until(async () => { const s = await authState(pair.page); return s.detail ? s : null; }, 4000);
   await sleep(300);
   const navs = pair.navigations.map((n) => n.url);
@@ -2464,7 +2476,7 @@ const SCENARIOS = [
     'revokeCancelNoRequest', 'revoke409Message', 'revoke503Message', 'hubAccountMenuFive', 'deleteAccountFlow', 'ownerPost401Redirect'], run: runHubDevices },
   { checks: ['desktopMatrixSelf', 'desktopDevicesNoRevoke', 'desktopVerifiedWarning', 'desktopDeviceCodeMenu', 'desktopDeviceCodeShown'], run: runDesktopDashboard },
   { checks: ['syncDotStates', 'sidebarDeviceDots', 'remoteOnlyCards', 'remoteOnlyNoOtherDevice'], run: runDesktopRemoteOnly },
-  { checks: ['authPairLookup', 'authPairApproveStepUp', 'authPairManualAndDeny', 'authPairHashChange', 'authPairApproveGuard', 'authPairTouchApprove', 'authPair390NoHScroll'], run: runAuthPair },
+  { checks: ['authPairLinkNoAutoLookup', 'authPairLookup', 'authPairApproveStepUp', 'authPairManualAndDeny', 'authPairHashChange', 'authPairApproveGuard', 'authPairTouchApprove', 'authPair390NoHScroll'], run: runAuthPair },
   { checks: ['authLoginToApp', 'authLoginStaysOnPair'], run: runAuthLogin },
   { checks: ['authCollaboratorLoginToApp', 'authCollaboratorRedirectsToApp'], run: runAuthCollaborator },
   {

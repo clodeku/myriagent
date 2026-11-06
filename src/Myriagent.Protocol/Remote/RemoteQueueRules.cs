@@ -26,6 +26,9 @@ internal static class RemoteQueueRules
         var current = RemoteTierRules.AgentInput(now, preApproved, low: false);
         if (current.Tier > origin.Tier || current.FullAccess && !origin.FullAccess)
             return false;
+        // 協作人送的（Author 有值）：對話現在是完全自動就不送進代理（入列之後才改成完全自動的也一樣；2026-11-07）
+        if (!Sync.CollaboratorRules.AllowsFullAccess(origin.Author is not null, now == AgentPermissionMode.FullAccess || current.FullAccess))
+            return false;
         return RemotePolicyRules.Check(policy, origin.Tier, origin.FullAccess) == null;
     }
 

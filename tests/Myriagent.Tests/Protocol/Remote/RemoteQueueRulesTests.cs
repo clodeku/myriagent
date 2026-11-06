@@ -16,6 +16,20 @@ public sealed class RemoteQueueRulesTests
     private static RemoteOrigin Origin(AgentPermissionMode? mode, int tier = 1, bool fullAccess = false) => new("01J9QZ3K8M5R7T2V4W6X8Y0A1B", mode, tier, fullAccess);
 
     [Fact]
+    public void 協作人的訊息_對話是完全自動就不送_其他模式照舊()
+    {
+        // 2026-11-07 資安檢查，擁有者決定「只擋完全自動」
+        var collab = new RemoteOrigin("01J9QZ3K8M5R7T2V4W6X8Y0A1C", AgentPermissionMode.FullAccess, 2, true, "小明");
+        RemoteQueueRules.CanDequeue(collab, AgentPermissionMode.FullAccess, false, ControlFull).Should().BeFalse();
+        RemoteQueueRules.CanDequeue(collab with { EffectiveMode = AgentPermissionMode.Ask, Tier = 1, FullAccess = false }, AgentPermissionMode.Ask, false, ControlFull).Should().BeTrue();
+        // 擁有者的同一則照舊可以送
+        RemoteQueueRules.CanDequeue(collab with { Author = null }, AgentPermissionMode.FullAccess, false, ControlFull).Should().BeTrue();
+        CollaboratorRules.AllowsFullAccess(collaborator: true, fullAccess: true).Should().BeFalse();
+        CollaboratorRules.AllowsFullAccess(collaborator: true, fullAccess: false).Should().BeTrue();
+        CollaboratorRules.AllowsFullAccess(collaborator: false, fullAccess: true).Should().BeTrue();
+    }
+
+    [Fact]
     public void 本機的訊息一律可以送()
     {
         RemoteQueueRules.CanDequeue(null, null, null, null).Should().BeTrue();

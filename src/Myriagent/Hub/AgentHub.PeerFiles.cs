@@ -117,8 +117,10 @@ internal static class PeerFileRules
             var path = Path.Combine(folder, n == 1 ? safe : $"{stem} ({n}){ext}");
             try
             {
-                await using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true);
-                await file.WriteAsync(body).ConfigureAwait(false);
+                await using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))
+                    await file.WriteAsync(body).ConfigureAwait(false);
+                // 其他電腦來的檔：標成從網際網路下載（Office 以保護的檢視開啟，2026-11-07 資安檢查）
+                MarkOfTheWeb.Mark(path);
                 return path;
             }
             catch (IOException) when (File.Exists(path))

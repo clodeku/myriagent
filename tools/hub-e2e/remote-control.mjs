@@ -648,6 +648,9 @@ try {
   const draft13 = await waitFor(async () => (await recs(M)).filter((m) => m.type === 'conversation' && m.isDraft).at(-1)?.c ?? null, 10000);
   if (draft13) await waitLoaded(M, draft13, 10000);
   if (draft13) await typeInto(M, draft13, '伺服器重開前打的字');
+  // M 存版面是延遲的（同一個瀏覽器內容共用 localStorage）：等它存好含新草稿的版面才開 C2，不然 M 晚到的存檔會蓋掉剛注入給 C2 的版面，
+  // C2 還原成 M 的分頁、沒有 conv.stream（2026-11-07 約一半機率在這裡逾時）
+  if (draft13) await waitFor(() => M.page.evaluate(([key, id]) => (localStorage.getItem(key) || '').includes(id) || null, [LAYOUT_KEY, draft13]).catch(() => null), 5000);
   const wsM0 = await wsState(M);
   const C2 = await openApp('C2', layout([conv.stream], conv.stream), { route: routeC });
   await waitLoaded(C2, conv.stream, 10000);

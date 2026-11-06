@@ -808,6 +808,8 @@ internal sealed partial class AgentHub
         try
         {
             var attachment = await Task.Run(() => AgentAttachmentProcessor.ImportFileAsync(file, attachmentDirectory, modelImageDirectory, CancellationToken.None));
+            // 附件是以串流複製出來的（替代資料流不跟著過去）：附件本身也標成從網際網路下載
+            MarkOfTheWeb.Mark(attachment.StoredPath);
             if (conversations.TryGetValue(c.Meta.Id, out var live) && ReferenceEquals(live, c))
             {
                 c.PendingAttachments.Add(attachment);
@@ -859,6 +861,8 @@ internal sealed partial class AgentHub
                     Directory.Delete(directory, recursive: true);   // 上次沒清掉的暫存（當機、關閉）
                 Directory.CreateDirectory(directory);
                 await transfer.DownloadUploadAsync(upload, file, ct).ConfigureAwait(false);
+                // 瀏覽器版（含協作人）上傳的檔：標成從網際網路下載，之後搬進附件也帶著（2026-11-07 資安檢查）
+                MarkOfTheWeb.Mark(file);
             }
             catch (InvalidDataException ex)
             {

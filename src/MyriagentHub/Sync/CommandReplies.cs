@@ -62,7 +62,7 @@ internal sealed class CommandReplies(
         ArgumentNullException.ThrowIfNull(tracked);
         if (tracked.OriginDeviceId is { } device)
             SendPeer(device, tracked.BrowserCommandId, message);
-        else if (browsers.Get(tracked.BrowserConnectionId) is { } browser)
+        else if (BrowserOf(tracked) is { } browser)
             gateway.SendAfterInit(browser, message);
     }
 
@@ -72,8 +72,21 @@ internal sealed class CommandReplies(
         ArgumentNullException.ThrowIfNull(tracked);
         if (tracked.OriginDeviceId is { } device)
             SendPeer(device, tracked.BrowserCommandId, toast);
-        else if (browsers.Get(tracked.BrowserConnectionId) is { } browser)
+        else if (BrowserOf(tracked) is { } browser)
             gateway.SendToast(browser, tracked.CmdName, toast);
+    }
+
+    /// <summary>
+    /// 發起的瀏覽器連線（還在的話）。協作人在指令執行途中被取消分享（或停用）：之後才到的結果與輸出（檔案清單、搜尋結果）不再給他（2026-11-07 資安檢查）
+    /// </summary>
+    private BrowserConnection? BrowserOf(TrackedCommand tracked)
+    {
+        if (browsers.Get(tracked.BrowserConnectionId) is not { } browser)
+            return null;
+        if (browser.IsCollaborator && (tracked.ExpectedConversationId ?? tracked.BrowserConversationId) is { } conversationId
+            && !gateway.CanSeeConversation(browser, conversationId))
+            return null;
+        return browser;
     }
 
     /// <summary>發起者還在嗎（瀏覽器：連線還在；裝置：一律當成在，送的時候才選連線）</summary>

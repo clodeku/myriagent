@@ -91,6 +91,8 @@ internal static class OwnerAccount
     /// <summary>擁有者 cookie 的身分：帳號是 admin、不是協作人的工作階段（授權政策與瀏覽器 hub 用）</summary>
     public static bool IsOwnerPrincipal(System.Security.Claims.ClaimsPrincipal? user) =>
         user?.Identity?.IsAuthenticated == true && user.FindFirst(HubClaims.Collaborator) is null
+        // 裝置權杖的身分名稱是使用者取的裝置名稱：叫「admin」的裝置不能被當成擁有者（2026-11-07 資安檢查；目前只在 cookie 的政策下用到，先擋住）
+        && user.FindFirst(HubClaims.DeviceId) is null
         && string.Equals(user.Identity.Name, UserName, StringComparison.Ordinal);
 }
 

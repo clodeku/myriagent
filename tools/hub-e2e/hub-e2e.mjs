@@ -666,7 +666,8 @@ async function releaseModuleFaults(ownerContext) {
     { label: '兩個都失敗、未登入的 /#pair', hash: '#pair', block: MODULES, owner: false, requested: ['/releaserules.js'], aborted: ['/releaserules.js'],
       expect: (s) => s.view === 'login' && s.pairHint === true && s.status === '請登入' },
     { label: '兩個都失敗、已登入的 /#pair=碼', hash: '#pair=ZZZZ-ZZZZ', block: MODULES, owner: true, requested: ['/releaserules.js'], aborted: ['/releaserules.js'],
-      expect: (s) => s.view === 'pair' && s.pairView === true && /找不到這個配對碼/.test(s.pairResult ?? '') && s.status === '' },
+      // 網址帶的碼只填進欄位、不自動查（2026-11-07 資安檢查）：停在配對頁、沒有查詢結果
+      expect: (s) => s.view === 'pair' && s.pairView === true && !s.pairResult && s.status === '' },
     { label: '只有 releases.js 失敗、已登入的 /#releases', hash: '#releases', block: ['/releases.js'], owner: true, requested: MODULES, aborted: ['/releases.js'],
       expect: (s) => s.view === 'releases' && s.status === '版本頁載入失敗，請重新整理頁面' && s.tone === 'error' && s.releases === null },
     { label: '只有 releaserules.js 失敗、已登入的 /#releases', hash: '#releases', block: ['/releaserules.js'], owner: true, requested: ['/releaserules.js'],

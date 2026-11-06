@@ -415,12 +415,15 @@ function clearPair() {
   setPairResult('');
 }
 
-/** 進入核准頁：網址帶碼就直接查；沒有碼就等輸入 */
+/**
+ * 進入核准頁：網址帶碼只填進欄位、不自動查（2026-11-07 資安檢查：代理的回覆被誘導放一個帶攻擊者配對碼的連結，
+ * 點了就直接出現攻擊者的電腦等著核准）；要使用者對照正在配對的那台電腦畫面上的碼，自己按「查詢」
+ */
 async function openPair(code) {
   clearPair();
   $('pair-code').value = code ? formatUserCode(code) : '';
-  if (code) await lookupPair(code);
-  else $('pair-code').focus();
+  $('pair-link-warn').hidden = !code;
+  $('pair-code').focus();
 }
 
 async function lookupPair(code) {

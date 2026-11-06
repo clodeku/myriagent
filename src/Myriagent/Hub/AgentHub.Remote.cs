@@ -435,6 +435,13 @@ internal sealed partial class AgentHub
                 return;
             }
 
+            // 協作人不能用到完全自動（2026-11-07 資安檢查，擁有者決定）：完全自動的對話裡協作人送的訊息不收
+            if (!Sync.CollaboratorRules.AllowsFullAccess(context.Collaborator is not null, tier.FullAccess))
+            {
+                context.Reject(RemoteResultCodes.Policy, Sync.CollaboratorRules.FullAccessRejected, step);
+                return;
+            }
+
             // 5f 驗證時間（只比伺服器時間；擁有者選「都不用輸入」，目前一律新鮮，Q2）
             step = RemoteGateSteps.Fresh;
             if (!RemoteAuthRules.IsFresh(tier.Tier, context.UvAt, context.Created))
