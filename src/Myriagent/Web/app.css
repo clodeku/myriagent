@@ -658,6 +658,9 @@ input[type="search"]::-webkit-search-cancel-button { filter: grayscale(1); opaci
    窗格改成左右排，分頁列是一欄（寬 tabdragrules.SIDE_TABS_WIDTH）、按鈕在最上面、分頁上下排可捲；作用中的分頁左緣一條線、右緣接到對話區 */
 .strip-side.on { color: var(--text-hi); }
 .pane.tabs-left { flex-direction: row; }
+/* 橫向排列時內容區要能比內容的最小寬度窄（flex 項目預設 min-width: auto）：不然回覆裡一行不換行的長指令把整個內容區撐寬，右邊被截掉（2026-11-07 使用者回報） */
+.pane.tabs-left .pane-body { min-width: 0; }
+.pane.tabs-left .strip { flex: none; }
 .pane.tabs-left .strip { width: var(--side-w, 184px); height: auto; flex-direction: column; border-bottom: 0; border-right: 1px solid var(--border); }
 .pane.tabs-left .strip-actions { order: -1; height: 35px; justify-content: flex-end; border-bottom: 1px solid var(--border); }
 .pane.tabs-left .tabs { flex: 1; min-height: 0; flex-direction: column; overflow-x: hidden; overflow-y: auto; }

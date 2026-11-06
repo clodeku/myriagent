@@ -501,9 +501,20 @@
 .q-other-row { display: flex; align-items: center; gap: 6px; padding-left: 38px; }
 .q-lock { width: 14px; height: 14px; color: var(--text-3); margin-left: -20px; }
 .q-other { flex: 1; height: 30px; }
-/* 補充說明（2026-11-05）：選項下面另一列，和「其他」同樣的縮排 */
-.q-note-row { display: flex; align-items: center; gap: 6px; padding-left: 38px; margin-top: 4px; }
-.q-note { flex: 1; height: 30px; }
+/* 「其他」是選項清單的最後一列（2026-11-07）：數字鍵、單選／複選記號同其他選項，輸入框在列裡；有打字就是選了它（.sel） */
+.opt-other { align-items: center; cursor: text; }
+.opt-other:active { transform: none; }
+.opt-other .opt-key, .it-question .opt-other .opt-mark { margin-top: 0; }
+.opt-other .opt-text { flex: 1; flex-direction: row; align-items: center; gap: 8px; }
+.opt-other .opt-label { flex: none; }
+.opt-other .q-other { flex: 1; min-width: 0; height: 28px; }
+.opt-other .q-lock { margin-left: 0; flex: none; }
+/* 補充說明（2026-11-05；2026-11-07 改成和答案分開）：選項下面隔一條虛線、有標題與「會和上面的答案一起送出」，看得出是附在答案上的 */
+.q-note-box { display: flex; flex-direction: column; gap: 5px; margin-top: 4px; padding-top: 8px; border-top: 1px dashed var(--border-2); }
+.q-note-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 12px; }
+.q-note-title { font-weight: 600; color: var(--text-2); }
+.q-note-hint { color: var(--text-3); }
+.q-note { height: 30px; }
 .q-note-ic { width: 13px; height: 13px; color: var(--text-3); flex: none; }
 .ans-note { display: flex; align-items: flex-start; gap: 6px; margin: 2px 0 4px; padding-left: 2px; font-size: 12px; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .ans-note-ic { width: 12px; height: 12px; margin-top: 2px; flex: none; }

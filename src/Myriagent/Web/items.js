@@ -900,26 +900,41 @@ function createQuestion(item, ctx) {
       opts.append(b);
     });
     block.append(opts);
-    if (q.allowOther || !(q.options && q.options.length)) {
+    const hasOptions = !!(q.options && q.options.length);
+    if (q.allowOther || !hasOptions) {
       const other = h('input', {
         type: q.secret ? 'password' : 'text', class: 'q-other input',
-        placeholder: (q.options && q.options.length) ? '其他（自行輸入）' : '輸入你的回答', autocomplete: 'off', spellcheck: 'false',
+        placeholder: hasOptions ? '自己輸入答案' : '輸入你的回答', autocomplete: 'off', spellcheck: 'false',
+        'aria-label': hasOptions ? '其他（自己輸入答案）' : '你的回答',
       });
       other.value = st.other[q.id] || '';
       other.addEventListener('input', () => {
         st.other[q.id] = other.value;
-        if (!q.multi && other.value.trim() && st.sel[q.id].length) { st.sel[q.id] = []; syncBlock(qi); }
+        if (!q.multi && other.value.trim() && st.sel[q.id].length) st.sel[q.id] = [];
+        syncBlock(qi);
       });
       other.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); }
       });
       other.addEventListener('focus', () => setActive(qi));
-      block.append(h('div', { class: 'q-other-row' }, q.secret ? icon('lock', 'q-lock') : null, other));
+      if (hasOptions) {
+        // 「其他」是答案之一（2026-11-07 使用者回報：和補充說明兩個一樣的輸入框會搞混）：排在選項清單的最後一列，有自己的數字鍵與單選／複選記號，
+        // 輸入框在那一列裡；單選題打了字就取消已選的選項（同以前）
+        const row = h('div', { class: 'opt opt-other', dataset: { idx: String(q.options.length + 1) } },
+          h('span', { class: 'opt-key', text: String(q.options.length + 1) }),
+          h('span', { class: 'opt-mark' }),
+          h('span', { class: 'opt-text' }, h('span', { class: 'opt-label', text: '其他' }), q.secret ? icon('lock', 'q-lock') : null, other));
+        row.addEventListener('click', (e) => { if (e.target !== other) other.focus(); });
+        opts.append(row);
+      } else {
+        block.append(h('div', { class: 'q-other-row' }, q.secret ? icon('lock', 'q-lock') : null, other));
+      }
     }
-    // 補充說明（2026-11-05）：選了選項之後另外補一段，和「其他（自行輸入）」互不清除；Claude、Grok 以 annotations.notes 交給 CLI
+    // 補充說明（2026-11-05）：選了答案之後另外補一段，和「其他」互不清除；Claude、Grok 以 annotations.notes 交給 CLI。
+    // 和答案分開：選項下面隔一條線、有自己的標題與說明（2026-11-07），看得出是附在答案上的，不是另一個答案
     if (noteFieldShown(q, asker)) {
       const note = h('input', {
-        type: 'text', class: 'q-note input', placeholder: '補充說明（選填）', maxLength: NOTE_MAX, autocomplete: 'off', spellcheck: 'false',
+        type: 'text', class: 'q-note input', placeholder: '例如：選這個的原因、要注意的地方', maxLength: NOTE_MAX, autocomplete: 'off', spellcheck: 'false',
         dataset: { field: 'questionNote' }, 'aria-label': '補充說明（選填）',
       });
       note.value = st.note[q.id] || '';
@@ -928,7 +943,10 @@ function createQuestion(item, ctx) {
         if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); }
       });
       note.addEventListener('focus', () => setActive(qi));
-      block.append(h('div', { class: 'q-note-row' }, icon('edit', 'q-note-ic'), note));
+      block.append(h('div', { class: 'q-note-box' },
+        h('div', { class: 'q-note-head' }, icon('edit', 'q-note-ic'), h('span', { class: 'q-note-title', text: '補充說明（選填）' }),
+          h('span', { class: 'q-note-hint', text: '會和上面的答案一起送出' })),
+        note));
     }
     block.addEventListener('pointerdown', () => setActive(qi));
     blocks.push(block);
@@ -949,11 +967,14 @@ function createQuestion(item, ctx) {
   function syncBlock(qi) {
     const q = qs[qi];
     const sel = st.sel[q.id] || [];
-    blocks[qi].querySelectorAll('.opt').forEach((b, oi) => {
+    blocks[qi].querySelectorAll('.opt:not(.opt-other)').forEach((b, oi) => {
       const on = sel.includes((q.options[oi] || {}).label);
       b.classList.toggle('sel', on);
       b.setAttribute('aria-pressed', String(on));
     });
+    // 「其他」那一列：有打字就算選了它
+    const otherRow = blocks[qi].querySelector('.opt-other');
+    if (otherRow) otherRow.classList.toggle('sel', !!(st.other[q.id] || '').trim());
   }
   function pick(qi, oi) {
     const q = qs[qi];
@@ -1000,7 +1021,14 @@ function createQuestion(item, ctx) {
     if (e.target.tagName === 'INPUT') return;
     if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.altKey && !e.metaKey) {
       e.preventDefault();
-      if (!n._blocked && !n.classList.contains('sending')) { pressKey(blocks[st.active || 0], e.key); pick(st.active || 0, Number(e.key) - 1); }
+      if (!n._blocked && !n.classList.contains('sending')) {
+        const qi = st.active || 0;
+        const otherInput = blocks[qi].querySelector('.opt-other .q-other');
+        pressKey(blocks[qi], e.key);
+        // 「其他」那一列的數字鍵：游標移到它的輸入框
+        if (otherInput && Number(e.key) === (qs[qi].options || []).length + 1) otherInput.focus();
+        else pick(qi, Number(e.key) - 1);
+      }
     } else if (e.key === 'Enter' && e.target === n) { e.preventDefault(); if (!n.classList.contains('sending')) submit(); }
   });
   qs.forEach((_, qi) => syncBlock(qi));

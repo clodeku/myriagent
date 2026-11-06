@@ -1067,6 +1067,35 @@ async function runMain(vp, full) {
   await scrollItem(page, 'c1', 'i19', 'center');
   const q = `${convSel('c1')} .it[data-id="i19"]`;
   await page.click(`${q} .card-head`);
+  // 版面（2026-11-07 使用者回報「其他」和補充說明兩個一樣的輸入框會搞混）：「其他」是選項清單的最後一列、有自己的數字鍵，
+  // 按那個數字鍵游標移到它的輸入框；補充說明在選項下面另一區，有標題與說明；沒有選項的題目只有一個回答框、不在選項清單裡
+  const layout = await page.evaluate((sel) => {
+    const b0 = document.querySelector(sel + ' .q-block[data-qi="0"]');
+    const last = b0.querySelector('.opts > :last-child');
+    const note = b0.querySelector('.q-note-box');
+    const b2 = document.querySelector(sel + ' .q-block[data-qi="2"]');
+    return {
+      otherIsLastOption: !!last && last.classList.contains('opt-other') && !!last.querySelector('.q-other'),
+      otherKey: last && last.querySelector('.opt-key') ? last.querySelector('.opt-key').textContent : null,
+      otherLabel: last && last.querySelector('.opt-label') ? last.querySelector('.opt-label').textContent : null,
+      noteOutsideOptions: !!note && !note.closest('.opts') && !!note.querySelector('.q-note'),
+      noteTitle: note ? note.querySelector('.q-note-title').textContent : null,
+      noteBelowOther: !!note && !!last && note.getBoundingClientRect().top >= last.getBoundingClientRect().bottom,
+      secretOtherOutsideOptions: !!b2.querySelector(':scope > .q-other-row .q-other') && !b2.querySelector('.opt-other'),
+    };
+  }, q);
+  await page.locator(q).screenshot({ path: path.join(OUT, `question-card-${tag}.png`) });
+  await page.keyboard.press('4');
+  const keyFocus = await page.evaluate((sel) => document.activeElement === document.querySelector(sel + ' .q-block[data-qi="0"] .opt-other .q-other'), q);
+  await page.keyboard.type('自訂');
+  const typedOther = await page.evaluate((sel) => document.querySelector(sel + ' .q-block[data-qi="0"] .opt-other').classList.contains('sel'), q);
+  await page.fill(`${q} .q-block[data-qi="0"] .opt-other .q-other`, '');
+  await page.dispatchEvent(`${q} .q-block[data-qi="0"] .opt-other .q-other`, 'input');
+  await page.click(`${q} .card-head`);
+  if (full) {
+    check('questionOtherIsOption', layout.otherIsLastOption && layout.otherKey === '4' && layout.otherLabel === '其他' && keyFocus && typedOther
+      && layout.noteOutsideOptions && layout.noteTitle === '補充說明（選填）' && layout.noteBelowOther && layout.secretOtherOutsideOptions, { layout, keyFocus, typedOther });
+  }
   await page.keyboard.press('2');
   // 補充說明（2026-11-05）：單選題選了之後再補一段，選項不會被清掉；密碼題沒有補充欄
   await page.fill(`${q} .q-block[data-qi="0"] .q-note`, '要等網路恢復再試');
@@ -1911,6 +1940,26 @@ async function runSideTabs(vp) {
   check('sideTabsRestore', a.left && a.pressed && a.title === '分頁改回上方' && a.stripW === 160 && column && a.bodyLeft >= a.stripRight - 1
     && !b.left && !b.pressed && b.title === '分頁改到左側' && b.stripH === 35, st);
   await shot(page, 'side-tabs-' + vp.w);
+
+  // 回覆裡一行不換行的長指令不能把內容區撐寬（2026-11-07 使用者回報：分頁放左側時對話框右邊被截掉）
+  const fit = await page.evaluate(() => {
+    const pane = document.querySelector('#workspace .pane[data-pane="p1"]');
+    // 標頭那一行（帳戶、資料夾、分支、執行列…不換行）比窗格寬時一樣：插在標頭裡（捲動區裡的內容本來就撐不寬）
+    const items = pane.querySelector('.conv[data-conv="c2"] .ch');
+    const long = document.createElement('div');
+    long.className = 'probe-long-line';
+    long.style.whiteSpace = 'nowrap';
+    long.textContent = 'git commit --only -m "' + 'docs(analysis): 更新商品改名效果至10月25日並補查26日 '.repeat(12) + '"';
+    items.append(long);
+    const pr = pane.getBoundingClientRect();
+    const body = pane.querySelector('.pane-body').getBoundingClientRect();
+    const comp = pane.querySelector('.conv[data-conv="c2"] .dock');
+    const cr = comp ? comp.getBoundingClientRect() : null;
+    const out = { paneRight: Math.round(pr.right), bodyRight: Math.round(body.right), composerRight: cr ? Math.round(cr.right) : null };
+    long.remove();
+    return out;
+  });
+  check('sideTabsLongLineFits', fit.bodyRight <= fit.paneRight + 1 && fit.composerRight != null && fit.composerRight <= fit.paneRight + 1, fit);
 
   // 側排時上下拖曳排序：c6 放到 c2 上半部＝插在最前面；存回的版面還是左側
   await page.dragAndDrop('#workspace .pane[data-pane="p1"] .tab[data-key="c6"]', '#workspace .pane[data-pane="p1"] .tab[data-key="c2"]', { targetPosition: { x: 40, y: 4 } });

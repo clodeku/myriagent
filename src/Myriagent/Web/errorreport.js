@@ -8,6 +8,14 @@ import * as R from './errorrules.js';
 let installed = false;
 let send = null;
 
+/**
+ * 網頁自己發現的異常（不是例外）：照 error 的種類回報（宿主與伺服器不必認得新的種類），同樣受節流管。
+ * 例：對話一直沒有載入完成（conversation.js 的載入看門狗）
+ */
+export function reportIssue(message, detail) {
+  if (send) send({ kind: 'error', message: String(message || ''), source: null, detail: detail == null ? null : String(detail) });
+}
+
 /** iframe 裡的影片（framedvideo.js）：error 事件到不了這裡的 window，由它直接回報 */
 export function reportMediaError(tag, src) {
   if (send) send(R.fromMedia(tag, src, location.href));

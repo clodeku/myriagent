@@ -555,6 +555,62 @@ async function runProviderCards() {
   await HP.closePage(app);
 }
 
+/**
+ * 載入看門狗（2026-11-07 使用者回報：分頁一直「載入對話中…」）：第一次 open 沒有回應，看得到的分頁 6 秒後自動重送 open、
+ * 回應到了就載好，並以 clientError 回報當時的狀態（找出是哪一條路掉的）
+ */
+async function runLoadRetry() {
+  const id = LF.CONV.idle;
+  let opens = 0;
+  const app = await H.openHub('load-retry', {
+    init: (ready) => LF.liveBrowserInit(NOW, { mode: ready && ready.mode, layout: layoutOf([[[id], id]]) }),
+    hub: (hub) => hub.onCmd('open', (cmd) => {
+      opens++;
+      if (opens === 1) return { push: [] }; // 第一次不回
+      return { push: [LF.conversationMessage(NOW, cmd.conversationId, TITLE_OF[cmd.conversationId] || '對話')] };
+    }),
+  });
+  await HP.waitLive(app);
+  const stuck = await convState(app, id);
+  const loaded = await waitLoaded(app, [id], 10000);
+  const reports = app.hub.cmds('clientError').map((c) => c.cmd);
+  const report = reports.find((r) => String(r.message).includes('一直沒有載入完成'));
+  check('hubLoadRetry', !!stuck && !stuck.loaded && !!loaded && openIds(app.hub).filter((x) => x === id).length === 2 && !!report && /"sent":true/.test(report.detail || ''),
+    { stuckFirst: stuck && stuck.loaded, loaded: !!loaded, opens: openIds(app.hub), report });
+  await HP.closePage(app);
+}
+
+/**
+ * 標頭清單對不上（2026-11-07 使用者回報 Claude 常偵測不到模型與推理強度）：對話沒有上一份清單時收到省略清單的標頭，
+ * 網頁重送 open 拿整份快照，模型鈕回來，並回報當時的狀態
+ */
+async function runHeaderListsRecover() {
+  const id = LF.CONV.idle;
+  let opens = 0;
+  const app = await H.openHub('header-lists', {
+    init: (ready) => LF.liveBrowserInit(NOW, { mode: ready && ready.mode, layout: layoutOf([[[id], id]]) }),
+    hub: (hub) => hub.onCmd('open', (cmd) => {
+      opens++;
+      const msg = LF.conversationMessage(NOW, cmd.conversationId, TITLE_OF[cmd.conversationId] || '對話');
+      if (opens === 1) { delete msg.header.models; delete msg.header.commands; } // 第一份快照少了清單（模擬兩邊對不上）
+      return { push: [msg] };
+    }),
+  });
+  await HP.waitLive(app);
+  await waitLoaded(app, [id]);
+  const modelHidden = () => app.page.evaluate((cid) => { const b = document.querySelector('.conv[data-conv="' + cid + '"] .cbar .pick'); return !b || b.hidden; }, id);
+  const before = await modelHidden();
+  const slim = LF.conversationMessage(NOW, id, TITLE_OF[id] || '對話').header;
+  delete slim.models; delete slim.commands;
+  app.hub.push({ type: 'header', conversationId: id, header: slim });
+  const reopened = await until(() => (openIds(app.hub).filter((x) => x === id).length >= 2 ? true : null), 3000);
+  const shown = await until(async () => ((await modelHidden()) ? null : true), 3000);
+  const report = app.hub.cmds('clientError').map((c) => c.cmd).find((r) => String(r.message).includes('沒有上一份清單'));
+  // 第一份快照就少了清單時網頁當場就重送（before 可能已經是 false）：看得到重送、模型鈕回來、有回報
+  check('hubHeaderListsRecover', !!reopened && !!shown && !!report, { before, reopened: !!reopened, shown: !!shown, opens: openIds(app.hub), report });
+  await HP.closePage(app);
+}
+
 async function runRestoreUnlisted() {
   // 清單外（被 1000 筆擠出）的對話：分頁留著、送 open；伺服器說不在了（conversationClosed）才關
   const layout = layoutOf([[[LF.CONV.idle, LF.CONV.unlisted], LF.CONV.idle]]);
@@ -5919,6 +5975,8 @@ const SCENARIOS = [
   { checks: ['thClientStateCarriesVisible', 'thVisibleUpdatesClientState'], run: runThClientState },
   { checks: ['thMediaLinkNewTab'], run: runThMediaLink },
   { checks: ['hubRestoreLayout', 'hubClientStateOpenIds', 'hubChat1440NoHScroll'], run: runRestoreLayout },
+  { checks: ['hubLoadRetry'], run: runLoadRetry },
+  { checks: ['hubHeaderListsRecover'], run: runHeaderListsRecover },
   { checks: ['hubRestoreKeepsUnlistedConversation'], run: runRestoreUnlisted },
   { checks: ['hubProviderAccountCards', 'hubProviderConversations', 'hubProviderMatrixRows', 'hubProvidersNoHScroll'], run: runProviderCards },
   { checks: ['hubNoAutoDraft'], run: runNoAutoDraft },

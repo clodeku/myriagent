@@ -1200,8 +1200,23 @@ export function setChatVisible(on) {
   reportVisible(false);
 }
 
+/**
+ * 看得到卻一直沒有載入完成的分頁（ConvView 的載入看門狗）：重送 open。
+ * 回傳這個分頁當時的狀態（記進回報，找出是哪一條路掉的）；還在等清單（其他電腦的對話，清單到了才 open）或已經不在窗格裡時不送
+ */
+function retryOpen(id) {
+  const s = {
+    deferred: deferredOpen.has(id), awaitingList: awaitingList.has(id), awaitingReply: awaitingReply.get(id) || 0,
+    staleReplies: staleReplies.get(id) || 0, inList: state.convMap.has(id), inPane: !!paneOf(id),
+  };
+  if (s.awaitingList || !s.inPane) return Object.assign({ sent: false }, s);
+  deferredOpen.delete(id);
+  postOpen(id);
+  return Object.assign({ sent: true }, s);
+}
+
 export const api = {
   openConversation, flashConversation, newConversation, openHealthFix, openScheduleAgent, closeTab, activateTab, focusPane, splitPane, closePane, moveTab, cycleTab, closeActiveTab,
   notePendingSwitch, activeConversationId, openConversationIds, refreshTab, getConv, paneCount: () => panes.length,
-  switchDraftDevice, scheduleLayout, forkConversation,
+  switchDraftDevice, scheduleLayout, forkConversation, retryOpen,
 };

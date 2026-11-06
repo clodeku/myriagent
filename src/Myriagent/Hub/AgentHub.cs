@@ -400,7 +400,11 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                     ForkConversation(view, Conv(), Str("paneId"));
                     break;
                 case "open":
-                    Open(view, Conv());
+                    // 找不到的對話以前什麼都不回、也不記，網頁就一直「載入對話中…」（2026-11-07 使用者回報）：至少留下記錄（網頁的看門狗會重送）
+                    if (Conv() is { } opening)
+                        Open(view, opening);
+                    else
+                        Log.Warn($"網頁要開的對話 {Str("conversationId")} 不在中樞，沒有回應（{ViewLabel(view)}）");
                     break;
                 case "close":
                     Close(view, Conv());

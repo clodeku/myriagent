@@ -1750,3 +1750,22 @@ test('openOrder_先聚焦窗格作用中的分頁_再其他窗格作用中的_�
   // 手機常見：一個窗格、看得到的是最後一個分頁
   assert.deepEqual(L.openOrder([{ id: 'p1', tabs: ['a', 'b', 'c', 'd'], active: 'd' }], 'p1'), ['d', 'a', 'b', 'c']);
 });
+
+test('loadRetryDelay_依序6秒15秒30秒_用完回null', () => {
+  assert.deepEqual([0, 1, 2, 3].map((n) => L.loadRetryDelay(n)), [6000, 15000, 30000, null]);
+  assert.equal(L.loadRetryDelay(-1), null);
+  assert.equal(L.loadRetryDelay(1.5), null);
+  assert.equal(L.loadRetryDelay('0'), null);
+});
+
+test('missingHeaderLists_省略的清單上一份也沒有才算對不上_只看commands與models', () => {
+  const full = { title: 'a', commands: [], models: [{ value: 'default' }] };
+  const slim = { title: 'b' };
+  assert.deepEqual(L.missingHeaderLists(full, slim), []);
+  assert.deepEqual(L.missingHeaderLists(null, slim), ['commands', 'models']);
+  assert.deepEqual(L.missingHeaderLists({ title: 'a', commands: [] }, slim), ['models']);
+  // 整份標頭（帶了清單）不算；agents、outputStyles 沒有不算
+  assert.deepEqual(L.missingHeaderLists(null, full), []);
+  assert.deepEqual(L.missingHeaderLists({ commands: [], models: [] }, { commands: [] }), []);
+  assert.deepEqual(L.missingHeaderLists(null, null), []);
+});

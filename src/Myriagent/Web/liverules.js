@@ -1266,6 +1266,19 @@ export function mediaPolicyNote(device) {
   return isObj(device) && device.level === 'Off' ? '這台電腦的遠端政策是關閉，只能看縮圖' : null;
 }
 
+// ───── 一直沒有載入完成的對話 ─────
+
+/**
+ * 看得到的對話一直停在「載入對話中…」時，第幾次自動重送 open 之前要等多久（2026-11-07 使用者回報：分頁一直載入不完）。
+ * 送出的 open 或回來的 conversation 在哪裡掉了都救得回來（宿主與伺服器收到重複的 open 只是再送一次整份）；用完就改成「重試」鈕
+ */
+export const LOAD_RETRY_MS = [6000, 15000, 30000];
+
+/** 第 attempt 次（0 起算）自動重送之前要等的毫秒；用完回 null */
+export function loadRetryDelay(attempt) {
+  return Number.isInteger(attempt) && attempt >= 0 && attempt < LOAD_RETRY_MS.length ? LOAD_RETRY_MS[attempt] : null;
+}
+
 // ───── 一次 open 很多分頁的順序 ─────
 
 /**
@@ -1601,6 +1614,23 @@ export const HEADER_LIST_FIELDS = Object.freeze(['commands', 'models', 'agents',
  * 標頭更新沒帶指令或模型清單＝和上一份相同：沿用 prev 的（排著還沒套用的那一份，否則畫面上的）。帶了的照新的；
  * 沒有上一份可沿用時補空陣列（不應發生：宿主對沒送過整份的 view 一律送整份）。回傳新的物件，不改 prev、next
  */
+/**
+ * 收到省略了清單的標頭，但上一份（prev）也沒有那份清單：網頁和宿主對不上了（宿主以為這個視窗有清單才省略）。
+ * 合併出來的清單會是空的——模型鈕不見、推理強度顯示「不支援」（2026-11-07 使用者回報 Claude 常偵測不到模型與推理強度）。
+ * 回傳缺的欄位（沒有缺回空陣列）；呼叫端重送 open 拿整份快照
+ */
+export function missingHeaderLists(prev, next) {
+  if (!isObj(next)) return [];
+  // 只看整份標頭一定有的兩份（桌面與伺服器都一定帶）；agents、outputStyles 只有 Claude 才有，沒有不代表對不上
+  return HEADER_LISTS_ALWAYS.filter((f) => !Object.prototype.hasOwnProperty.call(next, f) && !(isObj(prev) && Array.isArray(prev[f])));
+}
+
+/** 整份標頭一定有的清單欄位 */
+export const HEADER_LISTS_ALWAYS = Object.freeze(['commands', 'models']);
+
+/** 標頭清單對不上時，同一個對話多久之內最多重送一次 open */
+export const HEADER_LISTS_REOPEN_MS = 10000;
+
 export function mergeHeaderLists(prev, next) {
   if (!isObj(next)) return next;
   const out = Object.assign({}, next);

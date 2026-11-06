@@ -6,9 +6,9 @@ import { canManageCollaborators, openShareDialog } from './collab.js';
 import { sharedWith } from './collabrules.js';
 import { openMenu, openDialog, confirmDialog, choiceDialog, toast, spinner } from './ui.js';
 import {
-  originOf, deviceOf, deviceLine, statusLine, composerGate, cardGate, deleteConfirmText, deleteProgramsCheckbox, policyChoices, needsLocalOnlyConfirm, LOCAL_ONLY_CONFIRM_TEXT, loadChunks, LAZY_BATCH,
+  originOf, deviceOf, deviceLine, statusLine, composerGate, cardGate, deleteConfirmText, deleteProgramsCheckbox, policyChoices, needsLocalOnlyConfirm, LOCAL_ONLY_CONFIRM_TEXT, loadChunks, LAZY_BATCH, loadRetryDelay,
   attachGate, folderPickerGate, ownerRunning, mediaPolicyNote, peerOf, controllable, peerDraftDevices, peerDraftAccount, clearBoundary,
-  latestPrompt, promptHistory, promptLine, itemTimeText, itemTimeTitle, dayKey, backgroundLine, backgroundStopMenu, detailTasks, programsView, mergeHeaderLists, touchUnsticks, touchScrolling,
+  latestPrompt, promptHistory, promptLine, itemTimeText, itemTimeTitle, dayKey, backgroundLine, backgroundStopMenu, detailTasks, programsView, mergeHeaderLists, missingHeaderLists, HEADER_LISTS_REOPEN_MS, touchUnsticks, touchScrolling,
   remoteAccountMenu, headerAccountId, findAccount, originLink,
 } from './liverules.js';
 import { track } from './cmdtrack.js';
@@ -37,6 +37,7 @@ import { goalSummary, GOAL_STATUS } from './codexrules.js';
 import { openCodexPanel } from './codexcontrols.js';
 import { openRewind } from './rewind.js';
 import { openTaskDetail } from './taskdetail.js';
+import { reportIssue } from './errorreport.js';
 
 /**
  * 項目照實際高度排版的瀏覽器（同 chat.css 的 .it：觸控裝置、不支援捲動錨定的）。每次載入時才問（平板接上或拆下鍵盤會變）
@@ -474,6 +475,9 @@ export class ConvView {
     // 載入中：很快就回來時不閃一下，稍等才出現；load() 移除
     this.loadingEl = h('div', { class: 'runline', hidden: true, role: 'status' }, spinner('run-spin'), h('span', { class: 'run-text', text: '載入對話中…' }));
     this.loadingTimer = setTimeout(() => { if (this.loadingEl) this.loadingEl.hidden = false; }, 200);
+    // 載入看門狗（2026-11-07 使用者回報：分頁一直「載入對話中…」）：看得到卻一直沒收到 conversation 就自動重送 open，用完改成「重試」鈕
+    this.loadAttempt = 0;
+    this.loadWatch = 0;
     // 送出中的訊息另放一層、排在所有項目之後：等待期間代理新增的項目（插入這一輪時）不會排到它後面
     this.sendingEl = h('div', { class: 'sending-list' });
     this.thread = h('div', { class: 'thread' }, this.olderRow, this.loadingEl, this.empty, this.itemsEl, this.sendingEl, this.runEl);
@@ -608,6 +612,54 @@ export class ConvView {
     this.minimap.request();
     this.tick(Date.now());
     this.scheduleLazy(); // 在背景載入的分頁：切過來才把先不排版的項目換回實際高度
+    this.armLoadWatch();
+  }
+
+  /** 看得到、還沒載入完成：排下一次檢查（liverules.loadRetryDelay）；已經排著、載好了、看不到時不排（切回來的 show 再排） */
+  armLoadWatch() {
+    if (this.loaded || this.loadWatch || !this.visible || !this.loadingEl) return;
+    const delay = loadRetryDelay(this.loadAttempt);
+    if (delay == null) { this.showLoadFailed(); return; }
+    this.loadWatch = setTimeout(() => {
+      this.loadWatch = 0;
+      if (this.loaded || !this.loadingEl) return;
+      if (!this.visible) return; // 看不到的時間不算：切回來再從這一次接著等
+      this.loadAttempt++;
+      const st = this.ws.retryOpen ? this.ws.retryOpen(this.id) : null;
+      reportIssue('對話一直沒有載入完成，第 ' + this.loadAttempt + ' 次重送 open（' + this.id + '）', st ? JSON.stringify(st) : null);
+      this.armLoadWatch();
+    }, delay);
+  }
+
+  /**
+   * 收到省略清單的標頭、這個對話卻沒有上一份清單（liverules.missingHeaderLists）：重送 open 拿整份快照（每 HEADER_LISTS_REOPEN_MS 最多一次），
+   * 並回報當時的狀態，找出是哪一條路讓兩邊對不上
+   */
+  recoverHeaderLists(missing, hd) {
+    const now = Date.now();
+    if (this.listsReopenAt && now - this.listsReopenAt < HEADER_LISTS_REOPEN_MS) return;
+    this.listsReopenAt = now;
+    const st = this.ws.retryOpen ? this.ws.retryOpen(this.id) : null;
+    reportIssue('標頭省略了清單，但這個對話沒有上一份清單（' + this.id + '）', JSON.stringify({
+      missing, loaded: this.loaded, hadHeader: !!this.header, provider: hd && hd.provider, running: !!(hd && hd.running), visible: this.visible, open: st,
+    }));
+  }
+
+  /** 自動重送都用完了：轉圈換成說明與「重試」鈕（按了重新開始計次） */
+  showLoadFailed() {
+    const el = this.loadingEl;
+    if (!el || el.classList.contains('load-failed')) return;
+    el.hidden = false;
+    el.classList.add('load-failed');
+    const retry = h('button', { type: 'button', class: 'btn sm', text: '重試', dataset: { field: 'loadRetry' } });
+    retry.addEventListener('click', () => {
+      el.classList.remove('load-failed');
+      el.replaceChildren(spinner('run-spin'), h('span', { class: 'run-text', text: '載入對話中…' }));
+      this.loadAttempt = 0;
+      if (this.ws.retryOpen) this.ws.retryOpen(this.id);
+      this.armLoadWatch();
+    });
+    el.replaceChildren(icon('info'), h('span', { class: 'run-text', text: '這個對話一直沒有載入完成' }), retry);
   }
 
   hide() {
@@ -625,6 +677,7 @@ export class ConvView {
     if (views.get(this.id) === this) views.delete(this.id);
     for (const off of this.offs) off();
     clearTimeout(this.loadingTimer);
+    clearTimeout(this.loadWatch);
     clearTimeout(this.flashTimer);
     clearTimeout(this.posTimer);
     clearTimeout(this.turnSumTimer);
@@ -717,6 +770,9 @@ export class ConvView {
     this.loaded = true;
     this.root.classList.remove('loading');
     clearTimeout(this.loadingTimer);
+    clearTimeout(this.loadWatch);
+    this.loadWatch = 0;
+    this.loadAttempt = 0;
     if (this.loadingEl) { this.loadingEl.remove(); this.loadingEl = null; }
     this.cancelChunks();
     this.cancelLazy();
@@ -1157,7 +1213,9 @@ export class ConvView {
 
   setHeader(hd) {
     const prevHd = this.header; // 自動命名的標題解碼要比前後兩份（fxrules.titleDecodeFx）
-    // 標頭更新沒變就不帶指令與模型清單：沿用上一份（快照一律整份）
+    // 標頭更新沒變就不帶指令與模型清單：沿用上一份（快照一律整份）。上一份也沒有＝和宿主對不上了：重送 open 拿整份快照（2026-11-07）
+    const missing = missingHeaderLists(this.header, hd);
+    if (missing.length) this.recoverHeaderLists(missing, hd);
     hd = mergeHeaderLists(this.header, hd);
     this.header = hd;
     const acc = accountOf(hd.accountId);
