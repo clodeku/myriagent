@@ -699,9 +699,10 @@ internal static partial class AntigravityStreamRules
         => !string.IsNullOrEmpty(error) && ServiceUnavailablePattern().IsMatch(error) && !IsQuotaExhausted(error);
 
     /// <summary>
-    /// 這一輪因 agy 呼叫模型 API 時底層網路／傳輸連線中斷而失敗（實錄：「API error (attempt 2): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": write tcp …: wsasend: An existing connection was forcibly closed by the remote host.」）：
-    /// 常駐 agy 程序的 Go HTTP/TLS 連線池重用到被遠端或 NAT 關閉的閒置連線、或短暫網路抖動；會話在無存活背景工作時先關掉舊程序清掉連線池，中樞 10 秒後自動重試（AgentServerBusy.NetworkError）。
-    /// 只認 API 呼叫層的暫時性連線中斷；額度耗盡、未登入、HTTP 4xx/500、x509 憑證錯誤都不算
+    /// 這一輪因 agy 呼叫模型 API 時底層網路／傳輸連線中斷或 SSE 串流靜默逾時而失敗（例如：「API error (attempt 2): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": write tcp …: wsasend: An existing connection was forcibly closed by the remote host.」、
+    /// 「API error (attempt 1): request failed: stream idle timeout (5m0s): context deadline exceeded」）：
+    /// 常駐 agy 程序的 Go HTTP/TLS 連線池重用到被遠端或 NAT 關閉／靜默丟包的長連線、上游串流卡死，或短暫網路抖動；會話在無存活背景工作時先關掉舊程序清掉連線池，中樞 10 秒後自動重試（AgentServerBusy.NetworkError）。
+    /// 只認 API 呼叫層的暫時性連線中斷與串流逾時；額度耗盡、未登入、HTTP 4xx/500、x509 憑證錯誤都不算
     /// </summary>
     public static bool IsTransientNetworkError(string? error)
         => !string.IsNullOrEmpty(error)
@@ -863,7 +864,7 @@ internal static partial class AntigravityStreamRules
     [GeneratedRegex(@"\bAPI error\b|cloudcode-pa\.googleapis\.com|\bstreamGenerateContent\b", RegexOptions.IgnoreCase)]
     private static partial Regex ApiErrorContextPattern();
 
-    [GeneratedRegex(@"\b(?:wsasend|wsarecv)\b|forcibly closed by the remote host|established connection was aborted|connection reset by peer|\bbroken pipe\b|\bunexpected EOF\b|:\s*EOF\s*$|http2:\s*(?:client connection lost|server sent GOAWAY|transport received GOAWAY)|stream error:\s*stream ID\b|\bi/o timeout\b|TLS handshake timeout|Client\.Timeout exceeded|\bdial tcp\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(?:wsasend|wsarecv)\b|forcibly closed by the remote host|established connection was aborted|software caused connection abort|\bnetwork is down\b|connection reset by peer|\bbroken pipe\b|\bunexpected EOF\b|:\s*EOF\s*$|http2:\s*(?:client connection lost|server sent GOAWAY|transport received GOAWAY)|stream error:\s*stream ID\b|\bstream idle timeout\b|\bcontext deadline exceeded\b|\bDEADLINE_EXCEEDED\b|\bi/o timeout\b|TLS handshake timeout|Client\.Timeout exceeded|\bdial tcp\b", RegexOptions.IgnoreCase)]
     private static partial Regex TransientNetworkPattern();
 
     [GeneratedRegex(@"\s+")]

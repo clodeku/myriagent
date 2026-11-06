@@ -537,12 +537,16 @@ public class AntigravityRulesTests
     [InlineData("""API error (attempt 2): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": unexpected EOF""", true)]
     [InlineData("""API error (attempt 2): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": http2: client connection lost""", true)]
     [InlineData("""API error (attempt 2): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": dial tcp 172.217.112.4:443: i/o timeout""", true)]
+    [InlineData("""API error (attempt 1): request failed: stream idle timeout (5m0s): context deadline exceeded""", true)]
+    [InlineData("""API error (attempt 2): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": context deadline exceeded""", true)]
+    [InlineData("""API error (attempt 1): DEADLINE_EXCEEDED (code 504): Deadline expired before operation could complete.""", true)]
     [InlineData("""API error (attempt 1): UNAVAILABLE (code 503): The service is currently unavailable.""", false)]
     [InlineData("""API error (attempt 1): INTERNAL (code 500): Internal error encountered.""", false)]
     [InlineData("""API error (attempt 1): INVALID_ARGUMENT (code 400): Request contains an invalid argument.""", false)]
     [InlineData("""API error (attempt 1): RESOURCE_EXHAUSTED (code 429): individual quota reached""", false)]
     [InlineData("""API error (attempt 1): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": tls: failed to verify certificate: x509: certificate signed by unknown authority""", false)]
     [InlineData("authentication failed or timed out", false)]
+    [InlineData("command timed out: context deadline exceeded", false)]
     [InlineData("wsasend: An existing connection was forcibly closed by the remote host.", false)]
     [InlineData("", false)]
     [InlineData(null, false)]
@@ -555,6 +559,8 @@ public class AntigravityRulesTests
         AntigravityStreamRules.ClassifyServerBusy("API error (attempt 1): UNAVAILABLE (code 503): The service is currently unavailable.")
             .Should().Be(AgentServerBusy.Unavailable);
         AntigravityStreamRules.ClassifyServerBusy("""API error (attempt 2): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": write tcp 192.168.0.10:55012->172.217.112.4:443: wsasend: An existing connection was forcibly closed by the remote host.""")
+            .Should().Be(AgentServerBusy.NetworkError);
+        AntigravityStreamRules.ClassifyServerBusy("API error (attempt 1): request failed: stream idle timeout (5m0s): context deadline exceeded")
             .Should().Be(AgentServerBusy.NetworkError);
         AntigravityStreamRules.ClassifyServerBusy("API error (attempt 1): INTERNAL (code 500): Internal error encountered.")
             .Should().Be(AgentServerBusy.None);

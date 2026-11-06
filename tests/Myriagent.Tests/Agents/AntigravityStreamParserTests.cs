@@ -248,6 +248,15 @@ public class AntigravityStreamParserTests
         netTurn.ErrorMessage.Should().Be(WsError, "錯誤照原文顯示");
         netTurn.ServerBusy.Should().Be(AgentServerBusy.NetworkError, "API 網路瞬斷交給中樞 10 秒後重試");
         netFailed.OfType<AgentQuotaExhaustedEvent>().Should().BeEmpty();
+
+        const string IdleTimeoutError = "API error (attempt 1): request failed: stream idle timeout (5m0s): context deadline exceeded";
+        parser.BeginTurn();
+        var idleFailed = parser.Parse(Result(numTurns: 8, input: 0, output: 0, status: "ERROR", error: IdleTimeoutError)).Events;
+        var idleTurn = idleFailed.OfType<AgentTurnCompletedEvent>().Single();
+        idleTurn.Outcome.Should().Be(AgentTurnOutcome.Failed);
+        idleTurn.ErrorMessage.Should().Be(IdleTimeoutError);
+        idleTurn.ServerBusy.Should().Be(AgentServerBusy.NetworkError, "SSE 串流靜默逾時同樣回收連線池並於 10 秒後自動重試");
+        idleFailed.OfType<AgentQuotaExhaustedEvent>().Should().BeEmpty();
     }
 
     private static string Result(int numTurns, long input, long output, long thinking = 0, long cached = 0, string status = "SUCCESS", string? response = null, string? error = null)
