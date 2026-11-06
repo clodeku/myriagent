@@ -82,6 +82,23 @@ internal static class GrokAcpRules
     public static string ResolveHome(string userProfile) => Path.Combine(userProfile, ".grok");
 
     /// <summary>
+    /// 一個對話在 grok 的工作階段資料夾：&lt;GROK_HOME&gt;\sessions\&lt;工作資料夾以 %XX 編碼&gt;\&lt;session id&gt;（實測：C:\repo\proj 是
+    /// C%3A%5Crepo%5Cproj）。產生圖片與影片的工具把檔案存在它的 images\、videos\，回覆裡寫相對它的 videos/1.mp4。
+    /// 參數不合格（不是本機完整路徑、id 帶路徑字元）回 null
+    /// </summary>
+    public static string? SessionDirectory(string? home, string? workingDirectory, string? sessionId)
+    {
+        if (!AgentAttachmentRules.IsLocalDrivePath(home) || string.IsNullOrWhiteSpace(workingDirectory) || !IsPlainSessionId(sessionId))
+            return null;
+        return Path.Combine(home!, "sessions", Uri.EscapeDataString(workingDirectory), sessionId!);
+    }
+
+    /// <summary>session id 只能是一段資料夾名稱（不含路徑字元、不是 . 或 ..）</summary>
+    public static bool IsPlainSessionId(string? sessionId)
+        => !string.IsNullOrWhiteSpace(sessionId) && sessionId is not "." and not ".."
+           && sessionId.IndexOfAny(['\\', '/', ':', '*', '?', '"', '<', '>', '|']) < 0;
+
+    /// <summary>
     /// 隔離帳戶的資料夾：建立資料夾，config.toml 不存在就寫入 IsolatedConfigToml；已存在但沒有 [claude_compat] 段（還原的資料夾、被手動改過）就補上。
     /// 失敗只記錄（grok 照樣能跑，只是會匯入使用者的 Claude 設定）
     /// </summary>

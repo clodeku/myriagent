@@ -669,6 +669,13 @@ public class GrokRulesTests
         AccountRules.GetCredentialFile(Grok(@"C:\acc\g1\grok")).Should().Be(@"C:\acc\g1\grok\auth.json");
         AccountRules.ResolveConfigDirectory(Grok(@"C:\acc\g1\grok")).Should().Be(@"C:\acc\g1\grok");
         GrokAcpRules.ResolveHome(@"C:\Users\u").Should().Be(@"C:\Users\u\.grok");
+        // 工作階段資料夾（2026-11-06 實測的編碼）：產生的影片存在它的 videos\
+        GrokAcpRules.SessionDirectory(@"C:\Users\u\.grok", @"C:\repo\proj", "0b7c2f1e-1111-4a2b-9c3d-123456789abc")
+            .Should().Be(@"C:\Users\u\.grok\sessions\C%3A%5Crepo%5Cproj\0b7c2f1e-1111-4a2b-9c3d-123456789abc");
+        GrokAcpRules.SessionDirectory(@"C:\Users\u\.grok", @"C:\repo", @"..\x").Should().BeNull();
+        GrokAcpRules.SessionDirectory(@"C:\Users\u\.grok", @"C:\repo", "..").Should().BeNull();
+        GrokAcpRules.SessionDirectory(@"\\evil\share", @"C:\repo", "s1").Should().BeNull();
+        GrokAcpRules.SessionDirectory(@"C:\Users\u\.grok", null, "s1").Should().BeNull();
         AccountRules.SystemDefaultAppearance(AgentProvider.Grok).Should().Be(("Grok（本機）", "#A3B83A"));
         AccountRules.DescribeStatus(AgentProvider.Grok, AccountStatus.NotLoggedIn).Should().Be("尚未登入 Grok（grok.com 帳戶）");
         AccountRules.DescribeStatus(AgentProvider.Grok, AccountStatus.NotInstalled).Should().Be("這台電腦尚未安裝 Grok Build CLI");

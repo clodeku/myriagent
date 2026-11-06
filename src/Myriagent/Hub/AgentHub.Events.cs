@@ -76,7 +76,7 @@ internal sealed partial class AgentHub
                     break;
                 }
                 item.Status = AgentItemStatus.Done;
-                foreach (var media in AgentHubRules.FindMediaToShow(item.Text, fileExists))
+                foreach (var media in AgentHubRules.FindMediaToShow(item.Text, fileExists, RelativeMediaBases(c, item.Text), GetWorkingDirectory(c)))
                 {
                     if (!item.MediaPaths.Contains(media, StringComparer.OrdinalIgnoreCase))
                         item.MediaPaths.Add(media);

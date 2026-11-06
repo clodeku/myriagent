@@ -307,8 +307,11 @@ internal static partial class AgentHubRules
     /// <summary>
     /// 回覆文字中要另外顯示在訊息下方的圖片／影片：文字或反引號裡出現的本機完整路徑、可顯示的媒體、檔案存在；
     /// 已用 Markdown 圖片或連結語法寫出的路徑會由 Markdown 自己顯示，不重複。
+    /// <paramref name="relativeBases"/>（依序）有給時，相對路徑（videos/1.mp4）也找：解析到某個基準資料夾底下、檔案存在的第一個為準
+    /// （Grok 把產生的圖片與影片存在自己的工作階段資料夾，回覆裡寫的是相對那裡的 videos/1.mp4，2026-11-06 使用者回報影片沒顯示）；
+    /// 相對路徑的 Markdown 目標在 <paramref name="markdownBase"/>（對話的工作資料夾，Markdown 以它解析）底下找得到的由 Markdown 自己顯示，不重複
     /// </summary>
-    public static List<string> FindMediaToShow(string? text, Func<string, bool> fileExists)
+    public static List<string> FindMediaToShow(string? text, Func<string, bool> fileExists, IReadOnlyList<string?>? relativeBases = null, string? markdownBase = null)
     {
         var result = new List<string>();
         if (string.IsNullOrEmpty(text))
@@ -326,7 +329,59 @@ internal static partial class AgentHubRules
                 result.Add(path);
         }
 
+        if (relativeBases is null || relativeBases.Count == 0)
+            return result;
+        foreach (var relative in ExtractRelativeMediaPaths(text))
+        {
+            if (markdownTargets.Contains(relative) && ResolveUnder(markdownBase, relative) is { } viaMarkdown && fileExists(viaMarkdown))
+                continue;
+            foreach (var root in relativeBases)
+            {
+                if (ResolveUnder(root, relative) is not { } full || !fileExists(full))
+                    continue;
+                if (!result.Contains(full, StringComparer.OrdinalIgnoreCase))
+                    result.Add(full);
+                break;
+            }
+        }
+
         return result;
+    }
+
+    /// <summary>
+    /// 回覆文字裡可顯示的媒體的相對路徑（videos/1.mp4、./out/a.png、images\x.jpg）：只收字母、數字、「_-./\%」組成、副檔名是可顯示的媒體；
+    /// 開頭是「/」「\」、磁碟代號（完整路徑另外找）、前面接著「:」「/」（網址的一部分）的不收。斜線一律換成「\」，去重
+    /// </summary>
+    public static List<string> ExtractRelativeMediaPaths(string? text)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrEmpty(text))
+            return result;
+        foreach (Match m in RelativeMediaPattern().Matches(text))
+        {
+            var path = m.Value.Replace('/', '\\');
+            if (path.StartsWith('\\') || !AgentAttachmentRules.IsDisplayableMedia(path) || result.Contains(path, StringComparer.OrdinalIgnoreCase))
+                continue;
+            result.Add(path);
+        }
+        return result;
+    }
+
+    /// <summary>相對路徑接在 root（本機磁碟的完整路徑）底下；跑出 root（..）、root 不合格、組不出路徑回 null</summary>
+    private static string? ResolveUnder(string? root, string relative)
+    {
+        if (!AgentAttachmentRules.IsLocalDrivePath(root))
+            return null;
+        try
+        {
+            var full = Path.GetFullPath(Path.Combine(root!, relative));
+            var prefix = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root!)) + Path.DirectorySeparatorChar;
+            return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? full : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
     }
 
     public const int MaxHistoryRecapChars = 12_000;
@@ -533,6 +588,19 @@ internal static partial class AgentHubRules
         _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
     };
 
+    /// <summary>
+    /// 回覆文字裡的相對路徑（videos/1.mp4）要不要找出來顯示（FindMediaToShow 的 relativeBases）：Grok 把產生的圖片與影片存在自己的工作階段資料夾、
+    /// 回覆裡寫相對那裡的路徑（2026-11-06）；其他代理照舊只認完整路徑
+    /// </summary>
+    public static bool ShowsRelativeReplyMedia(AgentProvider provider) => provider switch
+    {
+        AgentProvider.Grok => true,
+        AgentProvider.Claude => false,
+        AgentProvider.Codex => false,
+        AgentProvider.Antigravity => false,
+        _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
+    };
+
     /// <summary>為了等回答而停下的這一輪，使用者略過了那個問題：送給代理的接續訊息</summary>
     public const string SkippedAsyncQuestionMessage = "我略過了你剛才的問題，請依你的判斷繼續。";
 
@@ -613,4 +681,11 @@ internal static partial class AgentHubRules
 
     [GeneratedRegex(@"\]\(\s*<?([^)\s>]+)")]
     private static partial Regex MarkdownTargetPattern();
+
+    /// <summary>
+    /// 相對路徑的候選：前面不是字母、數字、「_-./\%:」（網址、完整路徑的一部分不收），可以「./」「../」開頭，由這些字元（「:」除外）組成、
+    /// 最後一段帶 2～5 碼的副檔名，後面不再接路徑字元
+    /// </summary>
+    [GeneratedRegex(@"(?<![\p{L}\p{N}_\-./\\%:])(?:\.{1,2}[/\\])*[\p{L}\p{N}_\-%]+(?:\.[\p{L}\p{N}_\-%]+)*(?:[/\\]\.{0,2}[\p{L}\p{N}_\-%]+(?:\.[\p{L}\p{N}_\-%]+)*)*\.[A-Za-z0-9]{2,5}(?![\p{L}\p{N}_\-/\\%])")]
+    private static partial Regex RelativeMediaPattern();
 }

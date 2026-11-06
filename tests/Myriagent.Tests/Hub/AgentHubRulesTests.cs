@@ -211,6 +211,37 @@ public class AgentHubRulesTests
     }
 
     [Fact]
+    public void ExtractRelativeMediaPaths_只收可顯示媒體的相對路徑_網址與完整路徑不收()
+    {
+        var text = "成片：videos/1.mp4\n`images\\a.png`、./out/b.jpg、../up/c.webp，報表 out/d.xlsx，"
+                   + "網址 https://x.com/e.png、完整路徑 C:\\f\\g.png、/root/h.png、19.5 秒、videos/1.mp4 再一次、示範_外套.mp4。";
+
+        AgentHubRules.ExtractRelativeMediaPaths(text).Should().Equal(
+            @"videos\1.mp4", @"images\a.png", @".\out\b.jpg", @"..\up\c.webp", "示範_外套.mp4");
+        AgentHubRules.ExtractRelativeMediaPaths(null).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void FindMediaToShow_相對路徑依序以基準資料夾解析_跑出基準的不收()
+    {
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            @"C:\grok\s1\videos\1.mp4", @"C:\work\videos\1.mp4", @"C:\work\videos\2.mp4", @"C:\secret.png", @"C:\work\pic.png",
+        };
+        var text = "videos/1.mp4、videos/2.mp4、videos/3.mp4、../../secret.png、![圖](pic.png)、[影片](videos/2.mp4)";
+
+        // 工作階段資料夾優先；Markdown 圖片在工作資料夾找得到的由 Markdown 顯示；Markdown 連結在那裡找得到的也是（同完整路徑的規則）；跑出基準的不收
+        AgentHubRules.FindMediaToShow(text, existing.Contains, [@"C:\grok\s1", @"C:\work"], @"C:\work")
+            .Should().Equal(@"C:\grok\s1\videos\1.mp4");
+        // 沒給基準（其他代理）：相對路徑照舊不找
+        AgentHubRules.FindMediaToShow(text, existing.Contains).Should().BeEmpty();
+        // 基準是 null、UNC：略過、不查存在
+        var checkedPaths = new List<string>();
+        AgentHubRules.FindMediaToShow("videos/1.mp4", p => { checkedPaths.Add(p); return false; }, [null, @"\\evil\share"], null).Should().BeEmpty();
+        checkedPaths.Should().BeEmpty();
+    }
+
+    [Fact]
     public void FindMediaToShow_UNC路徑連存在都不查()
     {
         var checkedPaths = new List<string>();

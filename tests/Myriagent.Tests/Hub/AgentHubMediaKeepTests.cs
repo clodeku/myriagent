@@ -1,3 +1,4 @@
+using Myriagent.Accounts;
 using Myriagent.Agents;
 using Myriagent.Core;
 using Myriagent.Hub;
@@ -311,5 +312,41 @@ public sealed class AgentHubMediaKeepTests
 
         File.Delete(kept);
         resolver.Resolve(notLoaded, row)!.Path.Should().Be(shot, "副本不在就照原檔");
+    }
+
+    [Fact]
+    public void Grok回覆的相對路徑_以它的工作階段資料夾解析_接在回覆下面_其他代理照舊不找()
+    {
+        // 2026-11-06 使用者回報：Grok 回「videos/1.mp4」，對話裡看不到影片（檔案在 GROK_HOME\sessions\<工作資料夾>\<session>\videos\）
+        using var h = new HubHarness();
+        var grok = new AgentAccount { Id = "acc-grok", Provider = AgentProvider.Grok, Label = "Grok", ConfigDirectory = h.Temp.Combine("grok") };
+        h.Ui.Invoke(() => h.Accounts.Seed([h.Claude, h.Claude2, h.Codex, grok], AccountStatus.Ready));
+        var (id, s) = h.StartConversation(h.Main, grok, "顯示影片");
+        var meta = h.Conversation(id)!;
+        var workingDirectory = string.IsNullOrWhiteSpace(meta.WorkingDirectory) ? h.Store.GetDefaultWorkingDirectory(id) : meta.WorkingDirectory!;
+        var sessionDirectory = GrokAcpRules.SessionDirectory(grok.ConfigDirectory, workingDirectory, meta.SessionId)!;
+        var video = Path.Combine(sessionDirectory, "videos", "1.mp4");
+        Directory.CreateDirectory(Path.GetDirectoryName(video)!);
+        File.WriteAllBytes(video, [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]);
+
+        h.Raise(s, new AgentTextCompletedEvent("m:1", "三支成片在這裡。\n\nvideos/1.mp4\n示範外套，19.5 秒。\n\nvideos/9.mp4 還沒做。"));
+        h.Items(id).Single(i => i.Kind == AgentItemKind.Assistant).MediaPaths.Should().Equal(video);
+
+        // 編碼對不上（工作資料夾換過）：在 sessions\* 底下找同一個 session id
+        var moved = Path.Combine(grok.ConfigDirectory!, "sessions", "other-project", meta.SessionId!, "images", "a.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(moved)!);
+        File.WriteAllBytes(moved, Png);
+        Directory.Delete(sessionDirectory, recursive: true);
+        h.Raise(s, new AgentTextCompletedEvent("m:2", "圖在 images/a.png。"));
+        h.Items(id).Single(i => i.Kind == AgentItemKind.Assistant && i.Text.Contains("images/a.png")).MediaPaths.Should().Equal(moved);
+
+        // Claude 的回覆照舊只認完整路徑（工作資料夾裡真的有 videos\1.png 也不接）
+        var (claudeId, cs) = h.StartConversation(h.Main, h.Claude);
+        var claudeMeta = h.Conversation(claudeId)!;
+        var claudeImage = Path.Combine(string.IsNullOrWhiteSpace(claudeMeta.WorkingDirectory) ? h.Store.GetDefaultWorkingDirectory(claudeId) : claudeMeta.WorkingDirectory!, "videos", "1.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(claudeImage)!);
+        File.WriteAllBytes(claudeImage, Png);
+        h.Raise(cs, new AgentTextCompletedEvent("m:1", "圖在 videos/1.png"));
+        h.Items(claudeId).Single(i => i.Kind == AgentItemKind.Assistant).MediaPaths.Should().BeEmpty();
     }
 }
