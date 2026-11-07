@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isCollaboratorViewer, cleanUserName, cleanDisplayName, passwordProblem, errorText, listOf, sharedWith, shareCount, statusText,
-  authorLabel, resolvedLabel, shareIds,
+  authorLabel, resolvedLabel, shareIds, collabColor, shareBadge, COLLAB_COLORS,
 } from '../../src/Myriagent/Web/collabrules.js';
 
 const OWNER = { role: 'owner' };
@@ -105,4 +105,25 @@ test('resolvedLabel：協作人回應的寫名稱，其他不寫', () => {
 test('shareIds：只留清單裡的、依清單的順序、去重', () => {
   assert.deepEqual(shareIds(STATE, ['u3', 'u1', 'u1', 'gone']), ['u1', 'u3']);
   assert.deepEqual(shareIds(STATE, null), []);
+});
+
+test('第十一批：協作人的顏色——依名稱固定、同名一樣、沒有名稱是 null，顏色都在調色盤裡', () => {
+  assert.equal(collabColor('小明'), collabColor('小明'));
+  assert.ok(COLLAB_COLORS.includes(collabColor('小明')));
+  assert.ok(COLLAB_COLORS.includes(collabColor('hua')));
+  assert.equal(collabColor(''), null);
+  assert.equal(collabColor(null), null);
+  const seen = new Set(['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'].map(collabColor));
+  assert.ok(seen.size >= 4, '不同的名稱大多分得開');
+});
+
+test('第十一批：分享中的標記——沒有分享是 null；人數與名稱依清單順序；超過 5 位寫「等 N 位」', () => {
+  assert.equal(shareBadge(STATE, 'c-none'), null);
+  assert.equal(shareBadge(null, 'c1'), null);
+  const one = shareBadge({ list: STATE.list, shares: { c1: ['u2', 'u1'] } }, 'c1');
+  assert.equal(one.n, 2);
+  assert.equal(one.title, '分享給協作人：小明、小華', '依清單的順序');
+  const many = { list: Array.from({ length: 7 }, (_, i) => ({ id: 'x' + i, userName: 'u' + i, displayName: '人' + i })), shares: { c2: ['x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6'] } };
+  assert.equal(shareBadge(many, 'c2').title, '分享給協作人：人0、人1、人2、人3、人4 等 7 位');
+  assert.notEqual(shareBadge(many, 'c2').key, one.key);
 });

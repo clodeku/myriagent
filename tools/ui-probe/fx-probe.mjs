@@ -2103,6 +2103,77 @@ export async function runFx(ctx, vp) {
   await host.pushItem(C, item('fx10r', { status: 'Done', html: '<p>串流中的段落照一般的換行</p>' }));
   check('fxTextWrap', !!wrap10 && /balance/.test(wrap10.h2) && /pretty/.test(wrap10.done) && !/pretty|balance/.test(wrap10.running), wrap10);
 
+  // 第十一批：分享給協作人的標記——側欄列是小人像＋人數、分頁是小人像，滑過列出名稱；不分享了就拿掉
+  const collab11 = { list: [{ id: 'u1', userName: 'ming', displayName: '小明' }, { id: 'u2', userName: 'hua', displayName: '小華' }], shares: { [C]: ['u1', 'u2'] } };
+  await sendNow(page, [{ type: 'collaborators', collaborators: collab11 }]);
+  const shareState = () => page.evaluate((c) => {
+    const row = document.querySelector('#sidebar .crow[data-key="c:' + c + '"] .crow-share');
+    const tab = document.querySelector('.tab[data-key="' + c + '"] .tab-share');
+    const vis = (e) => !!e && !e.hidden && e.getBoundingClientRect().width > 0;
+    return { row: vis(row), rowN: row && row.textContent, rowTitle: row && row.title, tab: vis(tab), tabTitle: tab && tab.title };
+  }, C);
+  const share1 = await until(async () => { const x = await shareState(); return x.row && x.tab ? x : null; }, 2000);
+  await sendNow(page, [{ type: 'collaborators', collaborators: { list: collab11.list, shares: {} } }]);
+  const share0 = await until(async () => { const x = await shareState(); return !x.row && !x.tab ? x : null; }, 2000);
+  check('fxShareBadge', !!share1 && share1.rowN === '2' && share1.rowTitle === '分享給協作人：小明、小華' && share1.tabTitle === share1.rowTitle && !!share0, { share1, share0 });
+
+  // 第十一批：協作人的顏色——協作人送的訊息左緣那條線與名稱前的小方塊是同一個顏色（依名稱固定）
+  await host.pushItem(C, item('fx11u', { kind: 'User', html: '<p>幫我看一下這個錯誤</p>', author: '小明' }));
+  const tint = await until(() => page.evaluate((s) => {
+    const n = document.querySelector(s);
+    if (!n) return null;
+    const box = n.querySelector('.u-box'), au = n.querySelector('.u-author');
+    return { by: n.classList.contains('by-collab'), collab: n.style.getPropertyValue('--collab'), bar: getComputedStyle(box, '::before').backgroundColor,
+      dot: au && getComputedStyle(au, '::before').backgroundColor, text: au && au.textContent };
+  }, `${SEL} .it[data-id="fx11u"]`), 2000);
+  const hexRgb = (hx) => { const v = parseInt(String(hx).slice(1), 16); return `rgb(${v >> 16 & 255}, ${v >> 8 & 255}, ${v & 255})`; };
+  check('fxCollabColor', !!tint && tint.by && /^#[0-9a-f]{6}$/.test(tint.collab) && tint.bar === hexRgb(tint.collab) && tint.dot === tint.bar && tint.text === '協作人 小明', tint);
+
+  // 第十一批：問卷的作答進度——兩題、一題一格；選了第一題的選項那格亮、目前那題跳到第二題；第二題補充說明有字那格多一個小點
+  await host.pushItem(C, item('fx11q', { kind: 'Question', status: 'Waiting', html: undefined, requestKey: 'rq11',
+    questions: [{ id: 'q1', text: '要用哪個資料庫？', options: [{ label: 'SQLite' }, { label: 'SQL Server' }] },
+      { id: 'q2', text: '要不要加索引？', options: [{ label: '要' }, { label: '不要' }] }] }));
+  const q11 = `${SEL} .it[data-id="fx11q"]`;
+  await until(() => page.$(q11 + ' .q-progress .q-cell'), 2000);
+  const cells = () => page.evaluate((s) => Array.from(document.querySelectorAll(s + ' .q-cell')).map((c) => (c.classList.contains('done') ? 'D' : '-') + (c.classList.contains('cur') ? 'C' : '') + (c.classList.contains('noted') ? 'N' : '')), q11);
+  const qBefore = await cells();
+  await page.click(q11 + ' .q-block[data-qi="0"] .opt:not(.opt-other)');
+  const qAfter = await until(async () => { const c = await cells(); return c[0] === 'D' ? c : null; }, 1500);
+  const note = await page.$(q11 + ' .q-block[data-qi="1"] .q-note');
+  if (note) await note.fill('只對常用的欄位');
+  const qNoted = await cells();
+  check('fxQuestionProgress', JSON.stringify(qBefore) === '["-C","-"]' && !!qAfter && JSON.stringify(qAfter) === '["D","-C"]'
+    && (!note || JSON.stringify(qNoted) === '["D","-CN"]'), { qBefore, qAfter, qNoted, noteField: !!note });
+
+  // 第十一批：換版排空的進度與強制倒數——3 個對話在等、強制停下還剩 5 分鐘：3 顆亮、10 格倒數亮 5 格；剩 1 個時熄掉 2 顆
+  const drain = (waiting) => ({ type: 'appUpdate', state: { phase: 'draining', managed: true, available: '0.2.999', waiting, forced: true, forceAt: Date.now() + 4.5 * 60_000 } });
+  await sendNow(page, [drain(3)]);
+  const hudOf = () => page.evaluate(() => {
+    const b = document.getElementById('appBanner');
+    const hud = b && b.querySelector('.drain-hud');
+    return hud ? { pips: hud.querySelectorAll('.drain-pips > i').length, lit: hud.querySelectorAll('.drain-pips > i.on').length,
+      cd: hud.querySelectorAll('.force-cd > i').length, cdLit: hud.querySelectorAll('.force-cd > i.on').length, title: hud.title } : null;
+  });
+  const hud3 = await until(hudOf, 2000);
+  await sendNow(page, [drain(1)]);
+  const hud1 = await until(async () => { const x = await hudOf(); return x && x.lit === 1 ? x : null; }, 2000);
+  await page.locator('#appBanner').screenshot({ path: outFile('fx-drain-hud-dark.png') }).catch(() => {});
+  await sendNow(page, [{ type: 'appUpdate', state: { phase: 'idle', managed: true } }]);
+  const hudGone = await until(async () => ((await hudOf()) === null ? true : null), 2000);
+  check('fxDrainHud', !!hud3 && hud3.pips === 3 && hud3.lit === 3 && hud3.cd === 10 && hud3.cdLit === 5 && /已停下 0／3 個對話/.test(hud3.title) && /再 5 分鐘強制停下/.test(hud3.title)
+    && !!hud1 && hud1.pips === 3 && !!hudGone, { hud3, hud1, hudGone });
+
+  // 第十一批：行內程式碼裡的路徑——資料夾變淡、檔名亮，分隔符號後面可以換行；不像路徑的（指令）照舊
+  await host.pushItem(C, item('fx11p', { html: '<p>改了 <code>C:\\repo\\proj\\src\\Hub\\AgentHub.cs</code> 與 <code>src/Web/fx.css</code>，再跑 <code>npm run build</code></p>' }));
+  const paths = await until(() => page.evaluate((s) => {
+    const codes = Array.from(document.querySelectorAll(s + ' .md code'));
+    if (codes.length < 3) return null;
+    return codes.map((c) => ({ path: c.classList.contains('md-path'), base: (c.querySelector('.p-base') || {}).textContent || null, wbr: c.querySelectorAll('wbr').length, text: c.textContent,
+      dim: c.querySelector('.p-dir') ? getComputedStyle(c.querySelector('.p-dir')).color : null, hi: c.querySelector('.p-base') ? getComputedStyle(c.querySelector('.p-base')).color : null }));
+  }, `${SEL} .it[data-id="fx11p"]`), 2000);
+  check('fxPathParts', !!paths && paths[0].path && paths[0].base === 'AgentHub.cs' && paths[0].wbr === 5 && paths[0].text === 'C:\\repo\\proj\\src\\Hub\\AgentHub.cs'
+    && paths[0].dim !== paths[0].hi && paths[1].path && paths[1].base === 'fx.css' && !paths[2].path, paths);
+
   // 子代理：步數、錯誤數、正在做的工具；步數多了時晶片彈一下；結束後照「共 N 項步驟」、不寫正在做的
   const a8 = `${SEL} .it[data-id="fx8a"]`;
   const agent8 = (status, output) => tool('fx8a', status, { toolKind: 'agent', toolName: '子代理', title: '找出登入失敗的原因', output });

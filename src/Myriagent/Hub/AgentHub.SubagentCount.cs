@@ -1,4 +1,5 @@
 using Myriagent.Agents;
+using Newtonsoft.Json.Linq;
 
 namespace Myriagent.Hub;
 
@@ -55,6 +56,21 @@ internal sealed partial class AgentHub
             ? live.Values
             : [];
         return SubagentCountRules.Count(tools, tasks);
+    }
+
+    /// <summary>
+    /// 帳戶卡子代理徽章的說明（AccountView.subagentList，第十一批 2026-11-08）：這個帳戶有執行中子代理的對話，
+    /// 依子代理數多到少（一樣多時新的在前）、最多 <see cref="SubagentCountRules.MaxListed"/> 個；只有這台的（其他電腦的只有個數）
+    /// </summary>
+    private JArray RenderAccountSubagents(string accountId)
+    {
+        var list = new JArray();
+        var rows = conversations.Values.Where(c => c.Meta.AccountId == accountId)
+            .Select(c => (c, n: LiveSubagents(c))).Where(x => x.n > 0)
+            .OrderByDescending(x => x.n).ThenByDescending(x => x.c.Meta.UpdatedAt).Take(SubagentCountRules.MaxListed);
+        foreach (var (c, n) in rows)
+            list.Add(new JObject { ["conversationId"] = c.Meta.Id, ["title"] = c.Meta.Title, ["count"] = n });
+        return list;
     }
 
     /// <summary>agent 種類的工具卡開始或結束（AgentHub.Events.cs）：子代理數可能變了</summary>

@@ -13,7 +13,7 @@ import {
   overdueQuestion, RESTART_POLICIES, policyOf, confirmApplyNowProvider,
 } from './hotupdate.js';
 import { renderMatrix, renderDeviceCli, renderDevices, deviceStrip, deviceStripSig, confirmDeleteAccount, syncServer, loginHere } from './remote.js';
-import { matrixVisible, reorderIds, loginCodeView, claudeLoginUrlView, loginCodeInput, countLocalAccounts, remoteOnlyElsewhere, sessionTotals, sessionTitle, subagentsTitle } from './remoterules.js';
+import { matrixVisible, reorderIds, loginCodeView, claudeLoginUrlView, loginCodeInput, countLocalAccounts, remoteOnlyElsewhere, sessionTotals, sessionTitle, subagentsTitle, subagentsTooltip } from './remoterules.js';
 // 〔遠端〕瀏覽器版發起的帳戶操作（WP4.8）：登入追蹤、驗證碼上方的「在〈電腦〉」、帳戶選單的「在所有電腦登出…」
 import { tickRemoteLogins, originLabelOf, loginDeviceOf, logoutAllMenuItem, REMOTE_ACCOUNTS_CHANGED } from './remoteaccounts.js';
 // 健康度（只有桌面）：帳戶卡的一行與明細、電腦層級的指示檔
@@ -23,7 +23,7 @@ import { requestMcp, createMcpStrip, updateMcpStrip, refreshMcpDialog } from './
 import { requestUsageSegments, createUsageSegmentsSection, renderUsageSegmentsSection } from './usageseg.js';
 import { loginExpiry, loginExpiryText } from './loginrules.js';
 import { tokenCounter } from './tokenfx.js';
-import { quotaLocked, resetCountdown, countdownCells, accountPulse, pulsePhase, burnForecast, resetCreditsInfo, resetCreditAction } from './fxrules.js';
+import { quotaLocked, resetCountdown, countdownCells, accountPulse, pulsePhase, burnForecast, resetCreditsInfo, resetCreditAction, creditPips, creditExpiryCells, creditUsed, CREDIT_EXPIRY_CELLS } from './fxrules.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const RING_R = 52;
@@ -453,9 +453,25 @@ function updateCard(card, a, first) {
   // Codex 的免費重置次數（rateLimitResetCredits）：沒有可用的也列（灰字），有的話標最早到期的時間
   const rc = resetCreditsInfo(u, Date.now());
   if (rc) {
-    const row = h('div', { class: 'note' + (rc.count ? '' : ' dim'), title: '可以把用完的額度提前重置的次數（Codex 回報）' }, icon('refresh'),
+    // 第十一批：剩幾次畫成一排小方塊燈、最早到期的那次一格一天的倒數（fxrules.creditPips、creditExpiryCells）
+    const pips = creditPips(rc.count);
+    const exp = rc.expiresAt ? creditExpiryCells(rc.expiresAt, Date.now()) : null;
+    const row = h('div', { class: 'note credit-note' + (rc.count ? '' : ' dim'), title: '可以把用完的額度提前重置的次數（Codex 回報）' }, icon('refresh'),
       h('span', { text: '免費重置 ' }), h('b', { text: rc.count + ' 次' }),
-      rc.expiresAt ? h('span', { text: '・最早 ' + fmtDateTime(rc.expiresAt) + ' 到期' }) : null);
+      pips.shown ? h('span', { class: 'credit-pips', 'aria-hidden': 'true' }, ...Array.from({ length: pips.shown }, () => h('i')),
+        pips.more ? h('span', { class: 'credit-more', text: '+' + pips.more }) : null) : null,
+      rc.expiresAt ? h('span', { text: '・最早 ' + fmtDateTime(rc.expiresAt) + ' 到期' }) : null,
+      exp ? h('span', { class: 'credit-exp' + (exp.soon ? ' soon' : ''), title: '最早到期的那次還剩 ' + exp.days + ' 天', 'aria-hidden': 'true' },
+        ...Array.from({ length: CREDIT_EXPIRY_CELLS }, (_, i) => h('i', { class: i < exp.lit ? 'on' : null }))) : null);
+    // 用掉了一次（次數變少）：這張卡的圓環外面一道光掃一圈（fx.css 的 .credit-sweep，一次性；圓環自己的偽元素是執行中的動畫在用）
+    if (creditUsed(e.prevCredits, rc.count)) {
+      for (const w of card.querySelectorAll('.ring-wrap')) {
+        const sweep = h('span', { class: 'credit-sweep', 'aria-hidden': 'true' });
+        w.append(sweep);
+        setTimeout(() => sweep.remove(), 1000);
+      }
+    }
+    e.prevCredits = rc.count;
     // 「使用重置」：說明列每次重畫，按鈕是同一個元素（按到一半帳戶清單更新也不會掉）
     const act = resetCreditAction(a, rc, isHub);
     if (act) {
@@ -513,7 +529,7 @@ function updateCard(card, a, first) {
   e.sessions.append(sess('開著', s.open, null, sessionTitle(s.open, s.otherOpen, '開著')),
     sess('執行中', s.running, 'run', sessionTitle(s.running, s.otherRunning, '執行中')));
   // 執行中的子代理：有才列（個數，不是對話數）
-  if (s.subagents) e.sessions.append(sess('子代理', s.subagents, 'sub', subagentsTitle(s.subagents, s.otherSubagents)));
+  if (s.subagents) e.sessions.append(sess('子代理', s.subagents, 'sub', subagentsTooltip(a)));
   // 等背景工作回報：有才列（卡片底部的空間有限）
   if (s.background) e.sessions.append(sess('等背景', s.background, 'bg', sessionTitle(s.background, s.otherBackground, '等背景工作回報')));
   e.sessions.append(sess('等待你', s.waiting, 'wait', sessionTitle(s.waiting, s.otherWaiting, '等待你回應')));

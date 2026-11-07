@@ -1663,7 +1663,7 @@ textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
 
 /* 第十批（靜態）：圖片還沒載好時的佔位（util.fadeInImg 的 .fx-img，載好是 .fx-img-in、載不到拿掉 class）——圖片元素自己的背景畫點狀網格與四角括號，
    不做流光；對話裡的圖片（.md-img）載好之前沒有大小，先給一塊；縮圖格（代理的媒體、使用者訊息的附件）左下角寫檔名 */
-.fx-img:not(.fx-img-in) {
+.fx-img:not(.fx-img-in), .load-skel .sk {
   --ph: color-mix(in srgb, var(--acc, var(--focus)) 50%, transparent);
   background:
     linear-gradient(var(--ph) 0 0) left 4px top 4px / 10px 1px no-repeat, linear-gradient(var(--ph) 0 0) left 4px top 4px / 1px 10px no-repeat,
@@ -1709,3 +1709,91 @@ textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
     animation: fx-glow-out 900ms var(--ease-out) both; }
 }
 @keyframes fx-fork-in { from { opacity: 0; transform: translateX(-16px); } }
+
+/* ───── 第十一批（靜態，2026-11-08）：分享給協作人的標記（側欄列與分頁，collabrules.shareBadge）、協作人的顏色（collabrules.collabColor：
+   名稱前的小方塊、訊息框左緣那條線換成協作人的顏色、卡片上「由誰回應」同色） ───── */
+.crow-share { display: inline-flex; align-items: center; gap: 2px; flex: none; color: color-mix(in srgb, var(--link), var(--acc-text-mix)); font: 600 10.5px/1 var(--mono); }
+.crow-share .ic { width: 11px; height: 11px; }
+.tab-share { display: inline-flex; align-items: center; flex: none; color: color-mix(in srgb, var(--link), var(--acc-text-mix)); }
+.tab-share .ic { width: 11px; height: 11px; }
+.u-author.is-collab { color: color-mix(in srgb, var(--collab, var(--link)), var(--acc-text-mix)); }
+.u-author.is-collab::before { content: ""; width: 6px; height: 6px; border-radius: 1px; flex: none; background: var(--collab, var(--link)); }
+.it-user.by-collab .u-box::before { background: var(--collab); }
+.resolved-by { color: color-mix(in srgb, var(--collab, var(--link)), var(--acc-text-mix)); }
+.resolved-by::before { content: ""; width: 6px; height: 6px; border-radius: 1px; flex: none; background: var(--collab, var(--link)); }
+
+/* 第十一批：側排分頁欄（workspace.js 的 placeSideMark、updateTab 的 data-st、applySideWidth 的 data-w）——
+   作用中的分頁左緣一條亮線，換分頁時滑過去（一次性轉場，只動 transform；捲動時 .instant 不轉場），原本畫在分頁上的左緣線讓給它；
+   每列右緣一條細的虛線刻度標狀態（等你回應琥珀、執行中帳戶色、等背景工作淡色、未讀焦點色；靜態）；拖把手時旁邊顯示寬度 */
+.side-mark { position: absolute; left: 0; top: 0; width: 2px; z-index: 3; pointer-events: none; background: var(--acc, var(--focus));
+  box-shadow: 0 0 6px color-mix(in srgb, var(--acc, var(--focus)) 60%, transparent); }
+.pane:not(.focused) .side-mark { width: 1px; box-shadow: none; background: var(--border-3); }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-fx="off"]) .side-mark:not(.instant) { transition: transform 200ms var(--ease-out), height 200ms var(--ease-out); }
+}
+.pane.tabs-left .tab.active::before { background: transparent; }
+.pane.tabs-left .tab[data-st], .pane.tabs-left .tab[data-st]:hover {
+  background-image: repeating-linear-gradient(to bottom, var(--st-c) 0 2px, transparent 2px 4px);
+  background-repeat: no-repeat; background-position: right 3px center; background-size: 2px 60%;
+}
+.pane.tabs-left .tab[data-st="wait"] { --st-c: var(--badge-wait); }
+.pane.tabs-left .tab[data-st="run"] { --st-c: color-mix(in srgb, var(--acc) 80%, transparent); }
+.pane.tabs-left .tab[data-st="bg"] { --st-c: color-mix(in srgb, var(--acc) 40%, transparent); }
+.pane.tabs-left .tab[data-st="unread"] { --st-c: color-mix(in srgb, var(--focus) 70%, transparent); }
+.pane.tabs-left .strip-grip.on::before {
+  content: attr(data-w); position: absolute; top: 50%; left: 10px; transform: translateY(-50%); padding: 2px 6px; border-radius: 3px; white-space: nowrap;
+  font: 600 10.5px/14px var(--mono); color: var(--text-hi); background: var(--bg-raised); border: 1px solid var(--border-3); pointer-events: none;
+}
+
+/* 第十一批（靜態）：載入對話時的骨架（conversation.js 的 .load-wrap）——共用上面圖片佔位的點狀網格與四角括號，排成一則使用者訊息與兩則回覆；
+   自動重試用了幾次是 3 格（.load-tries，第幾次就亮幾格；重試鈕旁邊照樣顯示）。不做流光：分頁多時好幾個一起跑 */
+.load-skel { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+.load-skel .sk { border-radius: 8px; }
+.load-skel .sk-user { align-self: flex-end; width: min(46%, 340px); height: 52px; }
+.load-skel .sk-reply { width: 100%; height: 88px; }
+.load-skel .sk-short { width: 62%; height: 56px; }
+.load-wrap.load-failed .load-skel { display: none; }
+.load-tries { display: inline-flex; gap: 2px; margin-left: 2px; }
+.load-tries i { width: 6px; height: 6px; border-radius: 1px; background: var(--hud-line); }
+.load-tries i.on { background: var(--amber); box-shadow: 0 0 4px color-mix(in srgb, var(--amber) 60%, transparent); }
+
+/* 第十一批（靜態）：問卷的作答進度（items.js 的 .q-progress，questionrules.progressCells）——一題一格：答完的亮帳戶色、有補充說明的右上角多一個小點、
+   目前那題有外框；點了跳到那一題 */
+.q-progress { display: flex; flex-wrap: wrap; gap: 3px; margin: 2px 0 10px; }
+.q-cell { position: relative; width: 22px; height: 6px; padding: 0; border: 0; border-radius: 1px; cursor: pointer; background: var(--hud-line); }
+.q-cell.done { background: color-mix(in srgb, var(--acc) 80%, transparent); box-shadow: 0 0 5px color-mix(in srgb, var(--acc) 45%, transparent); }
+.q-cell.cur { outline: 1px solid color-mix(in srgb, var(--text-hi) 65%, transparent); outline-offset: 1px; }
+.q-cell.noted::after { content: ""; position: absolute; right: -2px; top: -3px; width: 4px; height: 4px; border-radius: 1px; background: var(--amber); }
+
+/* 第十一批：Codex 的免費重置（dashboard.js 的 .credit-note；fxrules.creditPips、creditExpiryCells、creditUsed）——剩幾次是一排小方塊燈（最多 8 顆，再多寫 +N）、
+   最早到期的那次一格一天（剩 1 天內琥珀色；靜態）；用掉一次時圓環上臨時插入的 .credit-sweep 掃一圈（一次性，只動 transform／opacity） */
+.credit-note { flex-wrap: wrap; row-gap: 3px; }
+.credit-pips { display: inline-flex; align-items: center; gap: 2px; margin: 0 4px; }
+.credit-pips > i { width: 5px; height: 5px; border-radius: 1px; background: var(--tone-auto); box-shadow: 0 0 4px color-mix(in srgb, var(--tone-auto) 55%, transparent); }
+.credit-more { margin-left: 2px; font: 600 10.5px/1 var(--mono); color: var(--text-2); }
+.credit-exp { display: inline-flex; align-items: center; gap: 1px; margin-left: 6px; }
+.credit-exp > i { width: 4px; height: 8px; border-radius: 1px; background: var(--hud-line); }
+.credit-exp > i.on { background: color-mix(in srgb, var(--tone-auto) 75%, transparent); }
+.credit-exp.soon > i.on { background: var(--amber); }
+.credit-sweep { display: none; }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-fx="off"]) .credit-sweep {
+    display: block; position: absolute; inset: -3px; border-radius: 50%; pointer-events: none;
+    border: 2px solid transparent; border-top-color: var(--tone-auto); filter: drop-shadow(0 0 4px var(--tone-auto));
+    animation: fx-credit-sweep 900ms var(--ease-out) both;
+  }
+}
+@keyframes fx-credit-sweep { from { transform: rotate(0deg); opacity: 1; } 80% { opacity: 1; } to { transform: rotate(360deg); opacity: 0; } }
+
+/* 第十一批（靜態）：換版排空的進度（appupdate.js 的 .drain-hud）——一顆一個對話，還在等的亮、停下的熄；強制更新時加上 10 格倒數（一格一分鐘，剩 2 分鐘內琥珀色） */
+.drain-hud { display: inline-flex; align-items: center; gap: 8px; margin: 0 4px; }
+.drain-pips, .force-cd { display: inline-flex; align-items: center; gap: 2px; }
+.drain-pips > i { width: 6px; height: 6px; border-radius: 1px; background: var(--hud-line); }
+.drain-pips > i.on { background: var(--tone-auto); box-shadow: 0 0 4px color-mix(in srgb, var(--tone-auto) 55%, transparent); }
+.force-cd > i { width: 4px; height: 9px; border-radius: 1px; background: var(--hud-line); }
+.force-cd > i.on { background: color-mix(in srgb, var(--tone-auto) 75%, transparent); }
+.force-cd.soon > i.on { background: var(--amber); }
+
+/* 第十一批（靜態）：行內程式碼裡的路徑與網址（items.js 的 decoratePaths，fxrules.pathParts）——資料夾變淡、最後一段（檔名）亮；分隔符號後面可以換行（<wbr>） */
+.md code.md-path .p-dir { color: var(--text-3); }
+.md code.md-path .p-base { color: var(--text-hi); font-weight: 600; }

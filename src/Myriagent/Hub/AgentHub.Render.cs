@@ -670,6 +670,9 @@ internal sealed partial class AgentHub
             // 背景程式的說明（帳戶卡滑過的提示）：沒有就不帶
             if (programs != null)
                 ((JObject)result[result.Count - 1])["programs"] = programs;
+            // 子代理徽章的說明（第十一批：哪幾個對話各有幾個子代理在跑）：沒有就不帶
+            if (sessions.Subagents > 0)
+                ((JObject)result[result.Count - 1])["subagentList"] = RenderAccountSubagents(account.Id);
         }
         // 〔同步〕logicalId、remoteOnly、devices（未配對時不加）
         sync?.DecorateAccounts(result);

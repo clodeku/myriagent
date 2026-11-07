@@ -1366,3 +1366,87 @@ export function handoffLabels(text) {
   const from = s.match(/已從「([^」]+)」/) || s.match(/^「([^」]+)」的額度已用完/);
   return { from: from ? from[1] : null, to: to[1] };
 }
+
+/** Codex 免費重置的次數燈（第十一批，2026-11-08）：最多畫幾顆，再多寫「+N」 */
+export const CREDIT_PIPS_MAX = 8;
+
+/** 次數燈：shown＝畫幾顆（0～CREDIT_PIPS_MAX）、more＝超過的次數（沒有是 0） */
+export function creditPips(count) {
+  const n = Number.isInteger(count) && count > 0 ? count : 0;
+  return { shown: Math.min(n, CREDIT_PIPS_MAX), more: Math.max(0, n - CREDIT_PIPS_MAX) };
+}
+
+/** 最早到期的分格倒數有幾格（一格一天） */
+export const CREDIT_EXPIRY_CELLS = 7;
+
+/**
+ * 最早到期的那次還剩幾天（第十一批：一格一天、亮的格數＝剩下的天數，超過 7 天全亮）：沒有到期時間或已過期回 null；
+ * days＝剩下的天數（無條件進位）、lit＝亮幾格、soon＝剩 1 天內（轉琥珀色）
+ */
+export function creditExpiryCells(expiresAt, now) {
+  const at = Number(expiresAt);
+  if (!Number.isFinite(at) || !Number.isFinite(now) || at <= now) return null;
+  const ms = at - now;
+  const days = Math.ceil(ms / 86_400_000);
+  return { days, lit: Math.min(CREDIT_EXPIRY_CELLS, days), soon: ms <= 86_400_000 };
+}
+
+/** 用掉了一次免費重置（次數比上次看到的少）：帳戶卡的圓環掃一圈（一次性）。上次沒看過（null）不算 */
+export function creditUsed(prev, count) {
+  return Number.isInteger(prev) && Number.isInteger(count) && count < prev;
+}
+
+/** 換版排空的進度最多畫幾顆（一顆一個對話；第十一批） */
+export const DRAIN_PIPS_MAX = 12;
+
+/**
+ * 換版排空的進度（第十一批，2026-11-08：強制更新之後看得出還要等多少）：waiting＝宿主說還在等幾個對話到安全點、peak＝這次排空看過最多的
+ * （網頁自己記，當成總數）。回 { total, left, shown（畫幾顆）}；都是 0 回 null。停下的熄掉、還在等的亮著
+ */
+export function drainProgress(waiting, peak) {
+  const left = Number.isInteger(waiting) && waiting > 0 ? waiting : 0;
+  const total = Math.max(left, Number.isInteger(peak) && peak > 0 ? peak : 0);
+  if (!total) return null;
+  return { total, left, shown: Math.min(total, DRAIN_PIPS_MAX) };
+}
+
+/** 強制更新：按下之後滿這麼久還沒停下的強制停下（同宿主的 AppUpdateRestartRules.ForceStopAfter） */
+export const FORCE_STOP_MS = 10 * 60_000;
+
+/** 強制停下的倒數有幾格（一格一分鐘） */
+export const FORCE_CELLS = 10;
+
+/**
+ * 強制停下的倒數（第十一批）：forceAt＝宿主的 appUpdate.forceAt（到這個時間還沒停下的強制停下）。回 { lit（亮幾格＝還剩幾分鐘，無條件進位）, minutes }；
+ * 沒有時間或已經到了回 null
+ */
+export function forceCountdown(forceAt, now) {
+  const at = Number(forceAt);
+  if (!Number.isFinite(at) || !Number.isFinite(now) || at <= now) return null;
+  const minutes = Math.ceil((at - now) / 60_000);
+  return { minutes, lit: Math.min(FORCE_CELLS, minutes) };
+}
+
+/**
+ * 回覆裡的路徑與網址（第十一批，2026-11-08：行內程式碼裡很長的路徑在窄窗格撐出橫向捲動、看不出是哪個檔）：
+ * 看起來像路徑或網址就回 { parts, base }——parts 是依分隔符號切好的片段（分隔符號留在前一段的結尾，畫面在它後面可以換行），
+ * base 是最後一段（檔名或最後一層資料夾）在 parts 裡的位置；不像路徑回 null。
+ * 認得：磁碟代號（C:\ 或 C:/）、UNC（\）、~/、./、../、/ 開頭，或「名稱/名稱」至少兩段；網址（http、https）。
+ * 中間有空白的不算（指令或句子），太短（8 字以內）的不算（例如 a/b、1/2）
+ */
+export function pathParts(text) {
+  if (typeof text !== 'string') return null;
+  const t = text.trim();
+  if (t.length <= 8 || t.length > 400 || /\s/.test(t) || t !== text) return null;
+  const url = /^https?:\/\/[^/]+/i.test(t);
+  const pathLike = url || /^(?:[A-Za-z]:[\\/]|\\\\|~[\\/]|\.{1,2}[\\/]|\/)/.test(t) || /^[\w.@-]+[\\/][\w.@-]/.test(t);
+  if (!pathLike) return null;
+  // 網址：協定與主機是第一段（https:// 中間不切），後面依 / 切
+  const head = url ? /^https?:\/\/[^/]+\/?/i.exec(t)[0] : '';
+  const parts = (head ? [head] : []).concat(t.slice(head.length).split(/(?<=[\\/])/).filter((x) => x !== ''));
+  if (parts.length < 2) return null;
+  // 最後一段：去掉結尾的分隔符號之後最後一個有字的片段
+  let base = parts.length - 1;
+  while (base > 0 && /^[\\/]+$/.test(parts[base])) base--;
+  return { parts, base };
+}

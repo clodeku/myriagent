@@ -78,6 +78,30 @@ public sealed class AgentHubSubagentCountTests
     }
 
     [Fact]
+    public async Task 帳戶卡帶子代理的對話明細_子代理多的在前_沒有就不帶()
+    {
+        using var h = new HubHarness();
+        var (id1, s1) = h.StartConversation(h.Main, h.Claude, "平行查三件事");
+        var (id2, s2) = h.StartConversation(h.Main, h.Claude, "另一件事");
+        JArray? ListOf(JObject m) => m["accounts"]!.Single(a => a.Value<string>("id") == h.Claude.Id)["subagentList"] as JArray;
+
+        var mark = h.Main.Mark();
+        h.Raise(s1, new AgentToolStartedEvent("a1", "Agent", "agent", "查 A", null));
+        h.Raise(s2, new AgentToolStartedEvent("b1", "Agent", "agent", "查 B", null));
+        h.Raise(s2, new AgentToolStartedEvent("b2", "Agent", "agent", "查 C", null));
+        var m = await h.Main.WaitForAsync("accounts", x => Count(x, h) == 3, mark);
+        var list = ListOf(m)!;
+        list.Select(x => (x.Value<string>("conversationId"), x.Value<int>("count"))).Should().Equal((id2, 2), (id1, 1));
+        list[0].Value<string>("title").Should().Be(h.Conversation(id2)!.Title);
+
+        mark = h.Main.Mark();
+        foreach (var (s, t) in new[] { (s1, "a1"), (s2, "b1"), (s2, "b2") })
+            h.Raise(s, new AgentToolCompletedEvent(t, AgentItemStatus.Done, "ok", []));
+        m = await h.Main.WaitForAsync("accounts", x => Count(x, h) == 0, mark);
+        ListOf(m).Should().BeNull("沒有子代理就不帶");
+    }
+
+    [Fact]
     public async Task 重送init時_帳戶卡帶子代理數()
     {
         using var h = new HubHarness();

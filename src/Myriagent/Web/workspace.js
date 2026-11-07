@@ -10,6 +10,8 @@ import { keepOnRestore, awaitsList, isDraftId, draftCarryOver, layoutDeviceField
 import * as live from './liveview.js';
 import { isFlashing, stopFlash } from './attnflash.js';
 import { tabDragHold, dropIndexAt, insertMarkX, EXTERNAL_DRAG_MS, sideTabsOn, clampSideWidth, SIDE_TABS_MIN, SIDE_TABS_MAX } from './tabdragrules.js';
+import { shareBadge } from './collabrules.js';
+import { zoomPlan, paneZoomEnabled, PANE_ZOOM_KEY, ZOOM_SKIP } from './panezoomrules.js';
 
 const MAX_PANES = 12;
 const TAB_MIME = 'application/x-myriagent-tab';
@@ -183,6 +185,14 @@ function createPane(id) {
   p.body = h('div', { class: 'pane-body' }, p.emptyEl);
   p.el = h('section', { class: 'pane', dataset: { pane: id } }, p.strip, p.body);
   p.el.addEventListener('pointerdown', () => focusPane(p.id), true);
+  // 點了暫時放大：點擊完成之後才放大（按下時就放大的話窗格會移位，點的東西跑掉、這一下點空）；
+  // 控制項（按鈕、連結、分頁…）與拖曳選取文字不放大（panezoomrules.ZOOM_SKIP）
+  p.el.addEventListener('click', (e) => {
+    if (!e.target.closest || e.target.closest(ZOOM_SKIP)) return;
+    const sel = window.getSelection ? window.getSelection() : null;
+    if (sel && !sel.isCollapsed) return;
+    zoomPane(p);
+  });
   p.el.addEventListener('focusin', () => focusPane(p.id));
   // 分頁多到溢出時（捲軸是隱藏的）：滾輪上下捲＝分頁列左右捲
   p.tabsEl.addEventListener('wheel', (e) => {
@@ -192,7 +202,7 @@ function createPane(id) {
     e.preventDefault();
     el.scrollLeft += e.deltaY;
   }, { passive: false });
-  p.tabsEl.addEventListener('scroll', () => { p.dragGeo = null; }, { passive: true });
+  p.tabsEl.addEventListener('scroll', () => { p.dragGeo = null; if (p.sideMark && !p.sideMark.hidden) placeSideMark(p, true); }, { passive: true });
   bindTabDrop(p);
   paneSizes.observe(p.el);
   applyTabsSide(p);
@@ -224,6 +234,7 @@ function applyTabsSide(p) {
   p.dragGeo = null;
   p.revealed = null;
   revealActiveTab(p);
+  placeSideMark(p);
 }
 
 /** 分頁欄顯示的寬度：使用者調的（沒調過是預設）依窗格寬度夾住；值沒變不寫（每次寫 style 都要重算樣式） */
@@ -233,7 +244,9 @@ function applySideWidth(p) {
   p.sideW = w;
   p.el.style.setProperty('--side-w', w + 'px');
   p.sideGrip.setAttribute('aria-valuenow', String(w));
+  p.sideGrip.dataset.w = w + 'px'; // 拖曳中把手旁邊的讀數（第十一批，fx.css 的 .strip-grip.on::before）
   p.dragGeo = null;
+  if (p.sideMark && !p.sideMark.hidden) placeSideMark(p, true);
 }
 
 /** 設定使用者調的寬度（null＝恢復預設）並記進版面（save＝false：拖曳中，放開才存） */
@@ -287,7 +300,58 @@ function sideTabs(p) {
   return p.el.classList.contains('tabs-left');
 }
 
+// ───── 點了暫時放大窗格（2026-11-08 使用者要求；panezoomrules.zoomPlan）─────
+/** 放大中的窗格 id（同時只有一個） */
+let zoomedId = null;
+
+/**
+ * 同時開著好幾個窗格時，點了窗格的對話區域就暫時放大它：上下還有空間就拉長成兩倍（下面不夠往上補）、已經滿高就加寬，
+ * 不超過工作區；疊在其他窗格上面（fx.css 的 .pane.zoomed），其他窗格不移位。點了它以外的地方（另一個窗格、側欄、頂部列）就恢復
+ */
+/** 開關（設定頁「外觀」；存在這台裝置） */
+export function paneZoomOn() {
+  try { return paneZoomEnabled(localStorage.getItem(PANE_ZOOM_KEY)); } catch { return true; }
+}
+
+export function setPaneZoomOn(on) {
+  try { localStorage.setItem(PANE_ZOOM_KEY, on ? 'on' : 'off'); } catch { /* 存不了就只在這次有效 */ }
+  if (!on) unzoomPane();
+}
+
+function zoomPane(p) {
+  if (zoomedId === p.id || panes.length < 2 || state.mode === 'popout' || !root || !paneZoomOn()) return;
+  unzoomPane();
+  const plan = zoomPlan(p.el.getBoundingClientRect(), root.getBoundingClientRect());
+  if (!plan) return;
+  zoomedId = p.id;
+  p.el.classList.add('zoomed', plan.axis === 'y' ? 'zoom-y' : 'zoom-x');
+  p.el.style.setProperty('--zoom-size', plan.size + 'px');
+  p.el.style.setProperty('--zoom-shift', -plan.shift + 'px');
+}
+
+export function unzoomPane() {
+  const p = zoomedId ? paneById(zoomedId) : null;
+  zoomedId = null;
+  if (!p) return;
+  p.el.classList.remove('zoomed', 'zoom-y', 'zoom-x');
+  p.el.style.removeProperty('--zoom-size');
+  p.el.style.removeProperty('--zoom-shift');
+}
+
+// 點了放大的窗格以外的地方就恢復（捕獲階段，比窗格自己的 pointerdown 早：點另一個窗格時先恢復、再放大那一個）。
+// 掛在 body 上的選單、對話框、燈箱、提示不算外面（在放大的窗格裡打開的選單點了照樣用）
+document.addEventListener('pointerdown', (e) => {
+  if (!zoomedId) return;
+  const p = paneById(zoomedId);
+  if (!p) { zoomedId = null; return; }
+  if (p.el.contains(e.target) || !e.target.closest || !e.target.closest('#app')) return;
+  unzoomPane();
+}, true);
+// 視窗大小變了：放大的位置不再準，先恢復（再點一次照新的大小放大）
+window.addEventListener('resize', () => unzoomPane());
+
 function addPane(afterId) {
+  unzoomPane();
   const p = createPane(newPaneId());
   const i = afterId ? panes.findIndex((x) => x.id === afterId) : -1;
   if (i >= 0) panes.splice(i + 1, 0, p); else panes.push(p);
@@ -332,6 +396,7 @@ export function splitPane(fromId) {
 }
 
 export function closePane(id) {
+  unzoomPane();
   const p = paneById(id);
   if (!p || panes.length < 2) return;
   for (const cid of p.tabs.slice()) closeTab(cid);
@@ -339,6 +404,7 @@ export function closePane(id) {
 }
 
 function removePane(id) {
+  unzoomPane();
   const i = panes.findIndex((p) => p.id === id);
   if (i < 0 || panes.length < 2) return;
   const [p] = panes.splice(i, 1);
@@ -366,6 +432,30 @@ function renderTabs(p) {
   for (const el of p.tabsEl.children) updateTab(el, el.dataset.key, p);
   setHidden(p.emptyEl, p.tabs.length > 0);
   revealActiveTab(p);
+  placeSideMark(p);
+}
+
+/**
+ * 側排時作用中分頁左緣的亮線（第十一批）：分頁欄裡一條獨立的線（不放進分頁清單，拖放與 reconcile 只看分頁），換分頁時以 transform 滑過去
+ * （fx.css 的 .side-mark，一次性轉場）；分頁欄捲動時跟著移、不轉場。橫排、沒有作用中的分頁、看不到時藏起來
+ */
+function placeSideMark(p, scrolling) {
+  const on = sideTabs(p) && !!p.active;
+  if (!on) { if (p.sideMark) setHidden(p.sideMark, true); return; }
+  if (!p.sideMark) { p.sideMark = h('span', { class: 'side-mark', 'aria-hidden': 'true', hidden: true }); p.strip.append(p.sideMark); }
+  const el = Array.from(p.tabsEl.children).find((t) => t.dataset.key === p.active);
+  if (!el || !el.offsetHeight) { setHidden(p.sideMark, true); return; }
+  // 分頁的 offsetParent 是分頁欄（.strip 有定位）：offsetTop 已經含上面按鈕列的高度，只扣分頁清單捲動的量
+  const y = el.offsetTop - p.tabsEl.scrollTop;
+  const sig = y + '|' + el.offsetHeight + '|' + el.style.getPropertyValue('--acc');
+  if (!p.sideMark.hidden && p.sideMark._sig === sig) return; // 位置與顏色沒變：不寫樣式
+  p.sideMark._sig = sig;
+  const first = p.sideMark.hidden;
+  p.sideMark.classList.toggle('instant', !!scrolling || first);
+  p.sideMark.style.transform = 'translateY(' + y + 'px)';
+  p.sideMark.style.height = el.offsetHeight + 'px';
+  p.sideMark.style.setProperty('--acc', el.style.getPropertyValue('--acc'));
+  setHidden(p.sideMark, false);
 }
 
 /** 作用中的分頁換了就捲進分頁列的可視範圍（只在換分頁時捲，不跟使用者自己的捲動搶） */
@@ -388,7 +478,8 @@ function revealActiveTab(p) {
 function createTab(id) {
   const t = h('div', { class: 'tab', role: 'tab', draggable: true, tabIndex: -1 });
   const x = h('button', { type: 'button', class: 'tab-x', title: '關閉（Ctrl+W）', 'aria-label': '關閉分頁', tabIndex: -1 }, icon('x'));
-  t.append(h('span', { class: 'tab-dot' }), h('span', { class: 'tab-title' }), h('span', { class: 'tab-state' }), x);
+  // 分享給協作人（第十一批）：標題後面一個小人像（collabrules.shareBadge）
+  t.append(h('span', { class: 'tab-dot' }), h('span', { class: 'tab-title' }), h('span', { class: 'tab-share', hidden: true }, icon('user')), h('span', { class: 'tab-state' }), x);
   t.addEventListener('click', (e) => { if (e.target.closest('.tab-x')) return; const p = paneOf(t.dataset.key); if (p) activateTab(p.id, t.dataset.key, true); });
   t.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); closeTab(t.dataset.key); } });
   t.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
@@ -460,6 +551,13 @@ function updateTab(el, id, p) {
     if (badge && prevKey !== undefined && !prevKey.includes(waiting ? 'w' : 'u')) replayClass(badge, 'fx-badge-in', BADGE_FX_MS);
   }
   el.classList.toggle('has-state', !!key);
+  // 側排時右緣的狀態刻度（第十一批，fx.css）：等你回應＞執行中＞等背景工作＞未讀
+  const stKind = waiting ? 'wait' : running ? 'run' : bgWait ? 'bg' : unread ? 'unread' : '';
+  if ((el.dataset.st || '') !== stKind) { if (stKind) el.dataset.st = stKind; else delete el.dataset.st; }
+  const share = shareBadge(state.collaborators, id);
+  const shareEl = el.querySelector('.tab-share');
+  setHidden(shareEl, !share);
+  if (share && shareEl.title !== share.title) shareEl.title = share.title;
   el.classList.toggle('attn-flash', isFlashing(id)); // 要你回來看：一直閃到點了它（attnflash.js；新建的分頁照狀態補上）
   el.title = title + (acc ? '\n' + acc.label : '') + (running ? '\n執行中' : '') + (bgWait ? '\n等背景工作回報' : '') + (waiting ? '\n等待你回應' : '');
 }
@@ -1060,6 +1158,7 @@ export function reopen(id) {
  * opts.autoNew 是 false 時沒有分頁也不開草稿
  */
 export function restore(layout, restoredDrafts, opts = {}) {
+  zoomedId = null; // 窗格整個重建：放大的那一個也沒了
   const mode = isHub ? 'hub' : 'desktop';
   panes.splice(0, panes.length);
   convs.clear();
@@ -1192,6 +1291,7 @@ export const scheduleLayout = debounce(() => {
 
 /** 切換檢視時顯示／隱藏作用中的對話 */
 export function setChatVisible(on) {
+  if (!on) unzoomPane();
   for (const p of panes) {
     const cv = p.active && convs.get(p.active);
     if (!cv) continue;

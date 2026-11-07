@@ -39,3 +39,19 @@ export function splitAnswer(values) {
   }
   return { answers, notes };
 }
+
+/**
+ * 問卷的作答進度（第十一批，2026-11-08：多題的問卷在標頭下方一題一格）：每題 { answered, note }——
+ * answered＝選了選項或「其他」有打字（同送出時的判斷），note＝補充說明有填（只看去掉空白後有沒有字）
+ */
+export function progressCells(questions, st) {
+  const sel = (st && st.sel) || {};
+  const other = (st && st.other) || {};
+  const note = (st && st.note) || {};
+  return (Array.isArray(questions) ? questions : []).map((q) => {
+    const id = q && q.id;
+    const picked = Array.isArray(sel[id]) && sel[id].length > 0;
+    const typed = typeof other[id] === 'string' && other[id].trim() !== '';
+    return { answered: picked || typed, note: typeof note[id] === 'string' && note[id].trim() !== '' };
+  });
+}

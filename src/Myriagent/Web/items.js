@@ -2,11 +2,11 @@
 import { h, baseName, extOf, copyToClipboard, iconButton, replayClass, fadeInImg, setHidden, setAcc, safeColor } from './util.js';
 import { icon, TOOL_ICON } from './icons.js';
 import { post, isHub, state } from './store.js';
-import { authorLabel, resolvedLabel } from './collabrules.js';
+import { authorLabel, resolvedLabel, collabColor } from './collabrules.js';
 import { mentionParts, mentionView } from './accountmentions.js';
 import { toast, spinner } from './ui.js';
 import { settleText, itemTimeText, itemTimeTitle } from './liverules.js';
-import { diffRatioCells, codeLineCount, toolSettleFx, parseRetryDelayMs, retryCountdown, retryOutcome, toolPeekLines, thinkPeekLines, toolPeekTiming, PEEK_ROWS, PEEK_CUT_MS, elapsedShort, SLOW_TOOL_MS, waitAgeLabel, STALE_WAIT_MS, thinkDuration, thinkTimeLabel, diffMapRuns, diffMapGradient, planCells, planNewlyDone, commandOutcome, outcomeChips, diagLineRanges, toolHits, subagentProgress, remoteExecOf, remoteExecChips, mcpToolOf, delegationOf, delegateChild, delegationChips, handoffLabels } from './fxrules.js';
+import { diffRatioCells, codeLineCount, toolSettleFx, parseRetryDelayMs, retryCountdown, retryOutcome, toolPeekLines, thinkPeekLines, toolPeekTiming, PEEK_ROWS, PEEK_CUT_MS, elapsedShort, SLOW_TOOL_MS, waitAgeLabel, STALE_WAIT_MS, thinkDuration, thinkTimeLabel, diffMapRuns, diffMapGradient, planCells, planNewlyDone, commandOutcome, outcomeChips, diagLineRanges, toolHits, subagentProgress, remoteExecOf, remoteExecChips, mcpToolOf, delegationOf, delegateChild, delegationChips, handoffLabels, pathParts } from './fxrules.js';
 import { calmMotion } from './theme.js';
 import { tokenCounter } from './tokenfx.js';
 import { queueHighlight, queueDiff, queueGutter } from './syntax.js';
@@ -14,7 +14,7 @@ import { commandLang, commandParts, detailLang, outputLang, guessLang } from './
 import { enhanceMermaidBlock, queueMermaid, flushMermaid } from './mermaid.js';
 import { framedVideo } from './framedvideo.js';
 import { agentUsageView } from './claudeoptrules.js';
-import { noteFieldShown, buildNotes, splitAnswer, NOTE_MAX } from './questionrules.js';
+import { noteFieldShown, buildNotes, splitAnswer, NOTE_MAX, progressCells } from './questionrules.js';
 
 const DIFF_LIMIT = 1200;
 const COPY_FX_MS = 900; // 複製成功的閃光（fx.css 的 .fx-copied）
@@ -105,7 +105,24 @@ function rawHtmlOf(node) {
   return node.nodeType === Node.ELEMENT_NODE ? node.outerHTML : '#' + node.nodeType + ':' + node.nodeValue;
 }
 
+/**
+ * 行內程式碼裡的路徑與網址（第十一批，fxrules.pathParts）：分隔符號後面可以換行（窄窗格不撐出橫向捲動），
+ * 最後一段（檔名）加亮、前面的資料夾變淡。只處理只有一段純文字的行內程式碼；程式碼區塊（pre）不碰。只用文字節點
+ */
+function decoratePaths(root) {
+  for (const code of root.querySelectorAll('code')) {
+    if (code.closest('pre') || code.classList.contains('md-path') || code.childNodes.length !== 1 || code.firstChild.nodeType !== Node.TEXT_NODE) continue;
+    const pp = pathParts(code.firstChild.nodeValue);
+    if (!pp) continue;
+    const dir = h('span', { class: 'p-dir' });
+    pp.parts.slice(0, pp.base).forEach((part) => { dir.append(document.createTextNode(part), document.createElement('wbr')); });
+    code.replaceChildren(dir, h('span', { class: 'p-base', text: pp.parts.slice(pp.base).join('') }));
+    code.classList.add('md-path');
+  }
+}
+
 export function enhanceMarkdown(root, _ctx, opts) {
+  decoratePaths(root);
   for (const pre of root.querySelectorAll('pre')) {
     if (pre.parentElement && pre.parentElement.classList.contains('code')) continue;
     const code = pre.querySelector('code');
@@ -190,6 +207,9 @@ function createUser(item, ctx) {
   // 多人協作：誰送的（協作人送的標出名稱；協作人看擁有者送的標「管理員」）
   const author = authorLabel(item, state.viewer);
   if (author) meta.append(h('div', { class: 'u-author' + (item.author ? ' is-collab' : ''), title: item.author ? '這則訊息是協作人送的' : '這則訊息是擁有者送的' }, icon('user'), h('span', { text: author })));
+  // 協作人的顏色（第十一批，collabrules.collabColor）：名稱前的小方塊與框左緣的線，多人一起用時分得出誰說的
+  const authorTint = item.author ? collabColor(item.author) : null;
+  if (authorTint) { n.classList.add('by-collab'); n.style.setProperty('--collab', authorTint); }
   if (item.source === 'remote') {
     meta.append(h('div', { class: 'u-src', title: '這則訊息是從 claude.ai 或 Claude App 送出的（Remote Control）' },
       icon('globe'), h('span', { text: '從 claude.ai／Claude App 送出' })));
@@ -885,6 +905,16 @@ function createQuestion(item, ctx) {
   const st = qState(ctx, item);
   n.tabIndex = 0;
   const blocks = [];
+  // 作答進度（第十一批）：多題時標頭下方一題一格——答完的亮、有補充說明的多一個小點、目前那題有外框；點了跳到那一題（questionrules.progressCells）
+  const prog = qs.length > 1 ? h('div', { class: 'q-progress', role: 'group', 'aria-label': '作答進度' }) : null;
+  if (prog) {
+    qs.forEach((q, qi) => {
+      const cell = h('button', { type: 'button', class: 'q-cell', tabIndex: -1 });
+      cell.addEventListener('click', () => { setActive(qi); blocks[qi].scrollIntoView({ block: 'nearest' }); });
+      prog.append(cell);
+    });
+    n.append(prog);
+  }
   qs.forEach((q, qi) => {
     const block = h('div', { class: 'q-block', dataset: { qi: String(qi) } });
     const top = h('div', { class: 'q-top' });
@@ -938,7 +968,7 @@ function createQuestion(item, ctx) {
         dataset: { field: 'questionNote' }, 'aria-label': '補充說明（選填）',
       });
       note.value = st.note[q.id] || '';
-      note.addEventListener('input', () => { st.note[q.id] = note.value; });
+      note.addEventListener('input', () => { st.note[q.id] = note.value; renderProgress(); });
       note.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); }
       });
@@ -959,10 +989,24 @@ function createQuestion(item, ctx) {
   // 〔遠端〕略過不帶 requestDigest（D18），照樣追蹤結果
   skipBtn.addEventListener('click', () => sendCard(n, item, ctx, 'skipQuestion', { itemId: item.id }));
   n.append(h('div', { class: 'card-actions' }, submitBtn, skipBtn, h('span', { class: 'card-keys', text: '數字鍵選擇　Enter 送出' })));
+  qs.forEach((q, qi) => syncBlock(qi)); // 重畫時照記著的作答標出選項與進度
 
   function setActive(qi) {
     st.active = qi;
     blocks.forEach((b, i) => b.classList.toggle('active', i === qi && blocks.length > 1));
+    renderProgress();
+  }
+  function renderProgress() {
+    if (!prog) return;
+    const cells = progressCells(qs, st);
+    Array.from(prog.children).forEach((c, i) => {
+      const x = cells[i];
+      c.classList.toggle('done', x.answered);
+      c.classList.toggle('noted', x.note);
+      c.classList.toggle('cur', i === (st.active || 0));
+      const title = '第 ' + (i + 1) + ' 題：' + (x.answered ? '已回答' : '還沒回答') + (x.note ? '（有補充說明）' : '');
+      if (c.title !== title) { c.title = title; c.setAttribute('aria-label', title); }
+    });
   }
   function syncBlock(qi) {
     const q = qs[qi];
@@ -975,6 +1019,7 @@ function createQuestion(item, ctx) {
     // 「其他」那一列：有打字就算選了它
     const otherRow = blocks[qi].querySelector('.opt-other');
     if (otherRow) otherRow.classList.toggle('sel', !!(st.other[q.id] || '').trim());
+    renderProgress();
   }
   function pick(qi, oi) {
     const q = qs[qi];
@@ -1060,7 +1105,8 @@ function answeredView(item) {
 /** 多人協作：卡片是哪位協作人回應的（擁有者回應的不寫） */
 function appendResolvedBy(n, item) {
   const label = resolvedLabel(item, state.viewer);
-  if (label) n.append(h('div', { class: 'resolved-by' }, icon('user'), h('span', { text: label })));
+  const tint = label ? collabColor(item.resolvedBy) : null;
+  if (label) n.append(h('div', { class: 'resolved-by', style: tint ? { '--collab': tint } : null }, icon('user'), h('span', { text: label })));
 }
 
 // ───── Approval ─────

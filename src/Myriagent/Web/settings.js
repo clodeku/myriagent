@@ -26,6 +26,7 @@ import { pairCountdown, countdownCells, deviceLed, rangeFill, rangeTicks } from 
 import { setDecodedText } from './textfx.js';
 import { SETTING_KEYWORDS, searchSettings, searchTerms, highlightParts, snippet, tabKeyTarget, tabHitCounts, normalizeHubUrl, parseTokens, fmtTokens, parsePercent, fmtPercent, modelText } from './settingsrules.js';
 import { collaboratorsSection, myAccountSection, canManageCollaborators, isCollaborator } from './collab.js';
+import { paneZoomOn, setPaneZoomOn } from './workspace.js';
 
 let open = null; // { d, refresh, browser, refreshApp }
 let lastTab = 'general';  // 再開設定時回到上次看的分頁（只記在這次執行）
@@ -92,6 +93,8 @@ export function openSettings(opts = {}) {
   const sw = (key, label) => switchControl({ checked: s[key] !== false, label, onChange: (v) => set(key, v) });
   // 動態效果：桌面專屬（瀏覽器模式是 null，不建）
   const fxSw = has('visualEffects') ? sw('visualEffects', '動態效果') : null;
+  // 點了暫時放大窗格（2026-11-08）：存在這台裝置（workspace.js 的 paneZoomOn），桌面與網頁版都有
+  const zoomSw = switchControl({ checked: paneZoomOn(), label: '點了暫時放大窗格', onChange: (v) => setPaneZoomOn(v) });
   const enterSw = switchControl({ checked: s.enterToSend !== false, label: 'Enter 送出', onChange: (v) => set('enterToSend', v) });
   const notifySw = sw('notifications', '系統通知');
   // 排程失敗時自動請代理診斷（桌面、掛了排程讀取器才有；宿主送 null 時不建）
@@ -170,7 +173,8 @@ export function openSettings(opts = {}) {
   put('look', '外觀',
     row('主題', '跟隨系統會依 Windows 的深淺色設定切換。', theme, 'theme'),
     row('對話字級', '訊息與輸入框的文字大小。', h('div', { class: 'range-wrap' }, size, sizeVal), 'fontSize'),
-    fxSw && row('動態效果', '執行中的掃描光、圓環轉動、電腦狀態面板的雷達等持續的動畫。關掉可以減輕處理器與顯示卡的負擔；Windows 設定了減少動畫效果時一律不播。', fxSw, 'visualEffects'));
+    fxSw && row('動態效果', '執行中的掃描光、圓環轉動、電腦狀態面板的雷達等持續的動畫。關掉可以減輕處理器與顯示卡的負擔；Windows 設定了減少動畫效果時一律不播。', fxSw, 'visualEffects'),
+    row('點了暫時放大窗格', '同時開著好幾個對話框時，點了某一個的對話區域就暫時把它放大成兩倍（上下有空間就拉長、只有一列就加寬，不超過視窗），點外面就恢復。只存在這台裝置。', zoomSw, 'paneZoom'));
   put('system', '系統',
     bootRow,
     traySw && row('關閉視窗時縮到系統匣', '對話會繼續在背景執行，從系統匣圖示叫回視窗。', traySw, 'closeToTray'));

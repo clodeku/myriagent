@@ -31,3 +31,11 @@ test('已回答的值：「補充說明：」開頭的另起一行，其他照�
   assert.deepEqual(R.splitAnswer(['紅色']), { answers: ['紅色'], notes: [] });
   assert.deepEqual(R.splitAnswer(null), { answers: [], notes: [] });
 });
+
+test('第十一批：作答進度——選了選項或「其他」有字算回答，補充說明有字標 note，空白不算', () => {
+  const qs = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const st = { sel: { a: ['SQLite'], b: [], c: [] }, other: { a: '', b: '  ', c: '自己的答案' }, note: { a: '', b: '原因', c: ' ' } };
+  assert.deepEqual(R.progressCells(qs, st), [{ answered: true, note: false }, { answered: false, note: true }, { answered: true, note: false }]);
+  assert.deepEqual(R.progressCells(qs, null), [{ answered: false, note: false }, { answered: false, note: false }, { answered: false, note: false }]);
+  assert.deepEqual(R.progressCells(null, st), []);
+});

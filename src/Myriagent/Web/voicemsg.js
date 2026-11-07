@@ -13,7 +13,7 @@
 // 診斷記錄：長按麥克風鈕、或聽寫時預覽列的「記錄」打開，列出這一頁每次按下、每個辨識器的事件與時間、麥克風的音量，
 // 可以複製或放進輸入框送出；裡面可以換做法（DIAG_MODES）。
 // 不呼叫 Windows 的語音輸入。同時只有一個輸入區在錄音或聽；麥克風只在使用者按下之後開，送出、停止或取消就關掉
-import { h, iconButton } from './util.js';
+import { h, iconButton, setHidden } from './util.js';
 import { icon } from './icons.js';
 import { post, state, isHub } from './store.js';
 import { toast, openDialog } from './ui.js';
@@ -111,7 +111,7 @@ function audioSessionText() {
  * 先開的麥克風接上 Web Audio 讀音量（levelReader）：每 100 ms 讀一次、每秒記一次最大的。不只是記錄——iOS 要有東西真的在用麥克風的聲音，
  * 語音辨識第二次之後才收得到（voicemsgrules.DIAG_MODES 的 gumHold），不要拿掉。回停止的函式
  */
-function meterStream(stream, label) {
+function meterStream(stream, label, onLevel) {
   const level = levelReader(stream);
   if (!level) {
     trace(label + '：讀不到音量');
@@ -120,7 +120,9 @@ function meterStream(stream, label) {
   let peak = 0;
   let n = 0;
   const timer = setInterval(() => {
-    peak = Math.max(peak, level.read());
+    const v = level.read();
+    peak = Math.max(peak, v);
+    if (onLevel) onLevel(v); // 聽寫時的音量格（第十一批，dictMeter）
     if (++n % 10 === 0) {
       trace(label + '音量 ' + diagDb(peak));
       peak = 0;
@@ -129,6 +131,7 @@ function meterStream(stream, label) {
   return () => {
     clearInterval(timer);
     if (n % 10) trace(label + '音量 ' + diagDb(peak));
+    if (onLevel) onLevel(null);
     level.close();
   };
 }
@@ -322,7 +325,10 @@ export function createVoiceMessage(cp) {
     }
     cancelBtn.hidden = !rec;
     time.hidden = !rec;
-    meter.hidden = !(rec && rec.level);
+    // 錄音時一定顯示；聽寫時由 dictMeter 顯示（第十一批），聽寫結束就藏起來、清掉亮格
+    const dictMeterOn = !rec && !!dict && meter.classList.contains('dict');
+    meter.hidden = !((rec && rec.level) || dictMeterOn);
+    if (!rec && !dictMeterOn && meter.classList.contains('dict')) { meter.classList.remove('dict'); paintMeter(0); }
     btn.classList.toggle('has-level', !!(rec && rec.level));
     if (rec) time.textContent = formatElapsed(Date.now() - rec.startedAt);
   }
@@ -393,6 +399,23 @@ export function createVoiceMessage(cp) {
       const next = meterStep(shown, levelCells(rms));
       if (next !== shown) { shown = next; paintMeter(shown); }
     }, METER_MS);
+  }
+
+  /**
+   * 聽寫時的音量（第十一批，2026-11-08）：iPhone／iPad 先開著的麥克風本來就每 100 ms 讀一次音量（meterStream），畫在錄音的那組 5 格上，
+   * 看得出麥克風有沒有收到聲音（「正在聽」卻打不出字時分得出是不是沒收到聲音）；結束（null）或已經不是這一次的聽寫就藏起來
+   */
+  function dictMeter(d) {
+    let shown = 0;
+    return (rms) => {
+      if (rms == null || dict !== d) {
+        if (!rec) { paintMeter(0); setHidden(meter, true); meter.classList.remove('dict'); }
+        return;
+      }
+      if (meter.hidden) { setHidden(meter, false); meter.classList.add('dict'); }
+      const next = meterStep(shown, levelCells(rms));
+      if (next !== shown) { shown = next; paintMeter(shown); }
+    };
   }
 
   function paintMeter(n) {
@@ -507,7 +530,7 @@ export function createVoiceMessage(cp) {
         }
         if (dm === 'gumHold') {
           d.stream = stream;
-          d.unmeter = meterStream(stream, '先開的麥克風');
+          d.unmeter = meterStream(stream, '先開的麥克風', dictMeter(d));
           step();
         } else {
           const unmeter = meterStream(stream, '先開的麥克風');

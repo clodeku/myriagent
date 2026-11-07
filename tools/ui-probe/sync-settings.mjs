@@ -757,7 +757,7 @@ async function runBrowserSettings(ctx, vp, csp) {
   const sameSet = (a, b) => a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
   const near = (x, y) => typeof x === 'number' && Math.abs(x - y) < 1e-3; // SpeechSynthesisUtterance 的 pitch 是 32 位元浮點數
 
-  // browserSettingsOnlyRoaming：只看得到主題、字級、Enter 送出、系統通知，加上這個瀏覽器自己的語音通知與語速、音調（voiceLocal，存在 localStorage、不送 setting）
+  // browserSettingsOnlyRoaming：只看得到主題、字級、Enter 送出、系統通知，加上這個瀏覽器自己的語音通知與語速、音調（voiceLocal，存在 localStorage、不送 setting）與點了暫時放大窗格（paneZoom，同樣只存在這台裝置）
   // 與「繼續」鈕的指令（continueLocal，存在 localStorage 的 myriagent.continueText、不送 setting；恢復預設就清掉）；
   // 切換它們送出的 setting 鍵都在四個鍵裡；0 筆桌面專屬的指令；
   // 程式以 openSettings({section}) 指定沒建的區塊（多電腦同步、CLI）也照常打開；匯出的 ROAMING_KEYS／isBrowserMode 照 WPR
@@ -837,7 +837,7 @@ async function runBrowserSettings(ctx, vp, csp) {
 
     const labels = r0.rows.map((x) => x.label);
     check('browserSettingsOnlyRoaming', exported.browser === true && sameSet(exported.keys, ROAMING)
-      && sameSet(r0.rows.map((x) => x.setting), [...ROAMING, 'voiceLocal', 'continueLocal']) && sameSet(labels, ['主題', '對話字級', '系統通知', '語音通知', 'Enter 送出', '「繼續」鈕的指令']) && r0.desktopNodes === 0
+      && sameSet(r0.rows.map((x) => x.setting), [...ROAMING, 'voiceLocal', 'continueLocal', 'paneZoom']) && sameSet(labels, ['主題', '對話字級', '點了暫時放大窗格', '系統通知', '語音通知', 'Enter 送出', '「繼續」鈕的指令']) && r0.desktopNodes === 0
       && contStored0 === null && contStored1 === '手機上看：做到哪了？' && contField1 === '手機上看：做到哪了？' && (contTitle1 === null || contTitle1 === '繼續：送出「手機上看：做到哪了？」')
       && contStored2 === null && contField2 === '進度如何呢如果還沒做完就繼續'
       && voiceStored === 'off' && tuneStored[0] === '2' && tuneStored[1] === '-1' && tuneOff
@@ -879,7 +879,7 @@ async function runBrowserSettings(ctx, vp, csp) {
     const settled = await readSettingsDialog(page);
     const dialogs = await page.$$eval('.dlg-back:not(.leaving) .dlg-settings', (ns) => ns.length);
     check('browserLateInitRebuilds', !!before && before.tabs.length === 7 && before.desktopNodes > 0
-      && !!after && !!settled && same(settled.tabs.map((t) => t.id), ['general', 'chat']) && settled.desktopNodes === 0 && sameSet(settled.rows.map((x) => x.setting), [...ROAMING, 'voiceLocal', 'continueLocal'])
+      && !!after && !!settled && same(settled.tabs.map((t) => t.id), ['general', 'chat']) && settled.desktopNodes === 0 && sameSet(settled.rows.map((x) => x.setting), [...ROAMING, 'voiceLocal', 'continueLocal', 'paneZoom'])
       && dialogs === 1 && desktopOnlySent(host).length === 0,
     { before: before && before.tabs.map((t) => t.id), after: settled && { tabs: settled.tabs.map((t) => t.id), rows: settled.rows, desktopNodes: settled.desktopNodes }, dialogs });
     await closeWithCsp(ctx, app, csp);

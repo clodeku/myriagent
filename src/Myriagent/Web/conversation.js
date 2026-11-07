@@ -6,7 +6,7 @@ import { canManageCollaborators, openShareDialog } from './collab.js';
 import { sharedWith } from './collabrules.js';
 import { openMenu, openDialog, confirmDialog, choiceDialog, toast, spinner } from './ui.js';
 import {
-  originOf, deviceOf, deviceLine, statusLine, composerGate, cardGate, deleteConfirmText, deleteProgramsCheckbox, policyChoices, needsLocalOnlyConfirm, LOCAL_ONLY_CONFIRM_TEXT, loadChunks, LAZY_BATCH, loadRetryDelay,
+  originOf, deviceOf, deviceLine, statusLine, composerGate, cardGate, deleteConfirmText, deleteProgramsCheckbox, policyChoices, needsLocalOnlyConfirm, LOCAL_ONLY_CONFIRM_TEXT, loadChunks, LAZY_BATCH, loadRetryDelay, LOAD_RETRY_MS,
   attachGate, folderPickerGate, ownerRunning, mediaPolicyNote, peerOf, controllable, peerDraftDevices, peerDraftAccount, clearBoundary,
   latestPrompt, promptHistory, promptLine, itemTimeText, itemTimeTitle, dayKey, backgroundLine, backgroundStopMenu, detailTasks, programsView, mergeHeaderLists, missingHeaderLists, HEADER_LISTS_REOPEN_MS, touchUnsticks, touchScrolling,
   remoteAccountMenu, headerAccountId, findAccount, originLink,
@@ -473,7 +473,12 @@ export class ConvView {
     this.runStop.addEventListener('click', () => this.openTaskStop());
     this.runEl = h('div', { class: 'runline', hidden: true, role: 'status' }, this.runSpin, this.runBg, this.runText, this.runTime, this.runDetail, this.runStop);
     // 載入中：很快就回來時不閃一下，稍等才出現；load() 移除
-    this.loadingEl = h('div', { class: 'runline', hidden: true, role: 'status' }, spinner('run-spin'), h('span', { class: 'run-text', text: '載入對話中…' }));
+    // 第十一批：狀態列（轉圈、說明、自動重試用了幾次的 3 格）＋底下幾塊靜態的訊息骨架（點狀網格與四角括號，同圖片的佔位；不做流光）
+    this.loadText = h('span', { class: 'run-text', text: '載入對話中…' });
+    this.loadTries = h('span', { class: 'load-tries', 'aria-hidden': 'true' }, ...LOAD_RETRY_MS.map(() => h('i')));
+    this.loadLine = h('div', { class: 'runline load-line' }, spinner('run-spin'), this.loadText, this.loadTries);
+    this.loadingEl = h('div', { class: 'load-wrap', hidden: true, role: 'status' }, this.loadLine,
+      h('div', { class: 'load-skel', 'aria-hidden': 'true' }, h('div', { class: 'sk sk-user' }), h('div', { class: 'sk sk-reply' }), h('div', { class: 'sk sk-reply sk-short' })));
     this.loadingTimer = setTimeout(() => { if (this.loadingEl) this.loadingEl.hidden = false; }, 200);
     // 載入看門狗（2026-11-07 使用者回報：分頁一直「載入對話中…」）：看得到卻一直沒收到 conversation 就自動重送 open，用完改成「重試」鈕
     this.loadAttempt = 0;
@@ -625,6 +630,7 @@ export class ConvView {
       if (this.loaded || !this.loadingEl) return;
       if (!this.visible) return; // 看不到的時間不算：切回來再從這一次接著等
       this.loadAttempt++;
+      this.markLoadTry();
       const st = this.ws.retryOpen ? this.ws.retryOpen(this.id) : null;
       reportIssue('對話一直沒有載入完成，第 ' + this.loadAttempt + ' 次重送 open（' + this.id + '）', st ? JSON.stringify(st) : null);
       this.armLoadWatch();
@@ -645,6 +651,13 @@ export class ConvView {
     }));
   }
 
+  /** 自動重送了一次（第十一批）：說明寫第幾次、重試的格子亮一格 */
+  markLoadTry() {
+    if (!this.loadText) return;
+    this.loadText.textContent = this.loadAttempt > 0 ? '載入對話中…（自動重試第 ' + this.loadAttempt + ' 次）' : '載入對話中…';
+    Array.from(this.loadTries.children).forEach((c, i) => c.classList.toggle('on', i < this.loadAttempt));
+  }
+
   /** 自動重送都用完了：轉圈換成說明與「重試」鈕（按了重新開始計次） */
   showLoadFailed() {
     const el = this.loadingEl;
@@ -654,12 +667,13 @@ export class ConvView {
     const retry = h('button', { type: 'button', class: 'btn sm', text: '重試', dataset: { field: 'loadRetry' } });
     retry.addEventListener('click', () => {
       el.classList.remove('load-failed');
-      el.replaceChildren(spinner('run-spin'), h('span', { class: 'run-text', text: '載入對話中…' }));
       this.loadAttempt = 0;
+      this.markLoadTry();
+      this.loadLine.replaceChildren(spinner('run-spin'), this.loadText, this.loadTries);
       if (this.ws.retryOpen) this.ws.retryOpen(this.id);
       this.armLoadWatch();
     });
-    el.replaceChildren(icon('info'), h('span', { class: 'run-text', text: '這個對話一直沒有載入完成' }), retry);
+    this.loadLine.replaceChildren(icon('info'), h('span', { class: 'run-text', text: '這個對話一直沒有載入完成' }), this.loadTries, retry);
   }
 
   hide() {

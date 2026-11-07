@@ -854,6 +854,10 @@ Codex 子代理用既有 `toolKind:"agent"` 工具卡顯示（id 前綴 `codex-c
                                         //   CLI 自己追蹤的背景工作算在 background、不算這裡（命令列對得上 CLI 回報的背景工作的也不算，IsCliTask）；
                                         //   同一個對話兩種都有時兩個都算。舊版沒有這個欄位，網頁當成 0
   "programs": [ { "conversationId": "…", "title": "開發工作六", "programs": ["bash chain7.sh"], "more": 0 } ],
+  "subagentList": [ { "conversationId": "…", "title": "平行查三件事", "count": 2 } ],
+                                        // 有執行中子代理的對話（第十一批 2026-11-08；只有 sessions.subagents > 0 才帶）：依子代理數多到少、一樣多時新的在前，最多 5 個；
+                                        //   帳戶卡的子代理徽章滑過列出（remoterules.subagentsTooltip），其他電腦的只有 otherSessions.subagents 的個數。只有這台的
+
                                         // 有背景程式的對話（依更新時間新到舊；只有 sessions.programs > 0 才帶）：programs 是程式的命令列
                                         //   （執行檔去掉路徑與 .exe，最多 80 字；每個對話最多 4 個，more＝還有幾個沒列）。側欄帳戶卡名稱那一行在等你回應之後有
                                         //   靜態的終端機徽章（sessions.programs＋otherSessions.programs），滑過列出這些（remoterules.js 的 programsTitle）。只有桌面

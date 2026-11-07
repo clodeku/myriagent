@@ -522,6 +522,23 @@ export function subagentsTitle(total, other) {
   return total + ' 個子代理執行中' + (other ? (other === total ? '（都在其他電腦）' : '（其中其他電腦 ' + other + ' 個）') : '');
 }
 
+/**
+ * 帳戶卡子代理徽章滑過的說明（第十一批）：第一行同 subagentsTitle，下面列這台哪幾個對話各有幾個（AccountView.subagentList，最多 5 個），
+ * 其他電腦的只有個數
+ */
+export function subagentsTooltip(a) {
+  const s = sessionTotals(a);
+  if (!s.subagents) return '';
+  const lines = [subagentsTitle(s.subagents, s.otherSubagents)];
+  const local = isObj(a) && Array.isArray(a.subagentList) ? a.subagentList.filter(isObj) : [];
+  for (const c of local) {
+    const n = Number.isInteger(c.count) && c.count > 0 ? c.count : 0;
+    if (n) lines.push('・' + (str(c.title) || '（沒有標題）') + '：' + n + ' 個');
+  }
+  if (s.otherSubagents) lines.push('・其他電腦 ' + s.otherSubagents + ' 個');
+  return lines.join('\n');
+}
+
 /** 執行中、等你回應的提示（「3 個對話執行中（其中其他電腦 2 個）」）；0 個是空字串 */
 export function sessionTitle(total, other, what) {
   if (!total) return '';

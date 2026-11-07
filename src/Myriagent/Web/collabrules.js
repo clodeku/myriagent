@@ -108,3 +108,25 @@ export function shareIds(collaborators, checked) {
   const want = new Set(Array.isArray(checked) ? checked : []);
   return listOf(collaborators).filter((c) => want.has(c.id)).map((c) => c.id);
 }
+
+/** 協作人的顏色（第十一批，2026-11-08）：依名稱固定挑一個（同一位在每個對話、每台電腦都一樣）；八色、避開帳戶色常用的橘與紫 */
+export const COLLAB_COLORS = ['#3fb6a8', '#e0a43a', '#d9668f', '#6aa84f', '#5b8def', '#c9a227', '#4fb3d9', '#e07a5f'];
+
+export function collabColor(name) {
+  if (typeof name !== 'string' || !name) return null;
+  let hash = 0;
+  for (const ch of name) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+  return COLLAB_COLORS[hash % COLLAB_COLORS.length];
+}
+
+/**
+ * 對話分享中的標記（第十一批：側欄列與分頁）：沒有分享是 null；n＝分享給幾位、title＝滑過的說明（依清單順序列名稱、最多 5 位）。
+ * key 給畫面比對有沒有變（名單或人數變了才重畫）
+ */
+export function shareBadge(collaborators, conversationId) {
+  const who = sharedWith(collaborators, conversationId);
+  if (!who.length) return null;
+  const names = who.map((c) => c.displayName || c.userName || c.id);
+  const shown = names.slice(0, 5).join('、') + (names.length > 5 ? ' 等 ' + names.length + ' 位' : '');
+  return { n: who.length, title: '分享給協作人：' + shown, key: who.map((c) => c.id).join(',') + '|' + names.join(',') };
+}

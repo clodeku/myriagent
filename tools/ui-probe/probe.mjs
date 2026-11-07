@@ -68,6 +68,7 @@ const CLAUDEOPT_ONLY = process.argv.includes('--claudeopt'); // 只跑 Claude �
 const REPLICA_RESTORE_ONLY = process.argv.includes('--replica-restore'); // 只跑還原版面時等其他電腦的對話清單（runReplicaRestore）
 const FORK_ONLY = process.argv.includes('--fork'); // 只跑延伸成新對話（fork-probe.mjs）
 const SIDETABS_ONLY = process.argv.includes('--side-tabs'); // 只跑分頁放左側（runSideTabs）
+const PANEZOOM_ONLY = process.argv.includes('--pane-zoom'); // 只跑點了暫時放大窗格（runPaneZoom）
 const LOGIN_ONLY = process.argv.includes('--login'); // 只跑登入到期的檢查（runLoginExpiry）
 const CONTEXT_ONLY = process.argv.includes('--context'); // 只跑輸入框的上下文用量提示（runContext）
 const BG_ONLY = process.argv.includes('--bg'); // 只跑等背景工作回報的樣貌（runBackgroundWait）
@@ -692,6 +693,8 @@ async function openApp(name, o) {
   page.on('pageerror', (e) => log.errors.push(`[${name}] pageerror ${e.message}`));
   await page.addInitScript(MOCK);
   await page.addInitScript(fakeMic); // 輸入區的語音訊息：假的麥克風與錄音器（不碰這台真的麥克風）
+  // 點了暫時放大窗格（panezoomrules）預設關：放大的窗格會蓋住別的窗格、改變版面的量測；要測的情境帶 paneZoom: true
+  await page.addInitScript((on) => { try { localStorage.setItem('myriagent.paneZoom.v1', on ? 'on' : 'off'); } catch { /* 沒有 localStorage */ } }, !!o.paneZoom);
   if (o.initScript) await page.addInitScript(o.initScript);
   await page.exposeFunction('__hostRecv', (msg) => host.recv(msg));
   await page.route(ORIGIN + '/**', (route) => serve(route, o));
@@ -1961,6 +1964,24 @@ async function runSideTabs(vp) {
   });
   check('sideTabsLongLineFits', fit.bodyRight <= fit.paneRight + 1 && fit.composerRight != null && fit.composerRight <= fit.paneRight + 1, fit);
 
+  // 第十一批：作用中分頁左緣的亮線對齊作用中的分頁，換分頁時滑過去（有轉場）；每列右緣的狀態刻度（c3 執行中的在 p2 的橫排，不畫）
+  const markOf = () => page.evaluate(() => {
+    const pane = document.querySelector('#workspace .pane[data-pane="p1"]');
+    const m = pane.querySelector('.side-mark');
+    const act = pane.querySelector('.tab.active');
+    if (!m || m.hidden || !act) return null;
+    const mr = m.getBoundingClientRect(), ar = act.getBoundingClientRect();
+    return { key: act.dataset.key, dy: Math.round(mr.top - ar.top), dh: Math.round(mr.height - ar.height), trans: getComputedStyle(m).transitionProperty };
+  });
+  const mark0 = await markOf();
+  await page.click('#workspace .pane[data-pane="p1"] .tab[data-key="c5"]');
+  await settle(page, 400);
+  const mark1 = await markOf();
+  await page.click('#workspace .pane[data-pane="p1"] .tab[data-key="c2"]');
+  await settle(page, 400);
+  check('sideTabsMark', !!mark0 && mark0.key === 'c2' && Math.abs(mark0.dy) <= 1 && Math.abs(mark0.dh) <= 1 && !!mark1 && mark1.key === 'c5' && Math.abs(mark1.dy) <= 1
+    && /transform/.test(mark1.trans), { mark0, mark1 });
+
   // 側排時上下拖曳排序：c6 放到 c2 上半部＝插在最前面；存回的版面還是左側
   await page.dragAndDrop('#workspace .pane[data-pane="p1"] .tab[data-key="c6"]', '#workspace .pane[data-pane="p1"] .tab[data-key="c2"]', { targetPosition: { x: 40, y: 4 } });
   const reo = await until(() => { const l = host.last('layout'); const p1 = l && l.layout.panes.find((x) => x.id === 'p1'); return p1 && p1.tabs.join(',') === 'c6,c2,c5' ? p1 : null; }, 2500);
@@ -1979,6 +2000,16 @@ async function runSideTabs(vp) {
   };
   const p1Of = () => { const l = host.last('layout'); return l && l.layout.panes.find((x) => x.id === 'p1'); };
   const widthOf = async () => (await page.evaluate(sideTabsState))[0];
+  // 拖曳中把手旁邊顯示寬度（第十一批）：按住、移動之後讀數是目前的寬度
+  const gr = await page.locator(grip).boundingBox();
+  await page.mouse.move(gr.x + gr.width / 2, gr.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(gr.x + gr.width / 2 + 10, gr.y + 200, { steps: 2 });
+  const readout = await page.evaluate((sel) => { const g = document.querySelector(sel); return { on: g.classList.contains('on'), text: getComputedStyle(g, '::before').content, w: g.dataset.w }; }, grip);
+  await page.mouse.up();
+  const readoutOff = await page.evaluate((sel) => getComputedStyle(document.querySelector(sel), '::before').content, grip);
+  check('sideTabsWidthReadout', readout.on && readout.text === '"' + readout.w + '"' && readout.w === '170px' && readoutOff === 'none', { readout, readoutOff });
+  await dragGrip(-10); // 回到還原的 160px，下面的寬度從這裡算
   await dragGrip(30);
   const w1 = await widthOf();
   const saved1 = await until(() => { const p1 = p1Of(); return p1 && p1.tabsWidth === 190 ? p1 : null; }, 2500);
@@ -2023,6 +2054,88 @@ async function runSideTabs(vp) {
   const gripTop = await page.evaluate(() => getComputedStyle(document.querySelector('#workspace .pane[data-pane="p1"] .strip-grip')).display);
   check('sideTabsGripOnlySide', gripTop === 'none', gripTop);
   await closeApp(app);
+}
+
+// ───── 點了暫時放大窗格（2026-11-08 使用者要求：多個對話框時點了某一個就暫時拉長成兩倍、不超過邊界，點外面就恢復）─────
+/** 每個窗格的位置、放大與否，以及工作區的範圍 */
+function paneZoomState() {
+  const ws = document.getElementById('workspace').querySelector('.ws') || document.getElementById('workspace');
+  const wr = ws.getBoundingClientRect();
+  const panes = Object.fromEntries(Array.from(document.querySelectorAll('#workspace .pane')).map((p) => {
+    const r = p.getBoundingClientRect();
+    return [p.dataset.pane, { zoomed: p.classList.contains('zoomed'), top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right),
+      w: Math.round(r.width), h: Math.round(r.height) }];
+  }));
+  return { ws: { top: Math.round(wr.top), bottom: Math.round(wr.bottom), left: Math.round(wr.left), right: Math.round(wr.right) }, panes };
+}
+
+async function runPaneZoom(vp) {
+  const grid = { panes: [
+    { id: 'p1', tabs: ['c2'], active: 'c2' }, { id: 'p2', tabs: ['c3'], active: 'c3' },
+    { id: 'p3', tabs: ['c5'], active: 'c5' }, { id: 'p4', tabs: ['c6'], active: 'c6' },
+  ], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' };
+  const app = await openApp('pane-zoom', { vp, layout: grid, paneZoom: true });
+  const { page } = app;
+  await waitConv(page, 'c2');
+  await settle(page, 300);
+  const st = () => page.evaluate(paneZoomState);
+  const clickBody = (id) => page.click(`#workspace .pane[data-pane="${id}"] .pane-body`, { position: { x: 60, y: 120 } });
+  const s0 = await st();
+  // 點下面那格的按鈕（權限選單）：按鈕照常打開選單、窗格不放大（以前按下就放大，窗格往上移、這一下點空）
+  await page.click('#workspace .pane[data-pane="p3"] .cbar .perm');
+  const btnMenu = await page.waitForSelector('.menu', { timeout: 2000 }).then(() => true).catch(() => false);
+  await page.keyboard.press('Escape');
+  await settle(page, 150);
+  const sBtn = await st();
+  check('paneZoomButtonsWork', btnMenu && !sBtn.panes.p3.zoomed && sBtn.panes.p3.top === s0.panes.p3.top, { btnMenu, p3: sBtn.panes.p3 });
+  // 2×2：左上那格往下拉長成兩倍（剛好到底），蓋在左下那格上面（點左下那格看得到的地方是左上的內容）
+  await clickBody('p1');
+  await settle(page, 200);
+  const s1 = await st();
+  const onTop = await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y).closest('.pane[data-pane="p1"]'), [s0.panes.p3.left + 40, s0.panes.p3.top + 60]);
+  check('paneZoomGrow', s1.panes.p1.zoomed && Math.abs(s1.panes.p1.h - Math.min(2 * s0.panes.p1.h, s1.ws.bottom - s1.ws.top)) <= 2 && s1.panes.p1.top === s0.panes.p1.top
+    && s1.panes.p1.bottom <= s1.ws.bottom + 1 && onTop && s1.panes.p3.h === s0.panes.p3.h && s1.panes.p2.h === s0.panes.p2.h, { s0: s0.panes, s1: s1.panes, ws: s1.ws, onTop });
+  await shot(page, 'pane-zoom-' + vp.w);
+
+  // 點右下那格：左上恢復、右下放大（下面沒有空間，往上補），不超出工作區
+  await clickBody('p4');
+  await settle(page, 200);
+  const s2 = await st();
+  check('paneZoomSwitch', !s2.panes.p1.zoomed && s2.panes.p1.h === s0.panes.p1.h && s2.panes.p4.zoomed && s2.panes.p4.bottom === s0.panes.p4.bottom
+    && s2.panes.p4.top >= s2.ws.top - 1 && s2.panes.p4.h > s0.panes.p4.h * 1.8, { s2: s2.panes, ws: s2.ws });
+
+  // 點側欄（窗格以外）：恢復；點分頁列不放大（拖分頁時不要蓋住別的窗格）
+  await page.click('#sidebar .sb-sec-accts', { position: { x: 20, y: 10 } });
+  await settle(page, 200);
+  const s3 = await st();
+  await page.click('#workspace .pane[data-pane="p2"] .tab[data-key="c3"]');
+  await settle(page, 200);
+  const s4 = await st();
+  check('paneZoomRestore', Object.values(s3.panes).every((x) => !x.zoomed) && s3.panes.p4.h === s0.panes.p4.h && !s4.panes.p2.zoomed, { s3: s3.panes, s4: s4.panes.p2 });
+
+  // 在放大的窗格裡打開選單（掛在 body 上）不算點外面
+  await clickBody('p1');
+  await settle(page, 150);
+  await page.click('#workspace .pane[data-pane="p1"] .cbar .perm');
+  await page.waitForSelector('.menu', { timeout: 2000 }).catch(() => {});
+  const menuOpen = await page.evaluate(() => !!document.querySelector('.menu'));
+  if (menuOpen) await page.click('.menu .mi, .menu button', { timeout: 1500 }).catch(() => {});
+  await settle(page, 150);
+  const s5 = await st();
+  check('paneZoomKeepsWithMenu', menuOpen && s5.panes.p1.zoomed, { menuOpen, p1: s5.panes.p1 });
+  await closeApp(app);
+
+  // 只有一列並排（已經滿高）：改成加寬兩倍，右邊那格往左補
+  const row = await openApp('pane-zoom-row', { vp, paneZoom: true, layout: { panes: [{ id: 'p1', tabs: ['c2'], active: 'c2' }, { id: 'p2', tabs: ['c3'], active: 'c3' }], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' } });
+  await waitConv(row.page, 'c2');
+  await settle(row.page, 300);
+  const r0 = await row.page.evaluate(paneZoomState);
+  await row.page.click('#workspace .pane[data-pane="p2"] .pane-body', { position: { x: 60, y: 120 } });
+  await settle(row.page, 200);
+  const r1 = await row.page.evaluate(paneZoomState);
+  check('paneZoomWiden', r1.panes.p2.zoomed && r1.panes.p2.h === r0.panes.p2.h && r1.panes.p2.right === r0.panes.p2.right && r1.panes.p2.left >= r1.ws.left - 1
+    && r1.panes.p2.w > r0.panes.p2.w * 1.8, { r0: r0.panes, r1: r1.panes, ws: r1.ws });
+  await closeApp(row);
 }
 
 // ───── 其他互動：改名、選項、資料夾、退回、貼上、拖放、換帳戶、快捷鍵、宿主訊息 ─────
@@ -2829,6 +2942,7 @@ async function runTokens(vp) {
   const bgApp = await openApp('background-programs', { vp, layout: MAIN_LAYOUT, hostSetup: (h) => {
     Object.assign(h.accounts.find((a) => a.id === 'a3'), {
       sessions: { open: 2, running: 0, waiting: 0, background: 1, programs: 1, subagents: 2 }, otherSessions: { open: 0, running: 0, waiting: 0, background: 0, programs: 1, subagents: 1 },
+      subagentList: [{ conversationId: 'c-sub', title: '平行查三件事', count: 2 }],
       programs: [{ conversationId: 'c-bg', title: '開發工作六', programs: ['bash chain7.sh', 'python worker6.py --batch'], more: 0 }],
     });
     Object.assign(h.accounts.find((a) => a.id === 'a6'), { otherSessions: { open: 0, running: 0, waiting: 0, background: 0, programs: 2 } });
@@ -2866,8 +2980,8 @@ async function runTokens(vp) {
     return [k, s ? { text: s.textContent, title: s.title } : null];
   })));
   check('subagentBadge', !sub.a1.shown && sub.a3.shown && sub.a3.n === '3' && sub.a3.icon && sub.a3.anim === 'none' && sub.a3.fits
-    && sub.a3.title === '3 個子代理執行中（其中其他電腦 1 個）' && subDash.a1 === null && !!subDash.a3 && subDash.a3.text === '子代理3'
-    && subDash.a3.title === '3 個子代理執行中（其中其他電腦 1 個）', { sidebar: sub, dashboard: subDash });
+    && sub.a3.title === '3 個子代理執行中（其中其他電腦 1 個）\n・平行查三件事：2 個\n・其他電腦 1 個' && subDash.a1 === null && !!subDash.a3 && subDash.a3.text === '子代理3'
+    && subDash.a3.title === sub.a3.title, { sidebar: sub, dashboard: subDash });
   await bgApp.page.click('#viewSwitch .seg-btn[data-view="chat"]');
   await settle(bgApp.page, 300);
   await bgApp.page.locator('#sidebar .sb-sec-accts').screenshot({ path: path.join(OUT, 'background-programs-sidebar-dark.png') });
@@ -2961,6 +3075,11 @@ async function runDashGrid() {
     const sent = () => app.page.evaluate(() => window.__posted.filter((m) => m.cmd === 'accountResetCredit'));
     const btn = app.page.locator('.reset-credit-btn');
     const r = { buttons: await btn.count() };
+    // 第十一批：剩 1 次是 1 顆燈；最早到期還有 9 天多是 7 格全亮（一格一天）
+    r.hud = await app.page.evaluate(() => {
+      const n = document.querySelector('.acard[data-key="a3"] .credit-note');
+      return n ? { pips: n.querySelectorAll('.credit-pips > i').length, exp: n.querySelectorAll('.credit-exp > i').length, expLit: n.querySelectorAll('.credit-exp > i.on').length } : null;
+    });
     await btn.first().click();
     await app.page.locator('.dlg-confirm').waitFor({ timeout: 3000 });
     r.dialog = await app.page.locator('.dlg-confirm').innerText();
@@ -2972,9 +3091,22 @@ async function runDashGrid() {
     await app.page.locator('.dlg-confirm .btn.primary').click();
     await settle(app.page, 300);
     r.afterConfirm = await sent();
+    // 用掉之後用量更新成 0 次：圓環上掃一圈的光（一次性，1 秒後拿掉）
+    await app.page.evaluate(() => {
+      window.__sweep = 0;
+      new MutationObserver((recs) => { for (const x of recs) for (const n of x.addedNodes) if (n.classList && n.classList.contains('credit-sweep')) window.__sweep++; })
+        .observe(document.body, { childList: true, subtree: true });
+    });
+    const a3 = app.host.accounts.find((a) => a.id === 'a3');
+    a3.usage = Object.assign({}, a3.usage, { resetCredits: 0 });
+    app.host.pushAccounts();
+    r.sweeps = await until(() => app.page.evaluate(() => window.__sweep || null), 2000);
+    await settle(app.page, 1200);
+    r.sweepGone = await app.page.evaluate(() => document.querySelectorAll('.credit-sweep').length === 0);
     await closeApp(app);
     check('dashResetCreditConfirm', r.buttons === 1 && r.dialog.includes('1 次') && r.afterCancel === 0
       && r.afterConfirm.length === 1 && r.afterConfirm[0].accountId === 'a3', r);
+    check('dashResetCreditHud', !!r.hud && r.hud.pips === 1 && r.hud.exp === 7 && r.hud.expLit === 7 && r.sweeps >= 1 && r.sweepGone, r);
   }
   // 淺色主題的截圖
   {
@@ -3879,6 +4011,7 @@ async function runConversationFixes(vp) {
       loading: conv.classList.contains('loading'), title: conv.querySelector('.ch-title-text').textContent,
       chips: vis(conv.querySelector('.ch-chips')), toolbar: Array.from(conv.querySelectorAll('.cbar .perm, .cbar .pick')).some(vis),
       indicator: status ? status.textContent : null,
+      skel: !!status && status.querySelectorAll('.load-skel .sk').length === 3 && vis(status.querySelector('.load-skel')), tries: status ? status.querySelectorAll('.load-tries i').length : 0,
       acc: getComputedStyle(conv).getPropertyValue('--acc').trim(), tabAcc: getComputedStyle(document.querySelector('.tab[data-key="c5"]')).getPropertyValue('--acc').trim(),
     };
   });
@@ -3889,7 +4022,7 @@ async function runConversationFixes(vp) {
   await sleep(150);
   const afterLoad = await loadSnap();
   check('loadingState', whileLoading.loading && whileLoading.title === '整理 CLI 自動更新的流程' && !whileLoading.chips && !whileLoading.toolbar &&
-    whileLoading.indicator === '載入對話中…' && whileLoading.acc === whileLoading.tabAcc && afterLoad.chips && afterLoad.toolbar && !afterLoad.indicator, { whileLoading, afterLoad });
+    whileLoading.indicator === '載入對話中…' && whileLoading.skel && whileLoading.tries === 3 && whileLoading.acc === whileLoading.tabAcc && afterLoad.chips && afterLoad.toolbar && !afterLoad.indicator, { whileLoading, afterLoad });
 
   // 草稿（帳戶尚未登入）：「在新視窗開啟」停用並說明原因；帳戶登入後，空白頁的提示跟著更新
   await page.hover('.macct[data-key="a4"]'); // 「＋」只在滑過帳戶卡時出現
@@ -6498,6 +6631,7 @@ try {
     if (CLAUDEOPT_ONLY) { if (full) await runClaudeOpt(searchCtx, vp); continue; }
     if (FORK_ONLY) { if (full) await runFork(searchCtx, vp); continue; }
     if (SIDETABS_ONLY) { if (full) await runSideTabs(vp); continue; }
+    if (PANEZOOM_ONLY) { if (full) await runPaneZoom(vp); continue; }
     if (REPLICA_RESTORE_ONLY) { if (full) await runReplicaRestore(vp); continue; }
     if (FX_ONLY) { if (full) await runFx(searchCtx, vp); continue; }
     if (SETTINGS_ONLY) { if (full) await runSettings(searchCtx, vp); continue; }
@@ -6514,7 +6648,7 @@ try {
     if (!HOT_ONLY && !SYNC_ONLY) {
       await runMain(vp, full);
       await runPopout(vp, full);
-      if (full) { await runExtras(vp); await runSideTabs(vp); await runNoLayout(vp); await runDraftRestore(vp); await runReplicaRestore(vp); await runLight(vp); await runVisualChecks(); }
+      if (full) { await runExtras(vp); await runSideTabs(vp); await runPaneZoom(vp); await runNoLayout(vp); await runDraftRestore(vp); await runReplicaRestore(vp); await runLight(vp); await runVisualChecks(); }
       if (full) await runDashboard(vp);
       if (full) await runDashGrid();
       if (full) await runTokens(vp);

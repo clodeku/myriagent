@@ -9,6 +9,7 @@ export const SETTING_KEYWORDS = Object.freeze({
   theme: '深色 淺色 暗色 亮色 夜間 dark light 顏色 外觀',
   fontSize: '字體 字型 文字大小 放大 縮小 font',
   visualEffects: '動畫 特效 效能 耗電 cpu gpu',
+  paneZoom: '窗格 對話框 放大 拉長 分割 多窗格',
   autoStart: '開機 啟動 登入 windows',
   closeToTray: '系統匣 背景 最小化 關閉視窗 tray',
   notifications: '通知 提醒 toast',

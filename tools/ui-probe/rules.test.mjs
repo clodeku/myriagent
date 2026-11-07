@@ -2624,3 +2624,70 @@ test('fxrules：每一輪的分隔線——和前一段最後一則隔了 30 分
   assert.equal(FX.gapLabel(23.6 * HR), '隔 1 天');
   assert.equal(FX.gapLabel(NaN), null);
 });
+
+// ───── 第十一批視覺效果（fxrules.js、remoterules.js）─────
+test('第十一批：免費重置的次數燈——最多 8 顆，再多寫 +N；不是正整數是 0', () => {
+  assert.deepEqual(FX.creditPips(3), { shown: 3, more: 0 });
+  assert.deepEqual(FX.creditPips(11), { shown: 8, more: 3 });
+  assert.deepEqual(FX.creditPips(0), { shown: 0, more: 0 });
+  assert.deepEqual(FX.creditPips(-1), { shown: 0, more: 0 });
+  assert.deepEqual(FX.creditPips(1.5), { shown: 0, more: 0 });
+});
+
+test('第十一批：免費重置的到期倒數——一格一天、超過 7 天全亮、剩 1 天內 soon、過期是 null', () => {
+  const now = 1_000_000_000;
+  const DAY = 86_400_000;
+  assert.deepEqual(FX.creditExpiryCells(now + 9 * DAY, now), { days: 9, lit: 7, soon: false });
+  assert.deepEqual(FX.creditExpiryCells(now + 2.5 * DAY, now), { days: 3, lit: 3, soon: false });
+  assert.deepEqual(FX.creditExpiryCells(now + 3 * 3_600_000, now), { days: 1, lit: 1, soon: true });
+  assert.equal(FX.creditExpiryCells(now - 1, now), null);
+  assert.equal(FX.creditExpiryCells(null, now), null);
+});
+
+test('第十一批：用掉一次免費重置——次數比上次少才算，第一次看到不算', () => {
+  assert.equal(FX.creditUsed(2, 1), true);
+  assert.equal(FX.creditUsed(1, 1), false);
+  assert.equal(FX.creditUsed(1, 2), false);
+  assert.equal(FX.creditUsed(undefined, 1), false);
+  assert.equal(FX.creditUsed(null, 0), false);
+});
+
+test('第十一批：換版排空的進度——總數取看過最多的、最多畫 12 顆；都是 0 是 null', () => {
+  assert.deepEqual(FX.drainProgress(3, 3), { total: 3, left: 3, shown: 3 });
+  assert.deepEqual(FX.drainProgress(1, 3), { total: 3, left: 1, shown: 3 });
+  assert.deepEqual(FX.drainProgress(4, 2), { total: 4, left: 4, shown: 4 }, '比看過的多：總數跟著變');
+  assert.deepEqual(FX.drainProgress(20, 20), { total: 20, left: 20, shown: 12 });
+  assert.deepEqual(FX.drainProgress(0, 5), { total: 5, left: 0, shown: 5 });
+  assert.equal(FX.drainProgress(0, 0), null);
+  assert.equal(FX.drainProgress(null, undefined), null);
+});
+
+test('第十一批：強制停下的倒數——一格一分鐘、無條件進位、最多 10 格；到了或沒有時間是 null', () => {
+  const now = 5_000_000;
+  assert.deepEqual(FX.forceCountdown(now + 4.5 * 60_000, now), { minutes: 5, lit: 5 });
+  assert.deepEqual(FX.forceCountdown(now + FX.FORCE_STOP_MS, now), { minutes: 10, lit: 10 });
+  assert.deepEqual(FX.forceCountdown(now + 30 * 60_000, now), { minutes: 30, lit: 10 });
+  assert.equal(FX.forceCountdown(now, now), null);
+  assert.equal(FX.forceCountdown(undefined, now), null);
+});
+
+test('第十一批：行內程式碼裡的路徑——Windows、UNC、相對、家目錄、網址切成片段、最後一段是檔名；指令與太短的不算', () => {
+  assert.deepEqual(FX.pathParts('C:\\repo\\proj\\src\\AgentHub.cs'), { parts: ['C:\\', 'repo\\', 'proj\\', 'src\\', 'AgentHub.cs'], base: 4 });
+  assert.equal(FX.pathParts('\\\\server\\share\\file.txt').parts.at(-1), 'file.txt');
+  assert.deepEqual(FX.pathParts('src/Web/fx.css'), { parts: ['src/', 'Web/', 'fx.css'], base: 2 });
+  assert.deepEqual(FX.pathParts('~/.claude/settings.json'), { parts: ['~/', '.claude/', 'settings.json'], base: 2 });
+  assert.deepEqual(FX.pathParts('https://example.com/a/b.html'), { parts: ['https://example.com/', 'a/', 'b.html'], base: 2 }, '網址的協定與主機不切開');
+  assert.deepEqual(FX.pathParts('tools/ui-probe/'), { parts: ['tools/', 'ui-probe/'], base: 1 }, '資料夾：最後一層加亮');
+  assert.equal(FX.pathParts('npm run build'), null, '有空白：指令或句子');
+  assert.equal(FX.pathParts('a/b'), null, '太短');
+  assert.equal(FX.pathParts('https://example.com'), null, '只有主機');
+  assert.equal(FX.pathParts('justaword.txt'), null, '沒有分隔符號');
+  assert.equal(FX.pathParts(' src/Web/fx.css'), null, '前後有空白');
+});
+
+test('第十一批：子代理徽章的說明——第一行同 subagentsTitle，下面列這台的對話各幾個、其他電腦只有個數', () => {
+  const a = { sessions: { subagents: 3 }, otherSessions: { subagents: 1 }, subagentList: [{ conversationId: 'c1', title: '平行查三件事', count: 2 }, { conversationId: 'c2', title: '', count: 1 }, { title: '壞的', count: 0 }] };
+  assert.equal(R.subagentsTooltip(a), '4 個子代理執行中（其中其他電腦 1 個）\n・平行查三件事：2 個\n・（沒有標題）：1 個\n・其他電腦 1 個');
+  assert.equal(R.subagentsTooltip({ sessions: { subagents: 0 } }), '');
+  assert.equal(R.subagentsTooltip({ sessions: { subagents: 2 } }), '2 個子代理執行中', '舊版宿主沒有清單');
+});

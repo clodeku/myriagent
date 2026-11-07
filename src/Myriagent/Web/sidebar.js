@@ -12,7 +12,8 @@ import { post, state, accountOf, STATUS_LABEL, isHub, isCollaborator, on, emit }
 import { openMenu, spinner } from './ui.js';
 import { confirmDeleteConversation } from './conversation.js';
 import { deviceStrip, deviceStripSig } from './remote.js';
-import { remoteOnlyElsewhere, sessionTotals, sessionTitle, programsTitle, subagentsTitle } from './remoterules.js';
+import { remoteOnlyElsewhere, sessionTotals, sessionTitle, programsTitle, subagentsTitle, subagentsTooltip } from './remoterules.js';
+import { shareBadge } from './collabrules.js';
 import { deviceOf, originOf, filterHistory, deviceFilterChoices, folderFilterChoices, filterFolder, folderCounts, backgroundWaiting, nestFamilies } from './liverules.js';
 import { tokenCounter } from './tokenfx.js';
 import { setDecodedText } from './textfx.js';
@@ -312,7 +313,7 @@ function updateMiniCard(card, a) {
   e.run.title = sessionTitle(s.running, s.otherRunning, '執行中');
   showBadge(e.agents, !!s.subagents, first);
   e.agentsN.set(s.subagents);
-  e.agents.title = subagentsTitle(s.subagents, s.otherSubagents);
+  e.agents.title = subagentsTooltip(a);
   showBadge(e.bg, !!s.background, first);
   e.bgN.set(s.background);
   e.bg.title = sessionTitle(s.background, s.otherBackground, '等背景工作回報');
@@ -854,8 +855,10 @@ function createEntry(e) {
   const more = iconButton('more', '更多', (ev) => { ev.stopPropagation(); rowMenu(row._id, more); }, 'crow-more sm');
   // 內容搜尋的片段：只有宿主回了片段時才顯示（換到下一行，與標題對齊）
   const snip = h('span', { class: 'crow-snip', hidden: true });
-  row.append(h('span', { class: 'crow-dot' }), title, dev, st, more, snip);
-  row._els = { title, st, dev, snip };
+  // 分享給協作人（第十一批）：小人像＋人數，滑過列出名稱（collabrules.shareBadge）
+  const share = h('span', { class: 'crow-share', hidden: true }, icon('user'), h('span', { class: 'crow-share-n' }));
+  row.append(h('span', { class: 'crow-dot' }), title, share, dev, st, more, snip);
+  row._els = { title, st, dev, snip, share };
   // 點一下就切過去，連點的每一下也一樣（2026-10-26 使用者要求：不再雙擊改名，改名用右鍵選單或 F2）
   row.addEventListener('click', () => { if (renaming !== row._id) openFromList(row._id); });
   row.addEventListener('keydown', (ev) => {
@@ -881,6 +884,7 @@ function updateEntry(row, e) {
   if (renaming !== c.id) setRowTitle(row._els.title, c.title || '未命名對話', e.terms, titleDecodeFx(row._tprev, c));
   row._tprev = { title: c.title, titling: !!c.titling };
   const d = updateDeviceBadge(row._els.dev, c);
+  updateShareBadge(row._els.share, c.id);
   row.classList.toggle('attn-flash', isFlashing(c.id)); // 要你回來看：一直閃到點了它（attnflash.js；新建的列照狀態補上）
   updateSnippet(row, e.snippet, e.terms);
   // 代理這一輪結束了、背景工作還在跑：還算在進行，用虛線圈（和執行中的實心轉圈分得出來）
@@ -905,6 +909,18 @@ function updateEntry(row, e) {
       else if (c.unread && !prevKey.includes('u')) { const dot = st.querySelector('.dot-unread'); if (dot) replayClass(dot, 'fx-badge-in', BADGE_FX_MS); }
     }
   }
+}
+
+/** 分享中的標記：沒有分享就藏起來；內容沒變不動 DOM */
+function updateShareBadge(el, id) {
+  if (!el) return;
+  const b = shareBadge(state.collaborators, id);
+  const key = b ? b.key : '';
+  if (el._key === key) return;
+  el._key = key;
+  setHidden(el, !b);
+  el.title = b ? b.title : '';
+  el.lastChild.textContent = b && b.n > 1 ? String(b.n) : '';
 }
 
 /**

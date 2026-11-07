@@ -770,6 +770,23 @@ async function runDraftRecreate() {
   await HP.closePage(app);
 }
 
+/** 網頁版也一樣（2026-11-08 使用者要求）：兩個窗格並排時點了一個就暫時加寬（已經滿高），點側欄就恢復 */
+async function runPaneZoom() {
+  const app = await openWithLayout('pane-zoom', layoutOf([[[LF.CONV.idle], LF.CONV.idle], [[LF.CONV.codex], LF.CONV.codex]]), { open: { paneZoom: true } });
+  const { page } = app;
+  await waitLoaded(app, [LF.CONV.idle, LF.CONV.codex]);
+  const rects = () => page.evaluate(() => Array.from(document.querySelectorAll('#workspace .pane')).map((p) => ({ zoomed: p.classList.contains('zoomed'), w: Math.round(p.getBoundingClientRect().width) })));
+  const before = await rects();
+  await page.click('#workspace .pane:first-child .scroller', { position: { x: 80, y: 260 } }); // 對話內容的中間（標頭與晶片列是按鈕，不放大）
+  await sleep(200);
+  const zoomed = await rects();
+  await page.click('#sidebar', { position: { x: 20, y: 200 } });
+  await sleep(200);
+  const after = await rects();
+  check('hubPaneZoom', zoomed[0].zoomed && zoomed[0].w > before[0].w * 1.8 && !after[0].zoomed && after[0].w === before[0].w, { before, zoomed, after });
+  await HP.closePage(app);
+}
+
 async function runClosedClosesPane() {
   const app = await openWithLayout('closed-closes-pane', layoutOf([[[LF.CONV.idle], LF.CONV.idle], [[LF.CONV.codex], LF.CONV.codex]]));
   const { hub } = app;
@@ -2819,6 +2836,31 @@ async function runVoiceDictationIos() {
 }
 
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 27_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Mobile/15E148 Safari/604.1';
+
+/**
+ * 聽寫時的音量格（第十一批，2026-11-08）：iPhone 的聽寫本來就先開著麥克風、每 100 ms 讀一次音量（voicemsg.js 的 gumHold），
+ * 畫在錄音的那組 5 格上——麥克風有聲音時出現、有亮格；停下聽寫就藏起來
+ */
+async function runVoiceDictationMeter() {
+  const id = LF.CONV.idle;
+  const app = await openWithLayout('voice-dictation-meter', layoutOf([[[id], id]]), { open: { vp: { w: 390, h: 844 }, hasTouch: true, userAgent: IPHONE_UA } });
+  await waitLoaded(app, [id]);
+  const { page } = app;
+  await page.click('#btnSidebar');
+  await sleep(200);
+  const mic = convSel(id) + ' .cbtn.mic';
+  const meterOf = () => page.evaluate((c) => {
+    const m = document.querySelector(c + ' .mic-meter');
+    return m ? { shown: !m.hidden && m.getBoundingClientRect().width > 0, dict: m.classList.contains('dict'), lit: m.querySelectorAll('i.lit').length } : null;
+  }, convSel(id));
+  await page.evaluate(() => { window.__mic.tone = 0.6; });
+  await page.tap(mic);
+  const on = await until(async () => { const x = await meterOf(); return x && x.shown && x.lit > 0 ? x : null; }, 4000);
+  await page.tap(mic);
+  const off = await until(async () => { const x = await meterOf(); return x && !x.shown ? x : null; }, 4000);
+  check('hubVoiceDictationMeter', !!on && on.dict && !!off && !off.dict && off.lit === 0, { on, off });
+  await HP.closePage(app);
+}
 
 async function runVoiceDictationIosRepeat() {
   // iPhone 的聽寫關掉再開（2026-10-28 使用者回報：iOS 27 主畫面 app，第一次正常、關掉再開就再也打不出字）。假辨識器的 freshDeaf 模擬
@@ -6029,6 +6071,8 @@ const SCENARIOS = [
   { checks: ['hubVoiceDictationRetap', 'hubVoiceDictationSpeech', 'hubVoiceDictationSilent'], run: runVoiceDictationRestart },
   { checks: ['hubVoiceDictationIosText', 'hubVoiceDictationIosDeaf'], run: runVoiceDictationIos },
   { checks: ['hubVoiceDictationIosRepeat', 'hubVoiceDictationIosRecover'], run: runVoiceDictationIosRepeat },
+  { checks: ['hubVoiceDictationMeter'], run: runVoiceDictationMeter },
+  { checks: ['hubPaneZoom'], run: runPaneZoom },
   { checks: ['hubVoiceDictationDiag', 'hubVoiceDictationDiagMode'], run: runVoiceDictationDiag },
   { checks: ['hubResyncReopens', 'hubResyncNullNoop'], run: runResync },
   { checks: ['hubClipboardWrite', 'hubClipboardDeniedFallback', 'hubClipboardUnsolicitedIgnored', 'hubClipboardExpiredIgnored'], run: runClipboard },

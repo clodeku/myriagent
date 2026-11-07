@@ -8,6 +8,9 @@ namespace Myriagent.Hub;
 /// </summary>
 internal static class SubagentCountRules
 {
+    /// <summary>帳戶卡子代理徽章的說明最多列幾個對話（AccountView.subagentList；第十一批）</summary>
+    public const int MaxListed = 5;
+
     /// <summary>Claude 的子代理工作種類（system/task_started 的 task_type）</summary>
     public const string ClaudeAgentTaskType = "local_agent";
 

@@ -213,6 +213,8 @@ on('sidebar-picked', () => { if (phoneDrawer() && !state.sidebarCollapsed) toggl
 
 on('want-view', (v) => setView(v));
 on('active-changed', () => { markActive(); updateTitle(); });
+// 分享給協作人的標記（第十一批）：清單或分享變了，側欄列與分頁重畫
+on('collaborators-changed', () => { renderHistory(); ws.refreshTabs(); });
 on('conv-header', (id) => { ws.refreshTab(id); if (id === ws.activeConversationId()) updateTitle(); });
 
 /** 換頁的進場（區塊最多錯開 5 × 40ms，各 300ms） */

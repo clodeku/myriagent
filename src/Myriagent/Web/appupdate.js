@@ -1,5 +1,5 @@
 // app 自我更新（設計 9.7）：頂部列下方的橫幅、設定頁的「Clode Myriagent」區塊。狀態全由宿主送（AppUpdateView），網頁只顯示與送指令
-import { byteRate, fmtByteRate } from './fxrules.js';
+import { byteRate, fmtByteRate, drainProgress, forceCountdown, FORCE_CELLS } from './fxrules.js';
 import { h, replayClass } from './util.js';
 import { icon } from './icons.js';
 import { post, state } from './store.js';
@@ -124,12 +124,53 @@ function renderDownloadChip() {
   el.title = '正在下載新版' + (a.available ? ' ' + a.available : '') + '（已下載 ' + (bytes / 1048576).toFixed(1) + ' MB' + (dlRate ? '，' + fmtByteRate(dlRate) : '') + '）';
 }
 
+/** 這次排空看過最多幾個對話在等（第十一批：排空進度的總數）；不在排空就歸零 */
+let drainPeak = 0;
+/** 強制排空期間每 30 秒重畫橫幅（倒數一分鐘一格） */
+let forceTimer = 0;
+
+/**
+ * 排空的進度（第十一批，fx.css 的 .drain-hud）：一顆一個對話（停下的熄掉、還在等的亮著，fxrules.drainProgress），
+ * 強制更新時加上強制停下的倒數（一格一分鐘，fxrules.forceCountdown）；不在排空時是 null
+ */
+function drainHud(a) {
+  if (!a || a.phase !== 'draining') { drainPeak = 0; return null; }
+  drainPeak = Math.max(drainPeak, Number.isInteger(a.waiting) ? a.waiting : 0);
+  const p = drainProgress(a.waiting, drainPeak);
+  const cd = a.forced ? forceCountdown(a.forceAt, Date.now()) : null;
+  if (!p && !cd) return null;
+  return { p, cd, sig: JSON.stringify([p && [p.total, p.left, p.shown], cd && cd.lit]) };
+}
+
+function paintDrainHud(el, hud) {
+  let box = el.querySelector('.drain-hud');
+  if (!hud) { if (box) box.remove(); return; }
+  if (box && box._sig === hud.sig) return;
+  if (!box) { box = h('span', { class: 'drain-hud', 'aria-hidden': 'true' }); el.querySelector('.app-banner-text').after(box); }
+  box._sig = hud.sig;
+  box.replaceChildren();
+  if (hud.p) {
+    const stopped = hud.p.total - hud.p.left;
+    box.title = '已停下 ' + stopped + '／' + hud.p.total + ' 個對話';
+    box.append(h('span', { class: 'drain-pips' }, ...Array.from({ length: hud.p.shown }, (_, i) => h('i', { class: i < hud.p.shown - Math.min(stopped, hud.p.shown) ? 'on' : null }))));
+  }
+  if (hud.cd) {
+    box.title = (box.title ? box.title + '；' : '') + '再 ' + hud.cd.minutes + ' 分鐘強制停下還沒停下的';
+    box.append(h('span', { class: 'force-cd' + (hud.cd.lit <= 2 ? ' soon' : '') }, ...Array.from({ length: FORCE_CELLS }, (_, i) => h('i', { class: i < hud.cd.lit ? 'on' : null }))));
+  }
+}
+
 export function renderAppBanner() {
   renderDownloadChip();
   const el = document.getElementById('appBanner');
   if (!el) return;
   const b = state.mode === 'popout' ? null : bannerOf(state.appUpdate, bannerDismissed);
   el.hidden = !b;
+  const hud = drainHud(state.appUpdate);
+  // 強制排空中：每 30 秒重畫一次，倒數才會前進（沒有強制就不排）
+  const forcing = !!(hud && hud.cd);
+  if (forcing && !forceTimer) forceTimer = setInterval(renderAppBanner, 30_000);
+  else if (!forcing && forceTimer) { clearInterval(forceTimer); forceTimer = 0; }
   if (!b) {
     el.replaceChildren();
     bannerKey = null;
@@ -139,12 +180,14 @@ export function renderAppBanner() {
   const key = JSON.stringify([b.tone, b.actions.map((a) => [a.label, a.cmd]), b.dismissible]);
   if (key === bannerKey) {
     setText(el.querySelector('.app-banner-text'), b.text);
+    paintDrainHud(el, hud);
     return;
   }
   bannerKey = key;
   el.replaceChildren();
   el.dataset.tone = b.tone;
   el.append(icon(b.tone === 'warn' ? 'warning' : 'download', 'app-banner-ic'), h('span', { class: 'app-banner-text', text: b.text }));
+  paintDrainHud(el, hud);
   for (const a of b.actions) el.append(h('button', { type: 'button', class: 'btn sm', text: a.label, title: a.title, onClick: () => post({ cmd: a.cmd }) }));
   if (b.dismissible) {
     el.append(h('button', { type: 'button', class: 'ibtn app-banner-close', title: '關閉', 'aria-label': '關閉', onClick: () => { bannerDismissed = true; renderAppBanner(); } }, icon('x')));
