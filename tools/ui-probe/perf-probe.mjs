@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import { pumpSetup, devices, SELF } from './monitor-probe.mjs';
 import { syncStatus } from './sync-settings.mjs';
+import { groupOf } from './fixtures.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const FOUR_PANES = { panes: [{ id: 'p1', tabs: ['c1'], active: 'c1' }, { id: 'p2', tabs: ['c3'], active: 'c3' }, { id: 'p3', tabs: ['c4'], active: 'c4' }, { id: 'p4', tabs: ['c7'], active: 'c7' }], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' };
@@ -68,7 +69,8 @@ async function measure(page, ms) {
   const wall = (Date.now() - t0) / 1000;
   const secs = get(m1, 'Timestamp') - get(m0, 'Timestamp');
   const per = (k) => Math.round(((get(m1, k) - get(m0, k)) / secs) * 1000);
-  const r = { busyMsPerSec: per('TaskDuration'), scriptMsPerSec: per('ScriptDuration'), styleMsPerSec: per('RecalcStyleDuration'), layoutMsPerSec: per('LayoutDuration'),
+  // threadMsPerSec：主執行緒真的用掉的 CPU（ThreadTime；別的程式搶 CPU 時 TaskDuration 會被拉長，這個比較不受影響）
+  const r = { busyMsPerSec: per('TaskDuration'), threadMsPerSec: per('ThreadTime'), scriptMsPerSec: per('ScriptDuration'), styleMsPerSec: per('RecalcStyleDuration'), layoutMsPerSec: per('LayoutDuration'),
     layoutsPerSec: Math.round((get(m1, 'LayoutCount') - get(m0, 'LayoutCount')) / secs), styleRecalcsPerSec: Math.round((get(m1, 'RecalcStyleCount') - get(m0, 'RecalcStyleCount')) / secs) };
   // 只算兩次快照都在的程序（量測期間結束的程序〔上一個情境關掉的渲染程序〕CPU 時間會不見，新開的沒有起點）
   if (c0 && c1) {
@@ -82,6 +84,10 @@ async function measure(page, ms) {
   if (process.env.MYRIAGENT_PERF_JSPROFILE) r.jsProfile = await jsProfile(cdp);
   // MYRIAGENT_PERF_INVALIDATION=1：另外錄 2 秒帶失效追蹤的追蹤，列出樣式重算是誰觸發的（traceInvalidations）
   if (process.env.MYRIAGENT_PERF_INVALIDATION) r.invalidations = await traceInvalidations(cdp);
+  // MYRIAGENT_PERF_LAYERS=1：列出合成圖層（依建立的原因與元素統計）
+  if (process.env.MYRIAGENT_PERF_LAYERS) r.layers = await layerReasons(cdp);
+  // MYRIAGENT_PERF_RAWTRACE=<檔案>：另外錄 2 秒完整的追蹤（含失效追蹤與堆疊）存成 JSON，給離線分析（trace-frames.py：依觸發來源分類每一格畫面）
+  if (process.env.MYRIAGENT_PERF_RAWTRACE) await rawTrace(cdp, process.env.MYRIAGENT_PERF_RAWTRACE);
   await cdp.detach().catch(() => {});
   return r;
 }
@@ -111,6 +117,46 @@ async function animationEvents(page, ms) {
     if (e.name === 'PrePaint' && e.ph === 'X') frames++;
   }
   return { animationEvents: types, mainFramesPerSec: Math.round((frames / (ms / 1000)) * 10) / 10 };
+}
+
+async function layerReasons(cdp) {
+  await cdp.send('DOM.getDocument', { depth: 0 });
+  const tree = new Promise((resolve) => cdp.once('LayerTree.layerTreeDidChange', resolve));
+  await cdp.send('LayerTree.enable');
+  const { layers } = await tree;
+  const byReason = new Map(), byNode = new Map();
+  let drawn = 0, area = 0;
+  for (const l of layers || []) {
+    if (l.drawsContent) { drawn++; area += l.width * l.height; }
+    let reasons = [];
+    try { reasons = (await cdp.send('LayerTree.compositingReasons', { layerId: l.layerId })).compositingReasonIds || []; } catch { /* 沒有原因 */ }
+    let desc = '(無節點)';
+    if (l.backendNodeId) {
+      try {
+        const { node } = await cdp.send('DOM.describeNode', { backendNodeId: l.backendNodeId });
+        const cls = (node.attributes || []).reduce((acc, v, i, a) => (a[i - 1] === 'class' ? v : acc), '');
+        desc = (node.pseudoType ? '::' + node.pseudoType + ' ' : '') + node.nodeName.toLowerCase() + (cls ? '.' + cls.split(/\s+/)[0] : '');
+        if (node.pseudoType && node.parentId) desc += ' (pseudo)';
+      } catch { desc = '(找不到節點)'; }
+    }
+    const rk = reasons.join(',') || '(無)';
+    byReason.set(rk, (byReason.get(rk) || 0) + 1);
+    byNode.set(desc + ' ← ' + rk, (byNode.get(desc + ' ← ' + rk) || 0) + 1);
+  }
+  await cdp.send('LayerTree.disable').catch(() => {});
+  const list = (m, n) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => v + ' × ' + k);
+  return { total: (layers || []).length, drawn, megapixels: Math.round(area / 1e5) / 10, byReason: list(byReason, 20), byNode: list(byNode, 60) };
+}
+
+async function rawTrace(cdp, file) {
+  const events = [];
+  cdp.on('Tracing.dataCollected', (e) => events.push(...e.value));
+  const done = new Promise((resolve) => cdp.once('Tracing.tracingComplete', resolve));
+  await cdp.send('Tracing.start', { traceConfig: { includedCategories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame', 'disabled-by-default-devtools.timeline.stack', 'disabled-by-default-devtools.timeline.invalidationTracking', 'disabled-by-default-layout_shift.debug', 'blink', 'cc', 'blink.animations'] }, transferMode: 'ReportEvents' });
+  await sleep(2000);
+  await cdp.send('Tracing.end');
+  await done;
+  fs.writeFileSync(file, JSON.stringify({ traceEvents: events }));
 }
 
 async function jsProfile(cdp) {
@@ -294,7 +340,8 @@ const BG_HIDDEN = ['c2', 'c8', 'c9', 'c10', 'c11', 'c12', 'c14'];
  * 標頭每 headerMs 一次（狀態文字與上下文用量在變）；帳戶卡每 500 ms、token 每 200 ms（數字在長）。各對話錯開
  */
 async function startBgStream(page, host, headerMs, opts = {}) {
-  const ids = [...BG_SHOWN, ...BG_HIDDEN];
+  const shownIds = opts.shown || BG_SHOWN, hiddenIds = opts.hidden || BG_HIDDEN;
+  const ids = [...shownIds, ...hiddenIds];
   const headers = Object.fromEntries(ids.map((id) => [id, host.conv(id).header]));
   await page.evaluate(({ shown, hidden, headers, accounts, tokens, headerMs, noHidden, noShown, noAccounts }) => {
     let tick = 0;
@@ -323,8 +370,45 @@ async function startBgStream(page, host, headerMs, opts = {}) {
         window.__host({ type: 'tokens', tokens: copy(tokens) });
       }
     }, 50);
-  }, { shown: BG_SHOWN, hidden: BG_HIDDEN, headers, accounts: host.accounts, tokens: opts.noTokens ? null : host.tokens || null, headerMs,
+  }, { shown: shownIds, hidden: hiddenIds, headers, accounts: host.accounts, tokens: opts.noTokens ? null : host.tokens || null, headerMs,
     noHidden: !!opts.noHidden, noShown: !!opts.noShown, noAccounts: !!opts.noAccounts });
+}
+
+// ───── 窗格與分頁很多的版面（2026-11-08）：9 個窗格、分頁全部放左側、101 個分頁、7 個執行中（3 個看得見在串流、4 個在背景分頁），電腦狀態面板開著 ─────
+const MANY_COUNTS = [4, 34, 10, 7, 7, 13, 7, 9, 10];
+const MANY_IDS = Array.from({ length: MANY_COUNTS.reduce((a, b) => a + b, 0) }, (_, i) => 'c' + (i + 1));
+const MANY_PANES = (() => {
+  const panes = [];
+  let at = 0;
+  MANY_COUNTS.forEach((n, k) => {
+    const tabs = MANY_IDS.slice(at, at + n);
+    at += n;
+    // 第一格的作用中分頁是 c1（量測期間在它的輸入框打字）；其他格是第二個分頁（第一個留給背景執行的）
+    panes.push({ id: 'p' + (k + 1), tabs, active: k === 0 ? tabs[0] : tabs[Math.min(1, n - 1)], tabsSide: 'left' });
+  });
+  return { panes, focusedPane: 'p1', sidebarCollapsed: false, view: 'chat', monitor: 'open' };
+})();
+const MANY_SHOWN = MANY_PANES.panes.slice(0, 3).map((p) => p.active);
+const MANY_HIDDEN = MANY_PANES.panes.slice(3, 7).map((p) => p.tabs.find((t) => t !== p.active));
+if (MANY_SHOWN[0] !== 'c1') throw new Error('MANY_PANES：第一格的作用中分頁要是 c1');
+
+/** 補齊 101 個對話的摘要（c15 起；帳戶輪流用 a1～a3），再照 multiStreamSetup 把執行中的標好 */
+function manySetup(ids) {
+  const base = multiStreamSetup(ids);
+  return (host) => {
+    const proto = Object.fromEntries(host.conversations.map((s) => [s.accountId, s]));
+    for (let i = host.conversations.length + 1; i <= MANY_IDS.length; i++) {
+      const id = 'c' + i;
+      if (host.conversations.some((s) => s.id === id)) continue;
+      const src = proto[['a1', 'a2', 'a3'][i % 3]];
+      const updatedAt = Date.now() - i * 3 * 3600e3;
+      host.conversations.push(Object.assign({}, src, { id, title: '第 ' + i + ' 個對話：' + ['修正同步的邊界情況', '整理部署腳本', '補上單元測試', '量測記憶體用量'][i % 4],
+        updatedAt, group: groupOf(Date.now(), updatedAt), running: false, waiting: false, unread: i % 9 === 0 }));
+    }
+    // 宿主的清單依更新時間由新到舊（分組才會連在一起）
+    host.conversations.sort((a, b) => b.updatedAt - a.updatedAt);
+    base(host);
+  };
 }
 
 /**
@@ -646,7 +730,37 @@ export async function runPerf(ctx) {
     // o.events：另外錄 2 秒追蹤，看頁面有沒有在派送動畫事件、主執行緒每秒幾幀
     const events = o.events ? await animationEvents(app.page, 2000) : null;
     const vframes = o.events ? await app.page.evaluate(() => document.querySelectorAll('iframe.vframe').length) : null;
-    results[name] = Object.assign(m, { loops: loops.length, loopNames: [...new Set(loops.map((l) => l.name))].sort(), transitions, mainThreadLoops: mainThread.length,
+    // 捲在畫面外（被捲動容器或視窗裁掉）卻還在跑的無限循環動畫（名稱 目標 → 數量）
+    const offscreen = await app.page.evaluate(() => {
+      const out = {};
+      const vw = innerWidth, vh = innerHeight;
+      const clipped = (el) => {
+        let r = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return 'zero';
+        if (r.bottom <= 0 || r.top >= vh || r.right <= 0 || r.left >= vw) return 'viewport';
+        for (let a = el.parentElement; a; a = a.parentElement) {
+          const cs = getComputedStyle(a);
+          if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+          const b = a.getBoundingClientRect();
+          if (r.bottom <= b.top || r.top >= b.bottom || r.right <= b.left || r.left >= b.right) return 'scroll:' + (a.className || a.tagName).toString().split(' ')[0];
+        }
+        return null;
+      };
+      for (const an of document.getAnimations()) {
+        if (!(an instanceof CSSAnimation) || an.playState !== 'running' || !an.effect || !an.effect.target) continue;
+        if (an.effect.getComputedTiming().iterations !== Infinity) continue;
+        const t = an.effect.target;
+        const why = clipped(t);
+        if (!why) continue;
+        const cls = typeof t.className === 'string' ? t.className : (t.className && t.className.baseVal) || t.tagName;
+        const k = an.animationName + ' ' + String(cls).trim().split(/\s+/)[0] + (an.effect.pseudoElement || '') + ' [' + why + ']';
+        out[k] = (out[k] || 0) + 1;
+      }
+      return out;
+    });
+    const tally = {};
+    for (const l of loops) tally[l.name + ' ' + l.target] = (tally[l.name + ' ' + l.target] || 0) + 1;
+    results[name] = Object.assign(m, { loops: loops.length, loopNames: [...new Set(loops.map((l) => l.name))].sort(), loopTally: tally, offscreenLoops: offscreen, transitions, mainThreadLoops: mainThread.length,
       mainThreadLoopList: [...new Set(mainThread.map((l) => l.name + ' ' + l.target + ' [' + l.props.join(',') + ']'))], steadyTransitions: steady },
       events ? Object.assign(events, { vframes }) : {});
     if (o.blur) {
@@ -708,6 +822,68 @@ export async function runPerf(ctx) {
     if (v.invalidations) console.log(JSON.stringify(v.invalidations, null, 1));
     if (v.jsProfile) console.log(JSON.stringify(v.jsProfile, null, 1));
     if (v.notComposited) console.log(JSON.stringify(v.notComposited, null, 1));
+    return;
+  }
+  // 版面配置的微基準（MYRIAGENT_PERF_LAYOUTBENCH=<{名稱: 額外的 CSS} 的 JSON 檔>）：窗格與分頁很多的版面、不串流，
+  // 各疊上那段 CSS 後量「改一格字＋強制版面配置」的平均毫秒數（token 數字的一格、側欄帳戶卡的一格、串流中回覆的最後一段）
+  if (process.env.MYRIAGENT_PERF_LAYOUTBENCH) {
+    const variants = Object.assign({ base: '' }, JSON.parse(fs.readFileSync(process.env.MYRIAGENT_PERF_LAYOUTBENCH, 'utf8')));
+    const app = await openApp('perf-layoutbench', { vp: { w: 2480, h: 1400 }, layout: MANY_PANES, remote, hostSetup: manySetup([...MANY_SHOWN, ...MANY_HIDDEN]) });
+    await sleep(3000);
+    const out = {};
+    for (let rep = 0; rep < 3; rep++) {
+      for (const [name, css] of Object.entries(variants)) {
+        const r = await app.page.evaluate(async (css) => {
+          const st = document.createElement('style');
+          st.textContent = css;
+          document.head.append(st);
+          await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+          const bench = (el, n) => {
+            if (!el) return null;
+            let t = el.firstChild;
+            if (!t || t.nodeType !== 3) { el.textContent = 'x'; t = el.firstChild; }
+            const orig = t.data;
+            void document.documentElement.offsetHeight;
+            const t0 = performance.now();
+            for (let i = 0; i < n; i++) { t.data = i % 2 ? orig : (orig === '8' ? '3' : '8'); void document.documentElement.offsetHeight; }
+            const ms = (performance.now() - t0) / n;
+            t.data = orig;
+            return Math.round(ms * 1000) / 1000;
+          };
+          const vis = [...document.querySelectorAll('.pane')].map((p) => p.querySelector('.conv:not([hidden]) .ci-turn .mtok-c, .ci-turn .mtok-c')).find(Boolean);
+          const res = {
+            composerTok: bench(document.querySelector('.ci-turn .mtok-c'), 200),
+            sidebarTok: bench(document.querySelector('.macct-tok .mtok-c'), 200),
+            tabTitle: bench(document.querySelector('.tab .tab-title'), 200),
+            assistantP: bench([...document.querySelectorAll('.it-assistant .md p, .it-assistant p')].pop(), 200),
+            monitorText: bench(document.querySelector('.mon-g-val, .mon-val, .mon-g-center span'), 200),
+          };
+          st.remove();
+          await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+          return res;
+        }, css);
+        for (const [k, v] of Object.entries(r)) ((out[name] = out[name] || {})[k] = out[name][k] || []).push(v);
+      }
+    }
+    await closeApp(app);
+    const med = (a) => { const x = a.filter((v) => v != null).sort((p, q) => p - q); return x.length ? x[Math.floor(x.length / 2)] : null; };
+    const table = Object.fromEntries(Object.entries(out).map(([n, r]) => [n, Object.fromEntries(Object.entries(r).map(([k, v]) => [k, med(v)]))]));
+    check('perfLayoutBench', true, table);
+    console.log(JSON.stringify(table, null, 1));
+    return;
+  }
+  // 只跑窗格與分頁很多的版面（MYRIAGENT_PERF_MANY=1）：9 窗格側排、101 個分頁、3 個看得見的在串流、4 個在背景分頁執行
+  if (process.env.MYRIAGENT_PERF_MANY) {
+    const opts = Object.fromEntries(String(process.env.MYRIAGENT_PERF_BG_OFF || '').split(',').filter(Boolean).map((k) => [k, true]));
+    await scenario('many', { vp: { w: 2480, h: 1400 }, layout: MANY_PANES, hostSetup: manySetup([...MANY_SHOWN, ...MANY_HIDDEN]), keys: true, settle: 2000 },
+      (page, host) => startBgStream(page, host, 250, Object.assign({ shown: MANY_SHOWN, hidden: MANY_HIDDEN }, opts)));
+    check('perfMany', true, results.many);
+    const v = results.many;
+    console.log(JSON.stringify({ off: Object.keys(opts).join(',') || null, busy: v.busyMsPerSec, thread: v.threadMsPerSec, script: v.scriptMsPerSec, style: v.styleMsPerSec, layout: v.layoutMsPerSec, styleRecalcs: v.styleRecalcsPerSec, cpu: v.cpuMsPerSec || null, loops: v.loops, mainFrames: v.mainFramesPerSec, keys: v.keys }));
+    if (v.invalidations) console.log(JSON.stringify(v.invalidations, null, 1));
+    if (v.jsProfile) console.log(JSON.stringify(v.jsProfile, null, 1));
+    if (v.notComposited) console.log(JSON.stringify(v.notComposited, null, 1));
+    if (v.layers) console.log(JSON.stringify(v.layers, null, 1));
     return;
   }
   // A/B 實驗：MYRIAGENT_PERF_AB 指向 {名稱: 額外的 CSS} 的 JSON 檔時，只把四窗格的情境各疊上那段 CSS 量一次（找出哪一類效果貴），不做檢查

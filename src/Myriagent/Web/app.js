@@ -30,6 +30,7 @@
  * 效能：header／item／removeItem／composer 以 requestAnimationFrame 合併同一影格的更新；倒數與經過時間用單一 1 秒計時器、只更新可見元素。
  */
 import { h, debounce, replayClass } from './util.js';
+import { ride } from './fxclock.js';
 import { icon, brandMark } from './icons.js';
 import { post, onHostMessage, state, setAccounts, setConversations, setProviders, providerKeys, on, emit, hasBridge, isHub } from './store.js';
 import { retryNow } from './transport.js';
@@ -399,7 +400,7 @@ function scheduleFlush() {
   else rafId = requestAnimationFrame(flush);
 }
 
-function flush() {
+function flush(frameTime) {
   if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = 0; }
   // 拖曳分頁期間先排著（workspace.js 的 tabDragActive）：同一則項目只留最新的一版，拖完（tab-drag）一次補上
@@ -412,6 +413,9 @@ function flush() {
     cv.applyBatch(b);
     if (b.header) ws.refreshTab(id);
   }
+  // 這一格本來就要畫：快到點（或剛到點、正在等宿主這一格）的數字與標題解碼也在這一格換字（fxclock.js 的搭便車，
+  // 不另外要一格只為了換字的影格）。只在影格裡的 flush 搭：在訊息的工作裡換字，後面讀版面的程式會被逼著多算一次樣式
+  if (batches.length) ride(typeof frameTime === 'number' ? frameTime : undefined);
 }
 
 // 〔遠端〕即時更新的版本（itemPatch，patch1）：每個對話 id → 項目 id → 最後收到的即時版本 rv（item 帶 rv 時記下，持久的 item、removeItem、

@@ -1411,19 +1411,20 @@ export class ConvView {
     this.acctChip.disabled = remote.remote && !remote.enabled;
     const pending = replica ? null : pendingSwitchView(hd);
     const next = this.acctChip.querySelector('.chip-next');
-    next.hidden = !pending;
+    // 每則標頭都會到這裡（執行中的對話一秒好幾則）：值沒變不寫（hidden、文字節點、title 每寫一次都要重算樣式，util.setHidden）
+    setHidden(next, !pending);
     next.classList.toggle('stopping', !!pending && !pending.turnEnd);
-    next.lastChild.textContent = pending ? pending.label : '';
+    setTextIfChanged(next.lastChild, pending ? pending.label : '');
     const hint = !remote.remote ? accountChipHint(hd.provider, !!hd.running, false, pending)
       : !remote.enabled ? remote.reason
         : accountChipHint(hd.provider, ownerRunning(hd, origin), false, pending) + '\n只能換成' + remote.scope;
     if (acc) {
-      label.textContent = acc.label;
+      setTextIfChanged(label, acc.label);
       setAcc(this.root, acc.color, hd.provider);
-      this.acctChip.title = acc.provider + '・' + acc.label + (acc.plan ? '（' + acc.plan + '）' : '') + '\n' + hint;
+      setTitle(this.acctChip, acc.provider + '・' + acc.label + (acc.plan ? '（' + acc.plan + '）' : '') + '\n' + hint);
     } else {
-      label.textContent = hd.accountMissing && !replica ? '帳戶已移除' : hd.provider;
-      this.acctChip.title = replica ? hd.provider + '（其他電腦的帳戶）\n' + hint : '更換帳戶';
+      setTextIfChanged(label, hd.accountMissing && !replica ? '帳戶已移除' : hd.provider);
+      setTitle(this.acctChip, replica ? hd.provider + '（其他電腦的帳戶）\n' + hint : '更換帳戶');
     }
     this.acctChip.classList.toggle('missing', !acc && !replica);
   }
@@ -2458,4 +2459,14 @@ export async function confirmDeleteConversation(id, info) {
   mark(true);
   // 完成時伺服器送 conversationClosed（分頁關掉）；被拒（伺服器已提示）或結果不明時恢復
   track(cid, { onSettle: (result) => { if (result !== 'done') mark(false); } });
+}
+
+/** 文字沒變就不寫（textContent 會換掉文字節點：插入、移除節點都要重算樣式與版面） */
+function setTextIfChanged(el, text) {
+  if (el.textContent !== text) el.textContent = text;
+}
+
+/** title 沒變就不寫 */
+function setTitle(el, title) {
+  if (el.title !== title) el.title = title;
 }
