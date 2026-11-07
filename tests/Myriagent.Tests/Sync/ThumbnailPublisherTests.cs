@@ -255,6 +255,19 @@ public sealed class ThumbnailPublisherTests : IDisposable
         relay.Requests.Should().BeEmpty();
     }
 
+    /// <summary>別的對話資料夾裡的大影片（超過留存上限、不會有副本）每 6 小時都再試一次：記成 Gone</summary>
+    [Fact]
+    public async Task 上傳_別的對話資料夾裡太大不會留副本的檔_回Gone()
+    {
+        var big = files.Write(Path.Combine("data", "conversations", "other0000000000000000000000000001", "caption-demo", "long.mp4"), MediaTestFiles.Png);
+        using (var stream = new FileStream(big, FileMode.Open, FileAccess.Write))
+            stream.SetLength(MediaKeepRules.MaxBytes + 1);
+        answer = _ => files.Snapshot(resolved: (big, "long.mp4"));
+
+        (await Publisher().PublishAsync(Row(), DeviceId, CancellationToken.None)).Should().Be(ThumbOutcome.Gone);
+        relay.Requests.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task 上傳_原檔已經不在_回Gone_不產縮圖也不送()
     {

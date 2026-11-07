@@ -69,6 +69,27 @@ public sealed class CommandRouterTests
     }
 
     [Fact]
+    public async Task answer的補充說明_那台比0_2_11舊就併成答案多一筆_不帶notes()
+    {
+        // 舊版桌面不認得 notes，整個回答會被當成格式錯誤（測試的電腦回報 0.1.0）
+        await using var s = await Setup.StartAsync();
+        var digest = "rd1:" + new string('a', 64);
+        var result = await s.Browser.Hub.CmdAsync(new
+        {
+            cmd = "answer", conversationId = Conv, itemId = "i1", answers = new Dictionary<string, string[]> { ["要開幾個 Chrome？"] = ["5 個"] },
+            notes = new Dictionary<string, string[]> { ["要開幾個 Chrome？"] = ["開 9 個"] }, requestDigest = digest,
+        }, commandId: NextCommandId());
+        result["accepted"]!.Value<bool>().Should().BeTrue(result.ToString());
+
+        var delivery = await s.Device!.WaitForAsync<CommandDelivery>();
+        var verdict = s.Verify(delivery);
+        verdict.Step.Should().BeNull(verdict.Detail);
+        var cmd = verdict.Body!.Cmd;
+        cmd["notes"].Should().BeNull();
+        cmd["answers"]!["要開幾個 Chrome？"]!.Values<string>().Should().Equal("5 個", "補充說明：開 9 個");
+    }
+
+    [Fact]
     public async Task cid是伺服器的ULID_另存瀏覽器的commandId()
     {
         await using var s = await Setup.StartAsync();

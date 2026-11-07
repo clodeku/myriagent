@@ -143,6 +143,20 @@ internal sealed class ThumbnailPublisher : IDisposable
     /// <summary>記著的原檔不在的參照（kv 的值）</summary>
     public string SerializeGone() => ThumbnailPublishRules.SerializeGone(gone);
 
+    /// <summary>本機檔大於回覆媒體的留存上限（不會有副本）；讀不到大小當成不是</summary>
+    private static bool TooLargeToKeep(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists && info.Length > Hub.MediaKeepRules.MaxBytes;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>上傳一筆（背景；<paramref name="ct"/> 是連線的取消）：失敗都回 <see cref="ThumbOutcome.Dropped"/>，取消照丟</summary>
     public async Task<ThumbOutcome> PublishAsync(LocalMediaRefRow row, string deviceId, CancellationToken ct)
     {
@@ -165,6 +179,14 @@ internal sealed class ThumbnailPublisher : IDisposable
                 {
                     // 原檔已經被刪掉（回覆的媒體沒有留存的副本）：不是暫時的，記下來一段時間內不再試
                     Drop(row, $"守門員拒絕（{opened.Reason}）：原檔已經不在，{ThumbnailPublishRules.GoneRetryAfter.TotalDays:0} 天內不再試", path);
+                    return ThumbOutcome.Gone;
+                }
+                if (opened.Reason == RemoteFileGuardReasons.Forbidden && AgentAttachmentRules.IsLocalDrivePath(path) && TooLargeToKeep(path))
+                {
+                    // 檔還在、不在遠端讀得到的範圍，而且大到永遠不會留副本（超過 MediaKeepRules.MaxBytes，例如別的對話資料夾裡的大影片，
+                    // 以前每次連線、每 6 小時都再試一次、記一筆警告）：同樣記下來一段時間內不再試。
+                    // 小的照舊之後再試：之後可能補留了副本（延伸對話的 RepairForkMediaLater）
+                    Drop(row, $"守門員拒絕（{opened.Reason}）：不在遠端讀得到的範圍、太大不會留副本，{ThumbnailPublishRules.GoneRetryAfter.TotalDays:0} 天內不再試", path);
                     return ThumbOutcome.Gone;
                 }
                 return Drop(row, $"守門員拒絕（{opened.Reason}）", path, MediaDiagnosticsRules.IsUnexpectedGuardReason(opened.Reason));

@@ -1,3 +1,4 @@
+using Myriagent.Agents;
 using Myriagent.Remote;
 using Myriagent.Security;
 using Myriagent.Sync;
@@ -197,6 +198,10 @@ internal sealed partial class CommandRouter(
         var spec = route.Spec;
         var name = spec.Name;
         var commandId = route.CommandId!;
+
+        // 問卷的補充說明（2026-11-05 起）：那台的桌面比 QuestionNoteRules.NotesMinAppVersion 舊（回報的版本認得出來才算）就把 notes 併成答案多一筆，舊版照收
+        if (name == "answer" && mapped["notes"] is JObject && QuestionNoteRules.DeviceLacksNotes(devices.Get(target)?.AppVersion))
+            mapped = QuestionNoteRules.FoldNotesIntoAnswers(mapped);
 
         // 上傳（WP4.7 計畫 D21、6.3 的 WP4.5 契約點 3）：簽章之前確認每個都已上傳到這台伺服器、雜湊與大小相符、沒過期，否則立即拒絕 invalid
         if (CommandUploadRules.Claims(mapped) is not { } claims || claims.Count > 0 && !uploads.TryVerify(claims))

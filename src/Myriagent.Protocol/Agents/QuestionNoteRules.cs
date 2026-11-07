@@ -44,6 +44,47 @@ internal static class QuestionNoteRules
         return result;
     }
 
+    /// <summary>認得 <c>answer</c> 的 <c>notes</c> 的最早桌面版本（版本是 0.2.＋提交數，補充說明是第 11 個提交）</summary>
+    public const string NotesMinAppVersion = "0.2.11";
+
+    /// <summary>那台回報的 app 版本認不得 notes（版本認得出來、而且比 <see cref="NotesMinAppVersion"/> 舊）；認不出來的照舊不動</summary>
+    public static bool DeviceLacksNotes(string? appVersion) =>
+        Sync.AppVersionRules.TryParse(appVersion, out _) && !Sync.AppVersionRules.IsAtLeast(appVersion, NotesMinAppVersion);
+
+    /// <summary>
+    /// 伺服器把 <c>answer</c> 轉給認不得 <c>notes</c> 的舊版桌面之前（2026-11-08：桌面等背景工作結束才換版，舊版可能跑上一兩天；
+    /// 網頁版跟著伺服器先有了補充說明，舊版的形狀檢查把整個回答當成格式錯誤拒絕）：
+    /// 拿掉 <c>notes</c>，併成那一題的答案多一筆「補充說明：…」（同 <see cref="Merge"/> 的格式，舊版照收、代理也看得到）。
+    /// 只併有答案的題目、守住形狀檢查的上限（每題的答案數、每筆的長度）；回傳新的物件（原本的不變），沒有 <c>notes</c> 照原樣回
+    /// </summary>
+    public static JObject FoldNotesIntoAnswers(JObject command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (command["notes"] is not JObject notes)
+            return command;
+        var copy = (JObject)command.DeepClone();
+        copy.Remove("notes");
+        if (copy["answers"] is not JObject answers)
+            return copy;
+        foreach (var property in notes.Properties())
+        {
+            if (answers[property.Name] is not JArray values || values.Count >= Remote.RemoteCommandShapeRules.MaxAnswerValues)
+                continue;
+            var parts = property.Value switch
+            {
+                JArray array => array.Where(v => v.Type == JTokenType.String).Select(v => (string?)v),
+                JValue { Type: JTokenType.String } value => new[] { (string?)value },
+                _ => Enumerable.Empty<string?>(),
+            };
+            var text = string.Join("\n", parts.Select(p => p?.Trim()).Where(p => !string.IsNullOrEmpty(p))).Trim();
+            if (text.Length == 0)
+                continue;
+            var merged = DisplayPrefix + text;
+            values.Add(merged.Length > Remote.RemoteCommandShapeRules.MaxTextLength ? merged[..Remote.RemoteCommandShapeRules.MaxTextLength] : merged);
+        }
+        return copy;
+    }
+
     /// <summary>答案接上補充說明（只接有答案的題目：補充不能單獨當成回答）；沒有補充的照原樣</summary>
     public static Dictionary<string, IReadOnlyList<string>> Merge(IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes)
     {

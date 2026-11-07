@@ -90,4 +90,49 @@ public sealed class QuestionNoteRulesTests
         RemoteCardRules.TryMapNotes(card, JObject.Parse("""{"要用哪種顏色？":"不是陣列"}"""), out _).Should().BeFalse();
         RemoteCardRules.TryMapNotes(card, JObject.Parse("""{"要用哪種顏色？":[1]}"""), out _).Should().BeFalse();
     }
+
+    [Fact]
+    public void 給舊版桌面_notes併成答案多一筆_原本的指令不變_沒答的題目不併()
+    {
+        // 舊版的桌面不認得 notes，瀏覽器版帶補充說明的回答會被當成格式錯誤
+        var command = JObject.Parse("""{"cmd":"answer","conversationId":"0123456789abcdef0123456789abcdef","itemId":"i1","answers":{"題一":["A"],"題二":["B"]},"notes":{"題一":["  開 9 個 chrome  "],"題三":["沒答的題"]},"requestDigest":"rd1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}""");
+        var folded = QuestionNoteRules.FoldNotesIntoAnswers(command);
+
+        folded["notes"].Should().BeNull();
+        folded["answers"]!["題一"]!.Values<string>().Should().Equal("A", "補充說明：開 9 個 chrome");
+        folded["answers"]!["題二"]!.Values<string>().Should().Equal("B");
+        folded["answers"]!["題三"].Should().BeNull("補充不能單獨當成回答");
+        folded["requestDigest"]!.Value<string>().Should().Be("rd1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        command["notes"].Should().NotBeNull("原本的指令不變");
+        RemoteCommandShapeRules.Check(folded).Should().BeNull("併完的形狀照樣合格");
+
+        var plain = JObject.Parse("""{"cmd":"answer","itemId":"i1","answers":{"題一":["A"]}}""");
+        QuestionNoteRules.FoldNotesIntoAnswers(plain).Should().BeSameAs(plain);
+    }
+
+    [Fact]
+    public void 給舊版桌面_併的時候守住每題答案數與長度上限()
+    {
+        var full = new JArray(Enumerable.Range(0, RemoteCommandShapeRules.MaxAnswerValues).Select(n => "v" + n));
+        var command = new JObject
+        {
+            ["cmd"] = "answer", ["itemId"] = "i1",
+            ["answers"] = new JObject { ["滿的"] = full, ["長的"] = new JArray("A") },
+            ["notes"] = new JObject { ["滿的"] = new JArray("x"), ["長的"] = new JArray(new string('字', RemoteCommandShapeRules.MaxTextLength)) },
+        };
+        var folded = QuestionNoteRules.FoldNotesIntoAnswers(command);
+        ((JArray)folded["answers"]!["滿的"]!).Count.Should().Be(RemoteCommandShapeRules.MaxAnswerValues);
+        folded["answers"]!["長的"]!.Values<string>().Last()!.Length.Should().Be(RemoteCommandShapeRules.MaxTextLength);
+    }
+
+    [Theory]
+    [InlineData("0.2.10", true)]
+    [InlineData("0.2.3", true)]
+    [InlineData("0.1.0", true)]
+    [InlineData("0.2.11", false)]
+    [InlineData("0.2.18", false)]
+    [InlineData(null, false)]
+    [InlineData("dev", false)]
+    public void 哪些版本認不得notes(string? version, bool lacks)
+        => QuestionNoteRules.DeviceLacksNotes(version).Should().Be(lacks);
 }
