@@ -611,6 +611,39 @@ async function runHeaderListsRecover() {
   await HP.closePage(app);
 }
 
+/**
+ * 執行中的標頭更新很頻繁，同一個影格常排到好幾份省略清單的標頭（2026-11-08 使用者回報：Claude 對話的模型鈕不見、推理強度「不支援」）：
+ * 連續推幾份省略清單的標頭，模型鈕要一直在、推理強度不能變成「不支援」，也不必重送 open
+ */
+async function runHeaderSlimBatch() {
+  const efforts = ['low', 'medium', 'high', 'xhigh', 'max'];
+  const SLIM_BATCH_HEADER = { effort: 'high', models: [{ value: 'default', label: '預設', description: '帳戶預設模型', efforts }, { value: 'opus', label: 'Opus', description: '', efforts }] };
+  const id = LF.CONV.idle;
+  const app = await H.openHub('header-slim-batch', {
+    init: (ready) => LF.liveBrowserInit(NOW, { mode: ready && ready.mode, layout: layoutOf([[[id], id]]) }),
+    hub: (hub) => hub.onCmd('open', (cmd) => ({ push: [LF.conversationMessage(NOW, cmd.conversationId, TITLE_OF[cmd.conversationId] || '對話', { header: SLIM_BATCH_HEADER })] })),
+  });
+  await HP.waitLive(app);
+  await waitLoaded(app, [id]);
+  const state = () => app.page.evaluate((cid) => {
+    const bar = document.querySelector('.conv[data-conv="' + cid + '"] .cbar');
+    const picks = bar ? [...bar.querySelectorAll('.pick')] : [];
+    return { model: picks[0] ? !picks[0].hidden : false, labels: picks.map((p) => (p.hidden ? '' : p.textContent.trim())) };
+  }, id);
+  const before = await state();
+  const opensBefore = openIds(app.hub).length;
+  for (let i = 0; i < 6; i++) {
+    const slim = LF.conversationMessage(NOW, id, (TITLE_OF[id] || '對話') + i, { header: SLIM_BATCH_HEADER }).header;
+    delete slim.models; delete slim.commands;
+    app.hub.push({ type: 'header', conversationId: id, header: slim });
+  }
+  await sleep(800);
+  const after = await state();
+  check('hubHeaderSlimBatchKeepsLists', before.model && after.model && !after.labels.some((t) => t.includes('不支援')) && openIds(app.hub).length === opensBefore,
+    { before, after, opens: openIds(app.hub) });
+  await HP.closePage(app);
+}
+
 async function runRestoreUnlisted() {
   // 清單外（被 1000 筆擠出）的對話：分頁留著、送 open；伺服器說不在了（conversationClosed）才關
   const layout = layoutOf([[[LF.CONV.idle, LF.CONV.unlisted], LF.CONV.idle]]);
@@ -6019,6 +6052,7 @@ const SCENARIOS = [
   { checks: ['hubRestoreLayout', 'hubClientStateOpenIds', 'hubChat1440NoHScroll'], run: runRestoreLayout },
   { checks: ['hubLoadRetry'], run: runLoadRetry },
   { checks: ['hubHeaderListsRecover'], run: runHeaderListsRecover },
+  { checks: ['hubHeaderSlimBatchKeepsLists'], run: runHeaderSlimBatch },
   { checks: ['hubRestoreKeepsUnlistedConversation'], run: runRestoreUnlisted },
   { checks: ['hubProviderAccountCards', 'hubProviderConversations', 'hubProviderMatrixRows', 'hubProvidersNoHScroll'], run: runProviderCards },
   { checks: ['hubNoAutoDraft'], run: runNoAutoDraft },

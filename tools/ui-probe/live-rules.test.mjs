@@ -1630,6 +1630,39 @@ test('mergeHeaderLists_沒帶清單沿用上一份_帶了照新的_沒有上一�
   assert.deepEqual(L.HEADER_LIST_FIELDS, ['commands', 'models', 'agents', 'outputStyles']);
 });
 
+test('mergeQueuedHeaders_同一批兩份省略清單的標頭_合併後照樣不帶清單_套用時沿用畫面上的', () => {
+  const models = [{ value: 'default', label: '預設', description: '', efforts: ['high'] }, { value: 'opus', label: 'Opus', description: '', efforts: ['high'] }];
+  const cmds = [{ name: 'compact', description: '壓縮', argumentHint: '' }];
+  const shown = { id: 'c1', model: 'default', effort: 'high', commands: cmds, models };
+  // 2026-11-08 的錯：執行中同一個影格排了兩份省略清單的標頭，以前合併時補了空陣列，套用後模型清單被清空
+  const a = { id: 'c1', running: true, title: '一' };
+  const b = { id: 'c1', running: true, title: '二' };
+  const queued = L.mergeQueuedHeaders(a, b);
+  assert.equal(queued.title, '二');
+  for (const f of L.HEADER_LIST_FIELDS) assert.equal(f in queued, false, f + ' 不能變成「帶了」');
+  const applied = L.mergeHeaderLists(shown, queued);
+  assert.equal(applied.models, models);
+  assert.equal(applied.commands, cmds);
+  assert.deepEqual(L.missingHeaderLists(shown, queued), []);
+  // 排著的那份帶了清單、後到的省略：沿用排著的（清單換過的那一份不能被後到的省略蓋掉）
+  const fresh = [{ value: 'fable', label: 'Fable', description: '', efforts: [] }];
+  const kept = L.mergeQueuedHeaders({ id: 'c1', models: fresh, commands: [] }, b);
+  assert.equal(kept.models, fresh);
+  assert.deepEqual(kept.commands, []);
+  assert.equal('agents' in kept, false);
+  // 後到的帶了就照後到的；不改傳入的物件
+  assert.deepEqual(L.mergeQueuedHeaders({ id: 'c1', models: fresh }, { id: 'c1', models: [] }).models, []);
+  assert.equal('models' in b, false);
+  assert.equal(L.mergeQueuedHeaders(null, b), b);
+  assert.equal(L.mergeQueuedHeaders(a, null), null);
+});
+
+test('app.js 排著的標頭不用 mergeHeaderLists 合併（會補空陣列清掉清單）', () => {
+  const src = readFileSync(path.join(webDir, 'app.js'), 'utf8');
+  assert.match(src, /q\.header = q\.header \? mergeQueuedHeaders\(q\.header, m\.header\) : m\.header/);
+  assert.doesNotMatch(src, /mergeHeaderLists\(/);
+});
+
 test('applyItemPatch_接在基底後面_長欄位照at與s拼_沒列的沿用基底', () => {
   const base = { id: 'i1', kind: 'Assistant', status: 'Running', html: '<p>前面</p>', detail: '細節', output: '輸出' };
   const patch = { type: 'itemPatch', id: 'i1', rv: 12, baseRv: 9,

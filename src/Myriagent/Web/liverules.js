@@ -1641,6 +1641,21 @@ export function mergeHeaderLists(prev, next) {
   return out;
 }
 
+/**
+ * 同一批（同一個影格）裡排著的兩份標頭合併成一份（app.js 的 header）：next 沒帶的清單沿用 prev 帶了的，prev 也沒帶就照樣不帶。
+ * 不能用 mergeHeaderLists：它在沒有上一份時補空陣列，兩份省略清單的標頭排在同一批，合併出來就「帶了空的模型與指令清單」，
+ * 套用時蓋掉畫面上的清單——模型鈕不見、推理強度顯示「不支援」，自救（missingHeaderLists 只看欄位有沒有帶）也不會觸發
+ * （2026-11-08 使用者回報：執行中的 Claude 對話標頭更新頻繁，常常這樣）。回傳新的物件，不改 prev、next
+ */
+export function mergeQueuedHeaders(prev, next) {
+  if (!isObj(next) || !isObj(prev)) return next;
+  const out = Object.assign({}, next);
+  for (const f of HEADER_LIST_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(out, f) && Array.isArray(prev[f])) out[f] = prev[f];
+  }
+  return out;
+}
+
 // ───── 即時更新的增量（itemPatch，patch1；docs/plans/2026-10-23-live-delta-and-replica-live.md 3.5）─────
 
 /** itemPatch 的長欄位（伺服器 ItemPatchRules.Fields）：其餘欄位整份在 set 裡 */

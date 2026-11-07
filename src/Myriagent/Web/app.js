@@ -34,7 +34,7 @@ import { icon, brandMark } from './icons.js';
 import { post, onHostMessage, state, setAccounts, setConversations, setProviders, providerKeys, on, emit, hasBridge, isHub } from './store.js';
 import { retryNow } from './transport.js';
 import { remoteFromInit, applySync, applyDevices, trackDeviceLinks, nextLinkChange, reconnectGraceOf, connectionBanner, syncDot } from './remoterules.js';
-import { layoutDeviceFilter, applyItemPatch, patchReopenDue, mergeHeaderLists } from './liverules.js';
+import { layoutDeviceFilter, applyItemPatch, patchReopenDue, mergeQueuedHeaders } from './liverules.js';
 import { failureOf } from './sendrules.js';
 import { isAppleTouch, isHandheld } from './voicemsgrules.js';
 import { pageTitle } from './titlerules.js';
@@ -516,8 +516,9 @@ function handle(m) {
       break;
     }
     case 'header':
-      // 沒帶指令與模型清單的標頭（宿主沒變就省略，liverules.mergeHeaderLists）：同一批裡排著的那一份帶了就沿用它的
-      if (ws.getConv(id) && m.header) { const q = queue(id); q.header = q.header ? mergeHeaderLists(q.header, m.header) : m.header; }
+      // 沒帶指令與模型清單的標頭（宿主沒變就省略）：同一批裡排著的那一份帶了就沿用它的，都沒帶就照樣不帶、套用時才和畫面上的合併
+      // （liverules.mergeQueuedHeaders；以前在這裡補空陣列，同一批兩份省略清單的標頭就把模型與指令清單清空，2026-11-08）
+      if (ws.getConv(id) && m.header) { const q = queue(id); q.header = q.header ? mergeQueuedHeaders(q.header, m.header) : m.header; }
       break;
     case 'item': if (ws.getConv(id) && m.item && m.item.id) { queue(id).ops.set(m.item.id, m.item); noteRv(id, m.item.id, m.rv); } break;
     case 'itemPatch': onItemPatch(m); break;
