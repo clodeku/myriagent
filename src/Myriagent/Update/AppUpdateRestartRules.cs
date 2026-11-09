@@ -37,6 +37,12 @@ internal enum AppRestartBlocker
     RemoteExecRunning,
 
     /// <summary>
+    /// 這台正在被遠端操控（遠端桌面，docs/sync-protocol.md 14.16；AgentHub.RemoteDeskActive）：重啟會中斷看的一方。
+    /// 列出來讓橫幅與設定頁說明原因；按「立即重啟」照樣開始
+    /// </summary>
+    RemoteDeskActive,
+
+    /// <summary>
     /// 這台有對話的背景工作還在跑（AgentHub.BackgroundWorkRunning：CLI 追蹤的 run_in_background、Codex 讓出的指令…）：重啟會停掉它們。
     /// 2026-10-28 使用者要求桌面版換版一直等到背景工作都完成（以前排空最多等 30 分鐘就停掉）。按「立即重啟」也不略過：
     /// 記著，背景工作都結束就馬上開始；排空開始之後才出現的背景工作由協調器放棄這次排空、就地接續
@@ -53,6 +59,7 @@ internal enum AppRestartBlocker
 /// <param name="LaunchBuilding">執行列正在建置（AgentHub.LaunchBuilding）：同 RemoteInUse，按「立即重啟」照樣開始</param>
 /// <param name="LaunchDebugging">執行列有 Debug 模式執行中的程式（AgentHub.LaunchDebugging）：同 RemoteInUse，按「立即重啟」照樣開始</param>
 /// <param name="RemoteExecRunning">其他電腦的代理正在這台執行遠端指令（AgentHub.RemoteExecRunning）：同 RemoteInUse，按「立即重啟」照樣開始</param>
+/// <param name="RemoteDeskActive">這台正在被遠端操控（AgentHub.RemoteDeskActive）：同 RemoteInUse，按「立即重啟」照樣開始</param>
 /// <param name="BackgroundWork">有對話的背景工作還在跑（AgentHub.BackgroundWorkRunning）：按「立即重啟」也等它們都結束，按「強制更新」不等</param>
 /// <param name="Forced">使用者按了「強制更新」（UserRequested 也是 true）：不等背景工作，排空中滿 ForceStopAfter 還沒停下的照立即套用停下</param>
 /// <param name="RemoteInUse">
@@ -75,7 +82,8 @@ internal sealed record AppRestartSituation(
     bool LaunchDebugging = false,
     bool RemoteExecRunning = false,
     bool BackgroundWork = false,
-    bool Forced = false);
+    bool Forced = false,
+    bool RemoteDeskActive = false);
 
 internal enum AppExitAction
 {
@@ -177,6 +185,8 @@ internal static class AppUpdateRestartRules
             return AppRestartBlocker.LaunchDebugging;
         if (s.RemoteExecRunning)
             return AppRestartBlocker.RemoteExecRunning;
+        if (s.RemoteDeskActive)
+            return AppRestartBlocker.RemoteDeskActive;
         return AppRestartBlocker.None;
     }
 
@@ -204,6 +214,7 @@ internal static class AppUpdateRestartRules
         AppRestartBlocker.LaunchBuilding => "執行列正在建置，建置完再重啟",
         AppRestartBlocker.LaunchDebugging => "執行列有 Debug 模式執行中的程式（重啟會一起關掉它），停止後再重啟",
         AppRestartBlocker.RemoteExecRunning => "其他電腦的代理正在這台執行遠端指令，結束後再重啟",
+        AppRestartBlocker.RemoteDeskActive => "這台正在被遠端操控，結束後再重啟",
         AppRestartBlocker.BackgroundWork => "有對話的背景工作還在跑，全部結束後再重啟",
         _ => string.Empty,
     };

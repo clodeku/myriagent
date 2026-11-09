@@ -148,6 +148,7 @@ internal static class RemoteNotifyRules
         RemoteCommandCatalog.DevicePut => ("把檔案傳到這台", false),
         RemoteCommandCatalog.DeviceTree => ("列出了這台整個資料夾的檔案", false),
         RemoteCommandCatalog.DeviceFetchMany => ("下載了這台整個資料夾的檔案", false),
+        RemoteCommandCatalog.DeskOpen => ("開始遠端操控這台電腦", false),
         _ => ($"執行了遠端操作 {cmd}", false),
     };
 

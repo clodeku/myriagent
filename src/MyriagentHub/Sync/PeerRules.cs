@@ -91,6 +91,13 @@ internal static class RemoteExecServerRules
     public static string FolderTransferTooOldMessage(string? deviceName)
         => "「" + (string.IsNullOrWhiteSpace(deviceName) ? PeerRules.UnnamedDevice : deviceName.Trim()) + "」的 Clode Myriagent 版本太舊，還不能傳整個資料夾；請先更新那台";
 
+    /// <summary>目標電腦選到的連線沒有協商出 <c>desk1</c>（舊版桌面）時的說明（遠端桌面）</summary>
+    public static string DeskTooOldMessage(string? deviceName)
+        => "「" + (string.IsNullOrWhiteSpace(deviceName) ? PeerRules.UnnamedDevice : deviceName.Trim()) + "」的 Clode Myriagent 版本太舊，還不能遠端桌面；請先更新那台";
+
+    /// <summary>發起的電腦這條連線沒有協商出 <c>desk1</c>（舊版桌面）時的說明</summary>
+    public const string DeskOriginTooOldMessage = "這台的 Clode Myriagent 版本太舊，還不能遠端桌面；請先更新";
+
     public static string TransferTooOldMessage(string? deviceName)
         => "「" + (string.IsNullOrWhiteSpace(deviceName) ? PeerRules.UnnamedDevice : deviceName.Trim()) + "」的 Clode Myriagent 版本太舊，還不能傳檔案；請先更新那台";
 

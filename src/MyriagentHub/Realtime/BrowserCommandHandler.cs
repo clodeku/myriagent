@@ -33,7 +33,8 @@ internal sealed class BrowserCommandHandler(
     IBrowserConversationCommands? conversationCommands = null,
     IBrowserCommandRouter? router = null,
     CollaboratorDirectory? collaborators = null,
-    CollaboratorCommandService? collaboratorCommands = null)
+    CollaboratorCommandService? collaboratorCommands = null,
+    DeskRelays? desk = null)
 {
     private readonly LogThrottle clientErrorThrottle = new(TimeSpan.FromMinutes(10), TimeProvider.System);
 
@@ -60,6 +61,7 @@ internal sealed class BrowserCommandHandler(
             {
                 ReadyCommand ready => Ready(connection, ready),
                 MonitorCommand monitor => Monitor(connection, monitor),
+                DeskCommand deskCommand => await DeskAsync(connection, deskCommand, cancellationToken),
                 ClientErrorCommand clientError => ClientError(connection, clientError),
                 PassiveCommand => null,
                 SettingCommand setting => await ApplyAsync(parsed, context =>
@@ -185,6 +187,22 @@ internal sealed class BrowserCommandHandler(
     private string? Ready(BrowserConnection connection, ReadyCommand ready)
     {
         gateway.RequestInit(connection, ready.Mode);
+        return null;
+    }
+
+    /// <summary>
+    /// 遠端桌面看的一方的封包（14.16）：轉給這條連線開的工作階段的那台；工作階段已經不在（那台結束、伺服器重啟）時送一則 <c>desk end</c> 讓網頁收起畫面
+    /// </summary>
+    private async Task<string?> DeskAsync(BrowserConnection connection, DeskCommand command, CancellationToken cancellationToken)
+    {
+        if (desk is null)
+            return BrowserErrorCodes.NotAvailable;
+        if (!await desk.ReceiveFromBrowserAsync(connection, command.Packet, cancellationToken) && command.Packet.Kind != DeskRules.Close)
+        {
+            gateway.SendAfterInit(connection, DeskRelays.BrowserMessage(new Myriagent.Sync.DeskPacket(command.Packet.SessionId, DeskRules.End, 0,
+                DeskRules.EndBody("gone", "遠端桌面已經結束"))));
+        }
+
         return null;
     }
 

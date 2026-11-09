@@ -423,6 +423,9 @@ internal sealed partial class SyncEngine
                 OnExecAbort(conn, abort);
                 Probe(nameof(OnExecAbort), abort);
                 break;
+            case DeskPacket desk:
+                OnDeskDown(conn, desk);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(message), message.GetType().Name, "不認得的第 4 階段伺服器訊息");
         }
@@ -445,6 +448,7 @@ internal sealed partial class SyncEngine
         LogRepair => DeviceHubMethods.LogRepair,
         ExecChunk => DeviceHubMethods.ExecReply,
         ExecAbort => DeviceHubMethods.ExecAbort,
+        DeskPacket => DeviceHubMethods.DeskDown,
         _ => throw new ArgumentOutOfRangeException(nameof(message), message.GetType().Name, "不認得的第 4 階段伺服器訊息"),
     };
 

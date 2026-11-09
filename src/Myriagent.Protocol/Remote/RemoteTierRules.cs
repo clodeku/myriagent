@@ -108,6 +108,8 @@ internal static class RemoteTierRules
             // 電腦狀態面板的檔案傳輸：整台的本機磁碟（同遠端選資料夾、fileFetch）
             RemoteCommandCatalog.DeviceBrowse or RemoteCommandCatalog.DeviceFetch or RemoteCommandCatalog.DevicePut
                 or RemoteCommandCatalog.DeviceTree or RemoteCommandCatalog.DeviceFetchMany => Two,
+            // 遠端桌面：看與操作整個畫面（同遠端執行指令）
+            RemoteCommandCatalog.DeskOpen => Two,
             "listFiles" => command.Value<bool?>("dirsOnly") == true ? Two
                 : command["path"] is null or { Type: JTokenType.Null } || (facts.PathInScope ?? low) ? One : Two,
             "delete" or "setAccount" or "fileFetch" or "accountAdd" or "accountLogin" or "accountLoginDevice" or RemoteCommandCatalog.AccountLoginCode or "accountLogout"

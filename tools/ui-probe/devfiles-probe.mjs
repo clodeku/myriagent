@@ -74,6 +74,9 @@ export async function runDeviceFiles(ctx, vp, m) {
           const rels = JSON.parse(c.pathsJson);
           host.send({ type: 'fileRefs', requestId: c.requestId, conversationId: null, root: c.root, expiresAt: Date.now() + 7200_000,
             refs: rels.map((r, i) => ({ path: r, name: r.split('\\').pop(), size: 100 * (i + 1), url: '/f/' + m.LAB + '-01J9QZ3K8M5R7T2V4W6X8Y0AB' + i })) });
+        } else if (c.cmd === 'deskOpen') {
+          host.deskSession = c.requestId;
+          done();
         } else if (c.cmd === 'devicePut') {
           done();
           host.putIds = host.putIds.concat(c.uploads.map((u) => ({ id: u.uploadId, name: u.name, size: u.size })));
@@ -109,12 +112,12 @@ export async function runDeviceFiles(ctx, vp, m) {
   const hubMenu = await page.evaluate(() => !!document.querySelector('.menu.df-menu'));
   await page.click((await cardSel('HOME-PC')) + ' .mon-name', { button: 'right' });
   const offline = await until(menuItems, 1500);
-  check('devfilesMenuScope', !selfMenu && !hubMenu && !!offline && offline.length === 2 && offline.every((x) => x.disabled), { selfMenu, hubMenu, offline });
+  check('devfilesMenuScope', !selfMenu && !hubMenu && !!offline && offline.length === 3 && offline.every((x) => x.disabled), { selfMenu, hubMenu, offline });
   await page.keyboard.press('Escape');
 
   await page.click((await cardSel('LAB-WORKSTATION')) + ' .mon-name', { button: 'right' });
   const items = await until(menuItems, 1500);
-  check('devfilesMenuItems', !!items && items.map((x) => x.label).join('|') === '瀏覽與下載檔案…|上傳檔案到這台…' && items.every((x) => !x.disabled), items);
+  check('devfilesMenuItems', !!items && items.map((x) => x.label).join('|') === '瀏覽與下載檔案…|上傳檔案到這台…|遠端桌面…' && items.every((x) => !x.disabled), items);
   await shot(page, 'devfiles-menu-dark');
   await page.click('.menu.df-menu .menu-item');
 
@@ -220,6 +223,66 @@ export async function runDeviceFiles(ctx, vp, m) {
   }), 2000);
   check('devfilesNetworkEmptyShowsLevel', !!net && net.crumbs.join('/') === '磁碟與常用資料夾/網路' && net.rows === 0 && /網路上的電腦/.test(net.err || '') && net.upload === true, net);
   await shot(page, 'devfiles-network-empty-dark');
+  await page.keyboard.press('Escape');
+  await until(() => page.evaluate(() => !document.querySelector('.df-dlg')), 2000);
+
+  // 遠端桌面（remotedesk.js）：選單開 → deskOpen（帶 commandId）→ 假宿主送一個真的 JPEG 影格與游標 → 畫在 canvas 上；
+  // 滑鼠點、鍵盤按 A 換成輸入事件，確認併在輸入裡送；那台結束時收起畫面並提示
+  await page.click((await cardSel('LAB-WORKSTATION')) + ' .mon-name', { button: 'right' });
+  await until(menuItems, 1500);
+  await page.click('.menu.df-menu .menu-item:nth-of-type(3)');
+  const open = await until(() => host.last('deskOpen'), 2000);
+  check('deskOpenSent', !!open && open.deviceId === m.LAB && /^[0-9A-Z]{26}$/.test(open.requestId || '') && /^[0-9A-Z]{26}$/.test(open.commandId || ''), open);
+  const jpeg = await page.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    const x = c.getContext('2d');
+    x.fillStyle = '#3b82f6'; x.fillRect(0, 0, 64, 64);
+    x.fillStyle = '#fff'; x.fillRect(16, 16, 32, 32);
+    return c.toDataURL('image/jpeg', 0.8).split(',')[1];
+  });
+  const png = await page.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = 16; c.height = 16;
+    const x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.beginPath(); x.moveTo(0, 0); x.lineTo(0, 14); x.lineTo(10, 10); x.fill();
+    return c.toDataURL('image/png').split(',')[1];
+  });
+  const tiles = [];
+  for (let y = 0; y < 270; y += 64) for (let x = 0; x < 480; x += 64) tiles.push({ x, y, w: 64, h: 64, d: jpeg });
+  host.send({ type: 'desk', sessionId: open.requestId, kind: 'frame', seq: 1, body: { w: 480, h: 270, key: true, part: 0, parts: 2, screen: 0, q: 'auto',
+    screens: [{ i: 0, name: '螢幕 1', w: 3840, h: 2160, primary: true }, { i: 1, name: '螢幕 2', w: 1920, h: 1080, primary: false }], tiles: tiles.slice(0, 10) } });
+  host.send({ type: 'desk', sessionId: open.requestId, kind: 'frame', seq: 1, body: { w: 480, h: 270, part: 1, parts: 2, screen: 0, q: 'auto', tiles: tiles.slice(10),
+    cur: { x: 0.5, y: 0.5, v: true, img: png, hx: 0, hy: 0, sw: 3840 } } });
+  const drawn = await until(() => page.evaluate(() => {
+    const c = document.querySelector('.rd-canvas');
+    if (!c || c.width !== 480) return null;
+    const px = c.getContext('2d').getImageData(32, 32, 1, 1).data;
+    const cur = document.querySelector('.rd-cursor');
+    return { w: c.width, h: c.height, px: Array.from(px).slice(0, 3), screenBtn: !document.querySelector('.rd-tool[title="螢幕"]').hidden,
+      cursor: !!cur && !cur.hidden, status: document.querySelector('.rd-status').hidden };
+  }), 3000);
+  check('deskFrameDrawn', !!drawn && drawn.h === 270 && drawn.px[0] > 200 && drawn.px[2] > 200 && drawn.screenBtn && drawn.cursor && drawn.status, drawn);
+  await shot(page, 'remotedesk-dark');
+  // 點畫面正中間、按 A：確認併在輸入裡（每 66 ms 最多一包）
+  const box = await page.locator('.rd-canvas').boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.press('KeyA');
+  const inputs = await until(() => {
+    const list = host.received.filter((c) => c.cmd === 'desk' && c.kind === 'input');
+    const events = list.flatMap((c) => (c.body.events || []));
+    return events.some((e) => e.t === 'ku' && e.k === 0x41) ? { list, events } : null;
+  }, 3000);
+  const evs = inputs ? inputs.events : [];
+  const down = evs.find((e) => e.t === 'md');
+  check('deskInputSent', !!inputs && inputs.list.every((c) => c.sessionId === open.requestId) && inputs.list.some((c) => c.body.ack === 1)
+    && !!down && down.b === 0 && Math.abs(down.x - 0.5) < 0.02 && Math.abs(down.y - 0.5) < 0.02 && evs.some((e) => e.t === 'kd' && e.k === 0x41),
+    { inputs: inputs && inputs.list });
+  // 那台結束：收起畫面、提示說明
+  host.send({ type: 'desk', sessionId: open.requestId, kind: 'end', seq: 0, body: { reason: 'targetClosed', text: '那台的人中斷了遠端桌面' } });
+  const ended = await until(() => page.evaluate(() => (!document.querySelector('.rd-wrap')
+    ? Array.from(document.querySelectorAll('.toast')).map((t) => t.textContent).join('|') : null)), 2000);
+  check('deskEnded', ended !== null && ended.includes('那台的人中斷了遠端桌面'), ended);
   clearInterval(host.statsTimer);
   await closeApp(app);
 }

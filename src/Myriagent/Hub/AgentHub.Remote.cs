@@ -338,6 +338,7 @@ internal sealed partial class AgentHub
         RegisterFileRemoteHandlers(remoteHandlers);
         RegisterExecRemoteHandlers(remoteHandlers);
         RegisterDeviceFileRemoteHandlers(remoteHandlers);
+        RegisterDeskRemoteHandlers(remoteHandlers);
         // 排程頁的遠端操作（AgentHub.ScheduleRemote.cs）
         RegisterScheduleRemoteHandlers(remoteHandlers);
     }

@@ -10,6 +10,7 @@ import { track } from './cmdtrack.js';
 import { uploadFile, fetchTransfer } from './hubapi.js';
 import { uploadResult, peerOf } from './liverules.js';
 import * as R from './devicefilesrules.js';
+import { openRemoteDesk } from './remotedesk.js';
 
 const FOLDER_KEY = 'myriagent.app.xfer.folder.v1';
 
@@ -43,6 +44,8 @@ export function cardMenuItems(row) {
     { type: 'header', label: row.name || '電腦' },
     { label: '瀏覽與下載檔案…', icon: 'download', disabled: !avail.enabled, desc: why, onSelect: () => openDeviceFiles(row.id) },
     { label: '上傳檔案到這台…', icon: 'arrowUp', disabled: !avail.enabled, desc: why, onSelect: () => openDeviceFiles(row.id, { upload: true }) },
+    // 遠端桌面（2026-11-09）：條件同檔案傳輸（那台的「可以操作」）；版本太舊的由伺服器說明
+    { label: '遠端桌面…', icon: 'desktop', disabled: !avail.enabled, desc: why, onSelect: () => openRemoteDesk(row.id, row.name || nameOf(row.id)) },
   ];
 }
 

@@ -204,6 +204,7 @@ internal static class MessageGuard
         "accountReorder" => ParseAccountReorder(cmd),
         "deviceRename" => ParseDeviceRename(cmd),
         "monitor" => ParseMonitor(cmd),
+        "desk" => ParseDesk(cmd),
         "clientError" => ClientErrorRules.TryParse(cmd) is { } report ? (new ClientErrorCommand(report), null) : (null, BrowserErrorCodes.Invalid),
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, "伺服器處理的指令沒有對應的解析"),
     };
@@ -282,6 +283,18 @@ internal static class MessageGuard
         return (new DeviceRenameCommand(deviceId, (string)nameToken!), null);
     }
 
+    /// <summary><c>desk {sessionId, kind, seq, body}</c>：遠端桌面看的一方的封包（14.16；<see cref="DeskRules.Check"/>）</summary>
+    private static (BrowserCommand?, string?) ParseDesk(JObject cmd)
+    {
+        if (cmd["sessionId"] is not JValue { Type: JTokenType.String, Value: string session }
+            || cmd["kind"] is not JValue { Type: JTokenType.String, Value: string kind }
+            || cmd["seq"] is not JValue { Type: JTokenType.Integer } seq
+            || cmd["body"] is { } rawBody && rawBody.Type != JTokenType.Null && rawBody is not JObject)
+            return (null, BrowserErrorCodes.Invalid);
+        var packet = new Myriagent.Sync.DeskPacket(session, kind, (long)seq, cmd["body"] as JObject);
+        return DeskRules.Check(packet, fromTarget: false) is null ? (new DeskCommand(packet), null) : (null, BrowserErrorCodes.Invalid);
+    }
+
     /// <summary><c>monitor {on}</c>：on 要是布林（stat1；web-protocol 第二節）</summary>
     private static (BrowserCommand?, string?) ParseMonitor(JObject cmd) =>
         cmd["on"] is { Type: JTokenType.Boolean } on ? (new MonitorCommand((bool)on), null) : (null, BrowserErrorCodes.Invalid);
@@ -329,6 +342,9 @@ internal sealed record AccountUpdateCommand(string AccountId, string? Label, str
 internal sealed record AccountReorderCommand(IReadOnlyList<string> Ids) : BrowserCommand("accountReorder");
 
 internal sealed record DeviceRenameCommand(string DeviceId, string Name) : BrowserCommand("deviceRename");
+
+/// <summary>遠端桌面看的一方的封包（14.16）</summary>
+internal sealed record DeskCommand(Myriagent.Sync.DeskPacket Packet) : BrowserCommand("desk");
 
 /// <summary>這條連線要不要收各電腦的即時狀態（stat1）</summary>
 internal sealed record MonitorCommand(bool On) : BrowserCommand("monitor");

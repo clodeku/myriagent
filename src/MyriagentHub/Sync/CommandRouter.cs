@@ -57,6 +57,7 @@ internal sealed partial class CommandRouter(
     IUploadRegistry uploads,
     CommandReplies replies,
     ExecRelays execRelays,
+    DeskRelays deskRelays,
     TimeProvider time,
     ILogger<CommandRouter> log) : IBrowserCommandRouter
 {
@@ -258,6 +259,23 @@ internal sealed partial class CommandRouter(
             && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.Xfer2))
             return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false,
                 RemoteExecServerRules.FolderTransferTooOldMessage(devices.Get(target)?.Name)), cancellationToken);
+        // 遠端桌面（14.16）：目標要協商出 desk1、發起的電腦這條連線也要（瀏覽器一律收得到）；不能看自己；每台同時只能一個工作階段
+        if (name == RemoteCommandCatalog.DeskOpen)
+        {
+            if (!device.Allows(DeviceHubMethods.DeskDown))
+                return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false, RemoteExecServerRules.DeskTooOldMessage(devices.Get(target)?.Name)), cancellationToken);
+            if (origin is DeviceCommandOrigin deskOrigin)
+            {
+                if (string.Equals(deskOrigin.Device, target, StringComparison.Ordinal))
+                    return CmdError(route, BrowserErrorCodes.Invalid);
+                if (registry.Get(origin.ConnectionId) is not { } deskConnection || !deskConnection.Allows(DeviceHubMethods.DeskDown))
+                    return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false, RemoteExecServerRules.DeskOriginTooOldMessage), cancellationToken);
+            }
+
+            if (deskRelays.CheckOpen(RemoteCommandShapeRules.IsString(mapped["requestId"], out var deskSession) ? deskSession : null, target) is { } deskProblem)
+                return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Conflict, CmdError: false, deskProblem), cancellationToken);
+        }
+
         // 遠端執行指令（14.11）：目標要能送輸出、發起的這條連線要能收（兩邊都要協商出 exec1）
         if (name == RemoteCommandCatalog.RemoteExec)
         {
@@ -349,6 +367,9 @@ internal sealed partial class CommandRouter(
         // 遠端執行指令（14.11）：送出之前登記，那台最早的輸出就找得到發起的電腦
         if (name == RemoteCommandCatalog.RemoteExec && origin.DeviceId is { } execOrigin)
             execRelays.Register(cid, execOrigin, commandId, target, mapped["timeoutSec"] is JValue { Type: JTokenType.Integer, Value: long seconds } ? (int)seconds : RemoteExecRules.DefaultTimeoutSeconds);
+        // 遠端桌面（14.16）：送出之前登記，那台的第一個影格就找得到看的一方
+        if (name == RemoteCommandCatalog.DeskOpen && RemoteCommandShapeRules.IsString(mapped["requestId"], out var deskSessionId))
+            deskRelays.Register(deskSessionId, target, origin);
         if (peerCreate)
             SendPeerCreated(origin, commandId, expectedConversation!);
         _ = DeliverAsync(device.ConnectionId, new CommandDelivery(cid, envelope!), name);

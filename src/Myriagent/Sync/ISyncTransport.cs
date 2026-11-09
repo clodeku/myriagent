@@ -84,6 +84,11 @@ internal interface ISyncSessionEvents
     /// <summary><c>exec1</c>：停止這台正在執行的遠端執行指令（14.11）</summary>
     void OnExecAbort(ExecAbort abort);
 
+    /// <summary><c>desk1</c>：遠端桌面的封包（14.16）；測試替身不必實作</summary>
+    void OnDeskDown(DeskPacket packet)
+    {
+    }
+
     /// <summary>連線關了（伺服器中斷、網路斷、自己關的）；error 是 SignalR 給的原因</summary>
     void OnClosed(Exception? error);
 }
@@ -150,6 +155,9 @@ internal interface ISyncSession : IAsyncDisposable
 
     /// <summary>Invoke（<c>exec1</c>）：停止這台下的遠端執行指令（14.11）</summary>
     Task<ExecCancelResult> ExecCancelAsync(ExecCancel c, CancellationToken ct);
+
+    /// <summary>Invoke（<c>desk1</c>）：遠端桌面的封包（14.16）；回伺服器還要不要轉送這個工作階段。測試替身沒實作時回 keep false</summary>
+    Task<DeskUpResult> DeskUpAsync(DeskPacket p, CancellationToken ct) => Task.FromResult(new DeskUpResult(false));
 
     /// <summary>Invoke（<c>collab1</c>）：替擁有者送協作人的管理指令（14.14）；測試替身沒實作時回 unavailable</summary>
     Task<CollabCmdResult> CollabCmdAsync(CollabCmdRequest r, CancellationToken ct)

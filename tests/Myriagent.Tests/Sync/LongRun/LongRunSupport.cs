@@ -49,10 +49,11 @@ internal sealed class LongRunDevice : IAsyncDisposable
         OwnerClient owner,
         string name,
         IReadOnlyList<FakeAccountSpec> accounts,
-        SyncEngineOptions? options = null)
+        SyncEngineOptions? options = null,
+        Func<Myriagent.RemoteDesk.IDeskScreen>? deskScreen = null)
     {
         var (dir, paired) = await PairAsync(hub, owner, name);
-        return await StartPairedAsync(dir, paired, name, accounts, options);
+        return await StartPairedAsync(dir, paired, name, accounts, options, deskScreen: deskScreen);
     }
 
     /// <summary>只配對（記憶體金鑰）、還不啟動：配對之後、啟動之前要先改資料根（例如灌舊對話、改 sync.db 的 kv）時用</summary>
@@ -81,7 +82,8 @@ internal sealed class LongRunDevice : IAsyncDisposable
         IReadOnlyList<FakeAccountSpec> accounts,
         SyncEngineOptions? options = null,
         Func<SyncEngineCreateArgs, ISyncEngine>? engineFactory = null,
-        Myriagent.RemoteExec.IRemoteExecConfirmer? remoteExecConfirmer = null)
+        Myriagent.RemoteExec.IRemoteExecConfirmer? remoteExecConfirmer = null,
+        Func<Myriagent.RemoteDesk.IDeskScreen>? deskScreen = null)
     {
         try
         {
@@ -96,6 +98,7 @@ internal sealed class LongRunDevice : IAsyncDisposable
                 Accounts = accounts,
                 EngineFactory = engineFactory ?? (args => SyncEngineLoader.Create(args with { SignerFactory = paired.SignerFactory, Options = options })),
                 RemoteExecConfirmer = remoteExecConfirmer,
+                DeskScreen = deskScreen,
             });
             return new LongRunDevice(dir, paired, runtime, name);
         }

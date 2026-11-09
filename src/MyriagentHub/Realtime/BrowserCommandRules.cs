@@ -48,7 +48,7 @@ internal static class BrowserCommandRules
     /// 伺服器處理的指令；<c>monitor</c> 是這條連線要不要收各電腦的即時狀態（stat1，<c>deviceStats</c>），<c>clientError</c> 是網頁的錯誤回報
     /// （寫進伺服器的記錄，2026-10-23）
     /// </summary>
-    public static IReadOnlySet<string> ServerCommands { get; } = Set("ready", "setting", "accountUpdate", "accountReorder", "deviceRename", "monitor", "clientError");
+    public static IReadOnlySet<string> ServerCommands { get; } = Set("ready", "setting", "accountUpdate", "accountReorder", "deviceRename", "monitor", "clientError", "desk");
 
     public static IReadOnlySet<string> IgnoredCommands { get; } = Set("layout", "open", "close", "visible", "loadOlder");
 
@@ -123,6 +123,8 @@ internal static class BrowserCommandRules
         "scheduleAction", "scheduleAgent",
         // 電腦狀態面板的檔案傳輸（2026-11-09）：由那台電腦執行（型錄的 Device 指令，伺服器轉送；目標要協商出 xfer1）
         "deviceBrowse", "deviceFetch", "devicePut", "deviceTree", "deviceFetchMany",
+        // 遠端桌面（desk1，sync-protocol 14.16）：由那台執行（型錄的 Device 指令；之後的封包走伺服器處理的 desk）
+        "deskOpen",
         // 多人協作（2026-10-30）：擁有者管理協作人與對話的分享，由伺服器處理（CollaboratorCommandService）
         "collabCreate", "collabUpdate", "collabDelete", "collabShare");
 
@@ -135,7 +137,7 @@ internal static class BrowserCommandRules
     /// 第 3 階段每次 init 都會讓網頁送 newConversation，提示了等於每次連線都跳錯誤（D17）
     /// </summary>
     public static IReadOnlySet<string> SilentCommands { get; } = Set(
-        ["newConversation", "listFiles", "fileSearch", "draftSnapshot", "monitor", "clientError", "searchConversations", .. IgnoredCommands]);
+        ["newConversation", "listFiles", "fileSearch", "draftSnapshot", "monitor", "clientError", "searchConversations", "desk", .. IgnoredCommands]);
 
     /// <summary>
     /// 電腦的結果與立即拒絕要不要另送 toast（<paramref name="cmd"/> 是送給電腦的指令名稱）：<see cref="SilentCommands"/> 不送；

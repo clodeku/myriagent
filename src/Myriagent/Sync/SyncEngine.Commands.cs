@@ -126,6 +126,9 @@ internal sealed partial class SyncEngine : ISyncEngineCommands
             // 電腦狀態面板的檔案傳輸（2026-11-09）：deviceBrowse、deviceFetch、devicePut（AgentHub.DeviceFiles.cs）
             into.Add(DeviceFeatureRules.Xfer1);
             into.Add(DeviceFeatureRules.Xfer2);
+            // 遠端桌面（14.16）：宿主接得住才宣告（SyncEngine.Desk.cs）
+            if (DeskPort is not null)
+                into.Add(DeviceFeatureRules.Desk1);
         }
         try
         {
@@ -216,6 +219,8 @@ internal sealed partial class SyncEngine : ISyncEngineCommands
         ReportPeerLive(conn);
         // 遠端執行指令（SyncEngine.Exec.cs）：補送上一條連線沒送出的結束碼
         OnExecProven(conn);
+        // 遠端桌面（SyncEngine.Desk.cs）：這條連線能不能搬封包
+        OnDeskProven(conn);
         if (commandLink is not { } link || !ReferenceEquals(link.Conn, conn) || !IsLive(link))
             return;
         ScheduleClockRefresh(link);
@@ -235,6 +240,7 @@ internal sealed partial class SyncEngine : ISyncEngineCommands
     {
         ReportPeerLive(null);
         OnExecClosed(conn);
+        OnDeskClosed(conn);
         if (commandLink is not { } link || !ReferenceEquals(link.Conn, conn))
             return;
         commandLink = null;

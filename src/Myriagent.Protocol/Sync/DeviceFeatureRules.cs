@@ -104,8 +104,14 @@ internal static class DeviceFeatureRules
     /// <summary>整個資料夾的傳輸（2026-11-09）：協商出它的連線收 <c>deviceTree</c>、<c>deviceFetchMany</c> 與帶 <c>subfolder</c> 的 <c>devicePut</c>。不對應任何 hub 方法</summary>
     public const string Xfer2 = "xfer2";
 
+    /// <summary>
+    /// 遠端桌面（docs/sync-protocol.md 14.16；2026-11-09）：協商出它的連線收 <c>deskOpen</c>（被看的一方）、可以發起（看的一方），
+    /// 之後的影格、輸入、結束走 <c>DeskUp</c>／<c>DeskDown</c>
+    /// </summary>
+    public const string Desk1 = "desk1";
+
     /// <summary>這版認得的功能（不認得的名稱照收、不啟用：交集裡不會有它）</summary>
-    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1, Xfer1, Xfer2];
+    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1, Xfer1, Xfer2, Desk1];
 
     public const int MaxFeatures = 32;
 
@@ -189,6 +195,7 @@ internal static class DeviceFeatureRules
         DeviceHubMethods.SchedulesPublish or DeviceHubMethods.SchedulesUpdate => Sched1,
         DeviceHubMethods.ExecOutput or DeviceHubMethods.ExecCancel or DeviceHubMethods.ExecReply or DeviceHubMethods.ExecAbort => Exec1,
         DeviceHubMethods.CollabCmd or DeviceHubMethods.CollabUpdate => Collab1,
+        DeviceHubMethods.DeskUp or DeviceHubMethods.DeskDown => Desk1,
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "不認得的裝置 hub 方法"),
     };
 }

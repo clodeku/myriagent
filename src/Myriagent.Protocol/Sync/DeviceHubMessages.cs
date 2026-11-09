@@ -239,6 +239,15 @@ internal sealed record ExecCancelResult(bool Found);
 internal sealed record ExecAbort(string CommandId);
 
 /// <summary>
+/// 遠端桌面的一個封包（docs/sync-protocol.md 14.16，<c>desk1</c>）：裝置以 <c>DeskUp</c> 送、伺服器以 <c>DeskDown</c> 轉給工作階段的另一邊；
+/// 瀏覽器的 <c>desk</c> 訊息是同一個形狀。<c>kind</c> 與 <c>body</c> 的格式見 <c>DeskRules</c>
+/// </summary>
+internal sealed record DeskPacket(string SessionId, string Kind, long Seq, JObject? Body = null);
+
+/// <summary><c>DeskUp</c> 的回應：<c>keep</c> 是 false 時伺服器已經不轉送這個工作階段，送的一方停止</summary>
+internal sealed record DeskUpResult(bool Keep);
+
+/// <summary>
 /// 裝置 → 伺服器（Send，<c>live1</c>）：串流中的項目（14.3）。<c>item</c> 是 <c>conv.item</c> 的 payload 的 JSON 字串
 /// （同持久事件的 payload 以字串傳：伺服器驗證只有一種解讀、原樣轉發），其中的 <c>ord</c>／<c>ver</c> 要等於外層的（<see cref="LiveRules.CheckRelay"/>）
 /// </summary>

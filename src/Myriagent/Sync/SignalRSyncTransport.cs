@@ -164,6 +164,8 @@ internal sealed class SignalRSyncTransport(TimeSpan? connectTimeout = null) : IS
             // 遠端執行指令（14.11）：沒協商 exec1 的伺服器不送；送了也由引擎略過
             connection.On<ExecChunk>(DeviceHubMethods.ExecReply, events.OnExecReply);
             connection.On<ExecAbort>(DeviceHubMethods.ExecAbort, events.OnExecAbort);
+            // 遠端桌面（14.16）：沒協商 desk1 的伺服器不送；送了也由引擎略過
+            connection.On<DeskPacket>(DeviceHubMethods.DeskDown, events.OnDeskDown);
             connection.Closed += error =>
             {
                 events.OnClosed(error);
@@ -248,6 +250,14 @@ internal sealed class SignalRSyncTransport(TimeSpan? connectTimeout = null) : IS
             EnsureFits(r, "協作人的管理指令", null);
             CollabCmdResult result = null!;
             await RunAsync(async () => result = await connection.InvokeAsync<CollabCmdResult>(DeviceHubMethods.CollabCmd, r, ct), handshake: false, ct);
+            return result;
+        }
+
+        public async Task<DeskUpResult> DeskUpAsync(DeskPacket p, CancellationToken ct)
+        {
+            // 封包的大小由 DeskRules.MaxPacketBytes 限制（影格在送的一方拆好），不再序列化一次量大小
+            DeskUpResult result = null!;
+            await RunAsync(async () => result = await connection.InvokeAsync<DeskUpResult>(DeviceHubMethods.DeskUp, p, ct), handshake: false, ct);
             return result;
         }
 

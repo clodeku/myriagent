@@ -306,6 +306,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         views.Remove(viewId);
         viewsReportingVisibility.Remove(viewId);
         ForgetMonitorView(viewId);
+        ForgetDeskView(viewId);
         CancelSearch(viewId);
         scheduleWatchers.Remove(viewId);
         foreach (var c in conversations.Values.ToList())
@@ -659,6 +660,10 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                     break;
                 case "setConversationDefault":
                     SetConversationDefault(Str("provider"), Str("key"), Str("model"), Str("value"));
+                    break;
+                case "desk":
+                    // 遠端桌面看的一方的封包（AgentHub.RemoteDesk.cs）
+                    HandleDeskCommand(view, command);
                     break;
                 case "monitor":
                     // 電腦狀態面板（AgentHub.Monitor.cs）
@@ -3150,6 +3155,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
     {
         if (!disposed)
         {
+            DisposeRemoteDesk();
             PersistQueuesOnExit();
             // 背景排著的紀錄先寫完（最多 10 秒），接著執行中的對話照常同步存最後一份（SaveConversation 會先等背景那份，順序不會顛倒）
             itemsWriter?.Drain(TimeSpan.FromSeconds(10));

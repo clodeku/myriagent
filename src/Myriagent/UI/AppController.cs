@@ -167,6 +167,9 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         remoteExec.TimedHandler = (conversationId, args) => InvokeOnUiAsync(() => Hub.HandleTimedCli(conversationId, args));
         Hub.TimedToolAvailable = File.Exists(Path.Combine(AppContext.BaseDirectory, TimedHubRules.ToolFileName));
         remoteExec.StartPipe();
+        // 遠端桌面（docs/sync-protocol.md 14.16）：被看時以 GDI 擷取、SendInput 注入，主螢幕上方顯示提示列（不出現在傳出去的畫面）
+        Hub.AttachRemoteDesk(Sync, () => new Myriagent.RemoteDesk.DxgiDeskScreen(), (text, disconnect) => RemoteDeskBanner.ShowFor(text, disconnect));
+        Sync.AttachDesk(Hub.DeskEndpoint);
         Accounts.UsagePollPolicy = Sync;
         Sync.StatusChanged += OnSyncStatusChanged;
         // 升級後第一次啟動：補上 Antigravity、Grok 的本機預設帳戶（各只補一次；帳戶清單這次唯讀時下次再補）

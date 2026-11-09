@@ -33,6 +33,7 @@ internal sealed class CommandResults(
     DurableCommands durable,
     IBrowserDrafts drafts,
     ICommandOutputRewriter rewriter,
+    DeskRelays deskRelays,
     TimeProvider time,
     ILogger<CommandResults> log)
 {
@@ -159,6 +160,9 @@ internal sealed class CommandResults(
         // 草稿的第一次 send 被拒（電腦保證什麼都沒建，契約 C17）：先清掉草稿記下的 cid，使用者收到 sendRejected 之後可以馬上再送（D33）；done、unknown 保留
         if (state == RemoteResultStates.Rejected && tracked is { DraftSessionId: { } draftSession, BrowserConversationId: { } draftId })
             DraftCommandOutcomes.Release(drafts, draftSession, draftId, commandId);
+        // 遠端桌面（14.16）：那台沒有接下（被拒、結果不明）就忘掉工作階段，名額才不會被佔住
+        if (state != RemoteResultStates.Done && tracked.CmdName == Myriagent.Remote.RemoteCommandCatalog.DeskOpen)
+            deskRelays.Forget(tracked.RequestId);
         if (replies.IsPresent(tracked))
         {
             if (tracked.FanOut)

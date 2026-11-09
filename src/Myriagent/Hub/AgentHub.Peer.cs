@@ -85,6 +85,8 @@ internal sealed partial class AgentHub
         try
         {
             sink.SubmitPeerCommand(commandId, PeerHubRules.PeerBody(command));
+            if (spec.Name == RemoteCommandCatalog.DeskOpen)
+                NoteDeskOpen(view, command);
         }
         catch (Exception ex)
         {

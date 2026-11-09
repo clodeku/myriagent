@@ -150,6 +150,8 @@ internal sealed partial class SyncEngine
 
         void ISyncSessionEvents.OnExecAbort(ExecAbort abort) => engine.Deliver(this, () => engine.OnPhase4Message(this, abort));
 
+        void ISyncSessionEvents.OnDeskDown(DeskPacket packet) => engine.Deliver(this, () => engine.OnPhase4Message(this, packet));
+
         void ISyncSessionEvents.OnClosed(Exception? error) => engine.Deliver(this, () => engine.OnClosed(this, error));
     }
 }

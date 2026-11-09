@@ -31,6 +31,7 @@ internal sealed partial class BrowserHub(
     BrowserSessionMonitor sessions,
     IHubContext<BrowserHub> hubContext,
     CollaboratorDirectory collaborators,
+    MyriagentHub.Sync.DeskRelays desk,
     ILogger<BrowserHub> log) : Hub
 {
     public override async Task OnConnectedAsync()
@@ -79,10 +80,13 @@ internal sealed partial class BrowserHub(
         }
     }
 
-    public override Task OnDisconnectedAsync(Exception? exception)
+    public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        var connection = connections.Get(Context.ConnectionId);
         connections.Remove(Context.ConnectionId);
-        return Task.CompletedTask;
+        // 遠端桌面（14.16）：這條連線在看的工作階段替它結束（被看的電腦停止擷取、拿掉提示列）
+        if (connection is not null)
+            await desk.BrowserGoneAsync(connection);
     }
 
     /// <summary><c>Cmd {commandId?, envelope?, cmd}</c> → <c>{accepted, commandId?, error?}</c>（web-protocol 第六節第 4 點）</summary>

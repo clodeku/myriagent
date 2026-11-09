@@ -11,7 +11,7 @@ public sealed class DeviceFeatureRulesTests
     [Fact]
     public void 這版認得的功能()
     {
-        DeviceFeatureRules.Known.Should().Equal("conv1", "live1", "live2", "cmd1", "media1", "update1", "peer1", "prov1", "stat1", "tok1", "tok2", "log1", "hand1", "exec1", "sched1", "collab1", "xfer1", "xfer2");
+        DeviceFeatureRules.Known.Should().Equal("conv1", "live1", "live2", "cmd1", "media1", "update1", "peer1", "prov1", "stat1", "tok1", "tok2", "log1", "hand1", "exec1", "sched1", "collab1", "xfer1", "xfer2", "desk1");
         DeviceFeatureRules.Known.Should().AllSatisfy(name => DeviceFeatureRules.IsValidName(name).Should().BeTrue());
     }
 
@@ -120,6 +120,8 @@ public sealed class DeviceFeatureRulesTests
             [DeviceHubMethods.ExecCancel] = DeviceFeatureRules.Exec1,
             [DeviceHubMethods.ExecReply] = DeviceFeatureRules.Exec1,
             [DeviceHubMethods.ExecAbort] = DeviceFeatureRules.Exec1,
+            [DeviceHubMethods.DeskUp] = DeviceFeatureRules.Desk1,
+            [DeviceHubMethods.DeskDown] = DeviceFeatureRules.Desk1,
             [DeviceHubMethods.SchedulesPublish] = DeviceFeatureRules.Sched1,
             [DeviceHubMethods.SchedulesUpdate] = DeviceFeatureRules.Sched1,
             [DeviceHubMethods.CollabCmd] = DeviceFeatureRules.Collab1,

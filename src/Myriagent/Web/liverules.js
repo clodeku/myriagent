@@ -176,6 +176,7 @@ export const PEER_COMMANDS = Object.freeze([
   'accountLoginCode',
   'scheduleAction', 'scheduleAgent',
   'deviceBrowse', 'deviceFetch', 'devicePut', 'deviceTree', 'deviceFetchMany',
+  'deskOpen',
 ]);
 const PEER_COMMAND_SET = new Set(PEER_COMMANDS);
 

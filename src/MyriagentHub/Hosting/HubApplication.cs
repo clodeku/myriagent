@@ -111,6 +111,8 @@ internal static class HubApplication
         // 電腦狀態面板的檔案傳輸（2026-11-09）：只把 deviceBrowse、deviceFetch、devicePut 送給協商出 xfer1 的連線
         builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Xfer1);
         builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Xfer2);
+        // 遠端桌面（sync-protocol 14.16）：deskOpen、DeskUp／DeskDown（Sync/DeskRelays.cs）
+        builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Desk1);
         // 第 5 階段（sync-protocol 第 16 節）：log1、hand1 排在 tok1 之後，各自依開關登記（預設都關）
         builder.Services.AddHubLogs(options);
         builder.Services.AddHubHandoff(options);

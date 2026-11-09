@@ -33,6 +33,9 @@ internal static class CommandRegistration
         // 遠端執行指令（sync-protocol 14.11）：宣告 exec1；remoteExec 照上面的路由簽發，輸出與停止經 ExecRelays 轉送（裝置 hub 的 ExecOutput／ExecCancel）
         services.AddDeviceHubFeature(DeviceFeatureRules.Exec1);
         services.TryAddSingleton<ExecRelays>();
+        // 遠端桌面（sync-protocol 14.16）：deskOpen 照上面的路由簽發，之後的封包經 DeskRelays 轉送（裝置 hub 的 DeskUp、瀏覽器的 desk）；desk1 在 HubApplication 最後宣告
+        services.TryAddSingleton<IDeskBrowserSender, GatewayDeskBrowserSender>();
+        services.TryAddSingleton<DeskRelays>();
         // 結果與輸出（步 7）：裝置 hub 的 CommandResult／CommandOutput 以方法參數取用；100 秒期限的維護迴圈
         services.TryAddSingleton<CommandResults>();
         services.TryAddSingleton<CommandMaintenance>();

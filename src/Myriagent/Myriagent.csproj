@@ -26,6 +26,8 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <!-- 電腦狀態的 CPU 溫度：讀 LibreHardwareMonitor／OpenHardwareMonitor 的 WMI（SystemStatus/CpuTemperatureReader.cs；只在讀溫度時載入） -->
     <PackageReference Include="System.Management" Version="10.0.13" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
   </ItemGroup>
 
   <ItemGroup>

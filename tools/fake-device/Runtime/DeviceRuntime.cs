@@ -74,6 +74,11 @@ internal sealed record DeviceRuntimeOptions
     /// 本機管道照資料根命名，myriagent-remote 可以連）。null＝不接（照舊不宣告 exec1）
     /// </summary>
     public IRemoteExecConfirmer? RemoteExecConfirmer { get; init; }
+
+    /// <summary>
+    /// 遠端桌面（docs/sync-protocol.md 14.16）：給了就接上（宣告 desk1、被看時以它擷取與注入，沒有提示列）。null＝不接（不宣告 desk1）
+    /// </summary>
+    public Func<Myriagent.RemoteDesk.IDeskScreen>? DeskScreen { get; init; }
 }
 
 /// <summary>看不到的主視窗：中樞的指令要有 view；記下最近的訊息（除錯用）、toast 與每個對話最後的輸入區狀態</summary>
@@ -93,12 +98,22 @@ internal sealed class HeadlessView(string id) : IAgentView
 
     public IReadOnlyList<JObject> Recent => recent.ToList();
 
+    /// <summary>收到的遠端桌面訊息（<c>desk</c>；最多 500 則，UI 執行緒）</summary>
+    public List<JObject> DeskMessages { get; } = [];
+
     public void PostToWeb(JObject message)
     {
         if (message.Value<string>("type") == "toast" && message.Value<string>("level") == "error" && message.Value<string>("text") is { } text)
             Toasts.Add(text);
         if (message.Value<string>("type") == "composer" && message.Value<string>("conversationId") is { } conversationId && message["composer"] is JObject composer)
             Composers[conversationId] = composer;
+        if (message.Value<string>("type") == "desk")
+        {
+            DeskMessages.Add(message);
+            if (DeskMessages.Count > 500)
+                DeskMessages.RemoveAt(0);
+        }
+
         recent.Enqueue(message);
         while (recent.Count > 50)
             recent.Dequeue();
@@ -295,6 +310,12 @@ internal sealed partial class DeviceRuntime : IAsyncDisposable
             Hub.AttachRemoteExec(RemoteExec.Runner);
             Sync.AttachRemoteExec(RemoteExec);
             RemoteExec.StartPipe();
+        }
+
+        if (options.DeskScreen is { } deskScreen)
+        {
+            Hub.AttachRemoteDesk(Sync, deskScreen, (_, _) => null);
+            Sync.AttachDesk(Hub.DeskEndpoint);
         }
 
         Accounts.UsagePollPolicy = Sync;
