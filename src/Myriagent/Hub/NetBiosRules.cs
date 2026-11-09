@@ -104,6 +104,47 @@ internal static class NetBiosRules
     }
 
     /// <summary>
+    /// 要掃描的網卡（2026-11-10 實機：CLODE-FEE 的「網路」一直逾時）：Hyper-V、WSL、VirtualBox、VMware、VPN 這類虛擬網卡的網段先被掃、
+    /// 用掉位址的上限，真正的區域網路反而沒掃到。有 IPv4 預設閘道的實體網卡排最前面，其他實體網卡其次，虛擬網卡只在沒有實體網卡時才掃
+    /// </summary>
+    public static IReadOnlyList<(IPAddress Address, int PrefixLength)> SweepAdapters(IEnumerable<DiscoveryAdapter> adapters)
+    {
+        ArgumentNullException.ThrowIfNull(adapters);
+        var list = adapters.Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork).ToList();
+        var physical = list.Where(a => !IsVirtualAdapter(a.Name, a.Description)).ToList();
+        var chosen = physical.Count > 0 ? physical : list;
+        return chosen.OrderByDescending(a => a.HasGateway).Select(a => (a.Address, a.PrefixLength)).ToList();
+    }
+
+    /// <summary>給使用者看的掃描摘要：「掃描了 192.168.1.0/24（254 個位址），找到 0 台」</summary>
+    public static string SweepSummary(IReadOnlyList<(IPAddress Address, int PrefixLength)> adapters, int targets, int found)
+    {
+        var nets = adapters.Where(a => NetworkPathRules.IsLanAddress(a.Address) && a.Address.GetAddressBytes()[0] != 169 && a.PrefixLength is >= 1 and <= 30)
+            .Select(a =>
+            {
+                var prefix = a.PrefixLength < MinSweepPrefix ? 24 : a.PrefixLength;
+                var value = BinaryPrimitives.ReadUInt32BigEndian(a.Address.GetAddressBytes());
+                var network = value & (uint.MaxValue << (32 - prefix));
+                var buffer = new byte[4];
+                BinaryPrimitives.WriteUInt32BigEndian(buffer, network);
+                return new IPAddress(buffer) + "/" + prefix;
+            })
+            .Distinct().ToList();
+        return nets.Count == 0
+            ? "這台沒有區域網路的網卡可以掃描"
+            : "掃描了 " + string.Join("、", nets) + "（" + targets + " 個位址），找到 " + found + " 台";
+    }
+
+    private static readonly string[] VirtualMarkers =
+        ["Hyper-V", "vEthernet", "WSL", "VirtualBox", "VMware", "Virtual Adapter", "Virtual Ethernet", "TAP-", "Tailscale", "ZeroTier", "WireGuard", "OpenVPN",
+            "Npcap", "Loopback", "Bluetooth", "Docker"];
+
+    /// <summary>虛擬網卡（名稱或描述含已知的虛擬化、VPN 字樣）</summary>
+    public static bool IsVirtualAdapter(string? name, string? description)
+        => VirtualMarkers.Any(m => (name ?? string.Empty).Contains(m, StringComparison.OrdinalIgnoreCase)
+                                   || (description ?? string.Empty).Contains(m, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
     /// 要查的位址：這台每個 IPv4 網段（私人網段、不是自動配置 169.254）裡的主機位址，前綴小於 <see cref="MinSweepPrefix"/> 的只查這台所在的 /24；
     /// 不含網路位址、廣播位址與這台自己；合計最多 <see cref="MaxTargets"/> 個
     /// </summary>
@@ -139,3 +180,6 @@ internal static class NetBiosRules
         return result;
     }
 }
+
+/// <summary>一張網卡的 IPv4 位址（找網路上的電腦用）</summary>
+internal sealed record DiscoveryAdapter(IPAddress Address, int PrefixLength, bool HasGateway, string? Name, string? Description);

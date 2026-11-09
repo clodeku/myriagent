@@ -93,31 +93,46 @@ internal sealed class NetworkShares : INetworkShares
         return result;
     }
 
+    /// <summary>自己找（NetBIOS、445 埠、WS-Discovery）最多等多久：整個「網路」這一層要在 <see cref="NetworkPathGuard.DefaultTimeout"/> 之內回</summary>
+    internal static readonly TimeSpan DiscoverBudget = TimeSpan.FromSeconds(9);
+
+    /// <summary>
+    /// 網路上的電腦：已經連過的分享（快）、自己找、舊式的網路芳鄰列舉（有的電腦會卡很久）同時做，各自有時間上限，
+    /// 拿到多少列多少——以前整個超過 12 秒就逾時，找到的也全丟掉（2026-11-10 實機）
+    /// </summary>
     public IReadOnlyList<string> Computers()
     {
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        // 現在的 Windows 舊式列舉多半回 6118（沒有瀏覽清單），主要靠 NetBIOS 與 WS-Discovery 自己找（NetworkDiscovery）
-        try
-        {
-            foreach (var name in NetworkDiscovery.FindAsync(CancellationToken.None).GetAwaiter().GetResult())
-                names.Add(name);
-        }
-        catch (Exception ex) when (ex is SocketException or InvalidOperationException)
-        {
-            Log.Info($"找網路上的電腦失敗：{ex.Message}");
-        }
+        var discover = Task.Run(() => NetworkDiscovery.FindAsync(CancellationToken.None));
+        // 舊式的網路芳鄰列舉（RESOURCE_CONTEXT；有瀏覽清單的網域或工作群組才有）：現在的 Windows 多半回 6118，也可能卡很久
+        var legacy = Task.Run(() => EnumRemoteNames(ResourceContext, serversOnly: true));
 
         // 已經連過的分享（net use、網路磁碟機）的主機
         foreach (var scope in new[] { ResourceConnected, ResourceRemembered })
             foreach (var remote in EnumRemoteNames(scope))
             {
-                if (remote.StartsWith(@"\\", StringComparison.Ordinal) && remote[2..].Split('\\')[0] is { Length: > 0 } host && NetworkPathRules.IsHostName(host))
+                if (remote.StartsWith(@"\\", StringComparison.Ordinal) && remote[2..].Split(Path.DirectorySeparatorChar)[0] is { Length: > 0 } host && NetworkPathRules.IsHostName(host))
                     names.Add(host);
             }
 
-        // 舊式的網路芳鄰列舉（RESOURCE_CONTEXT；有瀏覽清單的網域或工作群組才有）
-        foreach (var remote in EnumRemoteNames(ResourceContext, serversOnly: true))
-            names.Add(remote[2..]);
+        try
+        {
+            if (discover.Wait(DiscoverBudget))
+                names.UnionWith(discover.Result);
+            else
+                Log.Info("找網路上的電腦超過時間：先列出已經找到的");
+        }
+        catch (AggregateException ex)
+        {
+            Log.Info($"找網路上的電腦失敗：{ex.InnerException?.Message}");
+        }
+
+        if (legacy.Wait(TimeSpan.FromMilliseconds(500)))
+        {
+            foreach (var remote in legacy.Result)
+                names.Add(remote[2..]);
+        }
+
         names.RemoveWhere(n => string.Equals(n, Environment.MachineName, StringComparison.OrdinalIgnoreCase));
         return names.ToList();
     }

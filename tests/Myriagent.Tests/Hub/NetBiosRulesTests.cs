@@ -68,6 +68,32 @@ public sealed class NetBiosRulesTests(ITestOutputHelper output)
         NetBiosRules.SweepTargets([(IPAddress.Parse("192.168.1.5"), 24), (IPAddress.Parse("192.168.1.6"), 24)]).Should().HaveCount(252, "同一個網段不重複");
     }
 
+    [Fact]
+    public void 掃描的網卡_有閘道的實體網卡優先_虛擬網卡只在沒有實體網卡時才掃()
+    {
+        var lan = new DiscoveryAdapter(IPAddress.Parse("192.168.1.20"), 24, true, "乙太網路", "Realtek PCIe GbE Family Controller");
+        var wifi = new DiscoveryAdapter(IPAddress.Parse("192.168.50.3"), 24, false, "Wi-Fi", "Intel(R) Wi-Fi 6E AX211");
+        var hyperv = new DiscoveryAdapter(IPAddress.Parse("172.28.16.1"), 20, false, "vEthernet (Default Switch)", "Hyper-V Virtual Ethernet Adapter");
+        var wsl = new DiscoveryAdapter(IPAddress.Parse("172.20.0.1"), 20, false, "vEthernet (WSL)", "Hyper-V Virtual Ethernet Adapter #2");
+        var vpn = new DiscoveryAdapter(IPAddress.Parse("10.8.0.2"), 24, true, "Tailscale", "Tailscale Tunnel");
+
+        NetBiosRules.SweepAdapters([hyperv, wsl, wifi, lan, vpn]).Should().Equal((lan.Address, 24), (wifi.Address, 24));
+        NetBiosRules.SweepAdapters([hyperv, wsl]).Should().HaveCount(2, "沒有實體網卡時照樣掃虛擬的");
+        NetBiosRules.IsVirtualAdapter("vEthernet (Default Switch)", null).Should().BeTrue();
+        NetBiosRules.IsVirtualAdapter("乙太網路", "Intel(R) Ethernet Connection").Should().BeFalse();
+    }
+
+    [Fact]
+    public void 掃描摘要與找不到電腦的說明()
+    {
+        NetBiosRules.SweepSummary([(IPAddress.Parse("192.168.1.20"), 24), (IPAddress.Parse("10.1.2.3"), 8)], 506, 0)
+            .Should().Be("掃描了 192.168.1.0/24、10.1.2.0/24（506 個位址），找到 0 台");
+        NetBiosRules.SweepSummary([(IPAddress.Parse("8.8.8.8"), 24)], 0, 0).Should().Be("這台沒有區域網路的網卡可以掃描");
+        NetworkPathRules.NoComputersMessage("掃描了 192.168.1.0/24（254 個位址），找到 0 台")
+            .Should().StartWith("沒有找到網路上的電腦（掃描了 192.168.1.0/24").And.Contain("IP 位址");
+        NetworkPathRules.NoComputersMessage(null).Should().StartWith("沒有找到網路上的電腦：");
+    }
+
     /// <summary>真的在這台的區域網路找（MYRIAGENT_NET_IT=1 才跑；只送查詢、不連任何分享）</summary>
     [Fact]
     public async Task 真的找區域網路上的電腦()
@@ -76,7 +102,11 @@ public sealed class NetBiosRulesTests(ITestOutputHelper output)
             return;
         var started = DateTime.UtcNow;
         var found = await NetworkDiscovery.FindAsync(CancellationToken.None);
-        output.WriteLine($"{(DateTime.UtcNow - started).TotalMilliseconds:0} ms：" + string.Join("、", found));
+        output.WriteLine($"{(DateTime.UtcNow - started).TotalMilliseconds:0} ms：" + string.Join("、", found) + "；" + NetworkDiscovery.LastSummary);
+        var listed = DateTime.UtcNow;
+        var computers = new NetworkShares().Computers();
+        output.WriteLine($"整個「網路」這一層 {(DateTime.UtcNow - listed).TotalMilliseconds:0} ms：" + string.Join("、", computers));
+        (DateTime.UtcNow - listed).Should().BeLessThan(NetworkPathGuard.DefaultTimeout, "不能讓整個「網路」逾時");
         found.Should().NotContain(n => string.Equals(n, Environment.MachineName, StringComparison.OrdinalIgnoreCase));
     }
 }

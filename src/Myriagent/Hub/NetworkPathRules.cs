@@ -156,6 +156,11 @@ internal static class NetworkPathRules
 
     private static IPAddress Unmap(IPAddress ip) => ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip;
 
+    /// <summary>「網路」這一層沒有找到電腦時的說明：掃描了哪些網段（判斷是不是掃錯網卡），以及直接輸入路徑的提示</summary>
+    public static string NoComputersMessage(string? summary)
+        => "沒有找到網路上的電腦" + (string.IsNullOrWhiteSpace(summary) ? string.Empty : "（" + summary + "）")
+           + "：NAS 或另一個網段的電腦請在路徑列直接輸入 \\\\電腦名稱、\\\\IP 位址 或 \\\\電腦名稱\\分享名稱";
+
     /// <summary>給遠端看的說明</summary>
     public static string Explain(string reason) => reason switch
     {

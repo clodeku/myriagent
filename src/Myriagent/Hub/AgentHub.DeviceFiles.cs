@@ -219,7 +219,7 @@ internal sealed partial class AgentHub
             var list = new JArray(computers.Where(NetworkPathRules.IsHostName)
                 .Select(c => RenderRemoteEntry(new FileEntry(c, NetworkPathRules.NetworkRoot + c, "dir", null, DateTime.MinValue, false), null)));
             return FilesMessage(source, requestId, display, null, list, false,
-                list.Count == 0 ? @"沒有找到網路上的電腦（那台的網路探索可能關著）：請在路徑列輸入 \\電腦名稱 或 \\電腦名稱\分享名稱" : null);
+                list.Count == 0 ? NetworkPathRules.NoComputersMessage(NetworkDiscovery.LastSummary) : null);
         }
 
         if (mapped is null && NetworkPathRules.TryParse(display, out var host, out var share, out _) && share is null)

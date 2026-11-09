@@ -23,10 +23,17 @@ internal static class NetworkDiscovery
     private static readonly IPEndPoint WsdEndpoint = new(IPAddress.Parse("239.255.255.250"), 3702);
 
     /// <summary>找到的電腦（名稱，或取不到名稱時的位址），依名稱排序、不重複</summary>
+    /// <summary>上一次找的時候掃了哪些網段、找到幾台（找不到時給使用者看，判斷是不是掃錯了網卡）</summary>
+    public static string? LastSummary { get; private set; }
+
+    /// <summary>反查 DNS 取名稱最多一共等多久（取不到的用位址）</summary>
+    private static readonly TimeSpan NameBudget = TimeSpan.FromSeconds(2);
+
     public static async Task<IReadOnlyList<string>> FindAsync(CancellationToken ct)
     {
-        var local = LocalIPv4();
-        var own = local.Select(l => l.Address).ToHashSet();
+        var adapters = LocalIPv4();
+        var local = NetBiosRules.SweepAdapters(adapters);
+        var own = adapters.Select(l => l.Address).ToHashSet();
         var targets = NetBiosRules.SweepTargets(local);
         var netbios = SweepNetBiosAsync(targets, ct);
         var wsd = ProbeWsdAsync(local.Select(l => l.Address).ToList(), ct);
@@ -46,13 +53,29 @@ internal static class NetworkDiscovery
 
         // 445 埠開著或 WS-Discovery 找到、NetBIOS 沒問到伺服器名稱的：工作站名稱、反查 DNS，取不到就用位址
         var extra = smb.Result.Concat(wsd.Result).Where(ip => !named.Contains(ip) && !own.Contains(ip)).Distinct().Take(64).ToList();
-        var lookups = extra.Select(async ip =>
+        var lookups = extra.Select(ip => (Ip: ip, Name: LookupAsync(ip))).ToList();
+        try
+        {
+            await Task.WhenAll(lookups.Select(l => l.Name)).WaitAsync(NameBudget, ct).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // 反查太慢：取到的用名稱，其他用位址
+        }
+
+        foreach (var (ip, name) in lookups)
+            names.Add(name.IsCompletedSuccessfully ? name.Result : ip.ToString());
+        names.RemoveWhere(n => string.Equals(n, Environment.MachineName, StringComparison.OrdinalIgnoreCase));
+        LastSummary = NetBiosRules.SweepSummary(local, targets.Count, names.Count);
+        return names.ToList();
+
+        async Task<string> LookupAsync(IPAddress ip)
         {
             if (netbios.Result.TryGetValue(ip, out var status) && status.WorkstationName is { } workstation)
                 return workstation;
             try
             {
-                var entry = await Dns.GetHostEntryAsync(ip.ToString(), ct).WaitAsync(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
+                var entry = await Dns.GetHostEntryAsync(ip.ToString(), ct).WaitAsync(NameBudget, ct).ConfigureAwait(false);
                 var host = entry.HostName.Split('.')[0];
                 return NetworkPathRules.IsHostName(host) && !IPAddress.TryParse(host, out _) ? host : ip.ToString();
             }
@@ -60,27 +83,25 @@ internal static class NetworkDiscovery
             {
                 return ip.ToString();
             }
-        });
-        foreach (var name in await Task.WhenAll(lookups).ConfigureAwait(false))
-            names.Add(name);
-        names.RemoveWhere(n => string.Equals(n, Environment.MachineName, StringComparison.OrdinalIgnoreCase));
-        return names.ToList();
+        }
     }
 
-    /// <summary>這台開著的網卡的 IPv4 位址與前綴（迴路與通道介面不算）</summary>
-    private static List<(IPAddress Address, int PrefixLength)> LocalIPv4()
+    /// <summary>這台開著的網卡的 IPv4 位址、前綴、有沒有預設閘道與名稱（迴路與通道介面不算）</summary>
+    private static List<DiscoveryAdapter> LocalIPv4()
     {
-        var list = new List<(IPAddress, int)>();
+        var list = new List<DiscoveryAdapter>();
         try
         {
             foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
             {
                 if (nic.OperationalStatus != OperationalStatus.Up || nic.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)
                     continue;
-                foreach (var unicast in nic.GetIPProperties().UnicastAddresses)
+                var props = nic.GetIPProperties();
+                var gateway = props.GatewayAddresses.Any(g => g.Address.AddressFamily == AddressFamily.InterNetwork && !g.Address.Equals(IPAddress.Any));
+                foreach (var unicast in props.UnicastAddresses)
                 {
                     if (unicast.Address.AddressFamily == AddressFamily.InterNetwork)
-                        list.Add((unicast.Address, unicast.PrefixLength));
+                        list.Add(new DiscoveryAdapter(unicast.Address, unicast.PrefixLength, gateway, nic.Name, nic.Description));
                 }
             }
         }
@@ -137,13 +158,13 @@ internal static class NetworkDiscovery
     private static readonly TimeSpan SmbConnectTimeout = TimeSpan.FromMilliseconds(700);
 
     /// <summary>
-    /// 試連每個位址的 445 埠（檔案分享；同時最多 128 個、每個最多等 <see cref="SmbConnectTimeout"/>），連得上的就是有檔案分享的電腦——
+    /// 試連每個位址的 445 埠（檔案分享；同時最多 256 個、每個最多等 <see cref="SmbConnectTimeout"/>），連得上的就是有檔案分享的電腦——
     /// NetBIOS 關掉的 NAS 與 Windows 也找得到。只建立 TCP 連線就關，不送任何 SMB 封包（不會送出登入資訊）
     /// </summary>
     private static async Task<List<IPAddress>> SweepSmbAsync(IReadOnlyList<IPAddress> targets, CancellationToken ct)
     {
         var open = new List<IPAddress>();
-        using var gate = new SemaphoreSlim(128);
+        using var gate = new SemaphoreSlim(256);
         var tasks = targets.Select(async ip =>
         {
             await gate.WaitAsync(ct).ConfigureAwait(false);
