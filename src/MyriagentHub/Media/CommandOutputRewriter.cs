@@ -29,7 +29,7 @@ internal sealed class CommandOutputRewriter(SyncWriter writer, IConversationDire
     {
         ArgumentNullException.ThrowIfNull(message);
         // 只有三種檔案指令的輸出要看擁有者（toast、accountLogin 等原樣回同一個物件，不查對話目錄）
-        var fileOutput = message["type"] is JValue { Type: JTokenType.String, Value: CommandOutputRewriteRules.FilesType or CommandOutputRewriteRules.FileRefType or CommandOutputRewriteRules.FileSearchType };
+        var fileOutput = message["type"] is JValue { Type: JTokenType.String, Value: CommandOutputRewriteRules.FilesType or CommandOutputRewriteRules.FileRefType or CommandOutputRewriteRules.FileSearchType or CommandOutputRewriteRules.FileRefsType };
         var owner = conversationId is null || !fileOutput ? null : directory.Find(conversationId);
         var (rewritten, rows) = CommandOutputRewriteRules.Rewrite(deviceId, commandName, conversationId, owner, message, time.GetUtcNow().ToUnixTimeMilliseconds());
         if (rewritten is null)

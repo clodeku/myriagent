@@ -252,6 +252,12 @@ internal sealed partial class CommandRouter(
         if (RemoteCommandCatalog.DeviceTransferCommands.Contains(name) && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.Xfer1))
             return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false,
                 RemoteExecServerRules.TransferTooOldMessage(devices.Get(target)?.Name)), cancellationToken);
+        // 整個資料夾（2026-11-09）：deviceTree、deviceFetchMany 與帶 subfolder 的 devicePut 要 xfer2（舊版的桌面不認得，閘門 5a／5b 會回 invalid）
+        if ((RemoteCommandCatalog.DeviceFolderCommands.Contains(name)
+             || name == RemoteCommandCatalog.DevicePut && mapped[RemoteCommandCatalog.DevicePutSubfolder] is { Type: not JTokenType.Null })
+            && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.Xfer2))
+            return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false,
+                RemoteExecServerRules.FolderTransferTooOldMessage(devices.Get(target)?.Name)), cancellationToken);
         // 遠端執行指令（14.11）：目標要能送輸出、發起的這條連線要能收（兩邊都要協商出 exec1）
         if (name == RemoteCommandCatalog.RemoteExec)
         {

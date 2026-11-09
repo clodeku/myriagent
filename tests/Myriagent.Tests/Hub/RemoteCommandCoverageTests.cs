@@ -49,9 +49,10 @@ public sealed class RemoteCommandCoverageTests
     private static readonly string[] ScheduleHandled = [RemoteCommandCatalog.ScheduleAction, RemoteCommandCatalog.ScheduleAgent];
 
     /// <summary>電腦狀態面板的檔案傳輸（AgentHub.DeviceFiles.cs）：範圍沒有磁碟，瀏覽被守門員拒絕；下載與存檔要和伺服器傳輸，回 unsupported</summary>
-    private static readonly string[] DeviceTransferHandled = [RemoteCommandCatalog.DeviceBrowse, RemoteCommandCatalog.DeviceFetch, RemoteCommandCatalog.DevicePut];
+    private static readonly string[] DeviceTransferHandled = [RemoteCommandCatalog.DeviceBrowse, RemoteCommandCatalog.DeviceFetch, RemoteCommandCatalog.DevicePut,
+        RemoteCommandCatalog.DeviceTree, RemoteCommandCatalog.DeviceFetchMany];
 
-    private static readonly string[] DeviceTransferNeedingTransfer = [RemoteCommandCatalog.DeviceFetch, RemoteCommandCatalog.DevicePut];
+    private static readonly string[] DeviceTransferNeedingTransfer = [RemoteCommandCatalog.DeviceFetch, RemoteCommandCatalog.DevicePut, RemoteCommandCatalog.DeviceFetchMany];
 
     /// <summary>登記在最後：記下交到它手上的指令；退路的指令由它回 done（代替 HandleCommand），其他不接</summary>
     private sealed class FallbackRecorder : IRemoteCommandHandler
@@ -127,7 +128,7 @@ public sealed class RemoteCommandCoverageTests
         outcomes.Keys.Should().BeEquivalentTo(fallback.Concat(Handled).Concat(Files).Concat(AccountHandled).Concat(Unsupported).Concat(ExecHandled).Concat(ScheduleHandled).Concat(DeviceTransferHandled),
             "退路＋處理者＋檔案＋帳戶＋unsupported＋遠端執行指令＋排程頁＝型錄裡電腦執行的全部（契約:647）");
         (fallback.Length, Handled.Length, Files.Length, AccountHandled.Length, Unsupported.Length, ExecHandled.Length, ScheduleHandled.Length, DeviceTransferHandled.Length, outcomes.Count)
-            .Should().Be((10, 10, 5, 6, 1, 1, 2, 3, 38));
+            .Should().Be((10, 10, 5, 6, 1, 1, 2, 5, 40));
         outcomes.Where(p => p.Value is { State: RemoteResultStates.Rejected, Code: RemoteResultCodes.Unsupported, Step: RemoteGateSteps.Handler })
             .Select(p => p.Key).Should().BeEquivalentTo(Unsupported.Concat(FilesNeedingTransfer).Concat(NeedingVoice).Concat(ExecHandled).Concat(ScheduleHandled).Concat(DeviceTransferNeedingTransfer),
                 "回 unsupported 而且 step 是 handler 的恰好是 accountAdd、要傳輸的 2 個、沒掛辨識器的語音訊息、沒接執行者的遠端執行指令、沒掛排程讀取器的排程頁");

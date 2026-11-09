@@ -64,6 +64,7 @@ internal static class RemoteNotifyRules
         "listFiles", "fileSearch", RemoteCommandCatalog.ListFolders,
         // 電腦狀態面板的檔案傳輸（2026-11-09）：瀏覽每換一層送一次、多選下載每個檔送一次，逐一通知會洗版；收檔（devicePut）做完由處理者提示一次
         RemoteCommandCatalog.DeviceBrowse, RemoteCommandCatalog.DeviceFetch, RemoteCommandCatalog.DevicePut,
+        RemoteCommandCatalog.DeviceTree, RemoteCommandCatalog.DeviceFetchMany,
     };
 
     /// <param name="cmd">型錄的指令名稱（<see cref="SilentCommands"/> 不通知）</param>
@@ -145,6 +146,8 @@ internal static class RemoteNotifyRules
         RemoteCommandCatalog.DeviceBrowse => ("瀏覽了這台的資料夾", false),
         RemoteCommandCatalog.DeviceFetch => ("下載了這台的檔案", false),
         RemoteCommandCatalog.DevicePut => ("把檔案傳到這台", false),
+        RemoteCommandCatalog.DeviceTree => ("列出了這台整個資料夾的檔案", false),
+        RemoteCommandCatalog.DeviceFetchMany => ("下載了這台整個資料夾的檔案", false),
         _ => ($"執行了遠端操作 {cmd}", false),
     };
 

@@ -34,6 +34,9 @@ internal static class CommandOutputRewriteRules
 
     public const string FileSearchType = "fileSearch";
 
+    /// <summary>整個資料夾的下載（deviceFetchMany）：每個參照換成 <c>/f/</c> 網址、登記 <c>xfer</c></summary>
+    public const string FileRefsType = "fileRefs";
+
     /// <summary>改寫後（UTF-8、不縮排）的上限：瀏覽器那一頭的訊息上限</summary>
     public const int MaxMessageBytes = 1024 * 1024;
 
@@ -48,6 +51,15 @@ internal static class CommandOutputRewriteRules
     {
         ArgumentNullException.ThrowIfNull(message);
         var type = message["type"] is JValue { Type: JTokenType.String, Value: string t } ? t : null;
+        if (type == FileRefsType)
+        {
+            if (!SyncIds.IsDeviceId(deviceId))
+                return (null, []);
+            var many = (JObject)message.DeepClone();
+            var manyRows = RewriteTransferRefs(many, deviceId, nowMs);
+            return Utf8Length(many) > MaxMessageBytes ? (null, []) : (many, manyRows);
+        }
+
         if (type is not (FilesType or FileRefType or FileSearchType))
             return (message, []);
         if (!SyncIds.IsDeviceId(deviceId) || (conversationId is not null && !IsOwner(conversationId, owner, deviceId)))
@@ -147,6 +159,31 @@ internal static class CommandOutputRewriteRules
         var cap = nowMs + (long)MediaLookupRules.XferLifetime.TotalMilliseconds;
         message["expiresAt"] = message["expiresAt"] is JValue { Type: JTokenType.Integer, Value: long given } && given < cap ? given : cap;
         return [new MediaRefRow(deviceId, mediaRef!, string.Empty, MediaRefPurposes.Transfer, nowMs)];
+    }
+
+    /// <summary>fileRefs：每一項的參照換成 <c>/f/{key}</c>（有 error 或參照不合格的 url 是 null），登記 <c>xfer</c>；expiresAt 最多兩小時</summary>
+    private static List<MediaRefRow> RewriteTransferRefs(JObject message, string deviceId, long nowMs)
+    {
+        var rows = new List<MediaRefRow>();
+        var cap = nowMs + (long)MediaLookupRules.XferLifetime.TotalMilliseconds;
+        message["expiresAt"] = message["expiresAt"] is JValue { Type: JTokenType.Integer, Value: long given } && given < cap ? given : cap;
+        if (message["refs"] is not JArray refs)
+            return rows;
+        foreach (var item in refs.OfType<JObject>())
+        {
+            var mediaRef = item["ref"] is JValue { Type: JTokenType.String, Value: string r } ? r : null;
+            item.Remove("ref");
+            if (!IsNullish(item["error"]) || !ConversationEventRules.IsMediaRef(mediaRef))
+            {
+                item["url"] = JValue.CreateNull();
+                continue;
+            }
+
+            item["url"] = "/f/" + MediaKeyRules.Format(deviceId, mediaRef!);
+            rows.Add(new MediaRefRow(deviceId, mediaRef!, string.Empty, MediaRefPurposes.Transfer, nowMs));
+        }
+
+        return rows;
     }
 
     /// <summary>檔案版本（縮圖網址的 <c>v</c>）：1～19 位數字，數字或字串都收；其他回 null</summary>

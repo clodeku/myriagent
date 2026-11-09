@@ -1,10 +1,14 @@
 // 電腦狀態面板的檔案傳輸（Web/devicefiles.js；2026-11-09）的探針情境：monitor-probe.mjs 的 runMonitor 最後呼叫（node probe.mjs --monitor）。
 // 右鍵點 LAB 的卡片開選單 → 瀏覽（deviceBrowse 帶 commandId，假宿主回虛擬根、再回資料夾）→ Shift 連選三個檔 → 下載（deviceFetch → fileRef → peerXferSave → xferProgress）
 // → 上傳（選兩個檔 → peerUpload {deviceId} → peerUpload 的結果 → devicePut → commandResult done → deviceStats 的 xfers 存好）。這台、Hub 主機沒有選單，離線的停用
+// → 整個資料夾的下載（Ctrl 選資料夾 → deviceTree → fileTree → deviceFetchMany → fileRefs → peerXferSave 帶 subfolder）與上傳（webkitdirectory → devicePut 帶 subfolder）
 import { syncStatus } from './sync-settings.mjs';
 
 const DF_FOLDER = 'D:\\專案\\交付';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 async function until(fn, ms = 4000, step = 40) {
   const t0 = Date.now();
@@ -61,6 +65,15 @@ export async function runDeviceFiles(ctx, vp, m) {
           host.send({ type: 'peerUploadProgress', uploadId: c.uploadId, sent: 50, total: 100 });
           const file = (c.__files || [])[0] || { name: 'x', size: 1 };
           setTimeout(() => host.send({ type: 'peerUpload', uploadId: c.uploadId, status: 201, json: JSON.stringify({ uploadId: c.uploadId, sha256: 'a'.repeat(64), size: file.size }) }), 150);
+        } else if (c.cmd === 'deviceTree') {
+          done();
+          host.send({ type: 'fileTree', requestId: c.requestId, conversationId: null, root: c.path, name: c.path.split('\\').pop(),
+            files: [{ path: 'v1.docx', size: 100 }, { path: '圖\\a.png', size: 200 }], dirs: ['圖'], truncated: false, error: null });
+        } else if (c.cmd === 'deviceFetchMany') {
+          done();
+          const rels = JSON.parse(c.pathsJson);
+          host.send({ type: 'fileRefs', requestId: c.requestId, conversationId: null, root: c.root, expiresAt: Date.now() + 7200_000,
+            refs: rels.map((r, i) => ({ path: r, name: r.split('\\').pop(), size: 100 * (i + 1), url: '/f/' + m.LAB + '-01J9QZ3K8M5R7T2V4W6X8Y0AB' + i })) });
         } else if (c.cmd === 'devicePut') {
           done();
           host.putIds = host.putIds.concat(c.uploads.map((u) => ({ id: u.uploadId, name: u.name, size: u.size })));
@@ -141,7 +154,7 @@ export async function runDeviceFiles(ctx, vp, m) {
   check('devfilesDownloadDone', !!downDone, await stateTexts('down'));
 
   // 上傳兩個檔到目前的資料夾
-  await page.setInputFiles('.df-dlg input[type=file]', [
+  await page.setInputFiles('.df-dlg input[type=file]:not([webkitdirectory])', [
     { name: '合約.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(300) },
     { name: '說明.txt', mimeType: 'text/plain', buffer: Buffer.from('hi') },
   ]);
@@ -152,6 +165,49 @@ export async function runDeviceFiles(ctx, vp, m) {
   const upDone = await until(async () => { const t = await stateTexts('up'); return t.length === 2 && t.every((x) => /^已存/.test(x)) ? t : null; }, 5000);
   check('devfilesUploadSaved', !!upDone && upDone.includes('已存成「合約 (2).pdf」'), { upDone, now: await stateTexts('up') });
   await shot(page, 'devfiles-transfers-dark');
+
+  // 整個資料夾的下載：Ctrl 點「舊版」選取（直接點是進入），下載 → deviceTree → deviceFetchMany → 各檔 peerXferSave 帶 subfolder
+  await rows.nth(0).click({ modifiers: ['Control'] });
+  const fsel = await page.evaluate(() => ({
+    on: Array.from(document.querySelectorAll('.df-dlg .df-row.df-on .df-name')).map((n) => n.textContent),
+    info: document.querySelector('.df-dlg .df-sel').textContent,
+    btn: document.querySelector('.df-dlg .dlg-foot .btn.primary').textContent,
+  }));
+  check('devfilesFolderSelect', fsel.on.join('|') === '舊版' && /已選 1 個資料夾/.test(fsel.info) && fsel.btn.includes('下載 1 個資料夾'), fsel);
+  await page.click('.df-dlg .dlg-foot .btn.primary');
+  const tree = await until(() => host.last('deviceTree'), 2000);
+  const folderSaves = await until(() => { const x = host.received.filter((c) => c.cmd === 'peerXferSave' && c.subfolder); return x.length === 2 ? x : null; }, 3000);
+  const many = host.last('deviceFetchMany');
+  check('devfilesFolderDownloadFlow', !!tree && tree.path === DF_FOLDER + '\\舊版' && /^[0-9A-Z]{26}$/.test(tree.commandId || '') && !!many
+    && JSON.parse(many.pathsJson).join('|') === 'v1.docx|圖\\a.png' && !!folderSaves
+    && folderSaves.map((c) => c.subfolder + '/' + c.name).sort().join('|') === '舊版/v1.docx|舊版\\圖/a.png',
+    { tree, many, folderSaves });
+  const folderRowText = (dir) => page.evaluate((d) => {
+    const row = document.querySelector('.df-dlg .df-x[data-kind="folder"][data-dir="' + d + '"]');
+    return row ? row.querySelector('.df-x-name').textContent + '：' + row.querySelector('.df-x-state').textContent : null;
+  }, dir);
+  const fdone = await until(async () => { const t = await folderRowText('down'); return t && t.includes('完成 2 / 2 個檔') ? t : null; }, 3000);
+  check('devfilesFolderDownloadDone', !!fdone && fdone.startsWith('舊版：') && (await stateTexts('down')).length === 4, { fdone, rows: await stateTexts('down') });
+
+  // 整個資料夾的上傳：選一個這台的資料夾（webkitdirectory），每個檔帶 subfolder（最上層的資料夾名稱＋相對資料夾）
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devfiles-'));
+  const upRoot = path.join(tmp, '照片');
+  fs.mkdirSync(path.join(upRoot, '2024'), { recursive: true });
+  fs.writeFileSync(path.join(upRoot, 'a.jpg'), 'aaaa');
+  fs.writeFileSync(path.join(upRoot, '2024', 'b.jpg'), 'bb');
+  const putsBefore = host.received.filter((c) => c.cmd === 'devicePut').length;
+  await page.click('.df-dlg .dlg-foot .btn:not(.primary):not(.df-dest)');
+  const upMenu = await until(menuItems, 1500);
+  await page.keyboard.press('Escape');
+  await page.setInputFiles('.df-dlg input[webkitdirectory]', upRoot);
+  const folderPuts = await until(() => { const x = host.received.filter((c) => c.cmd === 'devicePut').slice(putsBefore); return x.length === 2 ? x : null; }, 5000);
+  check('devfilesFolderUploadFlow', !!upMenu && upMenu.map((x) => x.label).join('|') === '上傳檔案…|上傳整個資料夾…' && !!folderPuts
+    && folderPuts.map((c) => c.subfolder + '/' + c.uploads[0].name).sort().join('|') === '照片/a.jpg|照片\\2024/b.jpg' && folderPuts.every((c) => c.folder === DF_FOLDER),
+    { upMenu, folderPuts });
+  const fup = await until(async () => { const t = await folderRowText('up'); return t && t.includes('完成 2 / 2 個檔') ? t : null; }, 5000);
+  check('devfilesFolderUploadDone', !!fup && fup.startsWith('照片：'), { fup, now: await folderRowText('up') });
+  await shot(page, 'devfiles-folders-dark');
+  fs.rmSync(tmp, { recursive: true, force: true });
 
   // 網路芳鄰：「網路」找不到電腦時也切到那一層（路徑列是「網路」、清單是空的、錯誤寫在下方），不能留在上一層
   await page.fill('.df-dlg .df-path', '\\\\');

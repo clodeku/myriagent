@@ -88,6 +88,9 @@ internal static class PeerRules
 internal static class RemoteExecServerRules
 {
     /// <summary>目標電腦選到的連線沒有協商出 <c>xfer1</c>（舊版桌面）時的說明（電腦狀態面板的檔案傳輸）</summary>
+    public static string FolderTransferTooOldMessage(string? deviceName)
+        => "「" + (string.IsNullOrWhiteSpace(deviceName) ? PeerRules.UnnamedDevice : deviceName.Trim()) + "」的 Clode Myriagent 版本太舊，還不能傳整個資料夾；請先更新那台";
+
     public static string TransferTooOldMessage(string? deviceName)
         => "「" + (string.IsNullOrWhiteSpace(deviceName) ? PeerRules.UnnamedDevice : deviceName.Trim()) + "」的 Clode Myriagent 版本太舊，還不能傳檔案；請先更新那台";
 

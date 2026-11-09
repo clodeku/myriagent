@@ -18,6 +18,23 @@ internal sealed partial class AgentHub
 
     private readonly DeviceXferBoard deviceXfers = new();
 
+    /// <summary>收檔提示的合併（UI 執行緒）</summary>
+    private PutToast putToast = new();
+
+    private sealed class PutToast
+    {
+        public int Saved { get; set; }
+
+        public int Failed { get; set; }
+
+        public string Issuer { get; set; } = string.Empty;
+
+        /// <summary>存放的資料夾（都同一個時才寫出來；不同的是空字串）</summary>
+        public string? Directory { get; set; }
+
+        public int Version { get; set; }
+    }
+
     /// <summary>測試接縫：app 是不是以系統管理員執行</summary>
     internal Func<bool>? DeviceFilesElevatedForTest { get; set; }
 
@@ -91,6 +108,18 @@ internal sealed partial class AgentHub
                     }
 
                     _ = hub.DeviceFetchAsync(context, snapshot, requestId, command.Value<string>("path") ?? string.Empty);
+                    break;
+                case RemoteCommandCatalog.DeviceTree:
+                    _ = hub.DeviceTreeAsync(context, snapshot, requestId, command.Value<string>("path") ?? string.Empty);
+                    break;
+                case RemoteCommandCatalog.DeviceFetchMany:
+                    if (snapshot.Transfer is not { CanTransfer: true })
+                    {
+                        context.Reject(RemoteResultCodes.Unsupported, DeviceTransferRules.NoTransferMessage, RemoteGateSteps.Handler);
+                        break;
+                    }
+
+                    _ = hub.DeviceFetchManyAsync(context, snapshot, requestId, command.Value<string>("root") ?? string.Empty, command.Value<string>("pathsJson") ?? "[]");
                     break;
                 default:
                     hub.StartDevicePut(context, snapshot, command);
@@ -325,6 +354,234 @@ internal sealed partial class AgentHub
         ["error"] = RemoteListRules.FetchRefused,
     };
 
+    // ───────────────────────────── deviceTree／deviceFetchMany（整個資料夾） ─────────────────────────────
+
+    private async Task DeviceTreeAsync(RemoteViewContext context, DeviceFilesSnapshot s, string? requestId, string path)
+    {
+        RemoteFilesResult result;
+        try
+        {
+            result = await Task.Run(() => DeviceTreeCoreAsync(s, requestId, path, CancellationToken.None));
+        }
+        catch (Exception ex)
+        {
+            FailRemoteFiles(context, RemoteCommandCatalog.DeviceTree, ex);
+            return;
+        }
+
+        FinishRemoteFiles(context, result);
+    }
+
+    /// <summary>
+    /// 背景：驗資料夾（本機照守門員、網路照網路的守門），再逐層列底下所有的檔（相對路徑與大小）與資料夾：不進重新解析點與禁止清單的資料夾、
+    /// 不列憑證類的檔名；最多 <see cref="DeviceFolderRules.MaxTreeFiles"/> 個檔、<see cref="DeviceFolderRules.TreeBudget"/>，超過標 truncated
+    /// </summary>
+    private static async Task<RemoteFilesResult> DeviceTreeCoreAsync(DeviceFilesSnapshot s, string? requestId, string path, CancellationToken ct)
+    {
+        JObject Tree(string? root, JArray files, JArray dirs, bool truncated, string? error) => new()
+        {
+            ["type"] = "fileTree",
+            ["requestId"] = TextOrNull(requestId),
+            ["conversationId"] = JValue.CreateNull(),
+            ["root"] = TextOrNull(root),
+            ["name"] = TextOrNull(root is null ? null : DeviceFolderRules.FolderName(root)),
+            ["files"] = files,
+            ["dirs"] = dirs,
+            ["truncated"] = truncated,
+            ["error"] = TextOrNull(error),
+        };
+
+        string root;
+        Func<string, bool> forbiddenDirectory;
+        var network = s.Network.IsNetworkPath(path);
+        if (network)
+        {
+            var (directory, reason) = await s.Network.CheckDirectoryAsync(path, ct).ConfigureAwait(false);
+            if (directory is null)
+                return RemoteFilesResult.Send(Tree(null, [], [], false, NetworkPathRules.Explain(reason ?? NetworkPathReasons.NotFound)));
+            root = directory;
+            forbiddenDirectory = _ => false;
+        }
+        else
+        {
+            var scope = await DeviceTransferScope.BuildAsync(s.Folders, s.Drives, s.Guard, ct).ConfigureAwait(false);
+            var check = await s.Guard.CheckDirectoryAsync(path, scope, ct).ConfigureAwait(false);
+            if (check.Directory is not { } directory)
+            {
+                if (RemoteListRules.RefusesPath(check.Reason ?? RemoteFileGuardReasons.NotFound))
+                    return DeviceRefusedPath;
+                return RemoteFilesResult.Send(Tree(null, [], [], false, "這個資料夾不存在或讀不到"));
+            }
+
+            root = directory;
+            var kind = RemoteFileGuard.QueryDriveKind(Path.GetPathRoot(directory) ?? directory);
+            forbiddenDirectory = d => RemoteFolderRules.IsForbidden(d, kind, scope.Folders);
+        }
+
+        var files = new JArray();
+        var dirs = new JArray();
+        var truncated = false;
+        var deadline = Environment.TickCount64 + (long)DeviceFolderRules.TreeBudget.TotalMilliseconds;
+        var walked = await Task.Run(() =>
+        {
+            var queue = new Queue<string>();
+            queue.Enqueue(root);
+            var options = new EnumerationOptions { IgnoreInaccessible = true, RecurseSubdirectories = false, AttributesToSkip = 0 };
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                IEnumerable<FileSystemInfo> items;
+                try
+                {
+                    items = new DirectoryInfo(current).EnumerateFileSystemInfos("*", options).ToList();
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+                {
+                    continue;
+                }
+
+                foreach (var item in items.OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (Environment.TickCount64 > deadline || files.Count >= DeviceFolderRules.MaxTreeFiles || dirs.Count >= DeviceFolderRules.MaxTreeDirs)
+                    {
+                        truncated = true;
+                        return true;
+                    }
+
+                    if ((item.Attributes & FileAttributes.ReparsePoint) != 0 && (network || !RemoteFileGuard.IsAllowedReparsePoint(item.FullName)))
+                        continue;
+                    if (DeviceFolderRules.RelativeTo(root, item.FullName) is not { } relative)
+                        continue;
+                    if ((item.Attributes & FileAttributes.Directory) != 0)
+                    {
+                        if (forbiddenDirectory(item.FullName))
+                            continue;
+                        dirs.Add(relative);
+                        queue.Enqueue(item.FullName);
+                    }
+                    else if (!RemoteFileGuardRules.IsForbiddenFileName(item.FullName))
+                    {
+                        files.Add(new JObject { ["path"] = relative, ["size"] = (item as FileInfo)?.Length ?? 0 });
+                    }
+                }
+            }
+
+            return true;
+        }, ct).WaitAsync(DeviceFolderRules.TreeBudget + TimeSpan.FromSeconds(4), ct).ConfigureAwait(false);
+        if (!walked)
+            truncated = true;
+        var message = Tree(root, files, dirs, truncated, null);
+        // 太大放不進一則輸出：從後面拿掉檔案（標 truncated）
+        while (System.Text.Encoding.UTF8.GetByteCount(message.ToString(Newtonsoft.Json.Formatting.None)) > RemoteListRules.MaxOutputBytes && files.Count > 0)
+        {
+            files.RemoveAt(files.Count - 1);
+            message["truncated"] = true;
+        }
+
+        return RemoteFilesResult.Send(message);
+    }
+
+    private async Task DeviceFetchManyAsync(RemoteViewContext context, DeviceFilesSnapshot s, string? requestId, string root, string pathsJson)
+    {
+        var now = RemoteFilesTime.GetUtcNow().ToUnixTimeMilliseconds();
+        RemoteFilesResult result;
+        try
+        {
+            result = await Task.Run(() => DeviceFetchManyCoreAsync(s, requestId, root, pathsJson, now, CancellationToken.None));
+        }
+        catch (Exception ex)
+        {
+            FailRemoteFiles(context, RemoteCommandCatalog.DeviceFetchMany, ex);
+            return;
+        }
+
+        FinishRemoteFiles(context, result);
+    }
+
+    /// <summary>
+    /// 背景：<paramref name="root"/> 底下的多個相對路徑（JSON 陣列字串，最多 <see cref="DeviceFolderRules.MaxFetchMany"/> 個），逐一照單檔下載的守門開檔，
+    /// 開得了的一次發 <c>@xfer</c> 參照；開不了的那一項帶 error。輸出一則 <c>fileRefs</c>
+    /// </summary>
+    private static async Task<RemoteFilesResult> DeviceFetchManyCoreAsync(DeviceFilesSnapshot s, string? requestId, string root, string pathsJson, long nowMs, CancellationToken ct)
+    {
+        List<string> relatives;
+        try
+        {
+            relatives = JArray.Parse(pathsJson).Select(t => t is JValue { Type: JTokenType.String, Value: string v } ? v : string.Empty).ToList();
+        }
+        catch (Newtonsoft.Json.JsonException)
+        {
+            return new RemoteFilesResult(RemoteResultCodes.Invalid, "檔案清單的格式不正確", null);
+        }
+
+        if (relatives.Count is 0 or > DeviceFolderRules.MaxFetchMany)
+            return new RemoteFilesResult(RemoteResultCodes.Invalid, $"一次要 1～{DeviceFolderRules.MaxFetchMany} 個檔", null);
+        var network = s.Network.IsNetworkPath(root);
+        var scope = network ? null : await DeviceTransferScope.BuildAsync(s.Folders, s.Drives, s.Guard, ct).ConfigureAwait(false);
+        var items = new List<(string Relative, string? Final, long Size, string? Error)>();
+        foreach (var raw in relatives)
+        {
+            if (DeviceFolderRules.CheckRelative(raw) is not { } relative)
+            {
+                items.Add((raw.Length == 0 ? "?" : raw, null, 0, RemoteListRules.FetchRefused));
+                continue;
+            }
+
+            var full = Path.Combine(root, relative);
+            GuardedFile? file;
+            if (network)
+                (file, _) = await s.Network.OpenAsync(full, ct).ConfigureAwait(false);
+            else
+                file = (await s.Guard.OpenAsync(full, RemoteFilePurpose.File, scope!, long.MaxValue, ct).ConfigureAwait(false)).File;
+            if (file is null)
+            {
+                items.Add((relative, null, 0, RemoteListRules.FetchRefused));
+                continue;
+            }
+
+            using (file)
+                items.Add((relative, file.FinalPath, file.Length, null));
+        }
+
+        var finals = items.Where(i => i.Final is not null).Select(i => i.Final!).ToList();
+        IReadOnlyList<string> refs = [];
+        if (finals.Count > 0)
+        {
+            try
+            {
+                refs = await s.Transfer!.RegisterRefsAsync(string.Empty, MediaServerRules.TransferItemId, finals, ct).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Log.Warn($"deviceFetchMany 的參照寫不進去：{ex.Message}");
+                return new RemoteFilesResult(RemoteResultCodes.Unsupported, DeviceTransferRules.NoTransferMessage, null);
+            }
+        }
+
+        var array = new JArray();
+        var next = 0;
+        foreach (var (relative, final, size, error) in items)
+        {
+            if (final is null)
+            {
+                array.Add(new JObject { ["path"] = relative, ["error"] = error });
+                continue;
+            }
+
+            array.Add(new JObject { ["path"] = relative, ["name"] = Path.GetFileName(final), ["size"] = size, ["ref"] = refs[next++] });
+        }
+
+        return RemoteFilesResult.Send(new JObject
+        {
+            ["type"] = "fileRefs",
+            ["requestId"] = TextOrNull(requestId),
+            ["conversationId"] = JValue.CreateNull(),
+            ["root"] = root,
+            ["expiresAt"] = nowMs + (long)LooseMediaRefRules.XferLifetime.TotalMilliseconds,
+            ["refs"] = array,
+        });
+    }
+
     // ───────────────────────────── devicePut ─────────────────────────────
 
     /// <summary>UI 執行緒：檢查上傳的形狀與名額，背景驗資料夾與磁碟空間，通過才接下（done）、之後在背景依序下載</summary>
@@ -332,6 +589,13 @@ internal sealed partial class AgentHub
     {
         var uploads = ParseRemoteUploads(command["uploads"] as JArray);
         var folder = command.Value<string>("folder") ?? string.Empty;
+        var subfolder = DeviceFolderRules.CleanSubfolder(command[RemoteCommandCatalog.DevicePutSubfolder] is JValue { Type: JTokenType.String, Value: string sub } ? sub : null);
+        if (subfolder is null)
+        {
+            context.Reject(RemoteResultCodes.Invalid, "子資料夾的路徑不合格", RemoteGateSteps.Handler);
+            return;
+        }
+
         if (disposed)
         {
             context.Reject(RemoteResultCodes.Busy, "電腦的程式正在關閉", RemoteGateSteps.Handler);
@@ -359,15 +623,16 @@ internal sealed partial class AgentHub
             return;
         }
 
-        _ = DevicePutAsync(context, s, folder, uploads, transfer);
+        _ = DevicePutAsync(context, s, folder, subfolder, uploads, transfer);
     }
 
-    private async Task DevicePutAsync(RemoteViewContext context, DeviceFilesSnapshot s, string folder, IReadOnlyList<RemoteUpload> uploads, IRemoteFileTransfer transfer)
+    private async Task DevicePutAsync(RemoteViewContext context, DeviceFilesSnapshot s, string folder, string subfolder, IReadOnlyList<RemoteUpload> uploads,
+        IRemoteFileTransfer transfer)
     {
         (string? Directory, string? Code, string? Message) check;
         try
         {
-            check = await Task.Run(() => CheckPutFolderAsync(s, folder, uploads.Sum(u => u.Size), CancellationToken.None));
+            check = await Task.Run(() => CheckPutFolderAsync(s, folder, subfolder, uploads.Sum(u => u.Size), CancellationToken.None));
         }
         catch (Exception ex)
         {
@@ -395,8 +660,50 @@ internal sealed partial class AgentHub
         _ = Task.Run(() => ReceiveDevicePutAsync(directory, uploads, transfer, issuer));
     }
 
-    /// <summary>背景：資料夾要在範圍裡、不在禁止清單、存在；所在磁碟的可用空間要 ≥ 合計＋1 GB</summary>
-    private static async Task<(string? Directory, string? Code, string? Message)> CheckPutFolderAsync(DeviceFilesSnapshot s, string folder, long total, CancellationToken ct)
+    /// <summary>
+    /// 背景：資料夾要在範圍裡、不在禁止清單、存在；所在磁碟的可用空間要 ≥ 合計＋1 GB。有子資料夾（整個資料夾的上傳）時在它底下建好、再驗一次
+    /// （建之前先以禁止清單擋：子資料夾名稱可能是 .ssh 這類禁止的資料夾）
+    /// </summary>
+    private static async Task<(string? Directory, string? Code, string? Message)> CheckPutFolderAsync(DeviceFilesSnapshot s, string folder, string subfolder, long total,
+        CancellationToken ct)
+    {
+        var (baseDirectory, code, message) = await CheckPutBaseAsync(s, folder, total, ct).ConfigureAwait(false);
+        if (baseDirectory is null || subfolder.Length == 0)
+            return (baseDirectory, code, message);
+        var target = Path.Combine(baseDirectory, subfolder);
+        if (s.Network.IsNetworkPath(baseDirectory))
+        {
+            var created = await s.Network.RunAsync(() => TryCreateDirectory(target), ct).ConfigureAwait(false);
+            if (created != true)
+                return (null, RemoteResultCodes.Conflict, "建不了子資料夾（網路資料夾沒有寫入權限或逾時）");
+            var (networkTarget, reason) = await s.Network.CheckDirectoryAsync(target, ct).ConfigureAwait(false);
+            return networkTarget is null ? (null, RemoteResultCodes.Policy, NetworkPathRules.Explain(reason ?? NetworkPathReasons.NotFound)) : (networkTarget, null, null);
+        }
+
+        var scope = await DeviceTransferScope.BuildAsync(s.Folders, s.Drives, s.Guard, ct).ConfigureAwait(false);
+        if (RemoteFolderRules.IsForbidden(target, RemoteFileGuard.QueryDriveKind(Path.GetPathRoot(target) ?? target), scope.Folders))
+            return (null, RemoteResultCodes.Policy, DeviceTransferRules.RefusedPathMessage);
+        if (!TryCreateDirectory(target))
+            return (null, RemoteResultCodes.Conflict, "建不了子資料夾（沒有寫入權限）");
+        var check = await s.Guard.CheckDirectoryAsync(target, scope, ct).ConfigureAwait(false);
+        return check.Directory is { } directory ? (directory, null, null) : (null, RemoteResultCodes.Policy, DeviceTransferRules.RefusedPathMessage);
+    }
+
+    private static bool TryCreateDirectory(string path)
+    {
+        try
+        {
+            Directory.CreateDirectory(path);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            Log.Info($"devicePut 建不了子資料夾：{ex.Message}");
+            return false;
+        }
+    }
+
+    private static async Task<(string? Directory, string? Code, string? Message)> CheckPutBaseAsync(DeviceFilesSnapshot s, string folder, long total, CancellationToken ct)
     {
         if (s.Network.IsNetworkPath(folder))
         {
@@ -463,10 +770,23 @@ internal sealed partial class AgentHub
         {
             if (disposed)
                 return;
-            var text = saved.Count == 0
-                ? $"{issuer} 傳來的 {uploads.Count} 個檔案沒有收成功"
-                : $"收到 {issuer} 傳來的 {saved.Count} 個檔案，存在「{directory}」" + (failed > 0 ? $"（另有 {failed} 個失敗）" : string.Empty);
-            PostToAll(PeerFileRules.Toast(text, saved.Count == 0 ? "error" : "info"));
+            // 整個資料夾的上傳一個檔送一次 devicePut：4 秒內的併成一則提示
+            putToast.Saved += saved.Count;
+            putToast.Failed += failed;
+            putToast.Issuer = issuer;
+            putToast.Directory = putToast.Directory is null || string.Equals(putToast.Directory, directory, StringComparison.OrdinalIgnoreCase) ? directory : string.Empty;
+            var version = ++putToast.Version;
+            _ = Task.Delay(TimeSpan.FromSeconds(4)).ContinueWith(_ => host.BeginInvoke(() =>
+            {
+                if (disposed || version != putToast.Version)
+                    return;
+                var (ok, bad, who, where) = (putToast.Saved, putToast.Failed, putToast.Issuer, putToast.Directory);
+                putToast = new PutToast();
+                var text = ok == 0
+                    ? $"{who} 傳來的 {bad} 個檔案沒有收成功"
+                    : $"收到 {who} 傳來的 {ok} 個檔案" + (string.IsNullOrEmpty(where) ? string.Empty : $"，存在「{where}」") + (bad > 0 ? $"（另有 {bad} 個失敗）" : string.Empty);
+                PostToAll(PeerFileRules.Toast(text, ok == 0 ? "error" : "info"));
+            }), TaskScheduler.Default);
         });
     }
 

@@ -126,7 +126,7 @@ internal sealed partial class AgentHub
             peerPending.Remove(commandId);
     }
 
-    /// <summary><c>files</c> 每一項的 <c>url</c>、<c>thumbUrl</c> 與 <c>fileRef</c> 的 <c>url</c></summary>
+    /// <summary><c>files</c> 每一項的 <c>url</c>、<c>thumbUrl</c>，<c>fileRef</c> 的 <c>url</c> 與 <c>fileRefs</c> 每一項的 <c>url</c></summary>
     private void AllowPeerReplyUrls(JObject message)
     {
         switch (message.Value<string>("type"))
@@ -140,6 +140,10 @@ internal sealed partial class AgentHub
                 break;
             case "fileRef":
                 ReplicaMediaUrls.AllowRelativeUrl(message.Value<string>("url"));
+                break;
+            case "fileRefs" when message["refs"] is JArray refs:
+                foreach (var r in refs.OfType<JObject>())
+                    ReplicaMediaUrls.AllowRelativeUrl(r.Value<string>("url"));
                 break;
         }
     }

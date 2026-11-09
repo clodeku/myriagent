@@ -175,7 +175,7 @@ export const PEER_COMMANDS = Object.freeze([
   'accountAdd', 'accountLogin', 'accountLoginCancel', 'accountLogout', 'accountRemove', 'accountRefresh', 'cliCheck', 'cliInstall', 'cliUpdate', 'accountLoginDevice',
   'accountLoginCode',
   'scheduleAction', 'scheduleAgent',
-  'deviceBrowse', 'deviceFetch', 'devicePut',
+  'deviceBrowse', 'deviceFetch', 'devicePut', 'deviceTree', 'deviceFetchMany',
 ]);
 const PEER_COMMAND_SET = new Set(PEER_COMMANDS);
 

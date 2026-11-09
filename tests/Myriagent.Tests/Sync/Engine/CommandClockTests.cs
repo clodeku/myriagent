@@ -96,7 +96,7 @@ public sealed class CommandClockTests
         await h.AdvanceAsync(1);
 
         (await h.StateAsync()).Should().Be(SyncEngineState.Live);
-        h.Server.Hellos.Last().Features.Should().Equal(DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Collab1, DeviceFeatureRules.Xfer1);
+        h.Server.Hellos.Last().Features.Should().Equal(DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Collab1, DeviceFeatureRules.Xfer1, DeviceFeatureRules.Xfer2);
         port.Reports.Should().Equal(false, true);
         prunes.Should().ContainSingle("上次沒修剪成功：下一次 Hello 再做");
     }

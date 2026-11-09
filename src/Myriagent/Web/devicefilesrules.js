@@ -100,17 +100,17 @@ export function sortEntries(entries) {
 }
 
 /**
- * 點選一列（清單的索引）之後的選取：plain＝只選這一列；toggle（Ctrl）＝加入或拿掉；range（Shift）＝從錨點到這一列。
- * 只有檔案可以選（資料夾點了是進入）。回 { selected: Set<path>, anchor }
+ * 點選一列（清單的索引）之後的選取：plain＝只選這一列；toggle（Ctrl、勾選框）＝加入或拿掉；range（Shift）＝從錨點到這一列。
+ * 資料夾也可以選（整個資料夾的傳輸，2026-11-09）：資料夾直接點是進入（畫面處理、不經這裡），Ctrl、Shift 與勾選框才選。回 { selected: Set<path>, anchor }
  */
 export function selectAt(entries, selected, anchor, index, mode) {
   const list = Array.isArray(entries) ? entries : [];
   const target = list[index];
   const next = new Set(selected instanceof Set ? selected : []);
-  if (!target || target.kind === 'dir') return { selected: next, anchor };
+  if (!target || (target.kind === 'dir' && mode === 'plain')) return { selected: next, anchor };
   if (mode === 'range' && typeof anchor === 'number' && list[anchor]) {
     const [a, b] = anchor < index ? [anchor, index] : [index, anchor];
-    for (let i = a; i <= b; i++) if (list[i] && list[i].kind !== 'dir') next.add(list[i].path);
+    for (let i = a; i <= b; i++) if (list[i]) next.add(list[i].path);
     return { selected: next, anchor };
   }
   if (mode === 'toggle') {
@@ -120,9 +120,9 @@ export function selectAt(entries, selected, anchor, index, mode) {
   return { selected: new Set([target.path]), anchor: index };
 }
 
-/** 全選（只有檔案）；已經全選了就全部取消 */
+/** 全選（檔案與資料夾）；已經全選了就全部取消 */
 export function toggleAll(entries, selected) {
-  const files = (Array.isArray(entries) ? entries : []).filter((e) => e && e.kind !== 'dir').map((e) => e.path);
+  const files = (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e.path === 'string').map((e) => e.path);
   const all = files.length > 0 && files.every((p) => selected instanceof Set && selected.has(p));
   return all ? new Set() : new Set(files);
 }
@@ -137,7 +137,7 @@ export function selectedFiles(entries, selected) {
  * 跑著的狀態：down 的 'fetching'、'running'；up 的 'uploading'、'sending'
  */
 export function nextToStart(transfers, dir) {
-  const list = Array.isArray(transfers) ? transfers : [];
+  const list = (Array.isArray(transfers) ? transfers : []).filter((t) => t && t.kind !== 'folder');
   const activeStates = dir === 'down' ? ['fetching', 'running'] : ['uploading', 'sending'];
   const max = dir === 'down' ? MAX_ACTIVE_DOWNLOADS : MAX_ACTIVE_UPLOADS;
   const active = list.filter((t) => t.dir === dir && activeStates.includes(t.state)).length;
@@ -213,4 +213,86 @@ export function uploadProblem(file) {
 /** 對話框標題列的路徑說明：虛擬根是「磁碟與常用資料夾」 */
 export function locationLabel(path) {
   return path ? path : '磁碟與常用資料夾';
+}
+
+// ───── 整個資料夾（2026-11-09） ─────
+
+/** 一次 deviceFetchMany 最多幾個檔（同那台的上限） */
+export const FETCH_MANY_BATCH = 200;
+
+/** 選取的資料夾（依清單順序） */
+export function selectedFolders(entries, selected) {
+  return (Array.isArray(entries) ? entries : []).filter((e) => e && e.kind === 'dir' && selected instanceof Set && selected.has(e.path));
+}
+
+/** 分批（每批 size 個） */
+export function chunk(list, size) {
+  const out = [];
+  const arr = Array.isArray(list) ? list : [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/** 相對路徑的資料夾部分與檔名（a\b\c.txt → { dir: 'a\\b', name: 'c.txt' }；斜線也收） */
+export function splitRelative(rel) {
+  const parts = String(rel || '').replace(/\//g, '\\').split('\\').filter(Boolean);
+  const name = parts.pop() || '';
+  return { dir: parts.join('\\'), name };
+}
+
+/** 下載資料夾裡一個檔要存進的子資料夾：資料夾名稱，再加上檔案所在的相對資料夾 */
+export function downloadSubfolder(folderName, rel) {
+  const { dir } = splitRelative(rel);
+  return dir ? folderName + '\\' + dir : folderName;
+}
+
+/** 上傳資料夾裡一個檔的子資料夾：瀏覽器的 webkitRelativePath（photos/2024/a.jpg）去掉檔名，換成反斜線；沒有是 '' */
+export function uploadSubfolder(relativePath) {
+  return splitRelative(relativePath).dir;
+}
+
+/**
+ * 一個資料夾的整體進度（kind 'folder' 的傳輸；children 是它底下的各檔）：
+ * { files, finished, failed, done（位元組）, total（位元組）, state }。state：listing（還在列清單）、running、done（都結束、有成功的）、failed（都失敗）
+ */
+export function folderProgress(group, children) {
+  const list = Array.isArray(children) ? children : [];
+  const finished = list.filter(isFinished).length;
+  const failed = list.filter((t) => t.state === 'failed').length;
+  const cancelled = list.filter((t) => t.state === 'cancelled').length;
+  const total = list.reduce((a, t) => a + (num(t.size) ?? 0), 0);
+  const done = list.reduce((a, t) => a + (isFinished(t) && t.state !== 'failed' && t.state !== 'cancelled' ? (num(t.size) ?? 0) : Math.min(num(t.done) ?? 0, num(t.size) ?? 0)), 0);
+  let state = 'running';
+  if (isObj(group) && (group.state === 'listing' || group.state === 'failed' || group.state === 'cancelled') && !list.length) state = group.state;
+  else if (list.length && finished === list.length) state = failed + cancelled === list.length ? (cancelled === list.length ? 'cancelled' : 'failed') : 'done';
+  return { files: list.length, finished, failed, done, total, state };
+}
+
+/** 資料夾那一列的狀態文字 */
+export function folderText(group, progress) {
+  if (!isObj(group) || !isObj(progress)) return '';
+  if (progress.state === 'listing') return group.dir === 'down' ? '列出資料夾裡的檔案…' : '準備上傳…';
+  if (progress.state === 'failed' && !progress.files) return group.error || '失敗';
+  if (progress.state === 'cancelled') return '已取消';
+  const failed = progress.failed ? '，' + progress.failed + ' 個失敗' : '';
+  const more = group.truncated ? '（檔案太多，只傳了前 ' + progress.files + ' 個）' : '';
+  if (progress.state === 'done' || progress.state === 'failed') return '完成 ' + (progress.finished - progress.failed) + ' / ' + progress.files + ' 個檔' + failed + more;
+  return (group.dir === 'down' ? '下載中 ' : '上傳中 ') + progress.finished + ' / ' + progress.files + ' 個檔' + failed + more;
+}
+
+/** 瀏覽器版能不能下載整個資料夾（要能選一個資料夾寫進去：Chrome、Edge 的 showDirectoryPicker） */
+export function browserFolderDownloadProblem(hasDirectoryPicker) {
+  return hasDirectoryPicker ? null : '這個瀏覽器不能把整個資料夾存下來（手機與 Safari 不支援）：請用電腦的 Chrome 或 Edge，或進到資料夾裡選檔案下載';
+}
+
+/** 瀏覽器寫檔用的不重複檔名：已經有的話加「 (2)」、「 (3)」…（exists(name) 回 true 表示有） */
+export async function uniqueBrowserName(name, exists) {
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  for (let n = 1; n < 1000; n++) {
+    const candidate = n === 1 ? name : stem + ' (' + n + ')' + ext;
+    if (!(await exists(candidate))) return candidate;
+  }
+  return null;
 }

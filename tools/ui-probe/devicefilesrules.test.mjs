@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   transferMenu, normalizePath, crumbs, isDriveRoot, sortEntries, selectAt, toggleAll, selectedFiles, nextToStart, isFinished,
   percent, stateText, parseXfers, applyXfer, uploadProblem, locationLabel, NETWORK_ROOT, isNetworkPath, canUploadHere, MAX_ACTIVE_DOWNLOADS, MAX_ACTIVE_UPLOADS, MAX_UPLOAD_BYTES,
+  selectedFolders, FETCH_MANY_BATCH, chunk, splitRelative, downloadSubfolder, uploadSubfolder, folderProgress, folderText, browserFolderDownloadProblem, uniqueBrowserName,
 } from '../../src/Myriagent/Web/devicefilesrules.js';
 
 const row = (o) => Object.assign({ key: 'd_x', id: 'd_x', self: false, hub: false, online: true, name: 'OFFICE' }, o);
@@ -84,7 +85,7 @@ const entries = [
   { name: '3', path: 'C:\\3', kind: 'file' },
 ];
 
-test('selectAt：單選、Ctrl 加選與取消、Shift 連選；資料夾不能選', () => {
+test('selectAt：單選、Ctrl 加選與取消、Shift 連選；資料夾要 Ctrl、Shift 或勾選框才選', () => {
   let r = selectAt(entries, new Set(), null, 1, 'plain');
   assert.deepEqual([...r.selected], ['C:\\1']);
   assert.equal(r.anchor, 1);
@@ -97,14 +98,17 @@ test('selectAt：單選、Ctrl 加選與取消、Shift 連選；資料夾不能�
   r = selectAt(entries, new Set(), 3, 1, 'range');
   assert.deepEqual([...r.selected].sort(), ['C:\\1', 'C:\\2', 'C:\\3'], '往上連選');
   r = selectAt([entries[1], entries[0], entries[2]], new Set(), 0, 2, 'range');
-  assert.deepEqual([...r.selected].sort(), ['C:\\1', 'C:\\2'], '資料夾在範圍裡也不選');
+  assert.deepEqual([...r.selected].sort(), ['C:\\1', 'C:\\2', 'C:\\dir'], '資料夾在範圍裡也選（整個資料夾的下載）');
   r = selectAt(entries, new Set(['C:\\2']), 2, 0, 'plain');
-  assert.deepEqual([...r.selected], ['C:\\2'], '點資料夾不改選取');
+  assert.deepEqual([...r.selected], ['C:\\2'], '直接點資料夾不改選取（是進入）');
+  r = selectAt(entries, new Set(['C:\\2']), 2, 0, 'toggle');
+  assert.deepEqual([...r.selected].sort(), ['C:\\2', 'C:\\dir'], 'Ctrl 或勾選框選資料夾');
 });
 
-test('toggleAll、selectedFiles：只算檔案、依清單順序', () => {
+test('toggleAll（含資料夾）、selectedFiles（只算檔案）、selectedFolders：依清單順序', () => {
   const all = toggleAll(entries, new Set());
-  assert.equal(all.size, 3);
+  assert.equal(all.size, 4);
+  assert.deepEqual(selectedFolders(entries, all).map((e) => e.name), ['dir']);
   assert.equal(toggleAll(entries, all).size, 0);
   assert.deepEqual(selectedFiles(entries, new Set(['C:\\3', 'C:\\1', 'C:\\dir', 'C:\\gone'])).map((e) => e.name), ['1', '3']);
 });
@@ -158,4 +162,56 @@ test('uploadProblem、locationLabel', () => {
   assert.match(uploadProblem({}), /大小/);
   assert.equal(locationLabel(null), '磁碟與常用資料夾');
   assert.equal(locationLabel('C:\\a'), 'C:\\a');
+});
+
+test('整個資料夾：分批、相對路徑、存進的子資料夾', () => {
+  assert.equal(FETCH_MANY_BATCH, 200);
+  assert.deepEqual(chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
+  assert.deepEqual(chunk([], 2), []);
+  assert.deepEqual(splitRelative('a\\b\\c.txt'), { dir: 'a\\b', name: 'c.txt' });
+  assert.deepEqual(splitRelative('a/b/c.txt'), { dir: 'a\\b', name: 'c.txt' });
+  assert.deepEqual(splitRelative('c.txt'), { dir: '', name: 'c.txt' });
+  assert.equal(downloadSubfolder('photos', 'c.txt'), 'photos');
+  assert.equal(downloadSubfolder('photos', '2024\\06\\c.jpg'), 'photos\\2024\\06');
+  assert.equal(uploadSubfolder('photos/2024/a.jpg'), 'photos\\2024');
+  assert.equal(uploadSubfolder('a.jpg'), '');
+});
+
+test('folderProgress、folderText：列清單、進行中、完成、部分失敗、取消', () => {
+  const g = { dir: 'down', state: 'listing' };
+  let p = folderProgress(g, []);
+  assert.equal(p.state, 'listing');
+  assert.equal(folderText(g, p), '列出資料夾裡的檔案…');
+  const failed = { dir: 'down', state: 'failed', error: '那台不給' };
+  assert.equal(folderText(failed, folderProgress(failed, [])), '那台不給');
+  const run = { dir: 'down', state: 'running' };
+  const kids = [
+    { state: 'done', size: 100, done: 100 },
+    { state: 'running', size: 100, done: 40 },
+    { state: 'failed', size: 50, done: 0 },
+  ];
+  p = folderProgress(run, kids);
+  assert.deepEqual(p, { files: 3, finished: 2, failed: 1, done: 140, total: 250, state: 'running' });
+  assert.equal(folderText(run, p), '下載中 2 / 3 個檔，1 個失敗');
+  kids[1].state = 'done';
+  p = folderProgress(run, kids);
+  assert.equal(p.state, 'done');
+  assert.equal(folderText({ ...run, truncated: true }, p), '完成 2 / 3 個檔，1 個失敗（檔案太多，只傳了前 3 個）');
+  assert.equal(folderProgress(run, [{ state: 'failed', size: 1 }]).state, 'failed');
+  assert.equal(folderProgress(run, [{ state: 'cancelled', size: 1 }]).state, 'cancelled');
+  assert.equal(folderText({ dir: 'up' }, { state: 'running', files: 2, finished: 0, failed: 0 }), '上傳中 0 / 2 個檔');
+});
+
+test('nextToStart 不排資料夾本身', () => {
+  assert.deepEqual(nextToStart([{ kind: 'folder', dir: 'down', state: 'queued' }], 'down'), []);
+});
+
+test('瀏覽器版下載整個資料夾：要有 showDirectoryPicker；同名加 (2)', async () => {
+  assert.equal(browserFolderDownloadProblem(true), null);
+  assert.match(browserFolderDownloadProblem(false), /Chrome 或 Edge/);
+  const have = new Set(['a.txt', 'a (2).txt', 'noext']);
+  assert.equal(await uniqueBrowserName('a.txt', async (n) => have.has(n)), 'a (3).txt');
+  assert.equal(await uniqueBrowserName('b.txt', async (n) => have.has(n)), 'b.txt');
+  assert.equal(await uniqueBrowserName('noext', async (n) => have.has(n)), 'noext (2)');
+  assert.equal(await uniqueBrowserName('x', async () => true), null);
 });

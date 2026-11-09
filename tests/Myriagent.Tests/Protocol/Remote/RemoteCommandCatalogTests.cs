@@ -19,7 +19,7 @@ public sealed partial class RemoteCommandCatalogTests
     {
         var names = RemoteCommandCatalog.All.Select(s => s.Name).ToList();
         names.Should().OnlyHaveUniqueItems();
-        names.Count.Should().Be(38, "第 4 階段由電腦執行的 28 個網頁指令＋語音訊息 voiceMessage（2026-10-23）＋conversationCreate＋遠端執行指令 remoteExec（2026-10-25）＋排程頁的 scheduleAction、scheduleAgent（2026-10-26）＋Claude 遠端登入貼回授權碼的 accountLoginCode（2026-10-26）＋瀏覽器新對話的資料夾挑選 listFolders（2026-10-27）＋電腦狀態面板的檔案傳輸 deviceBrowse、deviceFetch、devicePut（2026-11-09）");
+        names.Count.Should().Be(40, "第 4 階段由電腦執行的 28 個網頁指令＋語音訊息 voiceMessage（2026-10-23）＋conversationCreate＋遠端執行指令 remoteExec（2026-10-25）＋排程頁的 scheduleAction、scheduleAgent（2026-10-26）＋Claude 遠端登入貼回授權碼的 accountLoginCode（2026-10-26）＋瀏覽器新對話的資料夾挑選 listFolders（2026-10-27）＋電腦狀態面板的檔案傳輸 deviceBrowse、deviceFetch、devicePut（2026-11-09）＋整個資料夾的 deviceTree、deviceFetchMany（2026-11-09）");
         names.Should().NotIntersectWith(RemoteCommandCatalog.ServerOnlyCommands);
         names.Should().NotIntersectWith(RemoteCommandCatalog.LocalOnlyCommands);
         RemoteCommandCatalog.ServerOnlyCommands.Should().NotIntersectWith(RemoteCommandCatalog.LocalOnlyCommands);
@@ -89,7 +89,7 @@ public sealed partial class RemoteCommandCatalogTests
         RemoteCommandCatalog.AllowsOutput("stop", "files").Should().BeFalse();
         RemoteCommandCatalog.AllowsOutput("ready", "toast").Should().BeFalse("不在型錄");
         RemoteCommandCatalog.AllowsOutput("send", null).Should().BeFalse();
-        RemoteCommandCatalog.All.SelectMany(s => s.Outputs).Distinct().Should().BeSubsetOf(["toast", "sendRejected", "files", "fileSearch", "fileRef", "accountLogin"],
+        RemoteCommandCatalog.All.SelectMany(s => s.Outputs).Distinct().Should().BeSubsetOf(["toast", "sendRejected", "files", "fileSearch", "fileRef", "fileTree", "fileRefs", "accountLogin"],
             "web-protocol 第二節附註：中樞回給這個視窗的訊息只有這幾種");
     }
 

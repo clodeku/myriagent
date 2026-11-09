@@ -596,6 +596,8 @@ function handle(m) {
     case 'deviceStats': mon.applyStats(m); devfiles.onStats(m); break;
     // 電腦狀態面板的檔案傳輸（devicefiles.js）：deviceFetch 的 fileRef、桌面代傳的進度、下載進這台的進度、挑這台的資料夾
     case 'fileRef': if (!devfiles.onFileRef(m)) live.handle(m); break;
+    case 'fileTree': devfiles.onFileTree(m); break; // 整個資料夾的下載：deviceTree 的檔案清單
+    case 'fileRefs': devfiles.onFileRefs(m); break; // 整個資料夾的下載：deviceFetchMany 的一批下載參照
     case 'peerUploadProgress': devfiles.onPeerUploadProgress(m); break;
     case 'xferProgress': devfiles.onXferProgress(m); break;
     case 'xferFolder': devfiles.onXferFolder(m); break;

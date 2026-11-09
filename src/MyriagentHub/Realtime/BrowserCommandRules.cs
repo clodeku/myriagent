@@ -122,7 +122,7 @@ internal static class BrowserCommandRules
         // 排程頁（S3）：由那台電腦執行（型錄的 Device 指令，伺服器轉送）
         "scheduleAction", "scheduleAgent",
         // 電腦狀態面板的檔案傳輸（2026-11-09）：由那台電腦執行（型錄的 Device 指令，伺服器轉送；目標要協商出 xfer1）
-        "deviceBrowse", "deviceFetch", "devicePut",
+        "deviceBrowse", "deviceFetch", "devicePut", "deviceTree", "deviceFetchMany",
         // 多人協作（2026-10-30）：擁有者管理協作人與對話的分享，由伺服器處理（CollaboratorCommandService）
         "collabCreate", "collabUpdate", "collabDelete", "collabShare");
 

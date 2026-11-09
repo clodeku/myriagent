@@ -103,7 +103,7 @@ public sealed class CommandEngineTests
         await h.RestartAsync();
 
         var hello = h.Server.Hellos.Last();
-        hello.Features.Should().Equal(DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Collab1, DeviceFeatureRules.Xfer1);
+        hello.Features.Should().Equal(DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Collab1, DeviceFeatureRules.Xfer1, DeviceFeatureRules.Xfer2);
         JObject.Parse(SyncJson.Serialize(hello)).Properties().Select(p => p.Name).Should().Equal(plainKeys.Append("features"), "只多 features，其他鍵不變");
         (await h.Inspect(v => v.Features)).Should().Equal(DeviceFeatureRules.Cmd1);
         port.Reports.Should().Equal(true);

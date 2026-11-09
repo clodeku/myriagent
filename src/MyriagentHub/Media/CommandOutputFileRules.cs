@@ -15,7 +15,88 @@ namespace MyriagentHub.Media;
 /// </summary>
 internal static class CommandOutputFileRules
 {
-    public const string Files = "files", FileSearch = "fileSearch", FileRef = "fileRef";
+    public const string Files = "files", FileSearch = "fileSearch", FileRef = "fileRef", FileTree = "fileTree", FileRefs = "fileRefs";
+
+    /// <summary>fileTree 最多幾個檔、幾個資料夾（同桌面的 <c>DeviceFolderRules</c>）</summary>
+    public const int MaxTreeFiles = 5000, MaxTreeDirs = 5000;
+
+    /// <summary>fileRefs 一次最多幾個（同 deviceFetchMany 的上限）</summary>
+    public const int MaxRefs = 200;
+
+    /// <summary>
+    /// <c>fileTree</c>（回應 deviceTree）：<c>root</c> 是那台的完整路徑、<c>name</c> 是資料夾名稱、<c>files</c> 是 <c>{path（相對）, size}</c>、
+    /// <c>dirs</c> 是相對路徑（含空的資料夾）；有 <c>error</c> 時清單是空的
+    /// </summary>
+    public static JObject? ProjectFileTree(JObject message, OutputContext context)
+    {
+        if (Header(message, FileTree, context) is not { } projected
+            || !OptionalText(message["root"], MaxPathLength, out var root)
+            || !OptionalText(message["name"], MaxPathLength, out var name)
+            || !OptionalBool(message["truncated"], out var truncated)
+            || !OptionalText(message["error"], MaxErrorLength, out var error)
+            || message["files"] is not JArray { Count: <= MaxTreeFiles } files
+            || message["dirs"] is not JArray { Count: <= MaxTreeDirs } dirs)
+            return null;
+        var projectedFiles = new JArray();
+        foreach (var token in files)
+        {
+            if (token is not JObject file || !Text(file["path"], MaxPathLength, out var path) || path.Length == 0
+                || file["size"] is not JValue { Type: JTokenType.Integer, Value: long size } || size < 0)
+                return null;
+            projectedFiles.Add(new JObject { ["path"] = path, ["size"] = size });
+        }
+
+        var projectedDirs = new JArray();
+        foreach (var token in dirs)
+        {
+            if (!Text(token, MaxPathLength, out var dir) || dir.Length == 0)
+                return null;
+            projectedDirs.Add(dir);
+        }
+
+        projected["root"] = Nullable(root);
+        projected["name"] = Nullable(name);
+        projected["files"] = projectedFiles;
+        projected["dirs"] = projectedDirs;
+        projected["truncated"] = truncated;
+        projected["error"] = Nullable(error);
+        return projected;
+    }
+
+    /// <summary>
+    /// <c>fileRefs</c>（回應 deviceFetchMany）：<c>refs</c> 每一項是 <c>{path（相對）, name, size, ref}</c> 或 <c>{path, error}</c>；
+    /// 參照原樣留著，交給改寫器換成 <c>/f/</c> 網址
+    /// </summary>
+    public static JObject? ProjectFileRefs(JObject message, OutputContext context)
+    {
+        if (Header(message, FileRefs, context) is not { } projected
+            || !OptionalText(message["root"], MaxPathLength, out var root)
+            || message["expiresAt"] is not JValue { Type: JTokenType.Integer, Value: long expiresAt }
+            || message["refs"] is not JArray { Count: <= MaxRefs } refs)
+            return null;
+        var projectedRefs = new JArray();
+        foreach (var token in refs)
+        {
+            if (token is not JObject item || !Text(item["path"], MaxPathLength, out var path) || path.Length == 0
+                || !OptionalText(item["error"], MaxErrorLength, out var error))
+                return null;
+            if (error is not null)
+            {
+                projectedRefs.Add(new JObject { ["path"] = path, ["error"] = error });
+                continue;
+            }
+
+            if (!Text(item["name"], MaxPathLength, out var name) || name.Length == 0
+                || item["size"] is not JValue { Type: JTokenType.Integer, Value: long size } || size < 0 || RefText(item["ref"]) is not { } mediaRef)
+                return null;
+            projectedRefs.Add(new JObject { ["path"] = path, ["name"] = name, ["size"] = size, ["ref"] = mediaRef });
+        }
+
+        projected["root"] = Nullable(root);
+        projected["expiresAt"] = expiresAt;
+        projected["refs"] = projectedRefs;
+        return projected;
+    }
 
     /// <summary>一份清單最多幾筆（web-protocol：最多 3000 筆，同桌面的 <c>FileBrowser.MaxEntries</c>）</summary>
     public const int MaxEntries = 3000;

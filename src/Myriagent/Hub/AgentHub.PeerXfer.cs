@@ -85,8 +85,17 @@ internal sealed partial class AgentHub
         }
 
         var name = command.Value<string>("name");
-        var target = folder ?? PeerDownloadsForTest ?? PeerFileRules.DownloadsFolder();
-        var createFolder = folder == null;
+        // 整個資料夾的下載（2026-11-09）：subfolder 是那個資料夾名稱加上檔案所在的相對資料夾，照結構建在存檔的資料夾底下
+        var subfolder = DeviceFolderRules.CleanSubfolder(command["subfolder"] is JValue { Type: JTokenType.String, Value: string sub } ? sub : null);
+        if (subfolder is null)
+        {
+            ReplyPeerXfer(view.Id, transferId!, "failed", 0, 0, null, "子資料夾的路徑不合格");
+            return;
+        }
+
+        var baseFolder = folder ?? PeerDownloadsForTest ?? PeerFileRules.DownloadsFolder();
+        var target = subfolder.Length == 0 ? baseFolder : Path.Combine(baseFolder, subfolder);
+        var createBase = folder == null;
         var cts = new CancellationTokenSource();
         peerXfers[transferId!] = cts;
         var viewId = view.Id;
@@ -101,10 +110,9 @@ internal sealed partial class AgentHub
             var part = DeviceTransferRules.PartPath(target, id);
             try
             {
-                if (createFolder)
-                    Directory.CreateDirectory(target);
-                else if (!Directory.Exists(target))
+                if (!createBase && !Directory.Exists(baseFolder))
                     throw new DirectoryNotFoundException("存檔的資料夾不存在");
+                Directory.CreateDirectory(target);
 
                 PeerDownload? got;
                 await using (var stream = new FileStream(part, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))

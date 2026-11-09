@@ -100,8 +100,24 @@ internal static class RemoteCommandCatalog
     /// <summary>電腦狀態面板的檔案傳輸：那台把已上傳到伺服器的檔下載進 folder（同名自動改名）；進度與結果走 DeviceStats.xfers</summary>
     public const string DevicePut = "devicePut";
 
-    /// <summary>電腦狀態面板的檔案傳輸的三個指令（伺服器只送給協商出 xfer1 的連線）</summary>
-    public static IReadOnlySet<string> DeviceTransferCommands { get; } = Set(DeviceBrowse, DeviceFetch, DevicePut);
+    /// <summary>
+    /// 整個資料夾的下載（2026-11-09）：列那台一個資料夾底下所有的檔（遞迴；輸出 <c>fileTree</c>，相對路徑與大小，最多 5000 個檔）。目標要協商出 <c>xfer2</c>
+    /// </summary>
+    public const string DeviceTree = "deviceTree";
+
+    /// <summary>
+    /// 整個資料夾的下載：一次要多個檔的下載參照（<c>root</c> 加上 <c>pathsJson</c> 裡的相對路徑，最多 200 個；輸出一則 <c>fileRefs</c>）。目標要協商出 <c>xfer2</c>
+    /// </summary>
+    public const string DeviceFetchMany = "deviceFetchMany";
+
+    /// <summary>devicePut 的子資料夾（整個資料夾的上傳：存進 folder 底下的這個相對路徑，沒有就建）；帶它時目標要協商出 <c>xfer2</c></summary>
+    public const string DevicePutSubfolder = "subfolder";
+
+    /// <summary>電腦狀態面板的檔案傳輸的指令（伺服器只送給協商出 xfer1 的連線；整個資料夾的兩個另要 xfer2）</summary>
+    public static IReadOnlySet<string> DeviceTransferCommands { get; } = Set(DeviceBrowse, DeviceFetch, DevicePut, DeviceTree, DeviceFetchMany);
+
+    /// <summary>整個資料夾的傳輸要 <c>xfer2</c> 的指令（devicePut 帶 subfolder 時也要）</summary>
+    public static IReadOnlySet<string> DeviceFolderCommands { get; } = Set(DeviceTree, DeviceFetchMany);
 
     /// <summary>型錄裡不是網頁指令的：只由伺服器送給電腦的 <see cref="ConversationCreate"/>、<see cref="ListFolders"/>，只由桌面發起的 <see cref="RemoteExec"/></summary>
     public static IReadOnlySet<string> NonWebCommands { get; } = Set(ConversationCreate, RemoteExec, ListFolders);
@@ -287,7 +303,11 @@ internal static class RemoteCommandCatalog
         // 電腦狀態面板的檔案傳輸（2026-11-09）：瀏覽整台的本機磁碟、下載一個檔、把上傳的檔存進那台的資料夾（同遠端選資料夾與 fileFetch，層級 2）
         yield return ForDevice(DeviceBrowse, 2, [Device(required: true), RequestId(), Text("path", required: false, nullable: true)], ["files", "toast"]);
         yield return ForDevice(DeviceFetch, 2, [Device(required: true), RequestId(), Text("path")], ["fileRef", "toast"]);
-        yield return ForDevice(DevicePut, 2, [Device(required: true), RequestId(), Text("folder"), Uploads(required: true)]);
+        yield return ForDevice(DevicePut, 2, [Device(required: true), RequestId(), Text("folder"), Uploads(required: true),
+            Text(DevicePutSubfolder, 1024, required: false, nullable: true)]);
+        // 整個資料夾（2026-11-09）：列遞迴的檔案清單、一次要多個檔的下載參照（pathsJson 是相對路徑的 JSON 陣列字串）
+        yield return ForDevice(DeviceTree, 2, [Device(required: true), RequestId(), Text("path")], ["fileTree", "toast"]);
+        yield return ForDevice(DeviceFetchMany, 2, [Device(required: true), RequestId(), Text("root"), Text("pathsJson", 60_000)], ["fileRefs", "toast"]);
 
         // 排程頁（S3，docs/sync-protocol.md 14.12）：其他電腦或手機對那台的 Windows 排程立即執行、停止、啟用、停用（只有這四個：
         // 不再列出、納入管理是那台自己的選擇，遠端不寫那台的持久設定），交給代理＝在那台的管理對話送出說明（沒有就開一個）

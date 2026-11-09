@@ -106,7 +106,8 @@ internal static class RemoteTierRules
             // 新對話的資料夾挑選：同 listFiles 的 dirsOnly
             RemoteCommandCatalog.ListFolders => Two,
             // 電腦狀態面板的檔案傳輸：整台的本機磁碟（同遠端選資料夾、fileFetch）
-            RemoteCommandCatalog.DeviceBrowse or RemoteCommandCatalog.DeviceFetch or RemoteCommandCatalog.DevicePut => Two,
+            RemoteCommandCatalog.DeviceBrowse or RemoteCommandCatalog.DeviceFetch or RemoteCommandCatalog.DevicePut
+                or RemoteCommandCatalog.DeviceTree or RemoteCommandCatalog.DeviceFetchMany => Two,
             "listFiles" => command.Value<bool?>("dirsOnly") == true ? Two
                 : command["path"] is null or { Type: JTokenType.Null } || (facts.PathInScope ?? low) ? One : Two,
             "delete" or "setAccount" or "fileFetch" or "accountAdd" or "accountLogin" or "accountLoginDevice" or RemoteCommandCatalog.AccountLoginCode or "accountLogout"

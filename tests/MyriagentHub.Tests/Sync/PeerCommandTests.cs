@@ -236,6 +236,36 @@ public sealed class PeerCommandTests
         }
     }
 
+    private static readonly string[] Xfer2Features = [DeviceFeatureRules.Conv1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Xfer1, DeviceFeatureRules.Xfer2];
+
+    [Fact]
+    public async Task 整個資料夾_目標有xfer2才簽_只有xfer1時deviceTree與帶subfolder的devicePut立即拒絕unsupported()
+    {
+        await using (var s = await CommandRouterTests.Setup.StartAsync(features: Xfer2Features))
+        await using (var b = await PeerAsync(s, "B 電腦", Xfer2Features))
+        {
+            var cid = NewCommandId();
+            var tree = new JObject { ["cmd"] = "deviceTree", ["deviceId"] = s.Owner.Id, ["requestId"] = "t1", ["path"] = @"C:\相簿" };
+            (await b.Client.PeerCmdAsync(new PeerCmd(cid, tree))).Should().Be(new PeerCmdResult(true, cid, null));
+            var delivery = await s.Device!.WaitForAsync<CommandDelivery>();
+            var verdict = Verify(s, delivery, acceptsDevice: true);
+            verdict.Step.Should().BeNull(verdict.Detail);
+            verdict.Body!.Tier.Should().Be(2);
+            verdict.Body.Cmd.Value<string>("cmd").Should().Be("deviceTree");
+        }
+
+        await using (var s = await CommandRouterTests.Setup.StartAsync(features: XferFeatures))
+        await using (var b = await PeerAsync(s, "B 電腦", Xfer2Features))
+        {
+            var tree = new JObject { ["cmd"] = "deviceTree", ["deviceId"] = s.Owner.Id, ["requestId"] = "t1", ["path"] = @"C:\相簿" };
+            (await b.Client.PeerCmdAsync(new PeerCmd(NewCommandId(), tree))).Accepted.Should().BeTrue();
+            var result = await b.Client.WaitForAsync<PeerReply>(r => (string?)r.Message["type"] == "commandResult");
+            result.Message["code"]!.Value<string>().Should().Be(RemoteResultCodes.Unsupported);
+            result.Message["message"]!.Value<string>().Should().Contain("版本太舊");
+            await CommandRouterTests.AssertNoDeliveryAsync(s.Device!, 200);
+        }
+    }
+
     private static readonly string[] ExecFeatures = [DeviceFeatureRules.Conv1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Exec1];
 
     private static JObject RemoteExec(string deviceId, string command = "Get-Date") => new()

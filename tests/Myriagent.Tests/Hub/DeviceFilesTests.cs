@@ -282,6 +282,137 @@ public sealed class DeviceFilesTests
         ShouldBeRejected(tooBig, RemoteResultCodes.Invalid);
         rig.H.Hub.DeviceXferSnapshot().Should().BeNull();
     }
+
+    // ───────────────────────────── 整個資料夾（deviceTree、deviceFetchMany、devicePut 的 subfolder） ─────────────────────────────
+
+    [Fact]
+    public async Task deviceTree逐層列出相對路徑與大小_不列憑證類檔名_app的資料夾回policy()
+    {
+        using var rig = new Rig();
+        var folder = rig.Outside.CreateDirectory("相簿");
+        rig.Outside.WriteFile(@"相簿\a.txt", "12345");
+        rig.Outside.WriteFile(@"相簿\2024\06\b.jpg", "xy");
+        rig.Outside.CreateDirectory(@"相簿\空的");
+        rig.Outside.WriteFile(@"相簿\金鑰\id_rsa", "secret");
+
+        var (outcome, output) = await rig.RunAsync(RemoteCommandCatalog.DeviceTree, new JObject { ["requestId"] = "t1", ["path"] = folder });
+
+        outcome.State.Should().Be(RemoteResultStates.Done, outcome.Message);
+        var tree = output.Single();
+        tree.Value<string>("type").Should().Be("fileTree");
+        tree.Value<string>("requestId").Should().Be("t1");
+        tree["conversationId"]!.Type.Should().Be(JTokenType.Null);
+        tree.Value<string>("name").Should().Be("相簿");
+        tree.Value<bool>("truncated").Should().BeFalse();
+        var files = tree["files"]!.OfType<JObject>().ToDictionary(f => f.Value<string>("path")!, f => f.Value<long>("size"));
+        files.Should().BeEquivalentTo(new Dictionary<string, long> { ["a.txt"] = 5, [@"2024\06\b.jpg"] = 2 });
+        tree["dirs"]!.Values<string>().Should().Contain([@"2024", @"2024\06", "空的", "金鑰"]);
+
+        var appFolder = rig.H.Store.GetDefaultWorkingDirectory("c-device-tree");
+        Directory.CreateDirectory(appFolder);
+        var (forbidden, _) = await rig.RunAsync(RemoteCommandCatalog.DeviceTree, new JObject { ["requestId"] = "t2", ["path"] = appFolder });
+        ShouldBeRejected(forbidden, RemoteResultCodes.Policy);
+    }
+
+    [Fact]
+    public async Task deviceFetchMany一次發多個xfer參照_跳出根目錄與憑證類的那一項帶error()
+    {
+        using var rig = new Rig();
+        var folder = rig.Outside.CreateDirectory("相簿");
+        rig.Outside.WriteFile(@"相簿\a.txt", "12345");
+        rig.Outside.WriteFile(@"相簿\2024\b.jpg", "xy");
+        rig.Outside.WriteFile(@"相簿\id_rsa", "secret");
+        rig.Outside.WriteFile("外面.txt", "out");
+        var paths = new JArray("a.txt", "2024/b.jpg", "id_rsa", @"..\外面.txt", "沒有.txt");
+
+        var (outcome, output) = await rig.RunAsync(RemoteCommandCatalog.DeviceFetchMany,
+            new JObject { ["requestId"] = "m1", ["root"] = folder, ["pathsJson"] = paths.ToString(Newtonsoft.Json.Formatting.None) });
+
+        outcome.State.Should().Be(RemoteResultStates.Done, outcome.Message);
+        var refs = output.Single();
+        refs.Value<string>("type").Should().Be("fileRefs");
+        refs.Value<string>("requestId").Should().Be("m1");
+        var items = refs["refs"]!.OfType<JObject>().ToList();
+        items.Should().HaveCount(5);
+        items[0].Value<string>("ref").Should().NotBeNullOrEmpty();
+        items[0].Value<long>("size").Should().Be(5);
+        items[1].Value<string>("path").Should().Be(@"2024\b.jpg");
+        items[1].Value<string>("ref").Should().NotBeNullOrEmpty();
+        items.Skip(2).Should().OnlyContain(i => i["ref"] == null && !string.IsNullOrEmpty(i.Value<string>("error")));
+        var registered = rig.Transfer.Registered.All.Should().ContainSingle().Which;
+        registered.ConversationId.Should().BeEmpty();
+        registered.Paths.Should().HaveCount(2, "一次登記開得了的兩個");
+
+        var (bad, _) = await rig.RunAsync(RemoteCommandCatalog.DeviceFetchMany, new JObject { ["requestId"] = "m2", ["root"] = folder, ["pathsJson"] = "不是 JSON" });
+        ShouldBeRejected(bad, RemoteResultCodes.Invalid);
+        var tooMany = new JArray(Enumerable.Range(0, DeviceFolderRules.MaxFetchMany + 1).Select(i => (object)("f" + i)).ToArray());
+        var (many, _) = await rig.RunAsync(RemoteCommandCatalog.DeviceFetchMany,
+            new JObject { ["requestId"] = "m3", ["root"] = folder, ["pathsJson"] = tooMany.ToString(Newtonsoft.Json.Formatting.None) });
+        ShouldBeRejected(many, RemoteResultCodes.Invalid);
+    }
+
+    [Fact]
+    public async Task devicePut帶subfolder時建好子資料夾再存_點點回invalid()
+    {
+        using var rig = new Rig();
+        var folder = rig.Outside.CreateDirectory("收件");
+        var args = PutArgs(folder, Upload("u1", "b.jpg", 4));
+        args[RemoteCommandCatalog.DevicePutSubfolder] = "相簿/2024:06";
+
+        var (outcome, _) = await rig.RunAsync(RemoteCommandCatalog.DevicePut, args);
+
+        outcome.State.Should().Be(RemoteResultStates.Done, outcome.Message);
+        await rig.H.WaitUntilAsync(() => rig.H.Hub.DeviceXferSnapshot()?.Any(x => x.State == "saved") == true, "存好了", 10_000);
+        new FileInfo(Path.Combine(folder, "相簿", "2024_06", "b.jpg")).Length.Should().Be(4);
+
+        var bad = PutArgs(folder, Upload("u2", "c.txt"));
+        bad[RemoteCommandCatalog.DevicePutSubfolder] = @"相簿\..\..\外面";
+        var (refused, _) = await rig.RunAsync(RemoteCommandCatalog.DevicePut, bad);
+        ShouldBeRejected(refused, RemoteResultCodes.Invalid);
+    }
+}
+
+/// <summary>整個資料夾傳輸的路徑規則（DeviceFolderRules）</summary>
+public sealed class DeviceFolderRulesTests
+{
+    [Theory]
+    [InlineData("a.txt", "a.txt")]
+    [InlineData("a/b/c.txt", @"a\b\c.txt")]
+    [InlineData(@"a\b\c.txt", @"a\b\c.txt")]
+    [InlineData(@"..\x", null)]
+    [InlineData(@"a\.\b", null)]
+    [InlineData(@"\a", null)]
+    [InlineData(@"C:\a", null)]
+    [InlineData("a:stream", null)]
+    [InlineData(@"a\\b", null)]
+    [InlineData("a.", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void CheckRelative只收乾淨的相對路徑(string? input, string? expected)
+        => DeviceFolderRules.CheckRelative(input).Should().Be(expected);
+
+    [Theory]
+    [InlineData(null, "")]
+    [InlineData("", "")]
+    [InlineData("photos/2024", @"photos\2024")]
+    [InlineData(@"\photos\\2024\", @"photos\2024")]
+    [InlineData("a:b/c*d", @"a_b\c_d")]
+    [InlineData("a/../b", null)]
+    [InlineData(".", null)]
+    public void CleanSubfolder清理每一段_點點不收(string? input, string? expected)
+        => DeviceFolderRules.CleanSubfolder(input).Should().Be(expected);
+
+    [Fact]
+    public void RelativeTo與FolderName()
+    {
+        DeviceFolderRules.RelativeTo(@"C:\x", @"C:\x\a\b.txt").Should().Be(@"a\b.txt");
+        DeviceFolderRules.RelativeTo(@"C:\x\", @"C:\X\a").Should().Be("a");
+        DeviceFolderRules.RelativeTo(@"C:\x", @"C:\xy\a").Should().BeNull();
+        DeviceFolderRules.RelativeTo(@"C:\x", @"C:\x").Should().BeNull();
+        DeviceFolderRules.FolderName(@"C:\Users\me\相簿\").Should().Be("相簿");
+        DeviceFolderRules.FolderName(@"D:\").Should().Be("D");
+        DeviceFolderRules.FolderName(@"\\nas\share").Should().Be("share");
+    }
 }
 
 /// <summary>電腦狀態面板的檔案傳輸的規則（DeviceTransferRules、DeviceXferBoard）</summary>

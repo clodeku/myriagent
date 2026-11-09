@@ -61,6 +61,9 @@ internal static class CommandOutputRules
             CommandOutputFileRules.Files => CommandOutputFileRules.ProjectFiles(message, context),
             CommandOutputFileRules.FileSearch => CommandOutputFileRules.ProjectFileSearch(message, context),
             CommandOutputFileRules.FileRef => CommandOutputFileRules.ProjectFileRef(message, context),
+            // 整個資料夾的傳輸（2026-11-09）：遞迴的檔案清單、一次多個檔的下載參照
+            CommandOutputFileRules.FileTree => CommandOutputFileRules.ProjectFileTree(message, context),
+            CommandOutputFileRules.FileRefs => CommandOutputFileRules.ProjectFileRefs(message, context),
             _ => null,
         };
     }

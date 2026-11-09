@@ -77,6 +77,64 @@ public sealed class DeviceTransferServerTests
     }
 
     [Fact]
+    public void deviceTree的fileTree_投影相對路徑與大小_格式不對整則丟掉()
+    {
+        var message = new JObject
+        {
+            ["type"] = "fileTree", ["requestId"] = "t1", ["conversationId"] = JValue.CreateNull(), ["root"] = @"D:\相簿", ["name"] = "相簿",
+            ["files"] = new JArray(new JObject { ["path"] = "a.txt", ["size"] = 5, ["extra"] = "x" }, new JObject { ["path"] = @"2024\b.jpg", ["size"] = 2 }),
+            ["dirs"] = new JArray("2024"), ["truncated"] = false, ["error"] = JValue.CreateNull(),
+        };
+
+        var projected = CommandOutputRules.Project(message, Context(RemoteCommandCatalog.DeviceTree, "t1"));
+
+        projected.Should().NotBeNull();
+        projected!["files"]!.Should().HaveCount(2);
+        projected["files"]![0]!["extra"].Should().BeNull("只留 path、size");
+        projected.Value<string>("name").Should().Be("相簿");
+        CommandOutputRules.Project(message, Context(RemoteCommandCatalog.DeviceTree, "other")).Should().BeNull("requestId 對不上");
+        var badSize = (JObject)message.DeepClone();
+        badSize["files"]![0]!["size"] = -1;
+        CommandOutputRules.Project(badSize, Context(RemoteCommandCatalog.DeviceTree, "t1")).Should().BeNull();
+        CommandOutputRules.Project(message, Context(RemoteCommandCatalog.DeviceBrowse, "t1")).Should().BeNull("deviceBrowse 只能回 files");
+    }
+
+    [Fact]
+    public void deviceFetchMany的fileRefs_每個參照改寫成f網址並登記xfer_有error的不登記()
+    {
+        var r1 = MediaSeed.NewRef();
+        var r2 = MediaSeed.NewRef();
+        var message = new JObject
+        {
+            ["type"] = "fileRefs", ["requestId"] = "m1", ["conversationId"] = JValue.CreateNull(), ["root"] = @"D:\相簿",
+            ["expiresAt"] = Now + (long)TimeSpan.FromDays(1).TotalMilliseconds,
+            ["refs"] = new JArray(
+                new JObject { ["path"] = "a.txt", ["name"] = "a.txt", ["size"] = 5, ["ref"] = r1 },
+                new JObject { ["path"] = "id_rsa", ["error"] = "不給" },
+                new JObject { ["path"] = @"2024\b.jpg", ["name"] = "b.jpg", ["size"] = 2, ["ref"] = r2 }),
+        };
+        var projected = CommandOutputRules.Project(message, Context(RemoteCommandCatalog.DeviceFetchMany, "m1"));
+        projected.Should().NotBeNull();
+
+        var (rewritten, rows) = CommandOutputRewriteRules.Rewrite(Device, RemoteCommandCatalog.DeviceFetchMany, null, null, projected!, Now);
+
+        rewritten.Should().NotBeNull();
+        var refs = rewritten!["refs"]!.OfType<JObject>().ToList();
+        refs[0].Value<string>("url").Should().Be("/f/" + MediaKeyRules.Format(Device, r1));
+        refs[0]["ref"].Should().BeNull("參照不給瀏覽器");
+        refs[1]["url"]!.Type.Should().Be(JTokenType.Null);
+        refs[2].Value<string>("url").Should().Be("/f/" + MediaKeyRules.Format(Device, r2));
+        rewritten.Value<long>("expiresAt").Should().Be(Now + (long)MediaLookupRules.XferLifetime.TotalMilliseconds);
+        rows.Should().Equal(
+            new MediaRefRow(Device, r1, string.Empty, MediaRefPurposes.Transfer, Now),
+            new MediaRefRow(Device, r2, string.Empty, MediaRefPurposes.Transfer, Now));
+
+        var tooMany = (JObject)message.DeepClone();
+        tooMany["refs"] = new JArray(Enumerable.Range(0, CommandOutputFileRules.MaxRefs + 1).Select(i => new JObject { ["path"] = "f" + i, ["error"] = "x" }));
+        CommandOutputRules.Project(tooMany, Context(RemoteCommandCatalog.DeviceFetchMany, "m1")).Should().BeNull();
+    }
+
+    [Fact]
     public void 媒體查詢的xfer_只給f與E11_不看對話_兩小時後到期()
     {
         MediaLookupRules.Allows(MediaEndpointKind.File, MediaRefPurposes.Transfer).Should().BeTrue();

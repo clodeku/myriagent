@@ -125,6 +125,7 @@ internal sealed partial class SyncEngine : ISyncEngineCommands
             into.Add(DeviceFeatureRules.Collab1);
             // 電腦狀態面板的檔案傳輸（2026-11-09）：deviceBrowse、deviceFetch、devicePut（AgentHub.DeviceFiles.cs）
             into.Add(DeviceFeatureRules.Xfer1);
+            into.Add(DeviceFeatureRules.Xfer2);
         }
         try
         {
