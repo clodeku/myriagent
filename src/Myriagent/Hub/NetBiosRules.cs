@@ -104,7 +104,7 @@ internal static class NetBiosRules
     }
 
     /// <summary>
-    /// 要掃描的網卡（2026-11-10 實機：CLODE-FEE 的「網路」一直逾時）：Hyper-V、WSL、VirtualBox、VMware、VPN 這類虛擬網卡的網段先被掃、
+    /// 要掃描的網卡（2026-11-10 實機：「網路」一直逾時）：Hyper-V、WSL、VirtualBox、VMware、VPN 這類虛擬網卡的網段先被掃、
     /// 用掉位址的上限，真正的區域網路反而沒掃到。有 IPv4 預設閘道的實體網卡排最前面，其他實體網卡其次，虛擬網卡只在沒有實體網卡時才掃
     /// </summary>
     public static IReadOnlyList<(IPAddress Address, int PrefixLength)> SweepAdapters(IEnumerable<DiscoveryAdapter> adapters)
