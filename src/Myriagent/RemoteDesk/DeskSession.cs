@@ -300,7 +300,7 @@ internal sealed class DeskSession : IDisposable
 
                 IReadOnlyList<DeskTile> tiles = captured == DeskCapture.Unchanged
                     ? []
-                    : encoder.Encode(previous, current, w, h, DeskRules.Quality(q, rtt), key);
+                    : encoder.Encode(previous, current, w, h, DeskRules.QualityFor(q, rtt, w), key);
                 // 游標另外送（看的一方疊在畫面上）：位置換成這個螢幕的比例，形狀變了才帶圖
                 var cursor = screen.Cursor();
                 var cursorChanged = !Equals(cursor, lastCursor) || key;
@@ -390,6 +390,9 @@ internal sealed class DeskSession : IDisposable
 
     private void SendSafely(DeskPacket packet)
     {
+        // 停下之後擷取執行緒手上剛好壓好的影格不再送（end 之後才到的影格看的一方用不到）
+        if (packet.Kind != DeskRules.End && Stopped)
+            return;
         try
         {
             send(packet);

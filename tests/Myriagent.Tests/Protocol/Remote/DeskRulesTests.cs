@@ -61,6 +61,8 @@ public sealed class DeskRulesTests
         DeskRules.ParseConfig(new JObject()).Should().Be(new DeskConfig(null, null, false));
         DeskRules.ParseConfig(new JObject { ["quality"] = "ultra" }).Should().BeNull();
         DeskRules.ParseConfig(new JObject { ["maxWidth"] = 100 }).Should().BeNull();
+        DeskRules.ParseConfig(new JObject { ["maxWidth"] = 3840 })!.MaxWidth.Should().Be(3840, "放大看細節時可以要求到 3840");
+        DeskRules.ParseConfig(new JObject { ["maxWidth"] = 3841 }).Should().BeNull();
         DeskRules.ParseConfig(new JObject { ["screen"] = "1" }).Should().BeNull();
     }
 
@@ -89,6 +91,13 @@ public sealed class DeskRulesTests
         DeskRules.MipLevel(3072, 1280).Should().Be(1, "1536 ≤ 1280×1.25");
         DeskRules.MipLevel(3840, 1280).Should().Be(2);
         DeskRules.MipSize(3840, 2160, 2).Should().Be((960, 540));
+        DeskRules.SendSize(3840, 2160, 3840).Should().Be((3840, 2160), "放大時要求原尺寸");
+        DeskRules.SendSize(3840, 2160, 2560).Should().Be((2560, 1440));
+        DeskRules.MipLevel(3840, 3840).Should().Be(0);
+        DeskRules.MipLevel(3072, 2560).Should().Be(0);
+        DeskRules.QualityFor("auto", 50, 3840).Should().Be(55);
+        DeskRules.QualityFor("auto", 900, 3840).Should().Be(35);
+        DeskRules.QualityFor("auto", 50, 1920).Should().Be(70);
     }
 
     [Fact]

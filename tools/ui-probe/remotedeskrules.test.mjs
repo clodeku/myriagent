@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   vkOf, comboEvents, normPoint, buttonOf, wheelUnits, createBatch, textEvents, createAssembler, fit, preferredMaxWidth,
-  touchKind, twoFingerWheel, endText, fpsOf, cursorScale, SPECIAL_KEYS, MAX_EVENTS, TAP_SLOP_PX, LONG_PRESS_MS, SEND_GAP_MS,
+  touchKind, twoFingerWheel, endText, fpsOf, cursorScale,
+  clampZoom, fitView, clampView, zoomAt, panBy, edgePan, twoFingerStep, twoFingerKind, zoomLabel, wantedMaxWidth, ZOOM_MAX, SPECIAL_KEYS, MAX_EVENTS, TAP_SLOP_PX, LONG_PRESS_MS, SEND_GAP_MS,
 } from '../../src/Myriagent/Web/remotedeskrules.js';
 
 test('vkOf：KeyboardEvent.code 換成 Windows 的虛擬鍵碼', () => {
@@ -122,4 +123,54 @@ test('cursorScale：照比例、夾在 0.6～1.5', () => {
   assert.equal(cursorScale(1440, 3840), 0.6);
   assert.equal(cursorScale(3840, 1280), 1.5);
   assert.equal(cursorScale(0, 0), 1, '還沒有大小時照原尺寸');
+});
+
+test('放大縮小：夾倍數、比框小置中、比框大不露空白、以一點為中心放大那一點不動', () => {
+  const fit = { width: 800, height: 450 };
+  assert.equal(clampZoom(0.5), 1);
+  assert.equal(clampZoom(99), ZOOM_MAX);
+  assert.equal(clampZoom(NaN), 1);
+  assert.deepEqual(fitView(fit, 1000, 600), { zoom: 1, left: 100, top: 75 }, '置中');
+  // 放大 2 倍：1600×900 比框大，位置夾在 [框－大小, 0]
+  assert.deepEqual(clampView({ zoom: 2, left: 50, top: -999 }, fit, 1000, 600), { zoom: 2, left: 0, top: -300 });
+  // 以框的 (300, 200) 為中心放大：那一點底下的內容比例不變
+  const v0 = fitView(fit, 1000, 600);
+  const u0 = (300 - v0.left) / (800 * v0.zoom);
+  const v1 = zoomAt(v0, 2, 300, 200, fit, 1000, 600);
+  const u1 = (300 - v1.left) / (800 * v1.zoom);
+  assert.equal(v1.zoom, 2);
+  assert.ok(Math.abs(u0 - u1) < 1e-9, '中心點底下的內容不動');
+  // 縮回 1 倍：回到置中
+  assert.deepEqual(zoomAt(v1, 0.5, 300, 200, fit, 1000, 600), v0);
+  // 平移：夾住
+  assert.deepEqual(panBy({ zoom: 2, left: -100, top: -100 }, 50, 9999, fit, 1000, 600), { zoom: 2, left: -50, top: 0 });
+});
+
+test('貼邊捲動：越貼近邊緣越快、中間不動', () => {
+  assert.deepEqual(edgePan(500, 300, 1000, 600), { dx: 0, dy: 0 });
+  assert.deepEqual(edgePan(0, 300, 1000, 600), { dx: 18, dy: 0 }, '貼左邊：內容往右移（看左邊）');
+  assert.deepEqual(edgePan(999, 599, 1000, 600).dx < 0, true);
+  assert.ok(edgePan(20, 300, 1000, 600).dx < edgePan(5, 300, 1000, 600).dx);
+});
+
+test('兩指：比例與中心、手勢的判斷', () => {
+  const st = twoFingerStep([{ x: 0, y: 0 }, { x: 100, y: 0 }], [{ x: 0, y: 10 }, { x: 200, y: 10 }]);
+  assert.equal(st.scale, 2);
+  assert.deepEqual([st.cx, st.cy, st.dx, st.dy], [100, 10, 50, 10]);
+  assert.equal(twoFingerKind(30, 0, 1), 'pinch');
+  assert.equal(twoFingerKind(-30, 0, 2), 'pinch');
+  assert.equal(twoFingerKind(2, 20, 1), 'scroll', '沒放大：捲動那台的畫面');
+  assert.equal(twoFingerKind(2, 20, 2), 'pan', '放大時：平移這裡的畫面');
+  assert.equal(twoFingerKind(2, 3, 2), null);
+});
+
+test('倍數文字與要求的傳送寬度', () => {
+  assert.equal(zoomLabel(1), '符合視窗');
+  assert.equal(zoomLabel(1.5), '150%');
+  assert.equal(wantedMaxWidth(1440, 1, 1, false), 1920, '電腦沒放大：預設');
+  assert.equal(wantedMaxWidth(390, 3, 1, true), 1170, '手機沒放大：照螢幕');
+  assert.equal(wantedMaxWidth(390, 3, 2, true), 2560, '手機放大 2 倍：清楚一點');
+  assert.equal(wantedMaxWidth(1440, 1, 2, false), 3840);
+  assert.equal(wantedMaxWidth(1440, 1, 1.2, false), 1920);
+  assert.equal(wantedMaxWidth(4000, 2, 8, false), 3840, '最多 3840');
 });

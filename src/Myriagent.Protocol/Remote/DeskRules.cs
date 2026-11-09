@@ -50,6 +50,12 @@ internal static class DeskRules
     /// <summary>傳送的畫面高度上限</summary>
     public const int MaxHeight = 1200;
 
+    /// <summary>
+    /// 看的一方可以要求的傳送寬度上限（2026-11-10：放大看細節時要更清楚的畫面；沒有要求時照 <see cref="MaxWidth"/>）。
+    /// 比 <see cref="MaxWidth"/> 寬時高度上限放寬成寬度的 3/4、JPEG 品質降一點（<see cref="QualityFor"/>），整個畫面重送才不會太大
+    /// </summary>
+    public const int MaxRequestWidth = 3840;
+
     /// <summary>比對變動的格子大小（像素）</summary>
     public const int Tile = 64;
 
@@ -174,7 +180,7 @@ internal static class DeskRules
         int? maxWidth = null;
         if (body["maxWidth"] is { Type: not JTokenType.Null } mw)
         {
-            if (!Int(mw, MinSendWidth, MaxWidth, out var mwi))
+            if (!Int(mw, MinSendWidth, MaxRequestWidth, out var mwi))
                 return null;
             maxWidth = mwi;
         }
@@ -206,8 +212,9 @@ internal static class DeskRules
     {
         if (width <= 0 || height <= 0)
             return (2, 2);
-        var limit = Math.Clamp(maxWidth ?? MaxWidth, MinSendWidth, MaxWidth);
-        var scale = Math.Min(1.0, Math.Min((double)limit / width, (double)MaxHeight / height));
+        var limit = Math.Clamp(maxWidth ?? MaxWidth, MinSendWidth, MaxRequestWidth);
+        var heightLimit = limit > MaxWidth ? limit * 3 / 4 : MaxHeight;
+        var scale = Math.Min(1.0, Math.Min((double)limit / width, (double)heightLimit / height));
         var w = Math.Max(2, (int)Math.Round(width * scale) & ~1);
         var h = Math.Max(2, (int)Math.Round(height * scale) & ~1);
         return (w, h);
@@ -219,7 +226,7 @@ internal static class DeskRules
     /// </summary>
     public static int MipLevel(int width, int? maxWidth)
     {
-        var limit = Math.Clamp(maxWidth ?? MaxWidth, MinSendWidth, MaxWidth) * 5 / 4;
+        var limit = Math.Clamp(maxWidth ?? MaxWidth, MinSendWidth, MaxRequestWidth) * 5 / 4;
         var level = 0;
         while ((width >> level) > limit && (width >> (level + 1)) >= MinSendWidth / 2)
             level++;
@@ -332,6 +339,10 @@ internal static class DeskRules
         => inflightFrames < MaxInflightFrames && inflightBytes < MaxInflightBytes;
 
     /// <summary>JPEG 品質：清晰固定 80、流暢固定 45，自動依往返時間（&lt;150 ms 70、&lt;400 ms 55、其他 40）</summary>
+    /// <summary>依傳送寬度調整的品質：比 2560 寬的（放大看細節時要求的）降 15、至少 35，整個畫面重送才不會太大</summary>
+    public static int QualityFor(string? mode, double rttMs, int width)
+        => width > 2560 ? Math.Max(35, Quality(mode, rttMs) - 15) : Quality(mode, rttMs);
+
     public static int Quality(string? mode, double rttMs) => mode switch
     {
         "sharp" => 80,

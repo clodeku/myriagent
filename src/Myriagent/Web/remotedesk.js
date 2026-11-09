@@ -28,6 +28,9 @@ export function openRemoteDesk(deviceId, name) {
     drawing: Promise.resolve(), lastFrameAt: 0, frameTimes: [], bytes: 0,
     w: 0, h: 0, screens: [], screen: 0, quality: 'auto', cursorImg: null, cursorHot: { x: 0, y: 0 }, cursorScale: 1, cursor: null,
     keysDown: new Set(), touch: null, closed: false, opened: false, statusText: null,
+    // 放大縮小（2026-11-10）：view 是 transform 的倍數與位置；fit 是符合框的大小；sentMaxWidth 是要求那台傳的寬度（那台預設 1920）
+    view: { zoom: 1, left: 0, top: 0 }, fit: { width: 0, height: 0 }, box: { w: 0, h: 0 }, sentMaxWidth: 1920, sharpTimer: 0,
+    pointers: new Map(), edge: null, edgeRaf: 0, lastMouse: null,
   };
   build(s);
   setStatus('連線到「' + s.name + '」…');
@@ -39,9 +42,8 @@ export function openRemoteDesk(deviceId, name) {
       if (s !== mine) return;
       if (state !== 'done') { end(openFailText(code)); return; }
       mine.opened = true;
-      // 手機：要求小一點的傳送寬度（省頻寬、畫面更快）
-      const maxWidth = R.preferredMaxWidth(window.innerWidth, window.devicePixelRatio, coarse());
-      if (maxWidth) sendPacket('config', { maxWidth });
+      // 手機：要求小一點的傳送寬度（省頻寬、畫面更快）；放大之後再要求清楚一點的
+      requestSharpness(mine);
     },
   });
   mine.stallTimer = setInterval(() => checkStall(mine), 1000);
@@ -93,18 +95,30 @@ function build(s) {
   const keysBtn = toolBtn('keyboard', '特殊按鍵', () => pickKeys(s, keysBtn));
   const typeBtn = toolBtn('edit', '打字', () => { s.keyInput.focus(); });
   setHidden(typeBtn, !coarse());
-  const fullBtn = toolBtn('fit', '全螢幕', () => toggleFullscreen(s));
+  const fullBtn = toolBtn('appWindow', '全螢幕', () => toggleFullscreen(s));
+  // 放大縮小：縮小、目前的倍數（按了回到符合視窗）、放大；滑鼠是 Ctrl＋滾輪（觸控板的兩指捏合也是），手機是兩指捏合
+  const zoomOutBtn = iconTool('zoomOut', '縮小', () => zoomBy(s, 1 / R.ZOOM_STEP));
+  s.zoomLabel = h('button', { type: 'button', class: 'btn rd-zoom', title: '回到符合視窗的大小', text: R.zoomLabel(1) });
+  s.zoomLabel.addEventListener('click', () => setView(s, R.fitView(s.fit, s.box.w, s.box.h)));
+  const zoomInBtn = iconTool('zoomIn', '放大', () => zoomBy(s, R.ZOOM_STEP));
   const closeBtn = h('button', { type: 'button', class: 'btn rd-close' }, icon('x'), h('span', { text: '中斷' }));
   closeBtn.addEventListener('click', () => end(null));
   s.bar = h('div', { class: 'rd-bar' },
     h('span', { class: 'rd-title', text: '遠端桌面：' + s.name }), s.info,
-    h('span', { class: 'rd-spacer' }), s.screenBtn, s.qualityBtn, keysBtn, typeBtn, fullBtn, closeBtn);
+    h('span', { class: 'rd-spacer' }), h('span', { class: 'rd-zoomgroup' }, zoomOutBtn, s.zoomLabel, zoomInBtn),
+    s.screenBtn, s.qualityBtn, keysBtn, typeBtn, fullBtn, closeBtn);
   s.root = h('div', { class: 'rd-wrap', role: 'dialog', 'aria-modal': 'true', 'aria-label': '遠端桌面：' + s.name }, s.bar, s.stage, s.keyInput);
   document.body.append(s.root);
   wireInput(s);
   s.resize = () => layout(s);
   window.addEventListener('resize', s.resize);
   s.stage.focus();
+}
+
+function iconTool(iconName, label, onClick) {
+  const b = h('button', { type: 'button', class: 'btn rd-tool rd-icon', title: label, 'aria-label': label }, icon(iconName));
+  b.addEventListener('click', onClick);
+  return b;
 }
 
 function toolBtn(iconName, label, onClick) {
@@ -120,14 +134,46 @@ function setStatus(text) {
   setHidden(s.statusEl, !text);
 }
 
-/** canvas 放進舞台裡（等比例），游標跟著換算 */
+/**
+ * canvas 放進舞台裡：canvas 本身是「符合框」的大小，放大與平移以 transform 做（合成器在做，捏合時不重排）；
+ * 框的大小或畫面的寬高比變了就重算、夾住位置
+ */
 function layout(s) {
   if (!s.w || !s.h) return;
   const box = s.stage.getBoundingClientRect();
-  const size = R.fit(box.width, box.height, s.w, s.h);
-  s.canvas.style.width = size.width + 'px';
-  s.canvas.style.height = size.height + 'px';
+  s.box = { w: box.width, h: box.height };
+  s.fit = R.fit(box.width, box.height, s.w, s.h);
+  s.canvas.style.width = s.fit.width + 'px';
+  s.canvas.style.height = s.fit.height + 'px';
+  setView(s, s.view);
+}
+
+/** 套用 view（夾住之後）：canvas 的 transform、倍數的文字、游標；倍數變了就看要不要請那台傳清楚一點的畫面 */
+function setView(s, view) {
+  const before = s.view.zoom;
+  s.view = R.clampView(view, s.fit, s.box.w, s.box.h);
+  s.canvas.style.transform = 'translate(' + s.view.left.toFixed(1) + 'px,' + s.view.top.toFixed(1) + 'px) scale(' + s.view.zoom.toFixed(4) + ')';
+  s.zoomLabel.textContent = R.zoomLabel(s.view.zoom);
+  s.root.classList.toggle('rd-zoomed', s.view.zoom > 1.001);
   placeCursor(s);
+  if (Math.abs(before - s.view.zoom) > 0.001) requestSharpness(s);
+}
+
+/** 以框的正中間（或給的那一點）放大縮小 */
+function zoomBy(s, factor, px = s.box.w / 2, py = s.box.h / 2) {
+  setView(s, R.zoomAt(s.view, s.view.zoom * factor, px, py, s.fit, s.box.w, s.box.h));
+}
+
+/** 放大之後請那台傳清楚一點（寬一點）的畫面、縮回來再請它傳小一點的；停下 0.5 秒才送（每次都會整個畫面重送） */
+function requestSharpness(s) {
+  clearTimeout(s.sharpTimer);
+  s.sharpTimer = setTimeout(() => {
+    if (!s.opened || s.closed) return;
+    const want = R.wantedMaxWidth(s.box.w || window.innerWidth, window.devicePixelRatio, s.view.zoom, coarse());
+    if (want === s.sentMaxWidth) return;
+    s.sentMaxWidth = want;
+    sendPacket('config', { maxWidth: want });
+  }, s.opened && s.sentMaxWidth === 1920 && s.view.zoom <= 1.001 ? 0 : 500);
 }
 
 function placeCursor(s) {
@@ -230,16 +276,29 @@ function wireInput(s) {
   });
   stage.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'touch') { touchMove(s, e); return; }
+    s.lastMouse = { x: e.clientX, y: e.clientY };
+    edgeCheck(s, e);
     input(s, { t: 'mm', ...point(e) });
   });
+  stage.addEventListener('pointerleave', () => { s.edge = null; });
   stage.addEventListener('pointerup', (e) => {
     if (e.pointerType === 'touch') { touchUp(s, e); return; }
     const b = R.buttonOf(e.button);
     if (b !== null) input(s, { t: 'mu', b, ...point(e) });
   });
-  stage.addEventListener('pointercancel', (e) => { if (e.pointerType === 'touch') s.touch = null; });
+  stage.addEventListener('pointercancel', (e) => {
+    if (e.pointerType !== 'touch') return;
+    s.pointers.delete(e.pointerId);
+    if (!s.pointers.size) s.touch = null;
+  });
   stage.addEventListener('wheel', (e) => {
     e.preventDefault();
+    // Ctrl＋滾輪（觸控板的兩指捏合也是這樣送）：放大縮小這裡的畫面，不送給那台
+    if (e.ctrlKey) {
+      const r = s.stage.getBoundingClientRect();
+      zoomBy(s, Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025)), e.clientX - r.left, e.clientY - r.top);
+      return;
+    }
     const dy = R.wheelUnits(e.deltaY, e.deltaMode);
     const dx = -R.wheelUnits(e.deltaX, e.deltaMode);
     if (dy || dx) input(s, { t: 'wh', dy, dx });
@@ -281,6 +340,25 @@ function wireInput(s) {
   });
 }
 
+/** 放大時滑鼠貼著框的邊緣：每個影格往那邊捲一點，那台的游標跟著留在滑鼠底下 */
+function edgeCheck(s, e) {
+  if (s.view.zoom <= 1.001) { s.edge = null; return; }
+  const r = s.stage.getBoundingClientRect();
+  const d = R.edgePan(e.clientX - r.left, e.clientY - r.top, r.width, r.height);
+  s.edge = d.dx || d.dy ? d : null;
+  if (s.edge && !s.edgeRaf) s.edgeRaf = requestAnimationFrame(() => edgeTick(s));
+}
+
+function edgeTick(s) {
+  s.edgeRaf = 0;
+  if (!s.edge || s.closed || s.view.zoom <= 1.001) return;
+  const before = s.view;
+  setView(s, R.panBy(s.view, s.edge.dx, s.edge.dy, s.fit, s.box.w, s.box.h));
+  if (before.left === s.view.left && before.top === s.view.top) return; // 到邊了
+  if (s.lastMouse) input(s, { t: 'mm', ...R.normPoint(s.lastMouse.x, s.lastMouse.y, s.canvas.getBoundingClientRect()) });
+  s.edgeRaf = requestAnimationFrame(() => edgeTick(s));
+}
+
 function releaseKeys(s) {
   for (const k of s.keysDown) input(s, { t: 'ku', k });
   s.keysDown.clear();
@@ -316,35 +394,62 @@ function sendPacket(kind, body) {
   post({ cmd: 'desk', sessionId: s.id, kind, seq: ++seq, body });
 }
 
-// ───── 觸控：點一下＝左鍵、長按＝右鍵、單指拖曳＝拖曳、雙指上下＝捲動 ─────
+// ───── 觸控：點一下＝左鍵、長按＝右鍵、單指拖曳＝拖曳；兩指捏合＝放大縮小，兩指移動＝放大時平移、沒放大時捲動那台的畫面 ─────
+
+function twoPoints(s) {
+  return [...s.pointers.values()].slice(0, 2).map((p) => ({ x: p.x, y: p.y }));
+}
 
 function touchDown(s, e) {
   e.preventDefault();
-  const p = R.normPoint(e.clientX, e.clientY, s.canvas.getBoundingClientRect());
-  if (s.touch && s.touch.id !== e.pointerId) {
-    // 第二隻手指：改成捲動
-    s.touch.two = { id: e.pointerId, y: e.clientY };
-    s.touch.mode = 'scroll';
-    clearTimeout(s.touch.longTimer);
+  s.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const t = s.touch;
+  if (t && s.pointers.size === 2) {
+    // 第二隻手指：不再是點、長按或拖曳（拖曳到一半的先放開）
+    clearTimeout(t.longTimer);
+    if (t.mode === 'drag') input(s, { t: 'mu', b: 0, ...t.last });
+    const pts = twoPoints(s);
+    t.mode = 'two';
+    t.two = { start: pts, prev: pts, kind: null };
     return;
   }
-  const t = { id: e.pointerId, x0: e.clientX, y0: e.clientY, at: performance.now(), moved: 0, mode: null, p, longFired: false };
-  t.longTimer = setTimeout(() => {
-    if (s.touch !== t || t.mode) return;
-    t.longFired = true;
-    input(s, { t: 'mm', ...t.p });
-    for (const ev of [{ t: 'md', b: 2, ...t.p }, { t: 'mu', b: 2, ...t.p }]) input(s, ev);
+  if (t) return;
+  const p = R.normPoint(e.clientX, e.clientY, s.canvas.getBoundingClientRect());
+  const one = { id: e.pointerId, x0: e.clientX, y0: e.clientY, at: performance.now(), moved: 0, mode: null, p, last: p, longFired: false };
+  one.longTimer = setTimeout(() => {
+    if (s.touch !== one || one.mode) return;
+    one.longFired = true;
+    input(s, { t: 'mm', ...one.p });
+    for (const ev of [{ t: 'md', b: 2, ...one.p }, { t: 'mu', b: 2, ...one.p }]) input(s, ev);
   }, R.LONG_PRESS_MS);
-  s.touch = t;
+  s.touch = one;
 }
 
 function touchMove(s, e) {
+  if (s.pointers.has(e.pointerId)) s.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   const t = s.touch;
   if (!t) return;
-  if (t.mode === 'scroll') {
-    if (t.two && e.pointerId === t.two.id) {
-      const wheel = R.twoFingerWheel(e.clientY - t.two.y);
-      t.two.y = e.clientY;
+  if (t.mode === 'two') {
+    if (s.pointers.size < 2) return;
+    const cur = twoPoints(s);
+    if (!t.two.kind) {
+      const total = R.twoFingerStep(t.two.start, cur);
+      const d0 = Math.hypot(t.two.start[1].x - t.two.start[0].x, t.two.start[1].y - t.two.start[0].y);
+      t.two.kind = R.twoFingerKind(total.scale * d0 - d0, Math.hypot(total.dx, total.dy), s.view.zoom);
+      if (!t.two.kind) return;
+      t.two.prev = t.two.start;
+    }
+    const step = R.twoFingerStep(t.two.prev, cur);
+    t.two.prev = cur;
+    const r = s.stage.getBoundingClientRect();
+    if (t.two.kind === 'pinch') {
+      // 捏合：以兩指的中心放大縮小，中心移動跟著平移
+      const zoomed = R.zoomAt(s.view, s.view.zoom * step.scale, step.cx - r.left, step.cy - r.top, s.fit, s.box.w, s.box.h);
+      setView(s, R.panBy(zoomed, step.dx, step.dy, s.fit, s.box.w, s.box.h));
+    } else if (t.two.kind === 'pan') {
+      setView(s, R.panBy(s.view, step.dx, step.dy, s.fit, s.box.w, s.box.h));
+    } else {
+      const wheel = R.twoFingerWheel(step.dy);
       if (wheel) input(s, { t: 'wh', dy: wheel });
     }
     return;
@@ -352,6 +457,7 @@ function touchMove(s, e) {
   if (e.pointerId !== t.id) return;
   t.moved = Math.max(t.moved, Math.hypot(e.clientX - t.x0, e.clientY - t.y0));
   const p = R.normPoint(e.clientX, e.clientY, s.canvas.getBoundingClientRect());
+  t.last = p;
   if (!t.mode && t.moved > R.TAP_SLOP_PX && !t.longFired) {
     clearTimeout(t.longTimer);
     t.mode = 'drag';
@@ -362,13 +468,17 @@ function touchMove(s, e) {
 }
 
 function touchUp(s, e) {
+  s.pointers.delete(e.pointerId);
   const t = s.touch;
   if (!t) return;
-  if (t.two && e.pointerId === t.two.id) { t.two = null; return; }
+  if (t.mode === 'two') {
+    // 兩指的手勢等手指都放開才結束（中途放開一隻不會變成點擊）
+    if (!s.pointers.size) s.touch = null;
+    return;
+  }
   if (e.pointerId !== t.id) return;
   clearTimeout(t.longTimer);
   s.touch = null;
-  if (t.mode === 'scroll') return;
   const p = R.normPoint(e.clientX, e.clientY, s.canvas.getBoundingClientRect());
   const kind = t.mode === 'drag' ? 'drag' : R.touchKind(performance.now() - t.at, t.moved, t.longFired);
   if (kind === 'drag') input(s, { t: 'mu', b: 0, ...p });
@@ -426,6 +536,8 @@ function end(text, notifyTarget = true) {
     post({ cmd: 'desk', sessionId: mine.id, kind: 'close', seq: ++seq, body: { reason: 'viewerClosed', text: '看的一方結束了遠端桌面' } });
   }
   clearTimeout(mine.sendTimer);
+  clearTimeout(mine.sharpTimer);
+  if (mine.edgeRaf) cancelAnimationFrame(mine.edgeRaf);
   clearInterval(mine.stallTimer);
   window.removeEventListener('resize', mine.resize);
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});

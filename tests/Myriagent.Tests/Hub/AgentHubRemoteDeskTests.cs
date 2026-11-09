@@ -130,7 +130,7 @@ public sealed class AgentHubRemoteDeskTests
         rig.H.Ui.Invoke(() => rig.Disconnect!());
 
         await rig.H.WaitUntilAsync(() => rig.Indicator!.Disposed, "提示列關掉");
-        var end = rig.Transport.Sent.All.Last();
+        var end = rig.Transport.Sent.All.Last(p => p.Kind == DeskRules.End);
         end.Kind.Should().Be(DeskRules.End);
         end.Body!.Value<string>("reason").Should().Be("targetClosed");
     }
@@ -146,7 +146,8 @@ public sealed class AgentHubRemoteDeskTests
 
         await rig.H.WaitUntilAsync(() => rig.Indicator!.Disposed, "停下");
         rig.Screen.Injected.All.Should().BeEmpty("政策改掉之後的輸入不送進去");
-        rig.Transport.Sent.All.Last().Body!.Value<string>("reason").Should().Be("policy");
+        rig.Transport.Sent.All.Last(p => p.Kind == DeskRules.End).Body!.Value<string>("reason").Should().Be("policy");
+        rig.Transport.Sent.All.SkipWhile(p => p.Kind != DeskRules.End).Skip(1).Should().BeEmpty("停下之後不再送影格");
     }
 
     [Fact]

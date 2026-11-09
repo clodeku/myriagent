@@ -226,3 +226,94 @@ export function cursorScale(shownWidth, screenWidth) {
   const raw = (Number(shownWidth) || 0) / Math.max(1, Number(screenWidth) || 1);
   return Math.min(1.5, Math.max(0.6, raw || 1));
 }
+
+// ───── 放大縮小與平移（2026-11-10 擁有者要求：手機畫面太小，要能把整個桌面放大縮小） ─────
+// 畫面以 transform 放大（合成器在做，捏合時順暢）：view 是 { zoom（1＝符合框的大小）, left, top（畫面左上角在框裡的位置） }
+
+/** 最多放大幾倍（相對於符合框的大小） */
+export const ZOOM_MAX = 8;
+
+/** 工具列的放大、縮小一次幾倍 */
+export const ZOOM_STEP = 1.25;
+
+/** 夾到 1～ZOOM_MAX 倍 */
+export function clampZoom(z) {
+  return Math.min(ZOOM_MAX, Math.max(1, Number.isFinite(z) ? z : 1));
+}
+
+/** 起始的 view：符合框的大小、置中 */
+export function fitView(fitSize, boxW, boxH) {
+  return clampView({ zoom: 1, left: 0, top: 0 }, fitSize, boxW, boxH);
+}
+
+/** 夾住位置：比框小的那一邊置中，比框大的那一邊不露出空白 */
+export function clampView(view, fitSize, boxW, boxH) {
+  const zoom = clampZoom(view && view.zoom);
+  const w = (fitSize && fitSize.width || 0) * zoom;
+  const hgt = (fitSize && fitSize.height || 0) * zoom;
+  const axis = (pos, size, box) => (size <= box ? (box - size) / 2 : Math.min(0, Math.max(box - size, Number(pos) || 0)));
+  return { zoom, left: axis(view && view.left, w, boxW), top: axis(view && view.top, hgt, boxH) };
+}
+
+/** 以框裡的一點（px, py）為中心換成 newZoom 倍：那一點底下的內容不動 */
+export function zoomAt(view, newZoom, px, py, fitSize, boxW, boxH) {
+  const old = clampView(view, fitSize, boxW, boxH);
+  const zoom = clampZoom(newZoom);
+  const w = fitSize.width * old.zoom;
+  const hgt = fitSize.height * old.zoom;
+  const u = w > 0 ? (px - old.left) / w : 0.5;
+  const v = hgt > 0 ? (py - old.top) / hgt : 0.5;
+  return clampView({ zoom, left: px - u * fitSize.width * zoom, top: py - v * fitSize.height * zoom }, fitSize, boxW, boxH);
+}
+
+/** 平移（手指或滑鼠移了 dx、dy） */
+export function panBy(view, dx, dy, fitSize, boxW, boxH) {
+  return clampView({ zoom: view.zoom, left: view.left + dx, top: view.top + dy }, fitSize, boxW, boxH);
+}
+
+/** 滑鼠貼著框的邊緣時往那邊捲（放大時看得到畫面外的部分）：回這一格要移的 dx、dy（越貼近邊緣越快） */
+export function edgePan(x, y, boxW, boxH, margin = 40, maxStep = 18) {
+  const step = (pos, size) => {
+    if (pos < margin) return Math.round(maxStep * (1 - Math.max(0, pos) / margin));
+    if (pos > size - margin) return -Math.round(maxStep * (1 - Math.max(0, size - pos) / margin));
+    return 0;
+  };
+  return { dx: step(x, boxW), dy: step(y, boxH) };
+}
+
+/** 兩隻手指從 prev 移到 cur（各兩點）：距離的比例、中心點與中心的移動 */
+export function twoFingerStep(prev, cur) {
+  const dist = (p) => Math.hypot(p[1].x - p[0].x, p[1].y - p[0].y);
+  const mid = (p) => ({ x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 });
+  const d0 = dist(prev);
+  const d1 = dist(cur);
+  const m0 = mid(prev);
+  const m1 = mid(cur);
+  return { scale: d0 > 0 ? d1 / d0 : 1, cx: m1.x, cy: m1.y, dx: m1.x - m0.x, dy: m1.y - m0.y };
+}
+
+/**
+ * 兩隻手指的手勢是什麼（從放下開始累計）：距離變了超過 16 像素＝捏合縮放；中心移了超過 10 像素＝放大時平移、沒放大時捲動那台的畫面；
+ * 都還沒到回 null（再看）
+ */
+export function twoFingerKind(distChange, centerMove, zoom) {
+  if (Math.abs(distChange) > 16) return 'pinch';
+  if (centerMove > 10) return zoom > 1.001 ? 'pan' : 'scroll';
+  return null;
+}
+
+/** 工具列顯示的倍數：1 倍是「符合視窗」 */
+export function zoomLabel(zoom) {
+  return zoom <= 1.001 ? '符合視窗' : Math.round(zoom * 100) + '%';
+}
+
+/**
+ * 要求那台傳多寬的畫面（裝置像素：框寬 × 螢幕倍率 × 放大倍數，取 1280／1920／2560／3840 裡夠用的最小一級）。
+ * 沒放大時：手機照 preferredMaxWidth（小一點、省頻寬），電腦是預設的 1920
+ */
+export function wantedMaxWidth(boxW, dpr, zoom, coarse) {
+  if (!(zoom > 1.001)) return preferredMaxWidth(boxW, dpr, coarse) ?? 1920;
+  const need = (Number(boxW) || 0) * (Number(dpr) || 1) * zoom * 0.9;
+  for (const level of [1280, 1920, 2560, 3840]) if (level >= need) return level;
+  return 3840;
+}

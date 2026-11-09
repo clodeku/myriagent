@@ -278,6 +278,63 @@ export async function runDeviceFiles(ctx, vp, m) {
   check('deskInputSent', !!inputs && inputs.list.every((c) => c.sessionId === open.requestId) && inputs.list.some((c) => c.body.ack === 1)
     && !!down && down.b === 0 && Math.abs(down.x - 0.5) < 0.02 && Math.abs(down.y - 0.5) < 0.02 && evs.some((e) => e.t === 'kd' && e.k === 0x41),
     { inputs: inputs && inputs.list });
+  // 放大縮小（2026-11-10）：工具列放大 4 次 → 倍數文字、transform、請那台傳清楚一點的畫面；放大時點正中間仍對到畫面中心；回到符合視窗
+  const view = () => page.evaluate(() => {
+    const c = document.querySelector('.rd-canvas');
+    const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\) scale\(([\d.]+)\)/.exec(c.style.transform || '');
+    return { label: document.querySelector('.rd-zoom').textContent, zoomed: document.querySelector('.rd-wrap').classList.contains('rd-zoomed'),
+      left: m ? Number(m[1]) : null, top: m ? Number(m[2]) : null, zoom: m ? Number(m[3]) : null };
+  });
+  for (let i = 0; i < 4; i++) await page.click('.rd-tool[title="放大"]');
+  const zoomedIn = await view();
+  const sharper = await until(() => host.received.find((c) => c.cmd === 'desk' && c.kind === 'config' && c.body && c.body.maxWidth === 3840), 3000);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const zoomClick = await until(() => {
+    const evs = host.received.filter((c) => c.cmd === 'desk' && c.kind === 'input').flatMap((c) => c.body.events || []);
+    const downs = evs.filter((e) => e.t === 'md');
+    return downs.length >= 2 ? downs[downs.length - 1] : null;
+  }, 3000);
+  check('deskZoomToolbar', zoomedIn.label === '244%' && zoomedIn.zoomed && Math.abs(zoomedIn.zoom - 2.4414) < 0.01 && !!sharper
+    && !!zoomClick && Math.abs(zoomClick.x - 0.5) < 0.02 && Math.abs(zoomClick.y - 0.5) < 0.02, { zoomedIn, sharper: !!sharper, zoomClick });
+  await shot(page, 'remotedesk-zoomed-dark');
+  await page.click('.rd-zoom');
+  const reset = await view();
+  const back = await until(() => host.received.filter((c) => c.cmd === 'desk' && c.kind === 'config' && c.body && c.body.maxWidth === 1920).length ? true : null, 3000);
+  // Ctrl＋滾輪：以滑鼠的位置放大（不送給那台）
+  const wheelsBefore = host.received.filter((c) => c.cmd === 'desk' && c.kind === 'input').flatMap((c) => c.body.events || []).filter((e) => e.t === 'wh').length;
+  await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.25);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -200);
+  await page.keyboard.up('Control');
+  await sleep(300);
+  const wheeled = await view();
+  const wheelsAfter = host.received.filter((c) => c.cmd === 'desk' && c.kind === 'input').flatMap((c) => c.body.events || []).filter((e) => e.t === 'wh').length;
+  check('deskZoomResetAndCtrlWheel', reset.label === '符合視窗' && !reset.zoomed && reset.zoom === 1 && !!back && wheeled.zoom > 1.5 && wheelsAfter === wheelsBefore,
+    { reset, back: !!back, wheeled, wheelsBefore, wheelsAfter });
+  await page.click('.rd-zoom');
+
+  // 手機的兩指捏合（CDP 的觸控事件）：放大；放大後兩指一起移＝平移，不送捲動給那台
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p, i) => ({ x: p[0], y: p[1], id: i + 1 })) });
+  await touch('touchStart', [[cx - 40, cy], [cx + 40, cy]]);
+  for (let d = 50; d <= 200; d += 15) await touch('touchMove', [[cx - d, cy], [cx + d, cy]]);
+  await touch('touchEnd', []);
+  await sleep(200);
+  const pinched = await view();
+  await touch('touchStart', [[cx - 60, cy], [cx + 60, cy]]);
+  for (let dx = 10; dx <= 120; dx += 10) await touch('touchMove', [[cx - 60 + dx, cy], [cx + 60 + dx, cy]]);
+  await touch('touchEnd', []);
+  await sleep(200);
+  const panned = await view();
+  const wheelsTouch = host.received.filter((c) => c.cmd === 'desk' && c.kind === 'input').flatMap((c) => c.body.events || []).filter((e) => e.t === 'wh').length;
+  check('deskPinchZoomAndPan', pinched.zoom > 2 && panned.zoom === pinched.zoom && panned.left > pinched.left && wheelsTouch === wheelsAfter,
+    { pinched, panned, wheelsTouch, wheelsAfter });
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+  await cdp.detach();
+
   // 那台結束：收起畫面、提示說明
   host.send({ type: 'desk', sessionId: open.requestId, kind: 'end', seq: 0, body: { reason: 'targetClosed', text: '那台的人中斷了遠端桌面' } });
   const ended = await until(() => page.evaluate(() => (!document.querySelector('.rd-wrap')
