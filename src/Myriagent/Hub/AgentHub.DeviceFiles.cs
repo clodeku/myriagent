@@ -27,6 +27,9 @@ internal sealed partial class AgentHub
     /// <summary>測試接縫：虛擬根的常用資料夾</summary>
     internal Func<IReadOnlyList<(string Name, string Path)>>? DevicePlacesForTest { get; set; }
 
+    /// <summary>測試接縫：網路芳鄰（解析主機、網路磁碟機、電腦與分享的清單）</summary>
+    internal INetworkShares? DeviceNetworkForTest { get; set; }
+
     /// <summary>測試：接收中與剛收完的檔</summary>
     internal DeviceXferBoard DeviceXfers => deviceXfers;
 
@@ -39,7 +42,7 @@ internal sealed partial class AgentHub
 
     /// <summary>UI 執行緒取的快照（之後在背景用）</summary>
     private sealed record DeviceFilesSnapshot(MediaFolderRoots Folders, IReadOnlyList<string> Drives, IReadOnlyList<(string Name, string Path)> Places,
-        RemoteFileGuard Guard, IRemoteFileTransfer? Transfer);
+        RemoteFileGuard Guard, IRemoteFileTransfer? Transfer, NetworkPathGuard Network);
 
     private DeviceFilesSnapshot SnapshotDeviceFiles()
     {
@@ -50,7 +53,8 @@ internal sealed partial class AgentHub
             DevicePlacesForTest?.Invoke() ?? DeviceTransferRules.Places(folders.UserProfile,
                 Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)),
             RemoteGuard,
-            CurrentRemoteFileTransfer());
+            CurrentRemoteFileTransfer(),
+            new NetworkPathGuard(DeviceNetworkForTest ?? NetworkShares.Instance, NetworkPathGuard.DefaultTimeout));
     }
 
     /// <summary>三個指令的處理者（其他指令回 false）</summary>
@@ -122,6 +126,9 @@ internal sealed partial class AgentHub
         var source = new RemoteListSource(null, null, [], s.Guard);
         if (path is null)
             return RemoteFilesResult.Send(await DeviceRootMessageAsync(source, s, scope, requestId, ct).ConfigureAwait(false));
+        // 網路芳鄰（2026-11-09）：「網路」、\\電腦、\\電腦\分享\…、網路磁碟機上的路徑
+        if (s.Network.IsNetworkPath(path))
+            return RemoteFilesResult.Send(await NetworkBrowseAsync(source, s.Network, requestId, path, ct).ConfigureAwait(false));
         var result = await ListDirectoryCoreAsync(source, scope, requestId, path, dirsOnly: false,
             _ => Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>()), ct).ConfigureAwait(false);
         return ReferenceEquals(result, RemoteFilesResult.RefusedPath) ? DeviceRefusedPath : result;
@@ -155,7 +162,69 @@ internal sealed partial class AgentHub
                 entries.Add(RenderRemoteEntry(new FileEntry(name, directory, "dir", null, DateTime.MinValue, false), null));
         }
 
+        // 網路芳鄰：對應的網路磁碟機（「Z: (\\NAS\資料)」）與「網路」這一層
+        var mapped = await s.Network.RunRefAsync(() => s.Network.Shares.MappedDrives(), ct).ConfigureAwait(false) ?? [];
+        foreach (var (root, target) in mapped)
+            entries.Add(RenderRemoteEntry(new FileEntry(root[..2] + " (" + target + ")", root, "dir", null, DateTime.MinValue, false), null));
+        entries.Add(RenderRemoteEntry(new FileEntry("網路", NetworkPathRules.NetworkRoot, "dir", null, DateTime.MinValue, false), null));
         return FilesMessage(source, requestId, null, null, entries, false, null);
+    }
+
+    /// <summary>
+    /// 背景：網路芳鄰的一層。「網路」列區域網路的電腦（網路探索），<c>\\電腦</c> 列它的資料夾分享，其他（分享以下、網路磁碟機上的路徑）列資料夾與檔案。
+    /// 主機不在區域網路、是這台自己、逾時、不存在都以 <c>error</c> 說明（清單是空的）
+    /// </summary>
+    private static async Task<JObject> NetworkBrowseAsync(RemoteListSource source, NetworkPathGuard network, string? requestId, string path, CancellationToken ct)
+    {
+        var mapped = network.MappedTargetOf(path);
+        var display = mapped is null ? NetworkPathRules.Normalize(path) ?? path : (path.Length > 3 ? path.TrimEnd(Path.DirectorySeparatorChar) : path);
+        string? parent = mapped is null ? NetworkPathRules.Parent(display)
+            : display.Length <= 3 ? null : Path.GetDirectoryName(display);
+        JObject Error(string reason) => FilesMessage(source, requestId, display, parent, [], false, NetworkPathRules.Explain(reason));
+
+        if (NetworkPathRules.IsNetworkRoot(display))
+        {
+            var computers = await network.RunRefAsync(() => network.Shares.Computers(), ct).ConfigureAwait(false);
+            if (computers is null)
+                return Error(NetworkPathReasons.Timeout);
+            var list = new JArray(computers.Where(NetworkPathRules.IsHostName)
+                .Select(c => RenderRemoteEntry(new FileEntry(c, NetworkPathRules.NetworkRoot + c, "dir", null, DateTime.MinValue, false), null)));
+            return FilesMessage(source, requestId, display, null, list, false,
+                list.Count == 0 ? @"沒有找到網路上的電腦（那台的網路探索可能關著）：請在路徑列輸入 \\電腦名稱 或 \\電腦名稱\分享名稱" : null);
+        }
+
+        if (mapped is null && NetworkPathRules.TryParse(display, out var host, out var share, out _) && share is null)
+        {
+            if (await network.CheckHostAsync(host, ct).ConfigureAwait(false) is { } refused)
+                return Error(refused);
+            var shares = await network.RunRefAsync(() => network.Shares.Shares(host), ct).ConfigureAwait(false);
+            if (shares is null)
+                return Error(NetworkPathReasons.Timeout);
+            var list = new JArray(shares.Where(sh => !NetworkPathRules.IsBlockedShare(sh))
+                .Select(sh => RenderRemoteEntry(new FileEntry(sh, display + @"\" + sh, "dir", null, DateTime.MinValue, false), null)));
+            return FilesMessage(source, requestId, display, parent, list, false, list.Count == 0 ? "這台電腦沒有可以瀏覽的分享資料夾（或要先在那台登入過）" : null);
+        }
+
+        var (directory, reason) = await network.CheckDirectoryAsync(display, ct).ConfigureAwait(false);
+        if (directory is null)
+            return Error(reason ?? NetworkPathReasons.NotFound);
+        var listed = await network.RunRefAsync<Tuple<List<FileEntry>, bool>?>(() =>
+        {
+            try
+            {
+                var (entries, truncated) = RemoteFileIndex.ListDirectory(directory, _ => false, dirsOnly: false);
+                return Tuple.Create(entries, truncated);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                Log.Info($"列不出網路資料夾：{ex.Message}");
+                return null;
+            }
+        }, ct).ConfigureAwait(false);
+        if (listed is null)
+            return Error(NetworkPathReasons.NotFound);
+        var (fitted, cut) = RemoteListRules.Fit(listed.Item1.Select(e => RenderRemoteEntry(e, null)), RemoteListRules.MaxOutputBytes);
+        return FilesMessage(source, requestId, directory, parent, fitted, listed.Item2 || cut, null);
     }
 
     // ───────────────────────────── deviceFetch ─────────────────────────────
@@ -180,6 +249,20 @@ internal sealed partial class AgentHub
     /// <summary>背景：守門員以整台本機磁碟的範圍開檔（沒有大小上限、不做文字 DLP：擁有者自己挑的檔，憑證類檔名照樣擋）→ 發 <c>@xfer</c> 參照（2 小時）</summary>
     private static async Task<RemoteFilesResult> DeviceFetchCoreAsync(DeviceFilesSnapshot s, string? requestId, string path, long nowMs, CancellationToken ct)
     {
+        if (s.Network.IsNetworkPath(path))
+        {
+            var (networkFile, networkReason) = await s.Network.OpenAsync(path, ct).ConfigureAwait(false);
+            if (networkFile is null)
+            {
+                Log.Info($"deviceFetch 的網路路徑不給（{networkReason}）");
+                return networkReason is NetworkPathReasons.NotFound or NetworkPathReasons.Name or NetworkPathReasons.Timeout
+                    ? RemoteFilesResult.Send(DeviceFileRefError(requestId))
+                    : new RemoteFilesResult(RemoteResultCodes.Policy, NetworkPathRules.Explain(networkReason!), null);
+            }
+
+            return await RegisterFetchAsync(s, requestId, networkFile, nowMs, ct).ConfigureAwait(false);
+        }
+
         var scope = await DeviceTransferScope.BuildAsync(s.Folders, s.Drives, s.Guard, ct).ConfigureAwait(false);
         var opened = await s.Guard.OpenAsync(path, RemoteFilePurpose.File, scope, long.MaxValue, ct).ConfigureAwait(false);
         if (opened.File is not { } file)
@@ -194,6 +277,12 @@ internal sealed partial class AgentHub
             return RemoteFilesResult.Send(DeviceFileRefError(requestId));
         }
 
+        return await RegisterFetchAsync(s, requestId, file, nowMs, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>開好的檔（本機或網路）→ 發 <c>@xfer</c> 參照、組 fileRef（檔案在這裡關掉，轉送時再開一次）</summary>
+    private static async Task<RemoteFilesResult> RegisterFetchAsync(DeviceFilesSnapshot s, string? requestId, GuardedFile file, long nowMs, CancellationToken ct)
+    {
         string finalPath;
         long length;
         using (file)
@@ -309,6 +398,22 @@ internal sealed partial class AgentHub
     /// <summary>背景：資料夾要在範圍裡、不在禁止清單、存在；所在磁碟的可用空間要 ≥ 合計＋1 GB</summary>
     private static async Task<(string? Directory, string? Code, string? Message)> CheckPutFolderAsync(DeviceFilesSnapshot s, string folder, long total, CancellationToken ct)
     {
+        if (s.Network.IsNetworkPath(folder))
+        {
+            var (networkDirectory, networkReason) = await s.Network.CheckDirectoryAsync(folder, ct).ConfigureAwait(false);
+            if (networkDirectory is null)
+            {
+                Log.Info($"devicePut 的網路資料夾被拒（{networkReason}）");
+                return (null, networkReason is NetworkPathReasons.NotFound or NetworkPathReasons.Timeout ? RemoteResultCodes.Conflict : RemoteResultCodes.Policy,
+                    NetworkPathRules.Explain(networkReason!));
+            }
+
+            var free = await s.Network.RunAsync(() => s.Network.Shares.FreeSpace(networkDirectory) ?? -1L, ct).ConfigureAwait(false);
+            if (!UploadNameRules.HasDiskRoom(free is null or < 0 ? null : free, total))
+                return (null, RemoteResultCodes.Conflict, $"那個網路資料夾的空間不夠或量不到（要 {AgentAttachmentRules.FormatSize(total)}，另外至少要留 1 GB）");
+            return (networkDirectory, null, null);
+        }
+
         var scope = await DeviceTransferScope.BuildAsync(s.Folders, s.Drives, s.Guard, ct).ConfigureAwait(false);
         var check = await s.Guard.CheckDirectoryAsync(folder, scope, ct).ConfigureAwait(false);
         if (check.Directory is not { } directory)

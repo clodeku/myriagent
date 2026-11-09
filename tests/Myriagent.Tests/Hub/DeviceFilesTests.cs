@@ -148,8 +148,11 @@ public sealed class DeviceFilesTests
         refused.Message.Should().Be(DeviceTransferRules.RefusedPathMessage);
         none.Should().BeEmpty();
 
-        var (unc, _) = await rig.BrowseAsync(@"\\server\share");
-        ShouldBeRejected(unc, RemoteResultCodes.Policy);
+        // 網路芳鄰（2026-11-09 起）：UNC 改走網路分支，這台自己的分享以 error 說明、不列內容
+        var (unc, uncOutput) = await rig.BrowseAsync(@"\\localhost\C$\Windows");
+        unc.State.Should().Be(RemoteResultStates.Done, unc.Message);
+        uncOutput.Single().Value<string>("error").Should().Contain("自己");
+        uncOutput.Single()["entries"]!.Should().BeEmpty();
     }
 
     [Fact]

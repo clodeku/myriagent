@@ -103,7 +103,7 @@ function buildDialog(s) {
     if (files.length) queueUploads(s, files);
   });
   s.list.addEventListener('dragover', (e) => {
-    if (!hasFiles(e) || !s.path) return;
+    if (!hasFiles(e) || !R.canUploadHere(s.path)) return;
     e.preventDefault();
     e.stopPropagation();
     s.list.classList.add('df-drop');
@@ -114,7 +114,7 @@ function buildDialog(s) {
     e.preventDefault();
     e.stopPropagation();
     s.list.classList.remove('df-drop');
-    if (!s.path) { toast('先開到一個資料夾再把檔案拖進來', 'info'); return; }
+    if (!R.canUploadHere(s.path)) { toast('先開到一個資料夾再把檔案拖進來', 'info'); return; }
     queueUploads(s, Array.from(e.dataTransfer.files || []));
   });
   s.list.addEventListener('keydown', (e) => {
@@ -161,7 +161,7 @@ const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || [])
 function pickUploads() {
   const s = session;
   if (!s) return;
-  if (!s.path) { toast('先開到要放檔案的資料夾（磁碟與常用資料夾這一層不能放檔案）', 'info'); return; }
+  if (!R.canUploadHere(s.path)) { toast('先開到要放檔案的資料夾（磁碟與常用資料夾、網路、電腦這幾層不能放檔案）', 'info'); return; }
   s.fileInput.click();
 }
 
@@ -290,7 +290,7 @@ function renderFooter(s) {
   s.selInfo.textContent = files.length ? '已選 ' + files.length + ' 個檔案（' + fmtBytes(bytes) + '）' : '點檔案選取，Shift 連選、Ctrl 加選，雙擊直接下載';
   s.downloadBtn.disabled = !files.length;
   s.downloadBtn.querySelector('.df-dl-text').textContent = files.length ? '下載 ' + files.length + ' 個檔案' : '下載';
-  s.uploadBtn.disabled = !s.path;
+  s.uploadBtn.disabled = !R.canUploadHere(s.path);
 }
 
 function renderDest(s) {
@@ -402,7 +402,7 @@ export function onXferProgress(m) {
 
 function queueUploads(s, files) {
   const folder = s.path;
-  if (!folder) return;
+  if (!R.canUploadHere(folder)) return;
   for (const file of files) {
     const t = { id: ++seq, dir: 'up', deviceId: s.deviceId, name: file.name, size: file.size, file, folder, state: 'queued', done: 0, total: file.size };
     const problem = R.uploadProblem(file);

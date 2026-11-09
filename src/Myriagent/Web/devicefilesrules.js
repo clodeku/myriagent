@@ -32,11 +32,21 @@ export function transferMenu({ row, device, hub, peer }) {
   return { enabled: true, reason: null };
 }
 
-/** 使用者輸入的路徑：去掉前後空白與引號、斜線換成反斜線、「C:」補成「C:\」、資料夾結尾的反斜線去掉（磁碟根目錄除外）；空的回 null */
+/** 網路芳鄰：「網路」這一層的路徑 */
+export const NETWORK_ROOT = '\\\\';
+
+/** 網路路徑（「網路」、\\電腦、\\電腦\分享\…） */
+export const isNetworkPath = (p) => typeof p === 'string' && p.startsWith(NETWORK_ROOT);
+
+/**
+ * 使用者輸入的路徑：去掉前後空白與引號、斜線換成反斜線、「C:」補成「C:\」、資料夾結尾的反斜線去掉（磁碟根目錄除外）；空的回 null。
+ * 網路路徑留著開頭的 \\、中間重複的反斜線合成一個；只有 \\ 是「網路」這一層
+ */
 export function normalizePath(input) {
   if (typeof input !== 'string') return null;
   let p = input.trim().replace(/^"+|"+$/g, '').trim().replace(/\//g, '\\');
   if (!p) return null;
+  if (p.startsWith(NETWORK_ROOT)) return NETWORK_ROOT + p.slice(2).split('\\').filter(Boolean).join('\\');
   if (/^[A-Za-z]:$/.test(p)) p += '\\';
   if (/^[A-Za-z]:\\$/.test(p)) return p[0].toUpperCase() + ':\\';
   p = p.replace(/\\+$/, '');
@@ -47,6 +57,16 @@ export function normalizePath(input) {
 /** 路徑列：[{ label, path }]，第一段是磁碟（「C:」→「C:\」）；null（虛擬根）是 [] */
 export function crumbs(path) {
   const p = normalizePath(path);
+  if (p && isNetworkPath(p)) {
+    // 網路芳鄰：網路 → 電腦 → 分享 → …
+    const out = [{ label: '網路', path: NETWORK_ROOT }];
+    let acc = NETWORK_ROOT;
+    for (const part of p.slice(2).split('\\').filter(Boolean)) {
+      acc = acc === NETWORK_ROOT ? acc + part : acc + '\\' + part;
+      out.push({ label: part, path: acc });
+    }
+    return out;
+  }
   if (!p || !/^[A-Za-z]:\\/.test(p)) return [];
   const parts = p.slice(3).split('\\').filter(Boolean);
   const out = [{ label: p.slice(0, 2), path: p.slice(0, 3) }];
@@ -56,6 +76,13 @@ export function crumbs(path) {
     out.push({ label: part, path: acc });
   }
   return out;
+}
+
+/** 這一層能不能放檔案：磁碟與常用資料夾、「網路」、\\電腦（分享的清單）都不行，要開到資料夾（本機或 \\電腦\分享 以下） */
+export function canUploadHere(path) {
+  if (typeof path !== 'string' || !path) return false;
+  if (!isNetworkPath(path)) return true;
+  return path.slice(2).split('\\').filter(Boolean).length >= 2;
 }
 
 /** 磁碟根目錄（「X:\」） */

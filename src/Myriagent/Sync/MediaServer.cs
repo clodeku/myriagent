@@ -255,6 +255,23 @@ internal sealed class MediaServer : IDisposable
     private async Task<Reply> TransferAsync(MediaJob job, ResolvedMedia target, MediaScopeSnapshot snapshot, Action<GuardedFile> keep, CancellationToken ct)
     {
         var request = job.Request;
+        // 網路芳鄰的檔（2026-11-09）：只收區域網路、不收這台自己，逾時之內開得了才給
+        var network = new NetworkPathGuard(NetworkShares.Instance, NetworkPathGuard.DefaultTimeout);
+        if (network.IsNetworkPath(target.Path))
+        {
+            var (networkFile, networkReason) = await network.OpenAsync(target.Path, ct).ConfigureAwait(false);
+            if (networkFile is null)
+            {
+                Refused(request, job.Row, $"網路路徑不給（{networkReason}）", target.Path);
+                return Rejected(networkReason is NetworkPathReasons.NotFound or NetworkPathReasons.Timeout
+                    ? new MediaVerdict(404, MediaErrorCodes.NotFound)
+                    : new MediaVerdict(403, MediaErrorCodes.Forbidden));
+            }
+
+            keep(networkFile);
+            return Original(networkFile, target.FileName, request.Range, MediaContentKinds.Binary);
+        }
+
         var scope = await DeviceTransferScope.BuildAsync(snapshot.Folders, DeviceTransferRules.FixedDriveRoots(), guard, ct).ConfigureAwait(false);
         var opened = await guard.OpenAsync(target.Path, RemoteFilePurpose.File, scope, long.MaxValue, ct).ConfigureAwait(false);
         if (opened.File is not { } file)

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   transferMenu, normalizePath, crumbs, isDriveRoot, sortEntries, selectAt, toggleAll, selectedFiles, nextToStart, isFinished,
-  percent, stateText, parseXfers, applyXfer, uploadProblem, locationLabel, MAX_ACTIVE_DOWNLOADS, MAX_ACTIVE_UPLOADS, MAX_UPLOAD_BYTES,
+  percent, stateText, parseXfers, applyXfer, uploadProblem, locationLabel, NETWORK_ROOT, isNetworkPath, canUploadHere, MAX_ACTIVE_DOWNLOADS, MAX_ACTIVE_UPLOADS, MAX_UPLOAD_BYTES,
 } from '../../src/Myriagent/Web/devicefilesrules.js';
 
 const row = (o) => Object.assign({ key: 'd_x', id: 'd_x', self: false, hub: false, online: true, name: 'OFFICE' }, o);
@@ -38,11 +38,29 @@ test('normalizePath：引號、斜線、磁碟代號、結尾的反斜線', () =
   assert.equal(normalizePath('\\\\server\\share'), '\\\\server\\share');
 });
 
+test('網路芳鄰：路徑整理、路徑列、哪幾層能放檔案', () => {
+  assert.equal(normalizePath('//nas//資料/'), '\\\\nas\\資料');
+  assert.equal(normalizePath('\\\\'), NETWORK_ROOT);
+  assert.equal(normalizePath('  "\\\\NAS\\share\\a\\"  '), '\\\\NAS\\share\\a');
+  assert.deepEqual(crumbs(NETWORK_ROOT), [{ label: '網路', path: NETWORK_ROOT }]);
+  assert.deepEqual(crumbs('\\\\nas\\資料\\2026'), [
+    { label: '網路', path: NETWORK_ROOT }, { label: 'nas', path: '\\\\nas' }, { label: '資料', path: '\\\\nas\\資料' }, { label: '2026', path: '\\\\nas\\資料\\2026' }]);
+  assert.equal(isNetworkPath('\\\\nas'), true);
+  assert.equal(isNetworkPath('C:\\'), false);
+  assert.equal(canUploadHere(null), false);
+  assert.equal(canUploadHere(NETWORK_ROOT), false);
+  assert.equal(canUploadHere('\\\\nas'), false);
+  assert.equal(canUploadHere('\\\\nas\\資料'), true);
+  assert.equal(canUploadHere('Z:\\'), true);
+  assert.equal(canUploadHere('C:\\a'), true);
+});
+
 test('crumbs：第一段是磁碟、之後逐層', () => {
   assert.deepEqual(crumbs(null), []);
   assert.deepEqual(crumbs('C:\\'), [{ label: 'C:', path: 'C:\\' }]);
   assert.deepEqual(crumbs('D:\\a\\b'), [{ label: 'D:', path: 'D:\\' }, { label: 'a', path: 'D:\\a' }, { label: 'b', path: 'D:\\a\\b' }]);
-  assert.deepEqual(crumbs('\\\\server\\share'), []);
+  assert.equal(crumbs('\\\\server\\share').length, 3, '網路路徑另有路徑列（網路芳鄰那一則）');
+  assert.deepEqual(crumbs('relative\\x'), []);
   assert.equal(isDriveRoot('C:\\'), true);
   assert.equal(isDriveRoot('C:\\a'), false);
 });
