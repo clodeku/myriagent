@@ -558,7 +558,7 @@ function handle(m) {
     case 'settings':
       state.settings = Object.assign({}, state.settings, m.settings || {});
       applySettings(state.settings);
-      for (const cv of ws.allConvs()) { cv.composer.updatePlaceholder(); cv.composer.updateSend(); cv.composer.autosize(); } // 字級改了，多行草稿要重算高度
+      for (const cv of ws.allConvs()) { cv.composer.updatePlaceholder(); cv.composer.updateSend(); }
       refreshSettings();
       dash.markDirty();
       dash.render();

@@ -234,6 +234,13 @@ export class Composer {
     });
     this.busyEl = h('div', { class: 'cbusy', hidden: true }, spinner(), h('span', { class: 'cbusy-text' }));
     this.ta = h('textarea', { class: 'cinput', rows: 1, spellcheck: 'false', 'aria-label': '訊息' });
+    // 輸入框不跟著內容長高（2026-11-09 使用者要求），由右上角的按鈕切換一行與窗格放得下的高度；各分頁各自記，不寫進設定
+    this.inputExpanded = false;
+    this.expandIc = syncIcon(null, 'inputExpand');
+    this.expandBtn = h('button', { type: 'button', class: 'ibtn cinput-toggle', title: '展開輸入框', 'aria-label': '展開輸入框', 'aria-expanded': 'false', dataset: { field: 'inputExpand' } }, this.expandIc);
+    this.expandBtn.addEventListener('mousedown', (e) => e.preventDefault()); // 不搶輸入框的焦點
+    this.expandBtn.addEventListener('click', () => this.toggleInputExpanded());
+    this.taWrap = h('div', { class: 'cinput-wrap' }, this.ta, this.expandBtn);
     this.attachBtn = iconButton('paperclip', ATTACH_TITLE, () => this.attach());
     this.attachBtn.dataset.field = 'attach';
     this.atBtn = iconButton('at', '提及 AI 帳戶或檔案（@）', () => this.insertAt(), 'at');
@@ -296,7 +303,7 @@ export class Composer {
     this.contBtn.dataset.field = 'continue';
     this.bar = h('div', { class: 'cbar' }, this.attachBtn, this.atBtn, this.permBtn, this.modelBtn, this.effortBtn, this.agentBtn, this.styleBtn, this.codexBtn, h('span', { class: 'grow' }), this.ctxEl, this.contBtn, this.voice.el, this.stopBtn, this.sendBtn);
     this.suggest = h('div', { class: 'suggest', hidden: true, role: 'listbox' });
-    this.box = h('div', { class: 'cbox' }, this.suggest, this.chips, this.upChips, this.busyEl, this.ta, this.bar, this.fileInput);
+    this.box = h('div', { class: 'cbox' }, this.suggest, this.chips, this.upChips, this.busyEl, this.taWrap, this.bar, this.fileInput);
     this.info = h('div', { class: 'cinfo' });
     // 輸入框下方那一行最前面的燈號（activityrules.js）：運行跟著執行中；資料流、網路、硬碟只在宿主量到真的數字時亮（activity）。
     // 節點只建一次（renderInfo 每次重排這一行時放回去），亮與暗由 applyActivity 控制
@@ -327,7 +334,7 @@ export class Composer {
       h('div', { class: 'steer-head' }, icon('clock', 'steer-ic'), this.quotaText, this.quotaCells, this.quotaCancelBtn));
     this.el = h('div', { class: 'dock' }, this.queueEl, this.steerEl, this.quotaEl, this.todo, this.settleEl, this.box, this.roEl, this.gateEl, this.info);
 
-    this.ta.addEventListener('input', () => { this.autosize(); this.updateSend(); this.checkTrigger(); });
+    this.ta.addEventListener('input', () => { this.updateSend(); this.checkTrigger(); });
     this.ta.addEventListener('keydown', (e) => this.onKeyDown(e));
     this.ta.addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') this.checkTrigger(); });
     this.ta.addEventListener('click', () => this.checkTrigger());
@@ -346,8 +353,8 @@ export class Composer {
       }
     }, 120);
     this.conv.root.addEventListener('keydown', (e) => this.onPaneKeyDown(e));
-    // 窗格高度、輸入框寬度或輸入區其他部分（佇列、待辦、附件）的高度改變時重算輸入框高度：
-    // 分割窗格、側欄、檔案瀏覽器、視窗變矮、分頁從隱藏變成顯示都會碰到。輸入框自己長高不會再觸發；
+    // 窗格高度、輸入框寬度或輸入區其他部分（佇列、待辦、附件）的高度改變時重算展開的高度：
+    // 分割窗格、側欄、檔案瀏覽器、視窗變矮、分頁從隱藏變成顯示都會碰到。輸入框自己變高不會再觸發；
     // 放到下一個影格做，避免在觀察回呼裡改到被觀察的元素
     this.sizeKey = '';
     this.sizeRaf = 0;
@@ -355,7 +362,7 @@ export class Composer {
       const key = [this.conv.root.clientHeight, this.ta.clientWidth, this.el.offsetHeight - this.ta.offsetHeight].join('x');
       if (key === this.sizeKey) return;
       this.sizeKey = key;
-      if (!this.sizeRaf) this.sizeRaf = requestAnimationFrame(() => { this.sizeRaf = 0; this.autosize(); });
+      if (!this.sizeRaf) this.sizeRaf = requestAnimationFrame(() => { this.sizeRaf = 0; this.applyInputHeight(); });
     });
     this.sizeObs.observe(this.conv.root);
     this.sizeObs.observe(this.el);
@@ -1225,7 +1232,6 @@ export class Composer {
     this.ta.value = '';
     // 輸入框清空了：先前按 Esc（或不能搜尋時按 Enter 送出）關掉的「@」提示位置不再算數，下一則開頭打「@」照樣提示
     this.dismissedAt = -1;
-    this.autosize();
     this.updateSend();
     this.closeSuggest();
     this.conv.stickToBottom();
@@ -1303,7 +1309,6 @@ export class Composer {
     if (!this.dispatch(text, this.attachedUploads())) return false;
     if (this.ta.value.trim() === String(text || '').trim()) {
       this.ta.value = '';
-      this.autosize();
       this.updateSend();
     }
     this.conv.stickToBottom();
@@ -1316,7 +1321,6 @@ export class Composer {
     if (this.ta.value.trim() === t.trim()) { this.focus(); return; }
     if (!this.ta.value.trim()) {
       this.ta.value = t;
-      this.autosize();
       this.updateSend();
       this.focus();
       return;
@@ -1357,7 +1361,6 @@ export class Composer {
   restoreText(text) {
     if (this.ta.value.trim() || !text) return;
     this.ta.value = text;
-    this.autosize();
     this.updateSend();
   }
 
@@ -1374,7 +1377,7 @@ export class Composer {
     try { ok = document.execCommand('insertText', false, text); } catch { ok = false; }
     if (!ok || ta.value !== text) ta.value = text;
     ta.setSelectionRange(ta.value.length, ta.value.length);
-    this.autosize();
+    this.revealEnd();
     this.updateSend();
   }
 
@@ -1384,23 +1387,39 @@ export class Composer {
     const before = ta.value.slice(0, s);
     const pad = before && !/\s$/.test(before) ? ' ' : '';
     ta.setRangeText(pad + text, s, e, 'end');
-    this.autosize();
+    this.revealEnd();
     this.updateSend();
     this.focus();
   }
 
-  autosize() {
+  /** 右上角的按鈕：輸入框在一行與窗格放得下的高度之間切換 */
+  toggleInputExpanded() {
+    const open = this.inputExpanded = !this.inputExpanded;
+    const title = open ? '收合輸入框' : '展開輸入框';
+    this.expandBtn.title = title;
+    this.expandBtn.setAttribute('aria-label', title);
+    this.expandBtn.setAttribute('aria-expanded', String(open));
+    this.expandIc = syncIcon(this.expandIc, open ? 'inputCollapse' : 'inputExpand');
+    this.applyInputHeight();
+    this.revealEnd();
+  }
+
+  /** 收合時高度交給 CSS（一行），放不下的字在框內捲動；展開時是 maxInputHeight，不看內容多長 */
+  applyInputHeight() {
     const ta = this.ta;
-    // 隱藏中（分頁不在前景、儀表板檢視）量不到內容高度：保留原高度，窗格顯示時 ResizeObserver 會再算一次
-    if (!ta.clientWidth) return;
-    const max = this.maxInputHeight();
-    ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, max) + 'px';
-    ta.classList.toggle('scrolling', ta.scrollHeight > max);
+    if (!this.inputExpanded) { ta.style.height = ''; return; }
+    // 隱藏中（分頁不在前景、儀表板檢視）量不到窗格高度：保留原高度，窗格顯示時 ResizeObserver 會再算一次
+    if (ta.clientWidth) ta.style.height = this.maxInputHeight() + 'px';
+  }
+
+  /** 程式放進去的字不會自動捲到游標：游標在最後面時捲到底，固定高度的輸入框才看得到剛放進去的字 */
+  revealEnd() {
+    const ta = this.ta;
+    if (ta.selectionEnd === ta.value.length) ta.scrollTop = ta.scrollHeight;
   }
 
   /**
-   * 輸入框最多長到多高：窗格（訊息串＋輸入區）高度的 40%、最多 360px，而且扣掉輸入區其他部分（佇列、待辦、附件、工具列）後
+   * 輸入框展開時多高：窗格（訊息串＋輸入區）高度的 40%、最多 360px，而且扣掉輸入區其他部分（佇列、待辦、附件、工具列）後
    * 訊息串至少留 30%。3～4 窗格時窗格只有視窗一半高，用視窗高度算會把訊息串擠成 0、工具列被下一排窗格蓋住
    */
   maxInputHeight() {
@@ -1482,7 +1501,6 @@ export class Composer {
     ta.setSelectionRange(ta.value.length, ta.value.length);
     this.dismissedAt = -1;
     this.closeSuggest();
-    this.autosize();
     ta.scrollTop = ta.scrollHeight; // 比輸入框高的一則：捲到游標所在的最後一行
     this.updateSend();
     return true;
@@ -1644,7 +1662,7 @@ export class Composer {
     else text = '@' + (/\s/.test(it.value) ? '"' + it.value + '"' : it.value) + ' ';
     ta.setRangeText(text, s.start, pos, 'end');
     this.closeSuggest();
-    this.autosize();
+    this.revealEnd();
     this.updateSend();
     this.focus();
   }

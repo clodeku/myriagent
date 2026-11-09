@@ -4568,12 +4568,13 @@ async function runComposerFixes(vp) {
   check('reloadDoesNotReopenClosedTab', !!closedAgain && !tabsAfterLateReply.includes('c6') && !tabsAfterReload.includes('c6'),
     { closedAgain: !!closedAgain, tabsAfterLateReply, tabsAfterReload });
 
-  // 多行草稿：分割窗格（輸入框變窄）、改字級、分頁隱藏時被退回，輸入框高度都會重算，不會被裁掉
+  // 展開的輸入框：分割窗格（輸入框變窄）、改字級、分頁隱藏時被退回，都維持展開，放不下的字在框內捲動
   await page.click('.tab[data-key="c2"]');
   await waitConv(page, 'c2');
   const ta2 = `${convSel('c2')} .cinput`;
   const draft = Array.from({ length: 4 }, (_, i) => '第 ' + (i + 1) + ' 點：把縮圖產生搬到背景執行緒、用 LRU 限制記憶體，並在資料夾很大時分批載入，避免畫面卡住。').join('\n');
   await page.fill(ta2, draft);
+  await page.click(`${convSel('c2')} [data-field="inputExpand"]`);
   await sleep(150);
   const fitBefore = await taFits(page, 'c2');
   await page.keyboard.press('Control+Backslash');
@@ -4606,6 +4607,25 @@ async function runComposerFixes(vp) {
   await waitConv(grid.page, 'c4');
   await settle(grid.page, 300);
   await grid.page.fill(`${convSel('c3')} .cinput`, Array.from({ length: 25 }, (_, i) => 'Error ' + (i + 1) + ': 登入逾時，WaitForLoginAsync 沒有回應').join('\n'));
+  await sleep(250);
+  // 輸入框不跟著內容長高：25 行的草稿照樣是一行高，按右上角的按鈕才展開，再按一次收回；按鈕不搶輸入框的焦點
+  const inputState = () => grid.page.evaluate(() => {
+    const conv = document.querySelector('.conv[data-conv="c3"]'), t = conv.querySelector('.cinput'), b = conv.querySelector('[data-field="inputExpand"]');
+    const tr = t.getBoundingClientRect(), br = b.getBoundingClientRect();
+    return { h: t.clientHeight, scrolls: t.scrollHeight > t.clientHeight, focused: document.activeElement === t, expanded: b.getAttribute('aria-expanded'), title: b.title, btnBesideText: br.left >= tr.right - 0.5, btnTop: Math.round(br.top - tr.top) };
+  });
+  const toggleSel = `${convSel('c3')} [data-field="inputExpand"]`;
+  const inputCollapsed = await inputState();
+  await grid.page.click(toggleSel);
+  await sleep(250);
+  const inputExpanded = await inputState();
+  await grid.page.click(toggleSel);
+  await sleep(150);
+  const inputAgain = await inputState();
+  check('inputExpandToggle', inputCollapsed.h <= 46 && inputCollapsed.scrolls && inputCollapsed.expanded === 'false' && inputCollapsed.btnBesideText && inputCollapsed.btnTop <= 8
+    && inputExpanded.h > inputCollapsed.h + 20 && inputExpanded.expanded === 'true' && inputExpanded.title === '收合輸入框' && inputExpanded.focused
+    && inputAgain.h === inputCollapsed.h && inputAgain.expanded === 'false' && inputAgain.focused, { inputCollapsed, inputExpanded, inputAgain });
+  await grid.page.click(toggleSel); // 下面量的是展開時窗格放不放得下
   await sleep(250);
   const g = await grid.page.evaluate(() => {
     const conv = document.querySelector('.conv[data-conv="c3"]');

@@ -2609,7 +2609,7 @@ async function runVoiceDictation() {
   await page.tap(mic);
   const listening = await until(async () => { const x = await st(); return x.listening ? x : null; }, 2000);
   // 聽寫的預覽列（輸入框上方）：只列還沒確定的字；全部確定後寫「正在聽…」；停下就收起來
-  const pv = () => page.evaluate((t) => { const p = document.querySelector(t).parentElement.querySelector('.dict-preview'); return p ? { hidden: p.hidden, idle: p.classList.contains('idle'), text: p.querySelector('.dict-text').textContent } : null; }, taSel(id));
+  const pv = () => page.evaluate((t) => { const p = document.querySelector(t).closest('.cbox').querySelector('.dict-preview'); return p ? { hidden: p.hidden, idle: p.classList.contains('idle'), text: p.querySelector('.dict-text').textContent } : null; }, taSel(id));
   const pv0 = await pv();
   await emit([['整理', false]]);
   const interim = (await st()).value;
@@ -2695,7 +2695,7 @@ async function runVoiceDictationRestart() {
   const ta = taSel(id);
   const st = () => page.evaluate(([m, t]) => {
     const b = document.querySelector(m);
-    const p = document.querySelector(t).parentElement.querySelector('.dict-preview');
+    const p = document.querySelector(t).closest('.cbox').querySelector('.dict-preview');
     return { listening: b.classList.contains('listening'), value: document.querySelector(t).value, preview: !!p && !p.hidden, dropped: window.__sr.dropped,
       rs: window.__sr.instances.map((r) => ({ started: r.started, stopped: r.stopped, aborted: r.aborted, live: r.live, deaf: r.deaf, began: r.began, createdAt: r.createdAt })) };
   }, [mic, ta]);
