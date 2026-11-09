@@ -46,10 +46,3 @@ test('倍數：預設兩倍，不合理的倍數照預設', () => {
   assert.deepEqual(Z.zoomPlan(rect(260, 40, 490, 200), ws, 3), { axis: 'y', size: 600, shift: 0 });
   assert.deepEqual(Z.zoomPlan(rect(260, 40, 490, 200), ws, 0.5), { axis: 'y', size: 400, shift: 0 });
 });
-
-test('開關：沒設過或 on 是開，off 才關；控制項不放大', () => {
-  assert.equal(Z.paneZoomEnabled(null), true);
-  assert.equal(Z.paneZoomEnabled('on'), true);
-  assert.equal(Z.paneZoomEnabled('off'), false);
-  for (const sel of ['button', 'a', '[role="tab"]', '.strip', 'summary']) assert.ok(Z.ZOOM_SKIP.includes(sel), sel);
-});

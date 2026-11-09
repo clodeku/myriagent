@@ -39,8 +39,8 @@ export const ICONS = {
   chevRight: svg('<path d="m6.2 4.5 3.5 3.5-3.5 3.5"/>'),
   chevLeft: svg('<path d="M9.8 4.5 6.3 8l3.5 3.5"/>'),
   chevUp: svg('<path d="m4.5 9.8 3.5-3.5 3.5 3.5"/>'),
-  inputExpand: svg('<path d="M4.5 5.5 8 2l3.5 3.5"/><path d="M4.5 10.5 8 14l3.5-3.5"/>'),
-  inputCollapse: svg('<path d="M4.5 2 8 5.5 11.5 2"/><path d="M4.5 14 8 10.5l3.5 3.5"/>'),
+  paneExpand: svg('<path d="M9.5 2.5h4v4"/><path d="M13.5 2.5 9 7"/><path d="M6.5 13.5h-4v-4"/><path d="M2.5 13.5 7 9"/>'),
+  paneRestore: svg('<path d="M9 3v4h4"/><path d="M13.5 2.5 9 7"/><path d="M7 13V9H3"/><path d="M2.5 13.5 7 9"/>'),
   // git 分支（對話標頭的 git 晶片）：兩個提交一條主線，旁邊分出一條
   gitBranch: svg('<circle cx="4.6" cy="3.6" r="1.6"/><circle cx="4.6" cy="12.4" r="1.6"/><circle cx="11.4" cy="5" r="1.6"/><path d="M4.6 5.2v5.6M11.4 6.6c0 2.6-2 3.6-5.3 4.6"/>'),
   folder: svg('<path d="M2 4.6A1.6 1.6 0 0 1 3.6 3h2.6l1.5 1.6h4.7A1.6 1.6 0 0 1 14 6.2v5.2a1.6 1.6 0 0 1-1.6 1.6H3.6A1.6 1.6 0 0 1 2 11.4z"/>'),

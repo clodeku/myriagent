@@ -1088,8 +1088,8 @@ body.viewer-collab .ch-folder { cursor: default; }
 .collab-warn { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: 12px; color: var(--sev-warn); }
 .collab-warn .ic { width: 14px; height: 14px; flex: none; margin-top: 1px; }
 
-/* 點了暫時放大的窗格（workspace.js 的 zoomPane，2026-11-08 使用者要求）：疊在其他窗格上面（其他窗格不移位）——
-   拉長時從格子的上緣長，下面不夠的往上補（--zoom-shift 是負的 margin）；加寬時同理往左補。點外面就恢復 */
+/* 放大的窗格（workspace.js 的 zoomPane，對話標頭右上角的按鈕切換）：疊在其他窗格上面（其他窗格不移位）——
+   拉長時從格子的上緣長，下面不夠的往上補（--zoom-shift 是負的 margin）；加寬時同理往左補 */
 .pane.zoomed { z-index: 40; box-shadow: 0 12px 40px rgba(0, 0, 0, .45), 0 0 0 1px var(--border-3); }
 .pane.zoom-y { align-self: start; height: var(--zoom-size); margin-top: var(--zoom-shift, 0px); }
 .pane.zoom-x { justify-self: start; width: var(--zoom-size); margin-left: var(--zoom-shift, 0px); }

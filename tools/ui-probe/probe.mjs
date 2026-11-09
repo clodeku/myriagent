@@ -693,8 +693,6 @@ async function openApp(name, o) {
   page.on('pageerror', (e) => log.errors.push(`[${name}] pageerror ${e.message}`));
   await page.addInitScript(MOCK);
   await page.addInitScript(fakeMic); // 輸入區的語音訊息：假的麥克風與錄音器（不碰這台真的麥克風）
-  // 點了暫時放大窗格（panezoomrules）預設關：放大的窗格會蓋住別的窗格、改變版面的量測；要測的情境帶 paneZoom: true
-  await page.addInitScript((on) => { try { localStorage.setItem('myriagent.paneZoom.v1', on ? 'on' : 'off'); } catch { /* 沒有 localStorage */ } }, !!o.paneZoom);
   if (o.initScript) await page.addInitScript(o.initScript);
   await page.exposeFunction('__hostRecv', (msg) => host.recv(msg));
   await page.route(ORIGIN + '/**', (route) => serve(route, o));
@@ -2074,68 +2072,76 @@ async function runPaneZoom(vp) {
     { id: 'p1', tabs: ['c2'], active: 'c2' }, { id: 'p2', tabs: ['c3'], active: 'c3' },
     { id: 'p3', tabs: ['c5'], active: 'c5' }, { id: 'p4', tabs: ['c6'], active: 'c6' },
   ], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' };
-  const app = await openApp('pane-zoom', { vp, layout: grid, paneZoom: true });
+  const app = await openApp('pane-zoom', { vp, layout: grid });
   const { page } = app;
   await waitConv(page, 'c2');
   await settle(page, 300);
   const st = () => page.evaluate(paneZoomState);
   const clickBody = (id) => page.click(`#workspace .pane[data-pane="${id}"] .pane-body`, { position: { x: 60, y: 120 } });
+  const zoomBtn = (id) => `#workspace .pane[data-pane="${id}"] .conv:not([hidden]) [data-field="paneZoom"]`;
   const s0 = await st();
-  // 點下面那格的按鈕（權限選單）：按鈕照常打開選單、窗格不放大（以前按下就放大，窗格往上移、這一下點空）
-  await page.click('#workspace .pane[data-pane="p3"] .cbar .perm');
-  const btnMenu = await page.waitForSelector('.menu', { timeout: 2000 }).then(() => true).catch(() => false);
-  await page.keyboard.press('Escape');
-  await settle(page, 150);
-  const sBtn = await st();
-  check('paneZoomButtonsWork', btnMenu && !sBtn.panes.p3.zoomed && sBtn.panes.p3.top === s0.panes.p3.top, { btnMenu, p3: sBtn.panes.p3 });
-  // 2×2：左上那格往下拉長成兩倍（剛好到底），蓋在左下那格上面（點左下那格看得到的地方是左上的內容）
+  // 點對話內容不放大（2026-11-10 起只有按鈕能放大）
   await clickBody('p1');
+  await settle(page, 200);
+  const sClick = await st();
+  check('paneZoomNotOnClick', Object.values(sClick.panes).every((x) => !x.zoomed) && sClick.panes.p1.h === s0.panes.p1.h, { p1: sClick.panes.p1 });
+  // 2×2：按左上那格的按鈕，往下拉長成兩倍（剛好到底），蓋在左下那格上面
+  await page.click(zoomBtn('p1'));
   await settle(page, 200);
   const s1 = await st();
   const onTop = await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y).closest('.pane[data-pane="p1"]'), [s0.panes.p3.left + 40, s0.panes.p3.top + 60]);
   check('paneZoomGrow', s1.panes.p1.zoomed && Math.abs(s1.panes.p1.h - Math.min(2 * s0.panes.p1.h, s1.ws.bottom - s1.ws.top)) <= 2 && s1.panes.p1.top === s0.panes.p1.top
     && s1.panes.p1.bottom <= s1.ws.bottom + 1 && onTop && s1.panes.p3.h === s0.panes.p3.h && s1.panes.p2.h === s0.panes.p2.h, { s0: s0.panes, s1: s1.panes, ws: s1.ws, onTop });
+  const icons = await page.$eval(zoomBtn('p1'), (b) => Array.from(b.querySelectorAll('.ic')).map((x) => getComputedStyle(x).display !== 'none'));
+  check('paneZoomIconSwaps', icons[0] === false && icons[1] === true, { icons });
   await shot(page, 'pane-zoom-' + vp.w);
 
-  // 點右下那格：左上恢復、右下放大（下面沒有空間，往上補），不超出工作區
-  await clickBody('p4');
+  // 點外面（側欄、另一個窗格）不恢復；在放大的窗格裡開選單也照舊
+  await page.click('#sidebar .sb-sec-accts', { position: { x: 20, y: 10 } });
+  await clickBody('p2');
+  await settle(page, 200);
+  const sOut = await st();
+  await page.click('#workspace .pane[data-pane="p1"] .cbar .perm');
+  await page.waitForSelector('.menu', { timeout: 2000 }).catch(() => {});
+  const menuOpen = await page.evaluate(() => !!document.querySelector('.menu'));
+  await page.keyboard.press('Escape');
+  await settle(page, 150);
+  const sMenu = await st();
+  check('paneZoomStaysUntilToggled', sOut.panes.p1.zoomed && !sOut.panes.p2.zoomed && menuOpen && sMenu.panes.p1.zoomed, { out: sOut.panes.p1, menuOpen, menu: sMenu.panes.p1 });
+
+  // 按右下那格的按鈕：左上恢復、右下放大（下面沒有空間，往上補），不超出工作區
+  await page.click(zoomBtn('p4'));
   await settle(page, 200);
   const s2 = await st();
   check('paneZoomSwitch', !s2.panes.p1.zoomed && s2.panes.p1.h === s0.panes.p1.h && s2.panes.p4.zoomed && s2.panes.p4.bottom === s0.panes.p4.bottom
     && s2.panes.p4.top >= s2.ws.top - 1 && s2.panes.p4.h > s0.panes.p4.h * 1.8, { s2: s2.panes, ws: s2.ws });
 
-  // 點側欄（窗格以外）：恢復；點分頁列不放大（拖分頁時不要蓋住別的窗格）
-  await page.click('#sidebar .sb-sec-accts', { position: { x: 20, y: 10 } });
+  // 再按一次：恢復
+  await page.click(zoomBtn('p4'));
   await settle(page, 200);
   const s3 = await st();
-  await page.click('#workspace .pane[data-pane="p2"] .tab[data-key="c3"]');
-  await settle(page, 200);
-  const s4 = await st();
-  check('paneZoomRestore', Object.values(s3.panes).every((x) => !x.zoomed) && s3.panes.p4.h === s0.panes.p4.h && !s4.panes.p2.zoomed, { s3: s3.panes, s4: s4.panes.p2 });
-
-  // 在放大的窗格裡打開選單（掛在 body 上）不算點外面
-  await clickBody('p1');
-  await settle(page, 150);
-  await page.click('#workspace .pane[data-pane="p1"] .cbar .perm');
-  await page.waitForSelector('.menu', { timeout: 2000 }).catch(() => {});
-  const menuOpen = await page.evaluate(() => !!document.querySelector('.menu'));
-  if (menuOpen) await page.click('.menu .mi, .menu button', { timeout: 1500 }).catch(() => {});
-  await settle(page, 150);
-  const s5 = await st();
-  check('paneZoomKeepsWithMenu', menuOpen && s5.panes.p1.zoomed, { menuOpen, p1: s5.panes.p1 });
+  check('paneZoomRestore', Object.values(s3.panes).every((x) => !x.zoomed) && s3.panes.p4.h === s0.panes.p4.h, { s3: s3.panes });
   await closeApp(app);
 
   // 只有一列並排（已經滿高）：改成加寬兩倍，右邊那格往左補
-  const row = await openApp('pane-zoom-row', { vp, paneZoom: true, layout: { panes: [{ id: 'p1', tabs: ['c2'], active: 'c2' }, { id: 'p2', tabs: ['c3'], active: 'c3' }], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' } });
+  const row = await openApp('pane-zoom-row', { vp, layout: { panes: [{ id: 'p1', tabs: ['c2'], active: 'c2' }, { id: 'p2', tabs: ['c3'], active: 'c3' }], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' } });
   await waitConv(row.page, 'c2');
   await settle(row.page, 300);
   const r0 = await row.page.evaluate(paneZoomState);
-  await row.page.click('#workspace .pane[data-pane="p2"] .pane-body', { position: { x: 60, y: 120 } });
+  await row.page.click(`#workspace .pane[data-pane="p2"] .conv:not([hidden]) [data-field="paneZoom"]`);
   await settle(row.page, 200);
   const r1 = await row.page.evaluate(paneZoomState);
   check('paneZoomWiden', r1.panes.p2.zoomed && r1.panes.p2.h === r0.panes.p2.h && r1.panes.p2.right === r0.panes.p2.right && r1.panes.p2.left >= r1.ws.left - 1
     && r1.panes.p2.w > r0.panes.p2.w * 1.8, { r0: r0.panes, r1: r1.panes, ws: r1.ws });
   await closeApp(row);
+
+  // 只有一個窗格：沒有放大鈕
+  const single = await openApp('pane-zoom-single', { vp, layout: { panes: [{ id: 'p1', tabs: ['c2'], active: 'c2' }], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' } });
+  await waitConv(single.page, 'c2');
+  await settle(single.page, 200);
+  const singleShown = await single.page.$eval(`#workspace .conv:not([hidden]) [data-field="paneZoom"]`, (b) => getComputedStyle(b).display !== 'none');
+  check('paneZoomHiddenSinglePane', !singleShown, { singleShown });
+  await closeApp(single);
 }
 
 // ───── 其他互動：改名、選項、資料夾、退回、貼上、拖放、換帳戶、快捷鍵、宿主訊息 ─────
@@ -4568,13 +4574,12 @@ async function runComposerFixes(vp) {
   check('reloadDoesNotReopenClosedTab', !!closedAgain && !tabsAfterLateReply.includes('c6') && !tabsAfterReload.includes('c6'),
     { closedAgain: !!closedAgain, tabsAfterLateReply, tabsAfterReload });
 
-  // 展開的輸入框：分割窗格（輸入框變窄）、改字級、分頁隱藏時被退回，都維持展開，放不下的字在框內捲動
+  // 多行草稿：分割窗格（輸入框變窄）、改字級、分頁隱藏時被退回，輸入框高度都會重算，不會被裁掉
   await page.click('.tab[data-key="c2"]');
   await waitConv(page, 'c2');
   const ta2 = `${convSel('c2')} .cinput`;
   const draft = Array.from({ length: 4 }, (_, i) => '第 ' + (i + 1) + ' 點：把縮圖產生搬到背景執行緒、用 LRU 限制記憶體，並在資料夾很大時分批載入，避免畫面卡住。').join('\n');
   await page.fill(ta2, draft);
-  await page.click(`${convSel('c2')} [data-field="inputExpand"]`);
   await sleep(150);
   const fitBefore = await taFits(page, 'c2');
   await page.keyboard.press('Control+Backslash');
@@ -4607,25 +4612,6 @@ async function runComposerFixes(vp) {
   await waitConv(grid.page, 'c4');
   await settle(grid.page, 300);
   await grid.page.fill(`${convSel('c3')} .cinput`, Array.from({ length: 25 }, (_, i) => 'Error ' + (i + 1) + ': 登入逾時，WaitForLoginAsync 沒有回應').join('\n'));
-  await sleep(250);
-  // 輸入框不跟著內容長高：25 行的草稿照樣是一行高，按右上角的按鈕才展開，再按一次收回；按鈕不搶輸入框的焦點
-  const inputState = () => grid.page.evaluate(() => {
-    const conv = document.querySelector('.conv[data-conv="c3"]'), t = conv.querySelector('.cinput'), b = conv.querySelector('[data-field="inputExpand"]');
-    const tr = t.getBoundingClientRect(), br = b.getBoundingClientRect();
-    return { h: t.clientHeight, scrolls: t.scrollHeight > t.clientHeight, focused: document.activeElement === t, expanded: b.getAttribute('aria-expanded'), title: b.title, btnBesideText: br.left >= tr.right - 0.5, btnTop: Math.round(br.top - tr.top) };
-  });
-  const toggleSel = `${convSel('c3')} [data-field="inputExpand"]`;
-  const inputCollapsed = await inputState();
-  await grid.page.click(toggleSel);
-  await sleep(250);
-  const inputExpanded = await inputState();
-  await grid.page.click(toggleSel);
-  await sleep(150);
-  const inputAgain = await inputState();
-  check('inputExpandToggle', inputCollapsed.h <= 46 && inputCollapsed.scrolls && inputCollapsed.expanded === 'false' && inputCollapsed.btnBesideText && inputCollapsed.btnTop <= 8
-    && inputExpanded.h > inputCollapsed.h + 20 && inputExpanded.expanded === 'true' && inputExpanded.title === '收合輸入框' && inputExpanded.focused
-    && inputAgain.h === inputCollapsed.h && inputAgain.expanded === 'false' && inputAgain.focused, { inputCollapsed, inputExpanded, inputAgain });
-  await grid.page.click(toggleSel); // 下面量的是展開時窗格放不放得下
   await sleep(250);
   const g = await grid.page.evaluate(() => {
     const conv = document.querySelector('.conv[data-conv="c3"]');

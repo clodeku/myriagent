@@ -11,7 +11,7 @@ import * as live from './liveview.js';
 import { isFlashing, stopFlash } from './attnflash.js';
 import { tabDragHold, dropIndexAt, insertMarkX, EXTERNAL_DRAG_MS, sideTabsOn, clampSideWidth, SIDE_TABS_MIN, SIDE_TABS_MAX } from './tabdragrules.js';
 import { shareBadge } from './collabrules.js';
-import { zoomPlan, paneZoomEnabled, PANE_ZOOM_KEY, ZOOM_SKIP } from './panezoomrules.js';
+import { zoomPlan } from './panezoomrules.js';
 
 const MAX_PANES = 12;
 const TAB_MIME = 'application/x-myriagent-tab';
@@ -185,13 +185,9 @@ function createPane(id) {
   p.body = h('div', { class: 'pane-body' }, p.emptyEl);
   p.el = h('section', { class: 'pane', dataset: { pane: id } }, p.strip, p.body);
   p.el.addEventListener('pointerdown', () => focusPane(p.id), true);
-  // 點了暫時放大：點擊完成之後才放大（按下時就放大的話窗格會移位，點的東西跑掉、這一下點空）；
-  // 控制項（按鈕、連結、分頁…）與拖曳選取文字不放大（panezoomrules.ZOOM_SKIP）
+  // 對話標頭右上角的放大鈕（conversation.js 的 zoomBtn；每個分頁一顆，窗格這裡接一次）
   p.el.addEventListener('click', (e) => {
-    if (!e.target.closest || e.target.closest(ZOOM_SKIP)) return;
-    const sel = window.getSelection ? window.getSelection() : null;
-    if (sel && !sel.isCollapsed) return;
-    zoomPane(p);
+    if (e.target.closest && e.target.closest('[data-field="paneZoom"]')) togglePaneZoom(p);
   });
   p.el.addEventListener('focusin', () => focusPane(p.id));
   // 分頁多到溢出時（捲軸是隱藏的）：滾輪上下捲＝分頁列左右捲
@@ -300,26 +296,29 @@ function sideTabs(p) {
   return p.el.classList.contains('tabs-left');
 }
 
-// ───── 點了暫時放大窗格（2026-11-08 使用者要求；panezoomrules.zoomPlan）─────
+// ───── 放大窗格（2026-11-08 使用者要求；2026-11-10 改成只由按鈕切換；panezoomrules.zoomPlan）─────
 /** 放大中的窗格 id（同時只有一個） */
 let zoomedId = null;
 
+/** 放大時工作區的大小（zoomWatch 比對）：放大的位置是以它算的 */
+let zoomRootSize = '';
+const rootSize = () => root.clientWidth + 'x' + root.clientHeight;
+// 工作區大小變了（視窗、側欄）：放大的位置不再準，先恢復（再按一次照新的大小放大）。換到儀表板時工作區隱藏、回來大小一樣，不算
+const zoomWatch = new ResizeObserver(() => {
+  if (root && root.clientWidth && rootSize() !== zoomRootSize) unzoomPane();
+});
+
+function togglePaneZoom(p) {
+  if (zoomedId === p.id) unzoomPane();
+  else zoomPane(p);
+}
+
 /**
- * 同時開著好幾個窗格時，點了窗格的對話區域就暫時放大它：上下還有空間就拉長成兩倍（下面不夠往上補）、已經滿高就加寬，
- * 不超過工作區；疊在其他窗格上面（fx.css 的 .pane.zoomed），其他窗格不移位。點了它以外的地方（另一個窗格、側欄、頂部列）就恢復
+ * 同時開著好幾個窗格時放大其中一個：上下還有空間就拉長成兩倍（下面不夠往上補）、已經滿高就加寬，
+ * 不超過工作區；疊在其他窗格上面（app.css 的 .pane.zoomed），其他窗格不移位。再按一次按鈕才恢復，同時只放大一個
  */
-/** 開關（設定頁「外觀」；存在這台裝置） */
-export function paneZoomOn() {
-  try { return paneZoomEnabled(localStorage.getItem(PANE_ZOOM_KEY)); } catch { return true; }
-}
-
-export function setPaneZoomOn(on) {
-  try { localStorage.setItem(PANE_ZOOM_KEY, on ? 'on' : 'off'); } catch { /* 存不了就只在這次有效 */ }
-  if (!on) unzoomPane();
-}
-
 function zoomPane(p) {
-  if (zoomedId === p.id || panes.length < 2 || state.mode === 'popout' || !root || !paneZoomOn()) return;
+  if (panes.length < 2 || state.mode === 'popout' || !root) return;
   unzoomPane();
   const plan = zoomPlan(p.el.getBoundingClientRect(), root.getBoundingClientRect());
   if (!plan) return;
@@ -327,28 +326,19 @@ function zoomPane(p) {
   p.el.classList.add('zoomed', plan.axis === 'y' ? 'zoom-y' : 'zoom-x');
   p.el.style.setProperty('--zoom-size', plan.size + 'px');
   p.el.style.setProperty('--zoom-shift', -plan.shift + 'px');
+  zoomRootSize = rootSize();
+  zoomWatch.observe(root);
 }
 
 export function unzoomPane() {
   const p = zoomedId ? paneById(zoomedId) : null;
   zoomedId = null;
+  zoomWatch.disconnect();
   if (!p) return;
   p.el.classList.remove('zoomed', 'zoom-y', 'zoom-x');
   p.el.style.removeProperty('--zoom-size');
   p.el.style.removeProperty('--zoom-shift');
 }
-
-// 點了放大的窗格以外的地方就恢復（捕獲階段，比窗格自己的 pointerdown 早：點另一個窗格時先恢復、再放大那一個）。
-// 掛在 body 上的選單、對話框、燈箱、提示不算外面（在放大的窗格裡打開的選單點了照樣用）
-document.addEventListener('pointerdown', (e) => {
-  if (!zoomedId) return;
-  const p = paneById(zoomedId);
-  if (!p) { zoomedId = null; return; }
-  if (p.el.contains(e.target) || !e.target.closest || !e.target.closest('#app')) return;
-  unzoomPane();
-}, true);
-// 視窗大小變了：放大的位置不再準，先恢復（再點一次照新的大小放大）
-window.addEventListener('resize', () => unzoomPane());
 
 function addPane(afterId) {
   unzoomPane();
@@ -404,6 +394,7 @@ export function closePane(id) {
 }
 
 function removePane(id) {
+  unzoomPane(); // 窗格少一格，格線重排：放大的位置不再準
   unzoomPane();
   const i = panes.findIndex((p) => p.id === id);
   if (i < 0 || panes.length < 2) return;

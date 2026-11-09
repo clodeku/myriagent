@@ -497,8 +497,6 @@ export function createPages(browser, o = {}) {
     await context.exposeBinding('__probeCsp', (source, v) => { csp.push(v); });
     await context.addInitScript(probeInit, opt.initOpts || {});
     await context.addInitScript(fakeMic); // 輸入區的語音訊息：假的麥克風與錄音器
-    // 點了暫時放大窗格（panezoomrules）預設關：放大的窗格會蓋住別的窗格、改變版面的量測；要測的情境帶 paneZoom: true
-    await context.addInitScript((on) => { try { localStorage.setItem('myriagent.paneZoom.v1', on ? 'on' : 'off'); } catch { /* 沒有 localStorage */ } }, !!opt.paneZoom);
     // 情境自己要在網頁載入前先跑的（例如以 overflow-anchor: none 模擬沒有捲動錨定的 iOS Safari）
     if (opt.initScript) await context.addInitScript(opt.initScript);
     const page = await context.newPage();
@@ -527,7 +525,6 @@ export function createPages(browser, o = {}) {
     await page.addInitScript(MOCK);
     await page.addInitScript(probeInit, opt.initOpts || {});
     await page.addInitScript(fakeMic);
-    await page.addInitScript((on) => { try { localStorage.setItem('myriagent.paneZoom.v1', on ? 'on' : 'off'); } catch { /* 沒有 localStorage */ } }, !!opt.paneZoom);
     await page.exposeFunction('__hostRecv', (msg) => {
       host.posted.push(msg);
       if (msg.cmd === 'ready') {

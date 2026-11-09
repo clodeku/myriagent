@@ -1,5 +1,5 @@
-// 點了暫時放大窗格的純規則（workspace.js；2026-11-08 使用者要求：同時開著好幾個對話框時，點了某一個就暫時拉長它
-// 〔預設兩倍、不超過視窗邊界〕，一次讀得到更多內容；點外面就恢復。桌面與網頁版都一樣）。
+// 放大窗格的純規則（workspace.js；2026-11-08 使用者要求：同時開著好幾個對話框時暫時拉長其中一個
+// 〔預設兩倍、不超過視窗邊界〕，一次讀得到更多內容。2026-11-10 起不再點了就放大，由對話標頭右上角的按鈕切換。桌面與網頁版都一樣）。
 // 沒有 import（tools/ui-probe 的 panezoomrules.test.mjs 以 data: URL 匯入）。
 
 /** 預設放大成原本的幾倍 */
@@ -28,16 +28,3 @@ function grow(axis, size, end, room, limit, f) {
   const after = Math.max(0, Math.min(extra, limit - end));
   return { axis, size: Math.round(size + extra), shift: Math.round(extra - after) };
 }
-
-/** 開關存在這台裝置的 localStorage（設定頁「外觀」的「點了暫時放大窗格」；不經宿主與伺服器，同語音通知的瀏覽器開關）；沒設過＝開 */
-export const PANE_ZOOM_KEY = 'myriagent.paneZoom.v1';
-
-export function paneZoomEnabled(stored) {
-  return stored !== 'off';
-}
-
-/**
- * 點了這些不放大（控制項做它自己的事：按鈕打開的選單、連結、分頁、摺疊的摘要；放大會讓窗格移位，選單會留在原本的位置）：
- * 只有點閱讀的區域或輸入框才放大
- */
-export const ZOOM_SKIP = 'button, a, select, summary, label, [role="button"], [role="menuitem"], [role="tab"], .strip';

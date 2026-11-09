@@ -798,16 +798,13 @@
 .cbox:focus-within { border-color: color-mix(in srgb, var(--acc) 62%, var(--border-2)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 13%, transparent); }
 .cbox.disabled { opacity: .75; }
 .cinput {
-  display: block; width: 100%; min-height: 46px; max-height: 40vh; resize: none; overflow-y: auto; border: 0; outline: 0;
+  display: block; width: 100%; min-height: 46px; max-height: 40vh; resize: none; overflow-y: hidden; border: 0; outline: 0;
   padding: 11px 14px 6px; background: transparent; color: var(--text-hi); font-size: var(--fs-chat); line-height: 1.55;
 }
-/* 輸入框與右上角切換高度的按鈕並排：捲軸和文字不會被按鈕蓋住，有附件時按鈕也不會疊在附件列上 */
-.cinput-wrap { display: flex; align-items: flex-start; }
-.cinput-wrap > .cinput { flex: 1; min-width: 0; }
-.ibtn.cinput-toggle { width: 24px; height: 24px; margin: 6px 6px 0 0; }
+.cinput.scrolling { overflow-y: auto; }
 .cinput::placeholder { color: var(--text-3); }
 /* 觸控裝置：字級至少 16px，iOS 點進輸入框時才不會自動放大整個頁面 */
-@media (hover: none) and (pointer: coarse) { .cinput { font-size: max(16px, var(--fs-chat)); } .ibtn.cinput-toggle { width: 32px; height: 32px; margin: 4px 4px 0 0; } }
+@media (hover: none) and (pointer: coarse) { .cinput { font-size: max(16px, var(--fs-chat)); } }
 .cbusy { display: flex; align-items: center; gap: 8px; padding: 9px 14px 0; font-size: 12px; color: var(--text-2); }
 .cbar { display: flex; align-items: center; gap: 3px; min-width: 0; padding: 2px 6px 6px 8px; }
 .cbar > .ibtn { width: 28px; height: 28px; }
@@ -1026,8 +1023,8 @@
   /* 執行列的輸出面板不讓位、矮一點 */
   .lout { flex: none; }
   .lout-body { max-height: 120px; }
-  /* 輸入框展開時最多到對話欄的 35%（composer.js 依窗格高度算出的上限之外再封頂：矮的對話欄裡送出鈕不會被推出窗格） */
-  .cinput { max-height: 35cqh; }
+  /* 輸入框最多長到對話欄的 35%，再長就在框內捲動（composer.js 依窗格高度算出的上限之外再封頂：矮的對話欄裡送出鈕不會被推出窗格） */
+  .cinput { max-height: 35cqh; overflow-y: auto; }
   .atts.in-composer { padding: 6px 8px 0; gap: 6px; }
   .atts.in-composer .att-img, .atts.in-composer .att-vid, .atts.in-composer .att-doc { height: 32px; }
   .atts.in-composer .att-img, .atts.in-composer .att-vid { width: 32px; }
@@ -1054,7 +1051,6 @@
   /* 這一列會捲動（也就會裁切）：移除鈕往內縮，不被切掉 */
   .atts.in-composer .chip-x { top: -3px; right: -3px; }
   .cinput { min-height: 32px; padding: 6px 12px 2px; }
-  .ibtn.cinput-toggle { margin: 4px 4px 0 0; }
   .cbar { padding-top: 0; padding-bottom: 3px; }
 }
 
@@ -1082,3 +1078,7 @@
 .u-author .ic { width: 12px; height: 12px; }
 .resolved-by { display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 11px; color: var(--link); }
 .resolved-by .ic { width: 12px; height: 12px; }
+
+/* 放大／還原窗格的按鈕（conversation.js 的 zoomBtn）：只有一個窗格時不需要；放大時換成還原的圖示 */
+[data-count="1"] .ch-zoom { display: none; }
+.pane:not(.zoomed) .ch-zoom .ic:nth-child(2), .pane.zoomed .ch-zoom .ic:nth-child(1) { display: none; }

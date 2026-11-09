@@ -805,18 +805,25 @@ async function runDraftRecreate() {
 
 /** 網頁版也一樣（2026-11-08 使用者要求）：兩個窗格並排時點了一個就暫時加寬（已經滿高），點側欄就恢復 */
 async function runPaneZoom() {
-  const app = await openWithLayout('pane-zoom', layoutOf([[[LF.CONV.idle], LF.CONV.idle], [[LF.CONV.codex], LF.CONV.codex]]), { open: { paneZoom: true } });
+  const app = await openWithLayout('pane-zoom', layoutOf([[[LF.CONV.idle], LF.CONV.idle], [[LF.CONV.codex], LF.CONV.codex]]));
   const { page } = app;
   await waitLoaded(app, [LF.CONV.idle, LF.CONV.codex]);
   const rects = () => page.evaluate(() => Array.from(document.querySelectorAll('#workspace .pane')).map((p) => ({ zoomed: p.classList.contains('zoomed'), w: Math.round(p.getBoundingClientRect().width) })));
+  const btn = '#workspace .pane:first-child .conv:not([hidden]) [data-field="paneZoom"]';
   const before = await rects();
-  await page.click('#workspace .pane:first-child .scroller', { position: { x: 80, y: 260 } }); // 對話內容的中間（標頭與晶片列是按鈕，不放大）
+  await page.click('#workspace .pane:first-child .scroller', { position: { x: 80, y: 260 } }); // 點對話內容不放大
+  await sleep(200);
+  const clicked = await rects();
+  await page.click(btn);
   await sleep(200);
   const zoomed = await rects();
-  await page.click('#sidebar', { position: { x: 20, y: 200 } });
+  await page.click('#sidebar', { position: { x: 20, y: 200 } }); // 點外面不恢復
+  await sleep(200);
+  const outside = await rects();
+  await page.click(btn);
   await sleep(200);
   const after = await rects();
-  check('hubPaneZoom', zoomed[0].zoomed && zoomed[0].w > before[0].w * 1.8 && !after[0].zoomed && after[0].w === before[0].w, { before, zoomed, after });
+  check('hubPaneZoom', !clicked[0].zoomed && zoomed[0].zoomed && zoomed[0].w > before[0].w * 1.8 && outside[0].zoomed && !after[0].zoomed && after[0].w === before[0].w, { before, clicked, zoomed, outside, after });
   await HP.closePage(app);
 }
 
@@ -2609,7 +2616,7 @@ async function runVoiceDictation() {
   await page.tap(mic);
   const listening = await until(async () => { const x = await st(); return x.listening ? x : null; }, 2000);
   // 聽寫的預覽列（輸入框上方）：只列還沒確定的字；全部確定後寫「正在聽…」；停下就收起來
-  const pv = () => page.evaluate((t) => { const p = document.querySelector(t).closest('.cbox').querySelector('.dict-preview'); return p ? { hidden: p.hidden, idle: p.classList.contains('idle'), text: p.querySelector('.dict-text').textContent } : null; }, taSel(id));
+  const pv = () => page.evaluate((t) => { const p = document.querySelector(t).parentElement.querySelector('.dict-preview'); return p ? { hidden: p.hidden, idle: p.classList.contains('idle'), text: p.querySelector('.dict-text').textContent } : null; }, taSel(id));
   const pv0 = await pv();
   await emit([['整理', false]]);
   const interim = (await st()).value;
@@ -2695,7 +2702,7 @@ async function runVoiceDictationRestart() {
   const ta = taSel(id);
   const st = () => page.evaluate(([m, t]) => {
     const b = document.querySelector(m);
-    const p = document.querySelector(t).closest('.cbox').querySelector('.dict-preview');
+    const p = document.querySelector(t).parentElement.querySelector('.dict-preview');
     return { listening: b.classList.contains('listening'), value: document.querySelector(t).value, preview: !!p && !p.hidden, dropped: window.__sr.dropped,
       rs: window.__sr.instances.map((r) => ({ started: r.started, stopped: r.stopped, aborted: r.aborted, live: r.live, deaf: r.deaf, began: r.began, createdAt: r.createdAt })) };
   }, [mic, ta]);

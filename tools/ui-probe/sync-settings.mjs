@@ -837,7 +837,7 @@ async function runBrowserSettings(ctx, vp, csp) {
 
     const labels = r0.rows.map((x) => x.label);
     check('browserSettingsOnlyRoaming', exported.browser === true && sameSet(exported.keys, ROAMING)
-      && sameSet(r0.rows.map((x) => x.setting), [...ROAMING, 'voiceLocal', 'continueLocal', 'paneZoom']) && sameSet(labels, ['主題', '對話字級', '點了暫時放大窗格', '系統通知', '語音通知', 'Enter 送出', '「繼續」鈕的指令']) && r0.desktopNodes === 0
+      && sameSet(r0.rows.map((x) => x.setting), [...ROAMING, 'voiceLocal', 'continueLocal']) && sameSet(labels, ['主題', '對話字級', '系統通知', '語音通知', 'Enter 送出', '「繼續」鈕的指令']) && r0.desktopNodes === 0
       && contStored0 === null && contStored1 === '手機上看：做到哪了？' && contField1 === '手機上看：做到哪了？' && (contTitle1 === null || contTitle1 === '繼續：送出「手機上看：做到哪了？」')
       && contStored2 === null && contField2 === '進度如何呢如果還沒做完就繼續'
       && voiceStored === 'off' && tuneStored[0] === '2' && tuneStored[1] === '-1' && tuneOff
@@ -879,7 +879,7 @@ async function runBrowserSettings(ctx, vp, csp) {
     const settled = await readSettingsDialog(page);
     const dialogs = await page.$$eval('.dlg-back:not(.leaving) .dlg-settings', (ns) => ns.length);
     check('browserLateInitRebuilds', !!before && before.tabs.length === 7 && before.desktopNodes > 0
-      && !!after && !!settled && same(settled.tabs.map((t) => t.id), ['general', 'chat']) && settled.desktopNodes === 0 && sameSet(settled.rows.map((x) => x.setting), [...ROAMING, 'voiceLocal', 'continueLocal', 'paneZoom'])
+      && !!after && !!settled && same(settled.tabs.map((t) => t.id), ['general', 'chat']) && settled.desktopNodes === 0 && sameSet(settled.rows.map((x) => x.setting), [...ROAMING, 'voiceLocal', 'continueLocal'])
       && dialogs === 1 && desktopOnlySent(host).length === 0,
     { before: before && before.tabs.map((t) => t.id), after: settled && { tabs: settled.tabs.map((t) => t.id), rows: settled.rows, desktopNodes: settled.desktopNodes }, dialogs });
     await closeWithCsp(ctx, app, csp);

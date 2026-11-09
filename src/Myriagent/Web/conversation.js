@@ -430,6 +430,10 @@ export class ConvView {
     this.drawerBtn = iconButton('panelRight', '檔案瀏覽器', () => this.toggleDrawer());
     this.popBtn = iconButton('popout', '在新視窗開啟', () => post({ cmd: 'popout', conversationId: this.id }));
     this.moreBtn = iconButton('more', '更多動作', () => this.openMoreMenu());
+    // 放大／還原這個窗格（workspace.js 的 togglePaneZoom 接點擊）；兩個圖示依 .pane.zoomed 顯示其中一個，只有一個窗格時不顯示（chat.css）
+    this.zoomBtn = iconButton('paneExpand', '放大或還原這個窗格', null, 'ch-zoom');
+    this.zoomBtn.dataset.field = 'paneZoom';
+    this.zoomBtn.append(icon('paneRestore'));
     // 〔遠端〕瀏覽器版草稿開在哪台電腦（D16）：點了換電腦
     this.devChip = h('button', { type: 'button', class: 'chip ch-devchip', 'aria-haspopup': 'menu', hidden: true, dataset: { field: 'draftDevice' } },
       h('span', { class: 'ch-dev-dot', 'aria-hidden': 'true' }), h('span', { class: 'chip-label' }), icon('chevDown', 'chip-chev'));
@@ -447,7 +451,7 @@ export class ConvView {
       title: '伺服器上的這個對話已刪除，網頁與其他電腦都看不到；這台的對話照常可以用' });
     // 兩行：第一行標題與右邊的按鈕，第二行帳戶、工作資料夾、git 晶片、執行列（下面建好才插進來）與所在電腦（擠在同一行時標題只剩幾個字）
     this.head = h('header', { class: 'ch' },
-      h('div', { class: 'ch-top' }, this.titleEl, this.autoTitleBtn, h('div', { class: 'grow' }), this.drawerBtn, this.popBtn, this.moreBtn),
+      h('div', { class: 'ch-top' }, this.titleEl, this.autoTitleBtn, h('div', { class: 'grow' }), this.drawerBtn, this.popBtn, this.zoomBtn, this.moreBtn),
       h('div', { class: 'ch-sub' }, this.chipsEl, this.deviceEl, this.syncDelEl));
     if (isFlashing(this.id)) this.head.classList.add('attn-flash'); // 開分頁之前就在閃（要你回來看，attnflash.js）：標頭跟著閃
     this.warn = h('div', { class: 'ch-warn', hidden: true }, icon('warning'), h('span', { class: 'ch-warn-text', text: '這個對話使用的帳戶已被移除，換一個帳戶才能繼續。' }),

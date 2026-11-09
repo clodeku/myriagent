@@ -786,8 +786,7 @@ export function createVoiceMessage(cp) {
     } catch {
       // 輸入框不在畫面上時忽略
     }
-    ta.dispatchEvent(new Event('input', { bubbles: true })); // 輸入區照常更新送出鈕與草稿
-    cp.revealEnd();
+    ta.dispatchEvent(new Event('input', { bubbles: true })); // 輸入區照常更新高度、送出鈕與草稿
   }
 
   /**
@@ -800,7 +799,7 @@ export function createVoiceMessage(cp) {
       log.addEventListener('mousedown', (e) => e.preventDefault()); // 不搶輸入框的焦點
       log.addEventListener('click', () => openDiag());
       preview = h('div', { class: 'dict-preview' }, h('span', { class: 'dict-led', 'aria-hidden': 'true' }), h('span', { class: 'dict-text', 'aria-hidden': 'true' }), log);
-      cp.taWrap.before(preview);
+      cp.ta.before(preview);
     }
     const text = (interim || '').trim();
     const el = preview.querySelector('.dict-text');
@@ -1032,7 +1031,6 @@ export function createVoiceMessage(cp) {
       const ta = cp.ta;
       ta.value = (ta.value ? ta.value + '\n\n' : '') + text();
       ta.dispatchEvent(new Event('input', { bubbles: true }));
-      cp.revealEnd();
       d.close();
     });
   }
