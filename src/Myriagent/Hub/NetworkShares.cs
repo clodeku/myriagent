@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using Myriagent.Core;
@@ -95,9 +96,38 @@ internal sealed class NetworkShares : INetworkShares
     public IReadOnlyList<string> Computers()
     {
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        // RESOURCE_CONTEXT：檔案總管「網路」那一層（網域或工作群組裡的電腦）
-        if (WNetOpenEnumW(ResourceContext, ResourceTypeDisk, 0, IntPtr.Zero, out var handle) != 0)
-            return [];
+        // 現在的 Windows 舊式列舉多半回 6118（沒有瀏覽清單），主要靠 NetBIOS 與 WS-Discovery 自己找（NetworkDiscovery）
+        try
+        {
+            foreach (var name in NetworkDiscovery.FindAsync(CancellationToken.None).GetAwaiter().GetResult())
+                names.Add(name);
+        }
+        catch (Exception ex) when (ex is SocketException or InvalidOperationException)
+        {
+            Log.Info($"找網路上的電腦失敗：{ex.Message}");
+        }
+
+        // 已經連過的分享（net use、網路磁碟機）的主機
+        foreach (var scope in new[] { ResourceConnected, ResourceRemembered })
+            foreach (var remote in EnumRemoteNames(scope))
+            {
+                if (remote.StartsWith(@"\\", StringComparison.Ordinal) && remote[2..].Split('\\')[0] is { Length: > 0 } host && NetworkPathRules.IsHostName(host))
+                    names.Add(host);
+            }
+
+        // 舊式的網路芳鄰列舉（RESOURCE_CONTEXT；有瀏覽清單的網域或工作群組才有）
+        foreach (var remote in EnumRemoteNames(ResourceContext, serversOnly: true))
+            names.Add(remote[2..]);
+        names.RemoveWhere(n => string.Equals(n, Environment.MachineName, StringComparison.OrdinalIgnoreCase));
+        return names.ToList();
+    }
+
+    /// <summary>WNet 列舉一層的遠端名稱（<c>\\主機</c> 或 <c>\\主機\分享</c>）；serversOnly：只要電腦</summary>
+    private static List<string> EnumRemoteNames(int scope, bool serversOnly = false)
+    {
+        var names = new List<string>();
+        if (WNetOpenEnumW(scope, ResourceTypeDisk, 0, IntPtr.Zero, out var handle) != 0)
+            return names;
         var buffer = Marshal.AllocHGlobal(BufferBytes);
         try
         {
@@ -112,8 +142,8 @@ internal sealed class NetworkShares : INetworkShares
                 for (var i = 0; i < count; i++)
                 {
                     var item = Marshal.PtrToStructure<NETRESOURCE>(buffer + i * itemSize);
-                    if (item.dwDisplayType == ResourceDisplayTypeServer && item.lpRemoteName is { Length: > 2 } remote && remote.StartsWith(@"\\", StringComparison.Ordinal))
-                        names.Add(remote[2..]);
+                    if ((!serversOnly || item.dwDisplayType == ResourceDisplayTypeServer) && item.lpRemoteName is { Length: > 2 } remote && remote.StartsWith(@"\\", StringComparison.Ordinal))
+                        names.Add(remote);
                 }
             }
         }
@@ -123,7 +153,7 @@ internal sealed class NetworkShares : INetworkShares
             WNetCloseEnum(handle);
         }
 
-        return names.ToList();
+        return names;
     }
 
     public IReadOnlyList<string> Shares(string host)
@@ -157,6 +187,8 @@ internal sealed class NetworkShares : INetworkShares
     public long? FreeSpace(string directory)
         => GetDiskFreeSpaceExW(directory.EndsWith('\\') ? directory : directory + @"\", out var available, out _, out _) ? (long)available : null;
 
+    private const int ResourceConnected = 1;
+    private const int ResourceRemembered = 3;
     private const int ResourceContext = 5;
     private const int ResourceTypeDisk = 1;
     private const int ResourceDisplayTypeServer = 2;

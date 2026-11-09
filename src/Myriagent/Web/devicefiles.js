@@ -218,7 +218,10 @@ export function onFiles(m) {
   browses.delete(m.requestId);
   if (s.requestId !== m.requestId) return true;
   s.loading = false;
-  if (m.error) { s.error = m.error; renderStatus(s); return true; }
+  // 有錯誤也切到那一層（路徑列、上一層、空的清單），錯誤寫在清單下方：網路芳鄰的「網路」找不到電腦時要看得出已經在「網路」、可以直接輸入路徑
+  // （2026-11-09 實機：以前留在上一層的清單，看起來像沒反應）；沒帶路徑的錯誤（舊版）照舊只顯示錯誤
+  s.error = m.error || null;
+  if (m.error && typeof m.path !== 'string') { renderStatus(s); return true; }
   s.path = typeof m.path === 'string' ? m.path : null;
   s.parent = s.path ? (typeof m.parent === 'string' ? m.parent : null) : null;
   s.entries = R.sortEntries(m.entries);

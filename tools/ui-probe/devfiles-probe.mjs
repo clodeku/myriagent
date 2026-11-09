@@ -41,7 +41,12 @@ export async function runDeviceFiles(ctx, vp, m) {
       host.onCmd = (c, h) => {
         monitorCmd(c, h);
         const done = () => host.send({ type: 'commandResult', commandId: c.commandId, state: 'done' });
-        if (c.cmd === 'deviceBrowse') {
+        if (c.cmd === 'deviceBrowse' && c.path === '\\\\') {
+          // 網路芳鄰的「網路」找不到電腦：帶路徑與 error
+          done();
+          host.send({ type: 'files', requestId: c.requestId, conversationId: null, path: '\\\\', parent: null, root: null, entries: [], truncated: false,
+            error: '沒有找到網路上的電腦（那台的網路探索可能關著）：請在路徑列輸入 \\\\電腦名稱 或 \\\\電腦名稱\\分享名稱' });
+        } else if (c.cmd === 'deviceBrowse') {
           done();
           host.send(c.path
             ? { type: 'files', requestId: c.requestId, conversationId: null, path: DF_FOLDER, parent: 'D:\\專案', root: null, entries: dfEntries(), truncated: false, error: null }
@@ -147,6 +152,18 @@ export async function runDeviceFiles(ctx, vp, m) {
   const upDone = await until(async () => { const t = await stateTexts('up'); return t.length === 2 && t.every((x) => /^已存/.test(x)) ? t : null; }, 5000);
   check('devfilesUploadSaved', !!upDone && upDone.includes('已存成「合約 (2).pdf」'), { upDone, now: await stateTexts('up') });
   await shot(page, 'devfiles-transfers-dark');
+
+  // 網路芳鄰：「網路」找不到電腦時也切到那一層（路徑列是「網路」、清單是空的、錯誤寫在下方），不能留在上一層
+  await page.fill('.df-dlg .df-path', '\\\\');
+  await page.press('.df-dlg .df-path', 'Enter');
+  const net = await until(() => page.evaluate(() => {
+    const crumbs = Array.from(document.querySelectorAll('.df-dlg .df-crumb')).map((n) => n.textContent);
+    const err = document.querySelector('.df-dlg .df-status .df-err');
+    return crumbs[crumbs.length - 1] === '網路' ? { crumbs, rows: document.querySelectorAll('.df-dlg .df-row').length, err: err ? err.textContent : null,
+      upload: document.querySelector('.df-dlg .dlg-foot .btn:not(.primary):not(.df-dest)').disabled } : null;
+  }), 2000);
+  check('devfilesNetworkEmptyShowsLevel', !!net && net.crumbs.join('/') === '磁碟與常用資料夾/網路' && net.rows === 0 && /網路上的電腦/.test(net.err || '') && net.upload === true, net);
+  await shot(page, 'devfiles-network-empty-dark');
   clearInterval(host.statsTimer);
   await closeApp(app);
 }
