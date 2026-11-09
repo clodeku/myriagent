@@ -127,6 +127,16 @@ internal static class CommandOutputFileRules
     /// </summary>
     private static JObject? Header(JObject message, string type, OutputContext context)
     {
+        // 電腦狀態面板的檔案傳輸（deviceBrowse、deviceFetch；2026-11-09）：沒有對話，conversationId 要是 null（或不帶），網頁以 requestId 認領
+        if (RemoteCommandCatalog.DeviceTransferCommands.Contains(context.CommandName))
+        {
+            if (context.RequestId is not { } transferRequest
+                || !RemoteCommandShapeRules.IsString(message["requestId"], out var givenTransferRequest) || !string.Equals(givenTransferRequest, transferRequest, StringComparison.Ordinal)
+                || message["conversationId"] is { Type: not JTokenType.Null })
+                return null;
+            return new JObject { ["type"] = type, ["requestId"] = transferRequest, ["conversationId"] = JValue.CreateNull() };
+        }
+
         if (context.CommandName == RemoteCommandCatalog.ListFolders)
         {
             if (context.RequestId is not { } folderRequest

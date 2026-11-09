@@ -201,6 +201,8 @@
 - 網頁（WP4.6）：遠端對話的資料夾選單有「瀏覽資料夾…」（瀏覽器版的遠端正式對話與新對話〔伺服器草稿，2026-10-27〕；執行中、沒連線、電腦離線、政策不允許時停用並說明原因），在檔案抽屜以 `dirsOnly: true` 挑選：先列虛擬根（「最近的資料夾」，最上面另加「目前的工作資料夾」＝`root`），只顯示資料夾，按「選這個資料夾」送 `setFolder`。被拒或沒送出時抽屜顯示「讀不到這個資料夾」或「目前沒有連線，連上之後才能瀏覽」；結果不明（重連後的 `init`、150 秒還等不到，`files` 只送回發出的那條連線、等不到了）顯示「沒有收到那台電腦的回覆，請按重新整理再試一次」，不再一直轉圈（WP4.6 合併前審查 LIVE-6、P1；之後真的到了同一個 `requestId` 的 `files` 照樣採用）。挑選模式的路徑列只有虛擬根列出的資料夾（最近的資料夾與工作資料夾）底下的段可以點，範圍外的上層（例如 `C:\`）照樣顯示但停用（電腦一定拒絕，合併前審查 P4）。瀏覽器版的檔案項目沒有「在檔案總管顯示」與「加入附件」。
 - 新對話（伺服器草稿）的「瀏覽資料夾…」（2026-10-27 使用者要求：選完電腦就能挑那台的資料夾，不必先送一則訊息）：網頁照樣送 `listFiles {conversationId: 草稿 id, dirsOnly: true}`，伺服器改成 `listFolders`（sync-protocol 14.4）轉給草稿選的電腦（沒選是第一次送出時會挑的那台），那台還沒有這個對話，只列它的最近資料夾（範圍同 `dirsOnly`，但沒有工作資料夾、`root` 是 null、app 自己的資料夾整個不給）；回來的 `files` 由伺服器換成草稿 id。選定後同樣送 `setFolder`（伺服器記在草稿，第一次送出時那台檢查）。那台的版本還不認得 `listFolders` 時回 `rejected invalid`，抽屜說明「那台電腦的 Clode Myriagent 版本太舊…請先更新那台，或改用「輸入資料夾路徑…」」（`liverules.listFailText`）；草稿上沒帶 `dirsOnly` 的 `listFiles` 照舊 `invalid`。
 
+- 〔電腦狀態〕電腦狀態面板的檔案傳輸（`deviceBrowse` 的回覆，2026-11-09；`Web/devicefiles.js`）：`conversationId` 一律是 null，網頁以 `requestId` 認領（不交給對話的抽屜）。`path` 是 null 時是虛擬根：那台的磁碟（`name` 是「本機磁碟 (C:)」這種、`path` 是 `C:\\`）與常用資料夾（桌面、文件、下載、使用者資料夾）；否則是那個資料夾的資料夾與檔案，在磁碟根目錄時 `parent` 是 null（回虛擬根）。範圍是整台的固定磁碟與隨身碟，禁止的資料夾（app 的資料、帳戶設定、金鑰與憑證）、網路磁碟、捷徑連結回 `commandResult rejected policy`。FileEntry 的 `url`、`thumbUrl` 一律 null、`root` 是 null。
+
 ### `fileSearch`
 回應 `fileSearch`（輸入框 `@` 檔案提示）。
 ```jsonc
@@ -466,6 +468,24 @@ app 更新排空完成、要換版之前，宿主向每個視窗要輸入框裡�
 { "type": "toast", "text": "已複製", "level": "info" | "error" | "success" }
 ```
 
+### `peerUploadProgress`〔電腦狀態〕
+只有桌面：帶 `deviceId` 的 `peerUpload`（電腦狀態面板的上傳，2026-11-09）上傳到伺服器的進度，只送給送出的視窗、最密每 300 ms 一則；結果照樣是 `peerUpload`。
+```jsonc
+{ "type": "peerUploadProgress", "uploadId": "01J9Q…", "sent": 10485760, "total": 52428800 }
+```
+
+### `xferProgress`〔電腦狀態〕
+只有桌面：`peerXferSave`（第二節）的進度與結果，只送給送出的視窗。`state`：`running`（最密每 300 ms 一則）、`done`（`path`、`name` 是實際存成的完整路徑與檔名：同名時自動加「 (2)」）、`failed`（`error` 是給人看的說明）、`cancelled`。
+```jsonc
+{ "type": "xferProgress", "transferId": "01J9Q…", "state": "running", "done": 8388608, "total": 52428800, "path": null, "name": null, "error": null }
+```
+
+### `xferFolder`〔電腦狀態〕
+只有桌面：`xferPickFolder` 的結果（這台的資料夾選擇視窗；按取消是 null）。網頁把它記在 localStorage，之後的 `peerXferSave` 帶它當 `folder`。
+```jsonc
+{ "type": "xferFolder", "requestId": "xf3", "path": "D:\\下載" | null }
+```
+
 ### `peerUpload`〔桌面遠端操作〕
 只有桌面：`peerUpload` 指令（第二節）的結果，只送給送出的視窗。形狀照瀏覽器 E4 的回應，網頁照 `liverules.uploadResult` 解讀，成功之後照瀏覽器版送 `addUploaded`。
 ```jsonc
@@ -709,7 +729,14 @@ app 更新排空完成、要換版之前，宿主向每個視窗要輸入框裡�
 | `attach` | `conversationId` | 宿主開選檔對話框 |
 | `addFiles` | `conversationId`（以 `postMessageWithAdditionalObjects` 附 File 物件） | 拖放或貼上的檔案 |
 | `pasteImage` | `conversationId`、`dataUrl`、`name` | 剪貼簿圖片 |
-| `peerUpload` | `uploadId`（UploadIdRules）、`conversationId`；以 `postMessageWithAdditionalObjects` 附一個 File 物件，或帶 `dataUrl`、`name`（剪貼簿的圖片沒有本機路徑，≤30 MB） | 〔桌面遠端操作〕只有桌面：可以操作的副本的附件，宿主以裝置的存取權杖上傳到伺服器（`PUT /api/v1/device/uploads/{uploadId}`，`docs/sync-protocol.md` 14.7），回 `peerUpload`（第一節）；附 File 卻沒有本機路徑時回 `no_path`，網頁改帶 `dataUrl` 重送一次 |
+| `deviceBrowse` | `deviceId`（必帶，其他電腦）、`requestId`、`path`（null＝磁碟與常用資料夾） | 〔電腦狀態〕電腦狀態面板的檔案傳輸（2026-11-09，sync-protocol 14.15）：列那台的一個資料夾，回 `files`（第一節的電腦狀態一點）。型錄的 Device 指令、層級 2：那台的遠端操作政策要是「可以操作」、app 不是以系統管理員執行、版本有 `xfer1`（否則伺服器立即拒絕 unsupported）；桌面照 `liverules.PEER_COMMANDS` 帶 commandId |
+| `deviceFetch` | `deviceId`（必帶）、`requestId`、`path` | 〔電腦狀態〕那台一個檔的下載參照，回 `fileRef`（`conversationId` 是 null；`url` 是 `/f/{key}`，2 小時內有效）。沒有大小上限、不掃文字裡的憑證；憑證、金鑰類的檔名一律 `error`。桌面拿到之後送 `peerXferSave`，瀏覽器以 `<a download>` 交給瀏覽器（伺服器整份接成一個 200，≤4 GB） |
+| `devicePut` | `deviceId`（必帶）、`requestId`、`folder`（那台的完整路徑）、`uploads`（同 `addUploaded`，1～20 個、每個 ≤512 MB） | 〔電腦狀態〕把已上傳到伺服器的檔存進那台的 `folder`（同名自動改名、不覆寫、標成從網際網路下載）。`done` 只表示那台接下了；接收的進度與結果看那台 `deviceStats` 的 `xfers`（第三節 DeviceStatsView）。資料夾不存在 `conflict`、禁止的資料夾 `policy` |
+| `peerXferSave` | `transferId`（UploadIdRules）、`url`（`deviceFetch` 回的 `/f/{key}`）、`name`、`folder`（這台的完整路徑；null＝「下載」） | 〔電腦狀態〕只有桌面：在背景以裝置的存取權杖分段（每段 ≤8 MB）下載進這台的資料夾，回 `xferProgress`（第一節）。`url` 要是這個視窗收過的 `fileRef` 的網址 |
+| `peerXferCancel` | `transferId` | 〔電腦狀態〕只有桌面：取消還在下載的 `peerXferSave` |
+| `peerXferReveal` | `transferId` | 〔電腦狀態〕只有桌面：在檔案總管顯示下載好的檔（只認這次執行下載過的） |
+| `xferPickFolder` | `requestId`、`initial`（選用，起始資料夾） | 〔電腦狀態〕只有桌面：開這台的資料夾選擇視窗，回 `xferFolder` |
+| `peerUpload` | `uploadId`（UploadIdRules）、`conversationId`；以 `postMessageWithAdditionalObjects` 附一個 File 物件，或帶 `dataUrl`、`name`（剪貼簿的圖片沒有本機路徑，≤30 MB） | 〔桌面遠端操作〕只有桌面：可以操作的副本的附件，宿主以裝置的存取權杖上傳到伺服器（`PUT /api/v1/device/uploads/{uploadId}`，`docs/sync-protocol.md` 14.7），回 `peerUpload`（第一節）；附 File 卻沒有本機路徑時回 `no_path`，網頁改帶 `dataUrl` 重送一次。〔電腦狀態〕電腦狀態面板的上傳改帶 `deviceId`（另一台已配對的電腦）而不帶 `conversationId`，上傳期間另回 `peerUploadProgress` |
 | `peerUploadCancel` | `uploadId` | 〔桌面遠端操作〕只有桌面：取消還在上傳的（宿主之後回 `status: 0`） |
 | `draftSetDevice` | `conversationId`（桌面的草稿）、`deviceId`（null 或這台＝回到本機草稿）、`accountId`（那台可用的邏輯帳戶 `la_…`）、`provider` | 〔桌面遠端操作〕只有桌面：草稿改開在其他電腦（`docs/sync-protocol.md` 14.7）。宿主回 `header`（`deviceId`、那台的帳戶、預設的模型選單，`workingDirectory`／`customFolder` 是選的那台的資料夾〔沒選是 null／false＝那台對話自己的工作區〕、`recentFolders` 是那台最近用過的資料夾〔那台的副本的自訂資料夾，由新到舊〕、`peerCreating` 是建立中）。遠端草稿的第一則 `send` 要帶 `commandId`：宿主組 `conversationCreate` 經伺服器送給那台，結果以 `commandResult` 回；那台建好、副本出現時送 `conversationClosed {conversationId: 草稿, replacedBy: 副本}`，被拒時送 `sendRejected` 把文字還回草稿。遠端草稿的 `setFolder {path}`（本機磁碟的完整路徑，宿主去掉前後空白與引號；不合格跳提示）、`resetFolder` 只記在草稿上，第一則 `send` 的 `conversationCreate` 帶 `folder`，由那台建立時檢查（找不到、不能從遠端用就整則被拒、文字還回草稿）；換到另一台電腦、回到這台時清掉。遠端草稿不能用這台的資料夾對話框（`chooseFolder`）、附加檔案、換這台的帳戶（提示「送出第一則訊息之後才能…」） |
 | `peerFileSave` | `conversationId`、`url`（`fileRef` 的 `/f/{鍵}`）、`name`；`open`（選用，布林） | `open: true`（2026-11-05：網頁對 Word、Excel、PowerPoint、PDF 帶）時下載完用這台的預設程式開（同 `openPath` 的白名單，白名單以外照舊在檔案總管顯示）。〔桌面遠端操作〕只有桌面：把可以操作的副本的 `fileFetch` 結果下載到這台的「下載」資料夾（不覆寫，同名加「 (2)」），在檔案總管顯示並以 `toast` 提示；網址要是伺服器轉來、宿主登記過的鍵 |
@@ -1520,7 +1547,9 @@ CLI 卡的「立即套用」（cliApplyNow {provider}）在 `runningOnOldVersion
   "gpus": [ { "name": "NVIDIA GeForce RTX 4070", "util": 23.5,      // 顯示卡（2026-10-23）：使用率 0～100（各引擎中最忙的，同工作管理員）
               "memUsed": 6442450944 | null, "memTotal": 17179869184 | null } ],   // 專用記憶體（位元組；兩個都有才顯示）。拿不到（伺服器主機、舊版）是空陣列
   "cpuTemp": 67.8 | null,               // CPU 溫度（攝氏，一位小數；2026-10-23）：讀不到是 null（沒有監控工具在跑的桌機）
-  "cpuTempSource": "hwinfo" | null      // 溫度從哪裡讀的：hwinfo、lhm（LibreHardwareMonitor）、ohm（OpenHardwareMonitor）、acpi（ACPI 熱區）；不認得的照原樣顯示
+  "cpuTempSource": "hwinfo" | null,     // 溫度從哪裡讀的：hwinfo、lhm（LibreHardwareMonitor）、ohm（OpenHardwareMonitor）、acpi（ACPI 熱區）；不認得的照原樣顯示
+  "xfers": [ { "id": "01J9Q…", "name": "報告.docx", "size": 52428800, "done": 10485760,   // 電腦狀態面板的檔案傳輸（2026-11-09）：這台正在接收（devicePut）與剛收完的檔，
+               "state": "receiving" | "saved" | "failed", "saved": "報告 (2).docx" | null } ]   // id 是 uploadId，saved 是實際存成的檔名；結束的留 10 分鐘、最多 32 筆；沒有時省略
 }
 ```
 網頁的分級（只影響顏色與文字，嚴重度一律同時有文字）：CPU ≥70% 偏高、≥90% 滿載；記憶體 ≥80% 偏高、≥92% 吃緊；磁碟 ≥85% 偏高、≥95% 快滿；顯示卡同 CPU；CPU 溫度 ≥80°C 偏高、≥90°C 過熱；延遲 ≤60 ms 良好、≤150 普通、≤400 偏慢、更慢是很慢。
@@ -1689,8 +1718,8 @@ CLI 在執行中被更新（app 觸發、使用者在終端機更新、互動式
    |---|---|---|
    | 伺服器處理 | `ready`、`setting`（只收四個漫遊鍵）、`accountUpdate`（只收 `label`、`color`）、`accountReorder`、`deviceRename`；〔遠端〕WP4.2 起另有 `newConversation`（伺服器草稿）、`copyItem`（回 `clipboard`），2026-10-23 起另有 `searchConversations`（回 `conversationSearch`），見表下的說明；〔電腦狀態〕`monitor`（記在這條連線，第 8 點）；`clientError`（寫進伺服器的記錄，不寫資料庫、不稽核、被拒也不送 toast） | 本機提交後 `accepted:true` |
    | 接受、不處理 | `layout`、`open`、`close`、`visible`、`loadOlder`（〔遠端〕WP4.2 起 `open`、`close`、`visible`、`loadOlder` 由伺服器處理，見表下的說明） | `accepted:true` |
-   | 桌面專屬（`desktop_only`） | 所有 `sync` 開頭的指令（`syncPair`、`syncCancelPair`、`syncUnpair`、`syncPause`、`syncRetry`、`syncConfirm`、`syncSetPolicy`，〔遠端〕`syncSetConversationPolicy`、`syncLoadRemoteAudit`）、`setConversationDefault`、`cliApplyNow`、`cliContinue`、`cliCancelUpdate`、`chooseFolder`、`attach`、`addFiles`、`pasteImage`、`addPathAttachment`、`openFolder`、`openPath`、`revealPath`、`saveFile`、`copyMedia`、`openLink`、`copyText`、`popout`、〔多視窗〕`newWindow`、`tabDrag`、`tabDragEnd`、`tabMoveIn`、`moveToNewWindow`、`closeWindow`、`accountOpenFolder`、`accountResetCredit`、`autoTitle`、`setAgent`、`setOutputStyle`、`codexControl`、`goalClear`、`taskDetail`、`taskStop`、`promptHistory`、`cancelSteer`、`quotaWaitCancel`、`rewindPreview`、`rewind`、`forkConversation`、`listExternalConversations`、`importExternalConversation`、`gitRefresh`、`launchAction`、`launchSelect`、`launchLog`、`launchRescan`、`programStop`、`mcpCheck`、`mcpAction`、`healthCheck`、`healthFix`、排程頁的 `scheduleWatch`、`scheduleRefresh`、`timedSave`、`timedAction`、`peerUpload`、`peerUploadCancel`、`peerFileSave`、`draftSetDevice`、app 自我更新的 `draftSnapshot`、`appUpdateCheck`、`appUpdateRestartNow`、`appUpdateForce`、`appUpdateCancel`、`appInstallHere`；`setting` 的 `instructions`、`closeToTray`、`autoUpdateCli`、`autoUpdateApp`、`cliRestartPolicy`、`claudeRemoteControl`、`autoSwitchAccount`、`autoSwitchCrossProvider`、`shareCrossCliCustomizations`、`claudeFallbackModel`、`claudeIdleResumeWarning`、`autoResumeAfterQuota`；帶 `safeMode` 或 `shareCustomizations` 的 `accountUpdate`（整筆不套用） | `accepted:false` |
-   | 〔遠端〕轉送電腦（WP4.5 起） | 轉給對話的擁有者：`send`、`voiceMessage`（2026-10-23）、`cancelQueued`、`stop`、`answer`、`skipQuestion`、`approve`、`approvePlan`、`rename`、`delete`、`setOption`、`setAccount`、`setFolder`、`resetFolder`、`removeAttachment`，WP4.7 起另有 `listFiles`、`fileSearch`、`addUploaded`、`fileFetch`（輸出 `files`、`fileSearch`、`fileRef` 經伺服器投影與改寫，見第一節；`addUploaded` 先查上傳，見第 12 點的 E4）；轉給指定的電腦：`accountAdd`、`accountLogin`、`accountLoginCancel`、`accountLogout`、`accountRemove`、`accountRefresh`、`cliCheck`、`cliInstall`、`cliUpdate`、`accountLoginDevice`、`accountLoginCode`（2026-10-26）、排程頁的 `scheduleAction`、`scheduleAgent`（2026-10-26，S3） | 一律要帶 commandId（沒帶回 `invalid`）。伺服器簽好信封、寫進指令列之後回 `accepted:true`，結果一律看 `commandResult`（第一節；電腦不在線、不支援、不是擁有者等也是 `commandResult rejected`）。`Cmd` 只回伺服器自己判得出的錯：`invalid`（形狀不合格、指定的電腦不存在或已撤銷）、`conflict`（對話或帳戶已刪除，另送 `conversationClosed` 或 toast）、`unavailable`（寫不進去）。仍是 `not_available` 的：沒帶 `deviceId` 而判不出目標的指令（沒有帳戶的 `cliCheck`、`accountRefresh {accountId:null}`、帳戶連結到兩台以上、`accountAdd` 沒有 `deviceId`；「所有電腦登出」〔`accountLogout` 不帶 `deviceId`〕例外，見第一節 `commandResult`），以及 `conversationId` 是第 3 階段網頁的本機 id 的。`conversationId` 是伺服器草稿的見表下的說明 |
+   | 桌面專屬（`desktop_only`） | 所有 `sync` 開頭的指令（`syncPair`、`syncCancelPair`、`syncUnpair`、`syncPause`、`syncRetry`、`syncConfirm`、`syncSetPolicy`，〔遠端〕`syncSetConversationPolicy`、`syncLoadRemoteAudit`）、`setConversationDefault`、`cliApplyNow`、`cliContinue`、`cliCancelUpdate`、`chooseFolder`、`attach`、`addFiles`、`pasteImage`、`addPathAttachment`、`openFolder`、`openPath`、`revealPath`、`saveFile`、`copyMedia`、`openLink`、`copyText`、`popout`、〔多視窗〕`newWindow`、`tabDrag`、`tabDragEnd`、`tabMoveIn`、`moveToNewWindow`、`closeWindow`、`accountOpenFolder`、`accountResetCredit`、`autoTitle`、`setAgent`、`setOutputStyle`、`codexControl`、`goalClear`、`taskDetail`、`taskStop`、`promptHistory`、`cancelSteer`、`quotaWaitCancel`、`rewindPreview`、`rewind`、`forkConversation`、`listExternalConversations`、`importExternalConversation`、`gitRefresh`、`launchAction`、`launchSelect`、`launchLog`、`launchRescan`、`programStop`、`mcpCheck`、`mcpAction`、`healthCheck`、`healthFix`、排程頁的 `scheduleWatch`、`scheduleRefresh`、`timedSave`、`timedAction`、`peerUpload`、`peerUploadCancel`、`peerFileSave`、`draftSetDevice`、電腦狀態面板的 `peerXferSave`、`peerXferCancel`、`peerXferReveal`、`xferPickFolder`、app 自我更新的 `draftSnapshot`、`appUpdateCheck`、`appUpdateRestartNow`、`appUpdateForce`、`appUpdateCancel`、`appInstallHere`；`setting` 的 `instructions`、`closeToTray`、`autoUpdateCli`、`autoUpdateApp`、`cliRestartPolicy`、`claudeRemoteControl`、`autoSwitchAccount`、`autoSwitchCrossProvider`、`shareCrossCliCustomizations`、`claudeFallbackModel`、`claudeIdleResumeWarning`、`autoResumeAfterQuota`；帶 `safeMode` 或 `shareCustomizations` 的 `accountUpdate`（整筆不套用） | `accepted:false` |
+   | 〔遠端〕轉送電腦（WP4.5 起） | 轉給對話的擁有者：`send`、`voiceMessage`（2026-10-23）、`cancelQueued`、`stop`、`answer`、`skipQuestion`、`approve`、`approvePlan`、`rename`、`delete`、`setOption`、`setAccount`、`setFolder`、`resetFolder`、`removeAttachment`，WP4.7 起另有 `listFiles`、`fileSearch`、`addUploaded`、`fileFetch`（輸出 `files`、`fileSearch`、`fileRef` 經伺服器投影與改寫，見第一節；`addUploaded` 先查上傳，見第 12 點的 E4）；轉給指定的電腦：`accountAdd`、`accountLogin`、`accountLoginCancel`、`accountLogout`、`accountRemove`、`accountRefresh`、`cliCheck`、`cliInstall`、`cliUpdate`、`accountLoginDevice`、`accountLoginCode`（2026-10-26）、排程頁的 `scheduleAction`、`scheduleAgent`（2026-10-26，S3）、電腦狀態面板的 `deviceBrowse`、`deviceFetch`、`devicePut`（2026-11-09；輸出 `files`、`fileRef` 的 `conversationId` 是 null，`fileRef` 的參照是 `xfer`） | 一律要帶 commandId（沒帶回 `invalid`）。伺服器簽好信封、寫進指令列之後回 `accepted:true`，結果一律看 `commandResult`（第一節；電腦不在線、不支援、不是擁有者等也是 `commandResult rejected`）。`Cmd` 只回伺服器自己判得出的錯：`invalid`（形狀不合格、指定的電腦不存在或已撤銷）、`conflict`（對話或帳戶已刪除，另送 `conversationClosed` 或 toast）、`unavailable`（寫不進去）。仍是 `not_available` 的：沒帶 `deviceId` 而判不出目標的指令（沒有帳戶的 `cliCheck`、`accountRefresh {accountId:null}`、帳戶連結到兩台以上、`accountAdd` 沒有 `deviceId`；「所有電腦登出」〔`accountLogout` 不帶 `deviceId`〕例外，見第一節 `commandResult`），以及 `conversationId` 是第 3 階段網頁的本機 id 的。`conversationId` 是伺服器草稿的見表下的說明 |
    | 尚未提供（`not_available`） | 第 5 階段的 `takeover`、`handoffCancel`（`listFiles`、`fileSearch`、`addUploaded`、`fileFetch` 在 WP4.7 合併前也在這裡，WP4.7 起轉送電腦） | `accepted:false`。程式的分類（`BrowserCommandRules`）照舊把上一列的指令與 `newConversation`、`copyItem`、`searchConversations` 也列成 not_available（和型錄的一致性測試對齊），由 WP4.2 的 `IBrowserConversationCommands` 與 WP4.5 的 `IBrowserCommandRouter` 接手（`src/MyriagentHub/Realtime/BrowserCommandSeams.cs`）；WP4.5 的 `CommandRouteRules.Deferred`（延後、照舊回 not_available 的轉送指令）在 WP4.7 合併後是空的 |
    | 其他 | 不認得的名稱、`setting` 的其他鍵、不合格的值 | `invalid` |
 

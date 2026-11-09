@@ -59,7 +59,12 @@ internal static class RemoteNotifyRules
     /// 網頁自動送的唯讀指令（@ 提示每停 120 ms 送一次 fileSearch、抽屜每換一層送一次 listFiles）：只記錄、不通知
     /// （和伺服器 <c>BrowserCommandRules.SilentCommands</c> 的檔案部分一致；WP4.7 合併前審查 INT-5）。fileFetch、addUploaded 是使用者的操作，照常通知
     /// </summary>
-    internal static readonly IReadOnlySet<string> SilentCommands = new HashSet<string>(StringComparer.Ordinal) { "listFiles", "fileSearch", RemoteCommandCatalog.ListFolders };
+    internal static readonly IReadOnlySet<string> SilentCommands = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "listFiles", "fileSearch", RemoteCommandCatalog.ListFolders,
+        // 電腦狀態面板的檔案傳輸（2026-11-09）：瀏覽每換一層送一次、多選下載每個檔送一次，逐一通知會洗版；收檔（devicePut）做完由處理者提示一次
+        RemoteCommandCatalog.DeviceBrowse, RemoteCommandCatalog.DeviceFetch, RemoteCommandCatalog.DevicePut,
+    };
 
     /// <param name="cmd">型錄的指令名稱（<see cref="SilentCommands"/> 不通知）</param>
     /// <param name="outcome">閘門的結果（層級是最終的）</param>
@@ -137,6 +142,9 @@ internal static class RemoteNotifyRules
         RemoteCommandCatalog.RemoteExec => ("執行了主控台指令", false),
         RemoteCommandCatalog.ScheduleAction => ("操作了排程", false),
         RemoteCommandCatalog.ScheduleAgent => ("把排程交給代理", false),
+        RemoteCommandCatalog.DeviceBrowse => ("瀏覽了這台的資料夾", false),
+        RemoteCommandCatalog.DeviceFetch => ("下載了這台的檔案", false),
+        RemoteCommandCatalog.DevicePut => ("把檔案傳到這台", false),
         _ => ($"執行了遠端操作 {cmd}", false),
     };
 

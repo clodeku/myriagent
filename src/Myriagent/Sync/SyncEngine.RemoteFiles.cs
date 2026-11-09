@@ -111,7 +111,7 @@ internal sealed partial class SyncEngine
         try
         {
             var now = NowMs();
-            var removed = s.PruneMediaRefs(LooseMediaRefRules.ListPruneBefore(now), LooseMediaRefRules.FilePruneBefore(now));
+            var removed = s.PruneMediaRefs(LooseMediaRefRules.ListPruneBefore(now), LooseMediaRefRules.FilePruneBefore(now), LooseMediaRefRules.XferPruneBefore(now));
             if (removed > 0)
                 Log.Info($"修剪了 {removed} 個過期的抽屜與檔案下載參照");
         }

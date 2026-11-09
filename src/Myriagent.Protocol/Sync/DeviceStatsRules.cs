@@ -22,6 +22,15 @@ internal static class DeviceStatsRules
 
     public const int MaxGpus = 8;
 
+    /// <summary>接收中與剛收完的檔最多幾筆（電腦狀態面板的檔案傳輸）</summary>
+    public const int MaxXfers = 32;
+
+    /// <summary>接收的檔名長度上限</summary>
+    public const int MaxXferNameLength = 255;
+
+    /// <summary>接收的狀態</summary>
+    public static IReadOnlySet<string> XferStates { get; } = new HashSet<string>(StringComparer.Ordinal) { "receiving", "saved", "failed" };
+
     public const int MaxGpuNameLength = 80;
 
     /// <summary>CPU 溫度的範圍（攝氏）：防呆，超出的一律當成讀錯</summary>
@@ -112,6 +121,32 @@ internal static class DeviceStatsRules
             return "cpuTemp 不正確";
         if (stats.CpuTempSource is not null && !LabelRules.IsClean(stats.CpuTempSource, MaxTempSourceLength))
             return "cpuTempSource 不正確";
+        if (stats.Xfers is { } xfers)
+        {
+            if (xfers.Count > MaxXfers)
+                return "xfers 不正確";
+            foreach (var xfer in xfers)
+            {
+                if (CheckXfer(xfer) is { } problem)
+                    return problem;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>一筆接收：id 是上傳 id、名稱乾淨、大小與進度合理、狀態認得；null＝合格</summary>
+    public static string? CheckXfer(XferStats? xfer)
+    {
+        if (xfer is null || !Media.UploadIdRules.IsValid(xfer.Id))
+            return "xfers 的 id 不正確";
+        if (!LabelRules.IsClean(xfer.Name, MaxXferNameLength) || xfer.Name.Length == 0)
+            return "xfers 的名稱不正確";
+        if (xfer.Size is < 0 or > MaxBytes || xfer.Done < 0 || xfer.Done > xfer.Size)
+            return "xfers 的大小不正確";
+        if (!XferStates.Contains(xfer.State))
+            return "xfers 的狀態不正確";
+        if (xfer.Saved is not null && (xfer.State != "saved" || !LabelRules.IsClean(xfer.Saved, MaxXferNameLength) || xfer.Saved.Length == 0))
+            return "xfers 的存檔名稱不正確";
         return null;
     }
 
@@ -191,7 +226,7 @@ internal static class DeviceStatsRules
     public static JObject WebView(string? id, bool self, string? name, long seq, long ageMs, DeviceStats stats)
     {
         ArgumentNullException.ThrowIfNull(stats);
-        return new JObject
+        var view = new JObject
         {
             ["id"] = Text(id),
             ["self"] = self,
@@ -218,6 +253,21 @@ internal static class DeviceStatsRules
             ["cpuTemp"] = stats.CpuTemp,
             ["cpuTempSource"] = Text(stats.CpuTempSource),
         };
+        // 電腦狀態面板的檔案傳輸：這台正在接收與剛收完的檔（有才帶）
+        if (stats.Xfers is { Count: > 0 } xfers)
+        {
+            view["xfers"] = new JArray(xfers.Select(x => new JObject
+            {
+                ["id"] = x.Id,
+                ["name"] = x.Name,
+                ["size"] = x.Size,
+                ["done"] = x.Done,
+                ["state"] = x.State,
+                ["saved"] = Text(x.Saved),
+            }));
+        }
+
+        return view;
     }
 
     /// <summary>字串欄位：null 是 JSON null（JValue 的字串建構子會把 null 記成字串型別）</summary>

@@ -11,11 +11,14 @@ namespace Myriagent.Sync;
 internal sealed record LocalMediaRefRow(string Ref, string ConversationId, string ItemId, string? AttachmentId, string? MediaPath, long CreatedAt)
 {
     /// <summary>抽屜或 fileFetch 的列（不是項目）</summary>
-    public bool IsLooseFile => ItemId is MediaServerRules.ListItemId or MediaServerRules.FileItemId;
+    public bool IsLooseFile => ItemId is MediaServerRules.ListItemId or MediaServerRules.FileItemId or MediaServerRules.TransferItemId;
+
+    /// <summary>電腦狀態面板的檔案傳輸（deviceFetch）的列：沒有對話（conversation_id 是空字串）</summary>
+    public bool IsTransfer => ItemId == MediaServerRules.TransferItemId;
 
     /// <summary>形狀合不合格：參照、對話、項目都有；項目的列恰有一個來源，抽屜與 fileFetch 的列只有完整路徑</summary>
     public bool IsWellFormed =>
-        !string.IsNullOrEmpty(Ref) && !string.IsNullOrEmpty(ConversationId) && !string.IsNullOrEmpty(ItemId)
+        !string.IsNullOrEmpty(Ref) && (IsTransfer ? ConversationId == string.Empty : !string.IsNullOrEmpty(ConversationId)) && !string.IsNullOrEmpty(ItemId)
         && (IsLooseFile
             ? AttachmentId is null && !string.IsNullOrEmpty(MediaPath)
             : (AttachmentId is null) != (MediaPath is null) && (AttachmentId ?? MediaPath)!.Length > 0);
@@ -127,14 +130,16 @@ internal sealed partial class SyncStore
     /// 每日修剪（步 11，D33）：抽屜（<c>@list</c>）建立早於 <paramref name="listBefore"/>、fileFetch（<c>@file</c>）建立早於 <paramref name="fileBefore"/> 的列刪掉；
     /// 項目的列不動。回刪掉的列數
     /// </summary>
-    public int PruneMediaRefs(long listBefore, long fileBefore)
+    public int PruneMediaRefs(long listBefore, long fileBefore, long? xferBefore = null)
     {
         ThrowIfDisposed();
         using var cmd = Command(null, """
             DELETE FROM media_refs_local
             WHERE (item_id = $list AND created_at < $listBefore) OR (item_id = $file AND created_at < $fileBefore)
+               OR (item_id = $xfer AND created_at < $xferBefore)
             """);
-        Bind(cmd, ("$list", MediaServerRules.ListItemId), ("$listBefore", listBefore), ("$file", MediaServerRules.FileItemId), ("$fileBefore", fileBefore));
+        Bind(cmd, ("$list", MediaServerRules.ListItemId), ("$listBefore", listBefore), ("$file", MediaServerRules.FileItemId), ("$fileBefore", fileBefore),
+            ("$xfer", MediaServerRules.TransferItemId), ("$xferBefore", xferBefore ?? fileBefore));
         return cmd.ExecuteNonQuery();
     }
 

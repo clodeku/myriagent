@@ -253,7 +253,7 @@ public sealed class DeviceHubSeamTests
         var observed = DeviceHubClient.ObservedSpki(host);
         var registry = host.Services.GetRequiredService<ConnectionRegistry>();
         var declared = host.Services.GetRequiredService<DeviceHubFeatures>().Declared!;
-        declared.Should().Equal(new[] { DeviceFeatureRules.Conv1, DeviceFeatureRules.Prov1, DeviceFeatureRules.Live1, DeviceFeatureRules.Live2, DeviceFeatureRules.Update1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Exec1, DeviceFeatureRules.Media1, DeviceFeatureRules.Stat1, DeviceFeatureRules.Tok1, DeviceFeatureRules.Tok2, DeviceFeatureRules.Sched1, DeviceFeatureRules.Collab1 },
+        declared.Should().Equal(new[] { DeviceFeatureRules.Conv1, DeviceFeatureRules.Prov1, DeviceFeatureRules.Live1, DeviceFeatureRules.Live2, DeviceFeatureRules.Update1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Exec1, DeviceFeatureRules.Media1, DeviceFeatureRules.Stat1, DeviceFeatureRules.Tok1, DeviceFeatureRules.Tok2, DeviceFeatureRules.Sched1, DeviceFeatureRules.Collab1, DeviceFeatureRules.Xfer1 },
             "依登記的順序：AddHubRealtime 的 conv1、prov1、live1，AddHubReleases 的 update1，AddHubCommands 的 cmd1、peer1，AddHubMedia 的 media1，AddHubStats 的 stat1，AddHubTokens 的 tok1、tok2，AddHubSchedules 的 sched1");
 
         var cases = new (IReadOnlyList<string>? Declared, string[] Negotiated, string Because)[]

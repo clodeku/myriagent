@@ -103,7 +103,9 @@ internal static class BrowserCommandRules
         // app 自我更新是這台電腦自己的（伺服器的 init 沒有 appUpdate，瀏覽器版不顯示橫幅與設定區塊）
         "draftSnapshot", "appUpdateCheck", "appUpdateRestartNow", "appUpdateForce", "appUpdateCancel", "appInstallHere",
         // 桌面遠端操作的附件與檔案下載（sync-protocol 14.7）：桌面的宿主以裝置的存取權杖代傳，瀏覽器版走 E4 與 /f/
-        "peerUpload", "peerUploadCancel", "peerFileSave", "draftSetDevice");
+        "peerUpload", "peerUploadCancel", "peerFileSave", "draftSetDevice",
+        // 電腦狀態面板的檔案傳輸（2026-11-09）：桌面的宿主把其他電腦的檔下載進這台的資料夾、挑這台的資料夾；瀏覽器版交給瀏覽器下載
+        "peerXferSave", "peerXferCancel", "peerXferReveal", "xferPickFolder");
 
     /// <summary>
     /// 第 3 階段回 not_available 的指令。第 4 階段起這是第 4 階段處理者的入口分類（<c>BrowserCommandHandler.TryPhase4Async</c>）：
@@ -119,6 +121,8 @@ internal static class BrowserCommandRules
         "addUploaded", "fileFetch", "accountLoginDevice", "accountLoginCode", "voiceMessage", "takeover", "handoffCancel",
         // 排程頁（S3）：由那台電腦執行（型錄的 Device 指令，伺服器轉送）
         "scheduleAction", "scheduleAgent",
+        // 電腦狀態面板的檔案傳輸（2026-11-09）：由那台電腦執行（型錄的 Device 指令，伺服器轉送；目標要協商出 xfer1）
+        "deviceBrowse", "deviceFetch", "devicePut",
         // 多人協作（2026-10-30）：擁有者管理協作人與對話的分享，由伺服器處理（CollaboratorCommandService）
         "collabCreate", "collabUpdate", "collabDelete", "collabShare");
 

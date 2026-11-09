@@ -43,7 +43,10 @@ internal sealed partial class SyncCoordinator
 
     private sealed partial class EnginePort : IDeviceStatsPort
     {
-        public DeviceStats? CurrentStats() => owner.hub.SystemMonitor?.Current(StatsMaxAge).Stats;
+        // 電腦狀態面板的檔案傳輸：這台正在接收的檔（devicePut）跟著狀態送（給人看的即時資料，可丟）
+        public DeviceStats? CurrentStats() => owner.hub.SystemMonitor?.Current(StatsMaxAge).Stats is { } stats
+            ? stats with { Xfers = owner.hub.DeviceXferSnapshot() }
+            : null;
 
         public bool Watching => owner.monitorWatching;
 

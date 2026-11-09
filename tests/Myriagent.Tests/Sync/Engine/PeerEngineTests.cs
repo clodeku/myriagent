@@ -29,7 +29,7 @@ public sealed class PeerEngineTests
         var port = UsePeerPort(h, serverPeer: true);
         await h.StartAsync();
 
-        h.Server.Hellos.Last().Features.Should().Equal(DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Collab1);
+        h.Server.Hellos.Last().Features.Should().Equal(DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Collab1, DeviceFeatureRules.Xfer1);
         await CommandEngineTests.WaitUntilAsync(() => port.PeerLive.Count > 0, "回報能送");
         port.PeerLive.Should().Equal(true);
     }

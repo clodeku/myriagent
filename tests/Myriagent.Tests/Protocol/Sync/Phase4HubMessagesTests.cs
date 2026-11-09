@@ -133,7 +133,7 @@ public sealed partial class Phase4HubMessagesTests
         SyncJson.Deserialize<MediaRequest>(SyncJson.Serialize(media)).Should().Be(media);
         SyncJson.Serialize(media with { Range = null }).Should().NotContain("range");
         SyncJson.Serialize(new MediaRange(4096)).Should().Be("{\"start\":4096}", "end 是 null＝到結尾");
-        MediaPurposes.All.Should().Equal("media", "thumb", "file");
+        MediaPurposes.All.Should().Equal("media", "thumb", "file", "xfer");
     }
 
     [Fact]

@@ -314,5 +314,8 @@ internal static class MediaPurposes
     /// <summary>檔案下載（fileFetch，層級 2）</summary>
     public const string File = "file";
 
-    public static IReadOnlyList<string> All { get; } = [Media, Thumb, File];
+    /// <summary>電腦狀態面板的檔案傳輸（deviceFetch 的 xfer 參照；2026-11-09）：原檔依範圍串流，不做文字 DLP、沒有 20 MB 的上限</summary>
+    public const string Transfer = "xfer";
+
+    public static IReadOnlyList<string> All { get; } = [Media, Thumb, File, Transfer];
 }

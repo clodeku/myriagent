@@ -56,7 +56,7 @@ public sealed class MixedVersionTests(ITestOutputHelper output)
             new[] { "serverTime", "nonceS", "server", "hubSig", "hubIdentitySpki", "trustRevs", "limits", "minAppVersion", "features" },
             "只多 features（舊桌面忽略未知欄位；不在 hubSig 的範圍）");
         // WP4.5 步 6 起伺服器另宣告 cmd1，WP4.7 步 4 起再宣告 media1，U2 起 AddHubReleases（HubApplication 在 AddHubPairing 之後）宣告 update1（依登記的順序）
-        hello["features"]!.ToObject<string[]>().Should().Equal(DeviceFeatureRules.Conv1, DeviceFeatureRules.Prov1, DeviceFeatureRules.Live1, DeviceFeatureRules.Live2, DeviceFeatureRules.Update1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Exec1, DeviceFeatureRules.Media1, DeviceFeatureRules.Stat1, DeviceFeatureRules.Tok1, DeviceFeatureRules.Tok2, DeviceFeatureRules.Sched1, DeviceFeatureRules.Collab1);
+        hello["features"]!.ToObject<string[]>().Should().Equal(DeviceFeatureRules.Conv1, DeviceFeatureRules.Prov1, DeviceFeatureRules.Live1, DeviceFeatureRules.Live2, DeviceFeatureRules.Update1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Exec1, DeviceFeatureRules.Media1, DeviceFeatureRules.Stat1, DeviceFeatureRules.Tok1, DeviceFeatureRules.Tok2, DeviceFeatureRules.Sched1, DeviceFeatureRules.Collab1, DeviceFeatureRules.Xfer1);
         var sig = P256KeyRules.Sign(device.Key, HandshakeRules.DeviceSignedData(device.Id, hello["nonceS"]!.Value<string>()!, nonceD, spki));
         var prove = await client.Connection.InvokeAsync<ProveResponse>(DeviceHubMethods.Prove, new ProveRequest(sig));
         prove.AccessToken.Should().NotBeNullOrEmpty();
@@ -88,7 +88,7 @@ public sealed class MixedVersionTests(ITestOutputHelper output)
         await using var old = await DeviceHubClient.ConnectAsync(host, legacy.Token);
         await using var live = await DeviceHubClient.ConnectAsync(host, current.Token);
         var (oldHello, _) = await old.HandshakeAsync(legacy, DeviceHubClient.ObservedSpki(host));
-        oldHello.Features.Should().Equal(new[] { DeviceFeatureRules.Conv1, DeviceFeatureRules.Prov1, DeviceFeatureRules.Live1, DeviceFeatureRules.Live2, DeviceFeatureRules.Update1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Exec1, DeviceFeatureRules.Media1, DeviceFeatureRules.Stat1, DeviceFeatureRules.Tok1, DeviceFeatureRules.Tok2, DeviceFeatureRules.Sched1, DeviceFeatureRules.Collab1 }, "伺服器照樣宣告（WP4.5 起含 cmd1、WP4.7 起含 media1、U2 起含 update1、桌面遠端操作起含 peer1、電腦狀態起含 stat1、token 計數起含 tok1、即時增量起含 live2、其他電腦的 token 起含 tok2、遠端執行指令起含 exec1、排程頁起含 sched1、多人協作起含 collab1）；協商出的是交集（空的）");
+        oldHello.Features.Should().Equal(new[] { DeviceFeatureRules.Conv1, DeviceFeatureRules.Prov1, DeviceFeatureRules.Live1, DeviceFeatureRules.Live2, DeviceFeatureRules.Update1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Exec1, DeviceFeatureRules.Media1, DeviceFeatureRules.Stat1, DeviceFeatureRules.Tok1, DeviceFeatureRules.Tok2, DeviceFeatureRules.Sched1, DeviceFeatureRules.Collab1, DeviceFeatureRules.Xfer1 }, "伺服器照樣宣告（WP4.5 起含 cmd1、WP4.7 起含 media1、U2 起含 update1、桌面遠端操作起含 peer1、電腦狀態起含 stat1、token 計數起含 tok1、即時增量起含 live2、其他電腦的 token 起含 tok2、遠端執行指令起含 exec1、排程頁起含 sched1、多人協作起含 collab1）；協商出的是交集（空的）");
         await live.HandshakeAsync(current, DeviceHubClient.ObservedSpki(host), features: [DeviceFeatureRules.Conv1, DeviceFeatureRules.Live1]);
         (await live.WaitForAsync<WatchChanged>()).ConversationIds.Should().BeEmpty();
         var theirs = ConversationHarness.ConversationId(9);

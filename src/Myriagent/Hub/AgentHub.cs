@@ -354,7 +354,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                 return;
 
             // 〔桌面遠端操作〕對其他電腦的對話（副本）或其他電腦的帳戶、CLI 下的指令（帶 commandId）交給同步（AgentHub.Peer.cs）
-            if (TryHandlePeerUpload(view, command, additionalPaths) || TryHandlePeerFileSave(view, command) || TryHandlePeerDraft(view, command)
+            if (TryHandlePeerUpload(view, command, additionalPaths) || TryHandlePeerFileSave(view, command) || TryHandlePeerXfer(view, command) || TryHandlePeerDraft(view, command)
                 || TryForwardPeerCommand(view, command))
                 return;
 

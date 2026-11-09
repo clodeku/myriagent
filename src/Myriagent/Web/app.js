@@ -57,6 +57,7 @@ import * as cmdtrack from './cmdtrack.js';
 import { onPeerUpload } from './composer.js';
 import { openFileLink } from './filelinks.js';
 import * as mon from './monitor.js';
+import * as devfiles from './devicefiles.js';
 import { installErrorReporting } from './errorreport.js';
 import { startFlash, isFlashing, forgetFlash } from './attnflash.js';
 import { onExternalConversations } from './importconv.js';
@@ -535,7 +536,7 @@ function handle(m) {
     // 〔桌面〕要你回來看的對話：一直閃到使用者點它（attnflash.js）；speaking＝語音通知開始念它，還在閃就讓標頭另外閃三下
     case 'flash': if (!m.speaking) startFlash(id); else if (isFlashing(id)) ws.flashConversation(id); break;
     case 'showView': if (state.mode !== 'popout') setView(m.view); break; // 系統匣選單「帳戶儀表板」
-    case 'files': { const cv = ws.getConv(id); if (cv && cv.drawer) cv.drawer.apply(m); break; }
+    case 'files': { if (devfiles.onFiles(m)) break; const cv = ws.getConv(id); if (cv && cv.drawer) cv.drawer.apply(m); break; } // 電腦狀態面板的檔案傳輸（deviceBrowse）：conversationId 是 null
     case 'fileSearch': { const cv = ws.getConv(id); if (cv) cv.composer.applyFileSearch(m); break; }
     case 'gitStatus': { const cv = ws.getConv(id); if (cv) cv.setGit(m.git || null); break; } // 工作資料夾的 git 狀態（只有桌面）
     case 'launchStatus': { const cv = ws.getConv(id); if (cv) cv.setLaunch(m.launch || null); break; } // 執行列（只有桌面）
@@ -565,7 +566,7 @@ function handle(m) {
     case 'rewound': { flushConv(id); const cv = ws.getConv(id); if (cv) cv.composer.putBack(m.text || ''); break; }
     case 'steerCancelled': { flushConv(id); const cv = ws.getConv(id); if (cv) cv.composer.putBack(m.text || ''); break; }
     case 'sendRejected': { flushConv(id); const cv = ws.getConv(id); if (cv) { cv.failSending(m.text, failureOf({ reason: m.reason })); cv.restoreText(m.text); } break; }
-    case 'peerUpload': onPeerUpload(m); break; // 〔桌面遠端操作〕宿主代傳的上傳結果（composer.js）
+    case 'peerUpload': if (!devfiles.onPeerUpload(m)) onPeerUpload(m); break; // 〔桌面遠端操作〕宿主代傳的上傳結果（composer.js）
     case 'draftSnapshotRequest':
       post({ cmd: 'draftSnapshot', requestId: m.requestId, drafts: ws.draftTexts() });
       break;
@@ -592,7 +593,12 @@ function handle(m) {
     case 'devices': state.remote = withDeviceLinks(applyDevices(state.remote, m.devices), state.remote); remoteChanged(); break;
     case 'sync': state.remote = applySync(state.remote, m.sync); remoteChanged(); break;
     case 'connection': onConnection(m); break;
-    case 'deviceStats': mon.applyStats(m); break;
+    case 'deviceStats': mon.applyStats(m); devfiles.onStats(m); break;
+    // 電腦狀態面板的檔案傳輸（devicefiles.js）：deviceFetch 的 fileRef、桌面代傳的進度、下載進這台的進度、挑這台的資料夾
+    case 'fileRef': if (!devfiles.onFileRef(m)) live.handle(m); break;
+    case 'peerUploadProgress': devfiles.onPeerUploadProgress(m); break;
+    case 'xferProgress': devfiles.onXferProgress(m); break;
+    case 'xferFolder': devfiles.onXferFolder(m); break;
     default: live.handle(m); break;
   }
 }
@@ -779,7 +785,7 @@ document.addEventListener('drop', (e) => {
 });
 
 // 觸控長按圖片與影片＝右鍵（longpress.js；iOS 長按不送 contextmenu）：對話與燈箱照右鍵開媒體選單
-longPressAsContextMenu(document, isMediaTarget);
+longPressAsContextMenu(document, (t) => isMediaTarget(t) || !!(t.closest && t.closest('.mon-dev[data-kind="device"][data-self="false"]')));
 
 // 預設右鍵選單只留給可編輯欄位與選取的文字
 document.addEventListener('contextmenu', (e) => {

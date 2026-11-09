@@ -334,9 +334,10 @@ internal sealed class MediaRefIndexer : BackgroundService
             {
                 cmd.CommandText =
                     "SELECT m.device_id, m.ref, m.thumb_blob FROM media_refs m "
-                    + "WHERE NOT EXISTS (SELECT 1 FROM conversations c WHERE c.conversation_id = m.conversation_id AND c.deleted_at IS NULL AND c.sync_policy = 'full') "
+                    // 檔案傳輸（xfer）的參照沒有對話：不算孤兒（到期由 MediaMaintenance 刪）
+                    + "WHERE m.purpose <> 'xfer' AND (NOT EXISTS (SELECT 1 FROM conversations c WHERE c.conversation_id = m.conversation_id AND c.deleted_at IS NULL AND c.sync_policy = 'full') "
                     + "OR (m.purpose LIKE 'item:%' AND NOT EXISTS (SELECT 1 FROM items i WHERE i.conversation_id = m.conversation_id "
-                    + "AND i.item_id = substr(m.purpose, 6) AND i.removed = 0)) LIMIT $limit";
+                    + "AND i.item_id = substr(m.purpose, 6) AND i.removed = 0))) LIMIT $limit";
                 cmd.Parameters.AddWithValue("$limit", ReconcileBatch);
                 using var reader = cmd.ExecuteReader();
                 while (reader.Read())

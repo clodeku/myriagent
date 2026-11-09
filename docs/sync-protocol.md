@@ -1038,6 +1038,17 @@ Claude 帳戶已對應或宣告了邏輯帳戶、這台**沒有發布過**這個
 - **伺服器端**：`CollaboratorDirectory`（hub.db 的 `collaborators`、`collaborator_shares`、`browser_sessions.user_id`；Identity 的 AspNetUsers 放帳號密碼）、`CollaboratorCommandService`（瀏覽器版的 `collab*` 與 `CollabCmd` 共用）、`CollaboratorFanout`（連線證明完成時送一份，名冊或協作人的「在線」改變時重送，內容相同不送，最多每秒一次）。`CollabCmd` 只收已證明、協商出 `collab1`、不是只更新的連線（已配對就是擁有者：擁有者 2026-10-22「已配對就能操作」），稽核的 actor 是 `device`。
 - **桌面端**：`SyncEngine.Collaborators.cs`（`CollabUpdate` 交給協調者、`CollabCmdAsync` 經目前的連線 Invoke；沒有連線或沒有 `collab1` 回 `unavailable`）、`AgentHub.Collaborators.cs`（web-protocol 的 `collaborators`、`collab*`、`collabResult`；`shares` 的鍵換成這台的對話 id）。解除配對時清掉。
 
+
+### 14.15 電腦狀態面板的檔案傳輸（`xfer1`；2026-11-09）
+
+擁有者 2026-11-09 要求：電腦狀態面板右鍵點一台電腦，瀏覽那台整台本機磁碟、多選上傳與下載。把關沿用遠端操作政策「可以操作」、範圍是整台本機磁碟、同名自動改名。
+
+- **功能**：桌面跟著 `cmd1` 宣告 `xfer1`（`SyncEngine.Commands.cs`），伺服器也宣告（`HubApplication`）。伺服器只把 `deviceBrowse`、`deviceFetch`、`devicePut` 送給選到的連線協商出 `xfer1` 的電腦，否則立即拒絕 `unsupported`「〈電腦〉的 Clode Myriagent 版本太舊，還不能傳檔案；請先更新那台」（`CommandRouter.IssueAsync`）。不對應任何 hub 方法。
+- **指令**（型錄的 Device、層級 2，形狀見 `RemoteCommandCatalog`）：`deviceBrowse {deviceId, requestId, path}` → 輸出 `files`；`deviceFetch {deviceId, requestId, path}` → 輸出 `fileRef`；`devicePut {deviceId, requestId, folder, uploads}`（`uploads` 照 `addUploaded`，伺服器簽之前以 `UploadRegistry.TryVerify` 驗）。輸出的 `conversationId` 一律是 null（`CommandOutputFileRules.Header` 只核對 `requestId`）。電腦的閘門照 14.6（5e 只收 `Control`），處理者（`AgentHub.DeviceFiles.cs`）另外在 app 以系統管理員執行時回 `policy`；範圍是整台的固定與卸除式磁碟（`DeviceTransferScope`），禁止清單是 `RemoteScopeBuilder.DeviceFoldersAsync` 的那一份加上 `DeviceTransferRules.ExtraForbiddenFolders`。這三個指令不跳本機通知（`RemoteNotifyRules.SilentCommands`），收檔做完由處理者在那台提示一次。
+- **下載參照 `xfer`**：桌面 `media_refs_local` 的 `item_id = @xfer`、`conversation_id = ""`；伺服器改寫 `fileRef` 時登記 `media_refs(purpose = 'xfer', conversation_id = '')`，`url` 是 `/f/{key}`，`expiresAt` ≤ 現在＋2 小時（`MediaLookupRules.XferLifetime`）。`/f/`（E3）與 E11 收 `file` 與 `xfer`；`xfer` 不看對話目錄（沒有對話），只看到期，協作人的連線一律 404（`CanSee` 對空的對話 id 是 false）。向電腦要位元組時 `MediaRequest.purpose` 是 `xfer`（`MediaPurposes.Transfer`），電腦的 `MediaServer` 只在這條連線的政策是 `Control` 時給（`MediaServerRules.Decide`），以傳輸的範圍開檔、依範圍串流（不做文字 DLP、沒有 20 MB 的上限）。`/f/` 沒帶 Range 的整份上限：`xfer` 4 GB（`MediaRelayRules.MaxUnrangedTransferBytes`），其他照舊。過期的列兩邊照 `@file` 的作法修剪；索引器重建後的孤兒清理不刪 `xfer`。
+- **接收的進度**：`DeviceStats.xfers`（14.8 的表外加的選用欄位：`[{id, name, size, done, state, saved?}]`，`id` 是 uploadId、`state` 是 `receiving`／`saved`／`failed`，最多 32 筆，`DeviceStatsRules.CheckXfer`）。給人看的即時資料，同 stat1 可丟；舊伺服器、舊桌面照 `MissingMemberHandling.Ignore` 略過。
+- **發起的桌面**：上傳照 14.7 的 `PUT /api/v1/device/uploads/{uploadId}`；下載以 E11（`purpose=file`）每段 ≤8 MB 的 Range 依序取（`ReplicaMediaSource.DownloadAsync`：每段核對起點、總長、ETag，503 等 2 秒重試），寫進這台的資料夾。
+
 ## 15. app 下載端點（app 自我更新 U2）
 
 桌面以存取權杖取得最新版與套件（U3 的 `HubReleaseSource`）。路由是 `AppReleaseRoutes`（`Update/AppReleaseMessages.cs`）的常數，回應以 `SyncJson` 序列化（1.2），形狀只加選用欄位（1.4 的不變式）。

@@ -48,6 +48,11 @@ public sealed class RemoteCommandCoverageTests
     /// <summary>排程頁（S3）：HubHarness 沒掛排程讀取器，處理者回 unsupported</summary>
     private static readonly string[] ScheduleHandled = [RemoteCommandCatalog.ScheduleAction, RemoteCommandCatalog.ScheduleAgent];
 
+    /// <summary>電腦狀態面板的檔案傳輸（AgentHub.DeviceFiles.cs）：範圍沒有磁碟，瀏覽被守門員拒絕；下載與存檔要和伺服器傳輸，回 unsupported</summary>
+    private static readonly string[] DeviceTransferHandled = [RemoteCommandCatalog.DeviceBrowse, RemoteCommandCatalog.DeviceFetch, RemoteCommandCatalog.DevicePut];
+
+    private static readonly string[] DeviceTransferNeedingTransfer = [RemoteCommandCatalog.DeviceFetch, RemoteCommandCatalog.DevicePut];
+
     /// <summary>登記在最後：記下交到它手上的指令；退路的指令由它回 done（代替 HandleCommand），其他不接</summary>
     private sealed class FallbackRecorder : IRemoteCommandHandler
     {
@@ -89,7 +94,14 @@ public sealed class RemoteCommandCoverageTests
         var h = rig.H;
         RemoteEntrySamples.AllowRemote(h, allowFullAccess: true);
         var recorder = new FallbackRecorder();
-        h.Ui.Invoke(() => h.Hub.AddRemoteHandlerForTest(recorder));
+        h.Ui.Invoke(() =>
+        {
+            h.Hub.AddRemoteHandlerForTest(recorder);
+            // 檔案傳輸：不看這台真的磁碟與權限
+            h.Hub.DeviceFilesElevatedForTest = () => false;
+            h.Hub.DeviceDriveRootsForTest = () => [];
+            h.Hub.DevicePlacesForTest = () => [];
+        });
         var (id, s) = h.StartConversation(h.Main, h.Claude);
         h.Raise(s, new AgentApprovalEvent("p-1", "執行指令", "bash", "npm test", "npm test", "t1", CanAllowForSession: true));
         h.Raise(s, new AgentApprovalEvent("plan-1", "確認執行計畫", "plan", "請確認", "1. 改 A", null, CanAllowForSession: false, IsPlan: true));
@@ -112,12 +124,12 @@ public sealed class RemoteCommandCoverageTests
         }
 
         var fallback = AgentHub.RemoteFallbackCommands.ToArray();
-        outcomes.Keys.Should().BeEquivalentTo(fallback.Concat(Handled).Concat(Files).Concat(AccountHandled).Concat(Unsupported).Concat(ExecHandled).Concat(ScheduleHandled),
+        outcomes.Keys.Should().BeEquivalentTo(fallback.Concat(Handled).Concat(Files).Concat(AccountHandled).Concat(Unsupported).Concat(ExecHandled).Concat(ScheduleHandled).Concat(DeviceTransferHandled),
             "退路＋處理者＋檔案＋帳戶＋unsupported＋遠端執行指令＋排程頁＝型錄裡電腦執行的全部（契約:647）");
-        (fallback.Length, Handled.Length, Files.Length, AccountHandled.Length, Unsupported.Length, ExecHandled.Length, ScheduleHandled.Length, outcomes.Count)
-            .Should().Be((10, 10, 5, 6, 1, 1, 2, 35));
+        (fallback.Length, Handled.Length, Files.Length, AccountHandled.Length, Unsupported.Length, ExecHandled.Length, ScheduleHandled.Length, DeviceTransferHandled.Length, outcomes.Count)
+            .Should().Be((10, 10, 5, 6, 1, 1, 2, 3, 38));
         outcomes.Where(p => p.Value is { State: RemoteResultStates.Rejected, Code: RemoteResultCodes.Unsupported, Step: RemoteGateSteps.Handler })
-            .Select(p => p.Key).Should().BeEquivalentTo(Unsupported.Concat(FilesNeedingTransfer).Concat(NeedingVoice).Concat(ExecHandled).Concat(ScheduleHandled),
+            .Select(p => p.Key).Should().BeEquivalentTo(Unsupported.Concat(FilesNeedingTransfer).Concat(NeedingVoice).Concat(ExecHandled).Concat(ScheduleHandled).Concat(DeviceTransferNeedingTransfer),
                 "回 unsupported 而且 step 是 handler 的恰好是 accountAdd、要傳輸的 2 個、沒掛辨識器的語音訊息、沒接執行者的遠端執行指令、沒掛排程讀取器的排程頁");
         recorder.Seen.All.Should().BeEquivalentTo(fallback.Concat(Unsupported), "這一包的處理者接下自己的 10 個、WP4.7 接下檔案的 5 個（含新對話的 listFolders）、帳戶與 CLI 的處理者接下 6 個，其他都交給下一個處理者");
         foreach (var name in fallback)

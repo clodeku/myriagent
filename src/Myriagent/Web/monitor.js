@@ -10,6 +10,7 @@ import { state, post, isHub } from './store.js';
 import { showTip, hideTip } from './ui.js';
 import { calmMotion, onMotionChange } from './theme.js';
 import * as R from './monitorrules.js';
+import { openCardMenu } from './devicefiles.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 /** 走勢圖的座標系（preserveAspectRatio="none" 拉滿寬度；線用 non-scaling-stroke） */
@@ -180,6 +181,8 @@ function createCard(hubCard) {
   c.body = h('div', { class: 'mon-body' }, h('div', { class: 'mon-gauges' }, c.cpu.el, c.mem.el, (c.lat || c.conn).el), c.hw, c.net.el, c.rtt && c.rtt.el, c.disks);
   c.el = h('section', { class: 'mon-dev', role: 'listitem', dataset: { kind: hubCard ? 'hub' : 'device' } },
     h('div', { class: 'mon-dev-head' }, c.led, hubCard ? icon('server', 'mon-kind') : null, c.name, c.badge, c.meta), c.sub, c.msg, c.body);
+  // 電腦狀態面板的檔案傳輸（devicefiles.js）：其他電腦的卡片按右鍵（觸控長按）開「瀏覽與下載檔案」「上傳檔案到這台」
+  if (!hubCard) c.el.addEventListener('contextmenu', (e) => { if (c.row) openCardMenu(e, c.row); });
   return c;
 }
 

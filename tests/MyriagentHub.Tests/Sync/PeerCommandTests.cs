@@ -204,6 +204,38 @@ public sealed class PeerCommandTests
 
     // ───────────────────────────── 遠端執行指令（sync-protocol 14.11） ─────────────────────────────
 
+    private static readonly string[] XferFeatures = [DeviceFeatureRules.Conv1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Xfer1];
+
+    [Fact]
+    public async Task 檔案傳輸_目標有xfer1才簽_沒有就立即拒絕unsupported()
+    {
+        await using (var s = await CommandRouterTests.Setup.StartAsync(features: XferFeatures))
+        await using (var b = await PeerAsync(s, "B 電腦", XferFeatures))
+        {
+            var cid = NewCommandId();
+            var browse = new JObject { ["cmd"] = "deviceBrowse", ["deviceId"] = s.Owner.Id, ["requestId"] = "b1", ["path"] = JValue.CreateNull() };
+            (await b.Client.PeerCmdAsync(new PeerCmd(cid, browse))).Should().Be(new PeerCmdResult(true, cid, null));
+            var delivery = await s.Device!.WaitForAsync<CommandDelivery>();
+            var verdict = Verify(s, delivery, acceptsDevice: true);
+            verdict.Step.Should().BeNull(verdict.Detail);
+            verdict.Body!.Tier.Should().Be(2);
+            verdict.Body.Conv.Should().BeNull();
+            verdict.Body.Cmd.Value<string>("cmd").Should().Be("deviceBrowse");
+        }
+
+        await using (var s = await CommandRouterTests.Setup.StartAsync(features: PeerFeatures))
+        await using (var b = await PeerAsync(s, "B 電腦", XferFeatures))
+        {
+            var cid = NewCommandId();
+            var fetch = new JObject { ["cmd"] = "deviceFetch", ["deviceId"] = s.Owner.Id, ["requestId"] = "f1", ["path"] = @"C:.txt" };
+            (await b.Client.PeerCmdAsync(new PeerCmd(cid, fetch))).Accepted.Should().BeTrue();
+            var result = await b.Client.WaitForAsync<PeerReply>(r => (string?)r.Message["type"] == "commandResult");
+            result.Message["code"]!.Value<string>().Should().Be(RemoteResultCodes.Unsupported);
+            result.Message["message"]!.Value<string>().Should().Contain("版本太舊").And.Contain("傳檔案");
+            await CommandRouterTests.AssertNoDeliveryAsync(s.Device!, 200);
+        }
+    }
+
     private static readonly string[] ExecFeatures = [DeviceFeatureRules.Conv1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Exec1];
 
     private static JObject RemoteExec(string deviceId, string command = "Get-Date") => new()

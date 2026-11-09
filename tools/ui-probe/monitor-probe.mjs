@@ -2,6 +2,7 @@
 // 假宿主收到 monitor {on:true} 才開始每秒送 deviceStats（MyriagentHub 主機、這台＋兩台在線、一台在線沒資料、一台離線、一台已撤銷），{on:false} 就停；
 // 開始時先一次補 40 筆（ageMs 依序變小）讓走勢圖有一段歷史。截深色、淺色、滑過走勢圖、未配對、窄視窗，並檢查協定與版面。
 import { syncStatus, XSS_NAME } from './sync-settings.mjs';
+import { runDeviceFiles } from './devfiles-probe.mjs';
 
 export const SELF = 'd_0123456789ABCDEFGHJKMNPQRS';
 const LAB = 'd_4123456789ABCDEFGHJKMNPQRS';
@@ -290,4 +291,7 @@ export async function runMonitor(ctx, vp) {
   await shot(narrow.page, 'monitor-narrow-700');
   clearInterval(narrow.host.statsTimer);
   await closeApp(narrow);
+
+  // 電腦狀態面板的檔案傳輸（devfiles-probe.mjs）
+  await runDeviceFiles(ctx, vp, { SELF, LAB, LAYOUT, devices, pumpSetup });
 }

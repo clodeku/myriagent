@@ -31,6 +31,9 @@ internal static class MediaServerRules
     /// <summary>fileFetch 發的參照的 <c>item_id</c></summary>
     public const string FileItemId = "@file";
 
+    /// <summary>電腦狀態面板的檔案傳輸（deviceFetch）發的參照的 <c>item_id</c>（對話 id 是空字串；2026-11-09）</summary>
+    public const string TransferItemId = "@xfer";
+
     /// <summary>縮圖一律 320 px（伺服器的 <c>s=160</c> 也要 320，瀏覽器縮放）</summary>
     public const int ThumbPixels = 320;
 
@@ -76,8 +79,9 @@ internal static class MediaServerRules
     /// </summary>
     public static bool PurposeMatches(string? purpose, string itemId) => purpose switch
     {
-        MediaPurposes.Media or MediaPurposes.Thumb => !string.Equals(itemId, FileItemId, StringComparison.Ordinal),
+        MediaPurposes.Media or MediaPurposes.Thumb => itemId is not (FileItemId or TransferItemId),
         MediaPurposes.File => string.Equals(itemId, FileItemId, StringComparison.Ordinal),
+        MediaPurposes.Transfer => string.Equals(itemId, TransferItemId, StringComparison.Ordinal),
         _ => false,
     };
 
@@ -86,7 +90,7 @@ internal static class MediaServerRules
     {
         MediaPurposes.Media => RemoteFilePurpose.Media,
         MediaPurposes.Thumb => RemoteFilePurpose.Thumb,
-        MediaPurposes.File => RemoteFilePurpose.File,
+        MediaPurposes.File or MediaPurposes.Transfer => RemoteFilePurpose.File,
         _ => throw new ArgumentOutOfRangeException(nameof(purpose), purpose, "不認得的媒體用途"),
     };
 
@@ -96,7 +100,7 @@ internal static class MediaServerRules
     public static long MaxBytes(string purpose) => purpose switch
     {
         MediaPurposes.File => MaxBinaryFileBytes,
-        MediaPurposes.Media or MediaPurposes.Thumb => long.MaxValue,
+        MediaPurposes.Media or MediaPurposes.Thumb or MediaPurposes.Transfer => long.MaxValue,
         _ => throw new ArgumentOutOfRangeException(nameof(purpose), purpose, "不認得的媒體用途"),
     };
 
@@ -114,6 +118,9 @@ internal static class MediaServerRules
             return new MediaVerdict(404, MediaErrorCodes.NotFound);
         // Q1-A：Off 或暫停時原檔與檔案不給、縮圖照常（伺服器對圖片改回縮圖，D29）
         if (purpose is MediaPurposes.Media or MediaPurposes.File && !AllowsOriginals(policy))
+            return new MediaVerdict(403, MediaErrorCodes.Policy);
+        // 電腦狀態面板的檔案傳輸：整台的本機磁碟，只給「可以操作」（同 deviceFetch 的閘門）
+        if (purpose == MediaPurposes.Transfer && policy.RemoteControlLevel != SyncSettings.LevelControl)
             return new MediaVerdict(403, MediaErrorCodes.Policy);
         return null;
     }

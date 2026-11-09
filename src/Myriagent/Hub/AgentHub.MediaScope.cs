@@ -10,6 +10,11 @@ internal sealed partial class AgentHub : IMediaScopeSource
     MediaScopeSnapshot? IMediaScopeSource.GetMediaScope(MediaScopeQuery query)
     {
         ArgumentNullException.ThrowIfNull(query);
+        // 電腦狀態面板的檔案傳輸（deviceFetch 的 @xfer）：沒有對話，只給禁止清單用的資料夾；以系統管理員執行時看不到
+        if (query.ItemId == MediaServerRules.TransferItemId)
+            return DeviceFilesElevated
+                ? MediaScopeSnapshot.Hidden(string.Empty)
+                : new MediaScopeSnapshot(string.Empty, true, string.Empty, string.Empty, string.Empty, string.Empty, false, null, CurrentMediaFolderRoots());
         if (FindByWireId(query.ConversationId) is not { } c)
             return null;
         // 本機擁有（還沒記擁有者的是這台的舊對話）、不是草稿與複本、目前的政策是 full（本機剛改成 metadata、伺服器還不知道的空窗也擋，D26）
@@ -20,7 +25,7 @@ internal sealed partial class AgentHub : IMediaScopeSource
         (string Path, string FileName)? resolved = null;
         int? sequence = null;
         string? keptPath = null;
-        var itemReference = query.ItemId is not (MediaServerRules.ListItemId or MediaServerRules.FileItemId);
+        var itemReference = query.ItemId is not (MediaServerRules.ListItemId or MediaServerRules.FileItemId or MediaServerRules.TransferItemId);
         if (itemReference && c.ItemsLoaded)
         {
             var item = c.Items.FirstOrDefault(i => string.Equals(i.Id, query.ItemId, StringComparison.Ordinal));

@@ -95,8 +95,14 @@ internal static class DeviceFeatureRules
     /// </summary>
     public const string Collab1 = "collab1";
 
+    /// <summary>
+    /// 電腦狀態面板的檔案傳輸（2026-11-09）：協商出它的連線收 <c>deviceBrowse</c>、
+    /// <c>deviceFetch</c>、<c>devicePut</c>（舊版的桌面在閘門 5a 回 invalid，伺服器先擋下、說明那台要先更新）。不對應任何 hub 方法
+    /// </summary>
+    public const string Xfer1 = "xfer1";
+
     /// <summary>這版認得的功能（不認得的名稱照收、不啟用：交集裡不會有它）</summary>
-    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1];
+    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1, Xfer1];
 
     public const int MaxFeatures = 32;
 

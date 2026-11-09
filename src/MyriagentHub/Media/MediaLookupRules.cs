@@ -39,6 +39,9 @@ internal static class MediaRefPurposes
 
     public const string File = "file";
 
+    /// <summary>電腦狀態面板的檔案傳輸（deviceFetch；2026-11-09）：沒有對話（conversation_id 是空字串），2 小時</summary>
+    public const string Transfer = "xfer";
+
     /// <summary><c>item:</c> 後面接著項目 id（不是空的）</summary>
     public static bool IsItem(string? purpose) =>
         purpose is { Length: > 5 } && purpose.StartsWith(ItemPrefix, StringComparison.Ordinal);
@@ -74,13 +77,16 @@ internal static class MediaLookupRules
     /// <summary><c>fileFetch</c>（<c>file</c>）的參照從建立起 15 分鐘內有效</summary>
     public static readonly TimeSpan FileLifetime = TimeSpan.FromMinutes(15);
 
+    /// <summary>檔案傳輸（<c>xfer</c>）的參照從建立起 2 小時內有效（桌面的 E11 每一段都會查，大檔要撐得過整個下載）</summary>
+    public static readonly TimeSpan XferLifetime = TimeSpan.FromHours(2);
+
     /// <summary>
     /// 端點與用途相符：<c>/f/</c> 只收 <c>file</c>；<c>/m/</c>、<c>/t/</c> 與桌面複本的代理只收項目（<c>item:*</c>）與抽屜（<c>list</c>）。
     /// 不認得的用途一律不收
     /// </summary>
     public static bool Allows(MediaEndpointKind endpoint, string? purpose) => endpoint switch
     {
-        MediaEndpointKind.File or MediaEndpointKind.ReplicaFile => purpose == MediaRefPurposes.File,
+        MediaEndpointKind.File or MediaEndpointKind.ReplicaFile => purpose is MediaRefPurposes.File or MediaRefPurposes.Transfer,
         MediaEndpointKind.Media or MediaEndpointKind.Thumb or MediaEndpointKind.ReplicaMedia or MediaEndpointKind.ReplicaThumb =>
             MediaRefPurposes.IsItem(purpose) || purpose == MediaRefPurposes.List,
         _ => throw new ArgumentOutOfRangeException(nameof(endpoint), endpoint, "不認得的媒體端點"),
@@ -98,6 +104,7 @@ internal static class MediaLookupRules
         {
             MediaRefPurposes.List => ListLifetime,
             MediaRefPurposes.File => FileLifetime,
+            MediaRefPurposes.Transfer => XferLifetime,
             _ => TimeSpan.Zero,
         };
         return nowMs - createdAtMs >= (long)lifetime.TotalMilliseconds;
@@ -119,6 +126,9 @@ internal static class MediaLookupRules
             return MediaLookupMisses.Purpose;
         if (Expired(purpose, createdAtMs, nowMs))
             return MediaLookupMisses.Expired;
+        // 檔案傳輸沒有對話：鍵裡的裝置就是來源（電腦的閘門以這條連線的政策再判一次）
+        if (purpose == MediaRefPurposes.Transfer)
+            return null;
         if (owner is null)
             return MediaLookupMisses.NoConversation;
         if (!string.Equals(owner.OwnerDeviceId, keyDeviceId, StringComparison.Ordinal))
@@ -134,4 +144,8 @@ internal static class MediaLookupRules
         MediaEndpointKind.File or MediaEndpointKind.ReplicaFile => MediaPurposes.File,
         _ => throw new ArgumentOutOfRangeException(nameof(endpoint), endpoint, "不認得的媒體端點"),
     };
+
+    /// <summary>向來源電腦要位元組時的 <c>MediaRequest.purpose</c>（依參照的用途：檔案傳輸的參照是 <c>xfer</c>，其他照端點）</summary>
+    public static string RequestPurpose(MediaEndpointKind endpoint, string? refPurpose)
+        => refPurpose == MediaRefPurposes.Transfer && endpoint is MediaEndpointKind.File or MediaEndpointKind.ReplicaFile ? MediaPurposes.Transfer : RequestPurpose(endpoint);
 }

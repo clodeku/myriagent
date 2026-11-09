@@ -717,7 +717,8 @@ public sealed class AgentHubRemoteGateTests
     {
         string[] needHandler = ["send", "voiceMessage", "answer", "approve", "approvePlan", "delete", "setOption", "setAccount", "setFolder", "listFiles", "fileSearch", "fileFetch",
             "addUploaded", "accountAdd", "accountLogin", "accountLoginDevice", RemoteCommandCatalog.AccountLoginCode, "accountLogout", "cliInstall", "cliUpdate", RemoteCommandCatalog.ConversationCreate,
-            RemoteCommandCatalog.RemoteExec, RemoteCommandCatalog.ScheduleAction, RemoteCommandCatalog.ScheduleAgent, RemoteCommandCatalog.ListFolders];
+            RemoteCommandCatalog.RemoteExec, RemoteCommandCatalog.ScheduleAction, RemoteCommandCatalog.ScheduleAgent, RemoteCommandCatalog.ListFolders,
+            RemoteCommandCatalog.DeviceBrowse, RemoteCommandCatalog.DeviceFetch, RemoteCommandCatalog.DevicePut];
 
         AgentHub.RemoteFallbackCommands.Should().OnlyContain(name => RemoteCommandCatalog.Find(name) != null);
         AgentHub.RemoteFallbackCommands.Select(n => RemoteCommandCatalog.Find(n)!)

@@ -23,7 +23,14 @@ internal sealed record DeviceStats(
     long? UptimeSec = null,
     IReadOnlyList<GpuStats>? Gpus = null,
     double? CpuTemp = null,
-    string? CpuTempSource = null);
+    string? CpuTempSource = null,
+    IReadOnlyList<XferStats>? Xfers = null);
+
+/// <summary>
+/// 這台正在接收或剛收完的檔（電腦狀態面板的檔案傳輸 devicePut，2026-11-09）：<c>id</c> 是 uploadId、<c>size</c> 是總大小、<c>done</c> 是已收到的位元組，
+/// <c>state</c> 是 <c>receiving</c>／<c>saved</c>／<c>failed</c>，<c>saved</c> 是實際存成的檔名（同名自動改名之後的；只有 saved 有）
+/// </summary>
+internal sealed record XferStats(string Id, string Name, long Size, long Done, string State, string? Saved = null);
 
 /// <summary>一個固定磁碟（<c>name</c> 是磁碟機代號，例如 <c>C:</c>）</summary>
 internal sealed record DiskStats(string Name, long Used, long Total);

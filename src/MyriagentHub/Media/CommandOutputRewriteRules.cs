@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Myriagent.Agents;
 using Myriagent.Media;
+using Myriagent.Remote;
 using Myriagent.Sync;
 using MyriagentHub.Sync;
 using Newtonsoft.Json;
@@ -55,7 +56,9 @@ internal static class CommandOutputRewriteRules
             return (message, []);
 
         var copy = (JObject)message.DeepClone();
-        var rows = type == FilesType ? RewriteFiles(copy, deviceId, conversationId, nowMs) : RewriteFileRef(copy, deviceId, conversationId, nowMs);
+        var rows = type == FilesType ? RewriteFiles(copy, deviceId, conversationId, nowMs)
+            : commandName == RemoteCommandCatalog.DeviceFetch ? RewriteTransferRef(copy, deviceId, nowMs)
+            : RewriteFileRef(copy, deviceId, conversationId, nowMs);
         return Utf8Length(copy) > MaxMessageBytes ? (null, []) : (copy, rows);
     }
 
@@ -123,6 +126,27 @@ internal static class CommandOutputRewriteRules
         var cap = nowMs + (long)MediaLookupRules.FileLifetime.TotalMilliseconds;
         message["expiresAt"] = message["expiresAt"] is JValue { Type: JTokenType.Integer, Value: long given } && given < cap ? given : cap;
         return [new MediaRefRow(deviceId, mediaRef!, conversationId, MediaRefPurposes.File, nowMs)];
+    }
+
+    /// <summary>
+    /// 電腦狀態面板的檔案傳輸（deviceFetch 的 fileRef；2026-11-09）：沒有對話，登記 <c>xfer</c> 參照（對話 id 是空字串），<c>url</c>＝<c>/f/{key}</c>，
+    /// <c>expiresAt</c> 取裝置給的值與現在加 2 小時的較小者；有 <c>error</c>（或參照不合格）時不登記、<c>url</c> 是 null
+    /// </summary>
+    private static List<MediaRefRow> RewriteTransferRef(JObject message, string deviceId, long nowMs)
+    {
+        var mediaRef = message["ref"] is JValue { Type: JTokenType.String, Value: string r } ? r : null;
+        message.Remove("ref");
+        message.Remove("url");
+        if (!IsNullish(message["error"]) || !ConversationEventRules.IsMediaRef(mediaRef))
+        {
+            message["url"] = JValue.CreateNull();
+            return [];
+        }
+
+        message["url"] = "/f/" + MediaKeyRules.Format(deviceId, mediaRef!);
+        var cap = nowMs + (long)MediaLookupRules.XferLifetime.TotalMilliseconds;
+        message["expiresAt"] = message["expiresAt"] is JValue { Type: JTokenType.Integer, Value: long given } && given < cap ? given : cap;
+        return [new MediaRefRow(deviceId, mediaRef!, string.Empty, MediaRefPurposes.Transfer, nowMs)];
     }
 
     /// <summary>檔案版本（縮圖網址的 <c>v</c>）：1～19 位數字，數字或字串都收；其他回 null</summary>

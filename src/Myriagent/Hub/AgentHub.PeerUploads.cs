@@ -1,6 +1,7 @@
 using Myriagent.Agents;
 using Myriagent.Core;
 using Myriagent.Media;
+using Myriagent.Sync;
 using Newtonsoft.Json.Linq;
 
 namespace Myriagent.Hub;
@@ -37,7 +38,11 @@ internal sealed partial class AgentHub
         if (!UploadIdRules.IsValid(uploadId))
             return true;
         var conversationId = command.Value<string>("conversationId");
-        if (conversationId == null || !conversations.TryGetValue(conversationId, out var c) || !c.IsReplica || !peerLive
+        // 電腦狀態面板的檔案傳輸（2026-11-09）：帶 deviceId（另一台已配對的電腦）而不是副本的對話
+        var deviceId = command.Value<string>("deviceId");
+        var forDevice = conversationId == null && SyncIds.IsDeviceId(deviceId) && peerSink?.DeviceId is { } own && !string.Equals(own, deviceId, StringComparison.Ordinal);
+        var forReplica = conversationId != null && conversations.TryGetValue(conversationId, out var c) && c.IsReplica;
+        if (!(forDevice || forReplica) || !peerLive
             || (PeerUploaderForTest ?? CurrentReplicaMediaSource() as IPeerUploader) is not { } uploader || peerUploads.ContainsKey(uploadId!))
         {
             ReplyPeerUpload(view, uploadId!, PeerUploadRules.Unavailable);
@@ -67,7 +72,22 @@ internal sealed partial class AgentHub
                     temp = await PeerUploadRules.WriteDataUrlAsync(dataUrl!, MaxPeerPasteBytes, cts.Token).ConfigureAwait(false);
                     source = temp;
                 }
-                result = source == null ? PeerUploadRules.TooLarge : await uploader.UploadAsync(uploadId!, source, cts.Token).ConfigureAwait(false);
+                var lastReport = 0L;
+                Action<long, long>? progress = forDevice
+                    ? (sent, total) =>
+                    {
+                        var now = Environment.TickCount64;
+                        if (now - Interlocked.Read(ref lastReport) < 300)
+                            return;
+                        Interlocked.Exchange(ref lastReport, now);
+                        host.BeginInvoke(() =>
+                        {
+                            if (!disposed && views.TryGetValue(viewId, out var pv))
+                                Post(pv, new JObject { ["type"] = "peerUploadProgress", ["uploadId"] = uploadId, ["sent"] = sent, ["total"] = total });
+                        });
+                    }
+                    : null;
+                result = source == null ? PeerUploadRules.TooLarge : await uploader.UploadAsync(uploadId!, source, progress, cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

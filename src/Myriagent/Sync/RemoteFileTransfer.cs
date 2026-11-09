@@ -48,9 +48,9 @@ internal sealed class RemoteFileTransfer : IRemoteFileTransfer, IDisposable
     {
         ArgumentNullException.ThrowIfNull(fullPaths);
         if (!LooseMediaRefRules.IsKind(kind))
-            throw new ArgumentException("種類只能是 @list 或 @file", nameof(kind));
-        if (!ConversationIds.IsWireId(conversationId))
-            throw new ArgumentException("對話 id 要是線上格式", nameof(conversationId));
+            throw new ArgumentException("種類只能是 @list、@file 或 @xfer", nameof(kind));
+        if (!LooseMediaRefRules.IsConversationFor(kind, conversationId))
+            throw new ArgumentException("對話 id 要是線上格式（@xfer 是空字串）", nameof(conversationId));
         if (Volatile.Read(ref disposed) != 0)
             throw new InvalidOperationException("同步引擎已經停止");
         if (fullPaths.Count == 0)

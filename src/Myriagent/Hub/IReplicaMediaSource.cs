@@ -44,6 +44,9 @@ internal interface IPeerUploader
     /// 沒有存取權杖、連不上是狀態 0、本文 null；取消時丟 <see cref="OperationCanceledException"/>
     /// </summary>
     Task<PeerUploadResult> UploadAsync(string uploadId, string path, CancellationToken ct);
+
+    /// <summary>同 <see cref="UploadAsync(string, string, CancellationToken)"/>，另以 <paramref name="progress"/>（已送出、總長）回報進度（電腦狀態面板的檔案傳輸）</summary>
+    Task<PeerUploadResult> UploadAsync(string uploadId, string path, Action<long, long>? progress, CancellationToken ct) => UploadAsync(uploadId, path, ct);
 }
 
 /// <summary>上傳的結果：伺服器的狀態碼（0＝沒有送出或連不上）與回應本文（同瀏覽器 E4 的 <c>{uploadId, sha256, size}</c> 或 <c>{error}</c>）</summary>
@@ -57,7 +60,18 @@ internal interface IPeerFileSource
 {
     /// <summary>整份檔案（≤<see cref="PeerFileRules.MaxBytes"/>）與伺服器給的檔名；鍵不合格、伺服器拒絕、連不上、太大回 null</summary>
     Task<PeerFile?> FetchFileAsync(string key, CancellationToken ct);
+
+    /// <summary>
+    /// 電腦狀態面板的檔案傳輸（2026-11-09）：以 E11 分段（每段 ≤8 MB 的 Range）把整個檔寫進 <paramref name="target"/>，沒有大小上限；
+    /// 每寫完一段以 <paramref name="progress"/>（已收到、總長）回報。鍵不合格、伺服器拒絕、連不上、檔案在途中變了（ETag 或總長不同）回 null；
+    /// 取消時丟 <see cref="OperationCanceledException"/>
+    /// </summary>
+    Task<PeerDownload?> DownloadAsync(string key, Stream target, Action<long, long>? progress, CancellationToken ct)
+        => Task.FromResult<PeerDownload?>(null);
 }
 
 /// <summary>取到的檔案：內容與檔名（Content-Disposition 的檔名；沒有是 null）</summary>
 internal sealed record PeerFile(byte[] Body, string? FileName);
+
+/// <summary>分段下載完的檔：伺服器給的檔名（沒有是 null）與總長</summary>
+internal sealed record PeerDownload(string? FileName, long Total);

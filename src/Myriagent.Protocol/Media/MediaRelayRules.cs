@@ -20,6 +20,9 @@ internal static class MediaRelayRules
     /// </summary>
     public const long MaxUnrangedFileBytes = 512L * 1024 * 1024;
 
+    /// <summary>電腦狀態面板的檔案傳輸（<c>xfer</c> 參照，2026-11-09）沒帶 Range 時的總長上限：瀏覽器版以 &lt;a download&gt; 整份下載</summary>
+    public const long MaxUnrangedTransferBytes = 4L * 1024 * 1024 * 1024;
+
     /// <summary>每台來源同時的轉送數（設計:1061）；再來的回 503 加 Retry-After</summary>
     public const int MaxConcurrentPerDevice = 20;
 

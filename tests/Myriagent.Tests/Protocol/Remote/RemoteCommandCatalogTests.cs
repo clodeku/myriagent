@@ -19,7 +19,7 @@ public sealed partial class RemoteCommandCatalogTests
     {
         var names = RemoteCommandCatalog.All.Select(s => s.Name).ToList();
         names.Should().OnlyHaveUniqueItems();
-        names.Count.Should().Be(35, "第 4 階段由電腦執行的 28 個網頁指令＋語音訊息 voiceMessage（2026-10-23）＋conversationCreate＋遠端執行指令 remoteExec（2026-10-25）＋排程頁的 scheduleAction、scheduleAgent（2026-10-26）＋Claude 遠端登入貼回授權碼的 accountLoginCode（2026-10-26）＋瀏覽器新對話的資料夾挑選 listFolders（2026-10-27）");
+        names.Count.Should().Be(38, "第 4 階段由電腦執行的 28 個網頁指令＋語音訊息 voiceMessage（2026-10-23）＋conversationCreate＋遠端執行指令 remoteExec（2026-10-25）＋排程頁的 scheduleAction、scheduleAgent（2026-10-26）＋Claude 遠端登入貼回授權碼的 accountLoginCode（2026-10-26）＋瀏覽器新對話的資料夾挑選 listFolders（2026-10-27）＋電腦狀態面板的檔案傳輸 deviceBrowse、deviceFetch、devicePut（2026-11-09）");
         names.Should().NotIntersectWith(RemoteCommandCatalog.ServerOnlyCommands);
         names.Should().NotIntersectWith(RemoteCommandCatalog.LocalOnlyCommands);
         RemoteCommandCatalog.ServerOnlyCommands.Should().NotIntersectWith(RemoteCommandCatalog.LocalOnlyCommands);

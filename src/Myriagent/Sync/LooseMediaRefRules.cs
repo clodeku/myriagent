@@ -16,6 +16,9 @@ internal static class LooseMediaRefRules
     /// <summary>fileFetch 的參照留多久（伺服器 15 分鐘後拒絕）</summary>
     public static readonly TimeSpan FileLifetime = TimeSpan.FromMinutes(15);
 
+    /// <summary>電腦狀態面板的檔案傳輸（deviceFetch）的參照留多久（伺服器 2 小時後拒絕；大檔的每一段都會查，要撐得過整個下載）</summary>
+    public static readonly TimeSpan XferLifetime = TimeSpan.FromHours(2);
+
     /// <summary>每隔多久修剪一次</summary>
     public static readonly TimeSpan PruneInterval = TimeSpan.FromDays(1);
 
@@ -23,7 +26,11 @@ internal static class LooseMediaRefRules
     public const int MaxPathsPerCall = 3000;
 
     /// <summary><c>@list</c> 或 <c>@file</c>（<see cref="MediaServerRules.ListItemId"/>、<see cref="MediaServerRules.FileItemId"/>）</summary>
-    public static bool IsKind(string? kind) => kind is MediaServerRules.ListItemId or MediaServerRules.FileItemId;
+    public static bool IsKind(string? kind) => kind is MediaServerRules.ListItemId or MediaServerRules.FileItemId or MediaServerRules.TransferItemId;
+
+    /// <summary>這個種類的參照要的對話 id 對不對：<c>@xfer</c> 沒有對話（空字串），其他要是線上格式</summary>
+    public static bool IsConversationFor(string kind, string? conversationId)
+        => kind == MediaServerRules.TransferItemId ? conversationId == string.Empty : ConversationIds.IsWireId(conversationId);
 
     /// <summary>抽屜的列還能重用：建立時間不在未來（本機時鐘倒退過的不信）、離現在不到 <see cref="ListReuse"/></summary>
     public static bool IsReusable(long createdAt, long nowMs) => createdAt <= nowMs && nowMs - createdAt < (long)ListReuse.TotalMilliseconds;
@@ -36,6 +43,9 @@ internal static class LooseMediaRefRules
 
     /// <summary>修剪的界線：fileFetch 早於這個時間的列刪掉</summary>
     public static long FilePruneBefore(long nowMs) => nowMs - (long)FileLifetime.TotalMilliseconds;
+
+    /// <summary>修剪的界線：檔案傳輸早於這個時間的列刪掉</summary>
+    public static long XferPruneBefore(long nowMs) => nowMs - (long)XferLifetime.TotalMilliseconds;
 
     /// <summary>
     /// 每個路徑（和 <paramref name="fullPaths"/> 同順序）要給的參照：
@@ -55,9 +65,9 @@ internal static class LooseMediaRefRules
         ArgumentNullException.ThrowIfNull(existing);
         ArgumentNullException.ThrowIfNull(newRef);
         if (!IsKind(kind))
-            throw new ArgumentException("種類只能是 @list 或 @file", nameof(kind));
-        if (!ConversationIds.IsWireId(conversationId))
-            throw new ArgumentException("對話 id 要是線上格式", nameof(conversationId));
+            throw new ArgumentException("種類只能是 @list、@file 或 @xfer", nameof(kind));
+        if (!IsConversationFor(kind, conversationId))
+            throw new ArgumentException("對話 id 要是線上格式（@xfer 是空字串）", nameof(conversationId));
         if (fullPaths.Count > MaxPathsPerCall)
             throw new ArgumentException($"一次最多 {MaxPathsPerCall} 個路徑", nameof(fullPaths));
         if (fullPaths.Any(string.IsNullOrWhiteSpace))

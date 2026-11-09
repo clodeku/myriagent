@@ -212,6 +212,10 @@ internal sealed class MediaServer : IDisposable
             return Rejected(refused, request.Purpose == MediaPurposes.Media ? AgentAttachmentRules.GetMediaContentType(target.Path) : null);
         }
 
+        // 電腦狀態面板的檔案傳輸（@xfer）：範圍是整台的本機磁碟，原檔依範圍串流（不做文字 DLP、沒有 20 MB 的上限）
+        if (row.IsTransfer)
+            return await TransferAsync(job, target, snapshot, keep, ct).ConfigureAwait(false);
+
         // Codex 產生的圖片只服務 attachments\generated\ 的複本（Q2-A；第一次用時複製）
         if (await resolver.SubstituteGeneratedAsync(snapshot, row, target, ct).ConfigureAwait(false) is not { } path)
         {
@@ -246,6 +250,22 @@ internal sealed class MediaServer : IDisposable
     }
 
     private static Reply Rejected(MediaVerdict verdict, string? contentType = null) => new(verdict.Status, verdict.Error, ContentType: contentType);
+
+    /// <summary>檔案傳輸的一段：守門員以整台本機磁碟的範圍（<see cref="DeviceTransferScope"/>）開檔，回原檔的一段（一律下載）</summary>
+    private async Task<Reply> TransferAsync(MediaJob job, ResolvedMedia target, MediaScopeSnapshot snapshot, Action<GuardedFile> keep, CancellationToken ct)
+    {
+        var request = job.Request;
+        var scope = await DeviceTransferScope.BuildAsync(snapshot.Folders, DeviceTransferRules.FixedDriveRoots(), guard, ct).ConfigureAwait(false);
+        var opened = await guard.OpenAsync(target.Path, RemoteFilePurpose.File, scope, long.MaxValue, ct).ConfigureAwait(false);
+        if (opened.File is not { } file)
+        {
+            Refused(request, job.Row, $"守門員拒絕（{opened.Reason}）", target.Path, MediaDiagnosticsRules.IsUnexpectedGuardReason(opened.Reason));
+            return Rejected(MediaServerRules.AfterGuard(opened.Reason ?? RemoteFileGuardReasons.Unreadable));
+        }
+
+        keep(file);
+        return Original(file, target.FileName, request.Range, MediaContentKinds.Binary);
+    }
 
     private static void Refused(MediaRequest request, LocalMediaRefRow? row, string reason, string? path = null, bool warn = false)
         => MediaDiagnostics.Refused("媒體轉送", request.Ref, row, request.Purpose, reason, path, warn);

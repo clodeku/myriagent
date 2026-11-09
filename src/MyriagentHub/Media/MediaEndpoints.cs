@@ -98,7 +98,7 @@ internal sealed class MediaResponder(MediaLookup lookup, MediaRelay relay, Thumb
                 return;
             }
 
-            var purpose = MediaLookupRules.RequestPurpose(endpoint);
+            var purpose = MediaLookupRules.RequestPurpose(endpoint, target.Purpose);
             var (kind, range, suffix) = HttpRangeRules.Parse(Single(http.Request.Headers.Range), length: null);
             switch (kind)
             {
@@ -298,7 +298,9 @@ internal sealed class MediaResponder(MediaLookup lookup, MediaRelay relay, Thumb
 
             // 416 對 (0, …) 只在檔案是空的時候：整份就是 0 個位元組
             var total = first.TotalLength!.Value;
-            if (total > (endpoint == MediaEndpointKind.File ? MediaRelayRules.MaxUnrangedFileBytes : MediaRelayRules.MaxUnrangedBytes))
+            var wholeLimit = target.Purpose == MediaRefPurposes.Transfer ? MediaRelayRules.MaxUnrangedTransferBytes
+                : endpoint == MediaEndpointKind.File ? MediaRelayRules.MaxUnrangedFileBytes : MediaRelayRules.MaxUnrangedBytes;
+            if (total > wholeLimit)
             {
                 await MediaResults.Error(http, StatusCodes.Status413PayloadTooLarge, MediaApiErrors.TooLarge).ExecuteAsync(http);
                 return;

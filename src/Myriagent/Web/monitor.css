@@ -289,3 +289,69 @@
 @keyframes mon-scan { from { transform: translateX(-110%); } to { transform: translateX(250%); } }
 @keyframes mon-ping { 0% { transform: scale(.15); opacity: .9; } 100% { transform: scale(1); opacity: 0; } }
 @keyframes mon-sheen { 0% { transform: translateX(-120%); opacity: 0; } 15% { opacity: 1; } 55%, 100% { transform: translateX(260%); opacity: 0; } }
+
+/* ───── 電腦狀態面板的檔案傳輸（devicefiles.js；2026-11-09）：右鍵選單開的檔案對話框、傳輸清單。class 一律 df- 前綴 ───── */
+.df-dlg .dlg-body { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; min-height: 0; }
+.df-body { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
+.df-bar { display: flex; align-items: center; gap: 6px; }
+.df-ibtn .ic { width: 15px; height: 15px; }
+.df-path {
+  flex: 1; min-width: 0; height: 30px; padding: 0 10px; border: 1px solid var(--border-2); border-radius: 6px;
+  background: var(--bg-pane); color: var(--text-hi); font: 12.5px var(--mono);
+}
+.df-path:focus { outline: none; border-color: var(--acc, var(--border-2)); }
+.df-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font-size: 12px; color: var(--text-2); min-height: 20px; }
+.df-crumb { border: 0; background: none; color: inherit; padding: 1px 4px; border-radius: 4px; cursor: pointer; font: inherit; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.df-crumb:hover { background: var(--bg-pane); color: var(--text-hi); }
+.df-crumb-sep .ic { width: 11px; height: 11px; opacity: .6; }
+.df-list {
+  height: min(46vh, 420px); overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-pane);
+  outline: none; transition: opacity 120ms ease;
+}
+.df-list.df-busy { opacity: .55; }
+.df-list.df-drop { box-shadow: inset 0 0 0 2px var(--green); }
+.df-row {
+  display: grid; grid-template-columns: 18px 18px minmax(0, 1fr) 80px 92px; align-items: center; gap: 8px;
+  padding: 5px 10px; font-size: 12.5px; color: var(--text-hi); cursor: default; user-select: none; border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 50%);
+}
+.df-row:hover { background: color-mix(in srgb, var(--text-hi), transparent 94%); }
+.df-row.df-on { background: color-mix(in srgb, var(--green), transparent 84%); }
+.df-dir { cursor: pointer; }
+.df-check { margin: 0; width: 14px; height: 14px; accent-color: var(--green); }
+.df-check:disabled { visibility: hidden; }
+.df-ic .ic { width: 15px; height: 15px; color: var(--text-2); display: block; }
+.df-dir .df-ic .ic { color: var(--amber); }
+.df-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.df-size, .df-when { font-size: 11.5px; color: var(--text-2); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.df-status { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+.df-status .ic { width: 14px; height: 14px; flex: none; }
+.df-err { color: color-mix(in srgb, var(--red), var(--text-hi) 25%); }
+.df-xfer-wrap { display: flex; flex-direction: column; gap: 4px; }
+.df-xfers-head { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.df-xfers { max-height: 180px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.df-x {
+  position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) 70px minmax(120px, 34%) auto; align-items: center; gap: 8px;
+  padding: 5px 8px 7px; border-radius: 6px; background: var(--bg-pane); font-size: 12px; color: var(--text-hi); overflow: hidden;
+}
+.df-x-ic .ic { width: 13px; height: 13px; display: block; color: var(--text-2); }
+.df-x-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.df-x-size { color: var(--text-2); text-align: right; font-variant-numeric: tabular-nums; }
+.df-x-state { color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.df-x-failed .df-x-state { color: color-mix(in srgb, var(--red), var(--text-hi) 25%); white-space: normal; }
+.df-x-done .df-x-state, .df-x-saved .df-x-state { color: var(--green); }
+.df-x-act { display: flex; gap: 2px; }
+.df-x-act .ibtn .ic { width: 13px; height: 13px; }
+.df-bar-track { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: color-mix(in srgb, var(--text-hi), transparent 90%); }
+.df-bar-fill { height: 100%; background: var(--green); transform-origin: left center; transform: scaleX(0); transition: transform 200ms var(--ease-out); }
+.df-x-failed .df-bar-fill, .df-x-cancelled .df-bar-fill { background: var(--text-3); }
+.df-sel { font-size: 12px; color: var(--text-2); align-self: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.df-dlg .dlg-foot { align-items: center; flex-wrap: wrap; }
+.df-dlg .dlg-foot .grow { flex: 1; }
+.df-dest { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.df-dest .ic, .df-dlg .dlg-foot .btn .ic { width: 13px; height: 13px; }
+@media (max-width: 640px) {
+  .df-row { grid-template-columns: 18px 18px minmax(0, 1fr) 70px; }
+  .df-when { display: none; }
+  .df-x { grid-template-columns: 16px minmax(0, 1fr) minmax(90px, 40%) auto; }
+  .df-x-size { display: none; }
+}

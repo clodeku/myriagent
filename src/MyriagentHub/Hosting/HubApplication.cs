@@ -108,6 +108,8 @@ internal static class HubApplication
         builder.Services.AddHubSchedules();
         // 多人協作（sync-protocol 14.14）：協作人發起的信封、CollabCmd、CollabUpdate；服務在 AddHubBrowser 登記
         builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Collab1);
+        // 電腦狀態面板的檔案傳輸（2026-11-09）：只把 deviceBrowse、deviceFetch、devicePut 送給協商出 xfer1 的連線
+        builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Xfer1);
         // 第 5 階段（sync-protocol 第 16 節）：log1、hand1 排在 tok1 之後，各自依開關登記（預設都關）
         builder.Services.AddHubLogs(options);
         builder.Services.AddHubHandoff(options);

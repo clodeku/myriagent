@@ -180,11 +180,13 @@ internal sealed class MediaMaintenance(
             using (var cmd = connection.CreateCommand())
             {
                 cmd.CommandText = "SELECT device_id, ref, thumb_blob FROM media_refs WHERE (purpose = $list AND created_at <= $listBefore) "
-                                  + "OR (purpose = $file AND created_at <= $fileBefore) LIMIT $limit";
+                                  + "OR (purpose = $file AND created_at <= $fileBefore) OR (purpose = $xfer AND created_at <= $xferBefore) LIMIT $limit";
                 cmd.Parameters.AddWithValue("$list", MediaRefPurposes.List);
                 cmd.Parameters.AddWithValue("$listBefore", now - (long)MediaLookupRules.ListLifetime.TotalMilliseconds);
                 cmd.Parameters.AddWithValue("$file", MediaRefPurposes.File);
                 cmd.Parameters.AddWithValue("$fileBefore", now - (long)MediaLookupRules.FileLifetime.TotalMilliseconds);
+                cmd.Parameters.AddWithValue("$xfer", MediaRefPurposes.Transfer);
+                cmd.Parameters.AddWithValue("$xferBefore", now - (long)MediaLookupRules.XferLifetime.TotalMilliseconds);
                 cmd.Parameters.AddWithValue("$limit", Batch);
                 using var reader = cmd.ExecuteReader();
                 while (reader.Read())

@@ -123,6 +123,8 @@ internal sealed partial class SyncEngine : ISyncEngineCommands
                 into.Add(DeviceFeatureRules.Exec1);
             // 多人協作（14.14）：接受協作人發起的信封（閘門只收白名單）、管理協作人與分享（SyncEngine.Collaborators.cs）
             into.Add(DeviceFeatureRules.Collab1);
+            // 電腦狀態面板的檔案傳輸（2026-11-09）：deviceBrowse、deviceFetch、devicePut（AgentHub.DeviceFiles.cs）
+            into.Add(DeviceFeatureRules.Xfer1);
         }
         try
         {

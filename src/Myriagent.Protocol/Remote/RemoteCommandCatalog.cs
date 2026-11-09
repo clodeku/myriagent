@@ -88,6 +88,21 @@ internal static class RemoteCommandCatalog
     /// </summary>
     public const string ListFolders = "listFolders";
 
+    /// <summary>
+    /// 電腦狀態面板的檔案傳輸（2026-11-09）：列那台的一個資料夾（path 是 null＝磁碟與常用資料夾）。
+    /// 輸出是 <c>files</c>（conversationId 是 null，網頁以 requestId 認領）；目標要協商出 <c>xfer1</c>
+    /// </summary>
+    public const string DeviceBrowse = "deviceBrowse";
+
+    /// <summary>電腦狀態面板的檔案傳輸：那台一個檔的下載參照（輸出 <c>fileRef</c>，伺服器登記 <c>xfer</c> 參照、2 小時）</summary>
+    public const string DeviceFetch = "deviceFetch";
+
+    /// <summary>電腦狀態面板的檔案傳輸：那台把已上傳到伺服器的檔下載進 folder（同名自動改名）；進度與結果走 DeviceStats.xfers</summary>
+    public const string DevicePut = "devicePut";
+
+    /// <summary>電腦狀態面板的檔案傳輸的三個指令（伺服器只送給協商出 xfer1 的連線）</summary>
+    public static IReadOnlySet<string> DeviceTransferCommands { get; } = Set(DeviceBrowse, DeviceFetch, DevicePut);
+
     /// <summary>型錄裡不是網頁指令的：只由伺服器送給電腦的 <see cref="ConversationCreate"/>、<see cref="ListFolders"/>，只由桌面發起的 <see cref="RemoteExec"/></summary>
     public static IReadOnlySet<string> NonWebCommands { get; } = Set(ConversationCreate, RemoteExec, ListFolders);
 
@@ -152,7 +167,9 @@ internal static class RemoteCommandCatalog
         "usageSegments",
         "draftSnapshot", "appUpdateCheck", "appUpdateRestartNow", "appUpdateForce", "appUpdateCancel", "appInstallHere",
         // 桌面遠端操作（docs/sync-protocol.md 14.7）：宿主代傳的附件與檔案下載、桌面草稿改開在其他電腦
-        "peerUpload", "peerUploadCancel", "peerFileSave", "draftSetDevice");
+        "peerUpload", "peerUploadCancel", "peerFileSave", "draftSetDevice",
+        // 電腦狀態面板的檔案傳輸（2026-11-09）：把其他電腦的檔下載進這台的資料夾、取消、挑這台的資料夾
+        "peerXferSave", "peerXferCancel", "peerXferReveal", "xferPickFolder");
 
     private static readonly string[] ToastOnly = ["toast"];
 
@@ -266,6 +283,11 @@ internal static class RemoteCommandCatalog
         ], ["sendRejected", "toast"], RemoteLimits.ExplicitFolder | RemoteLimits.NoRememberFolder);
         // 瀏覽器新對話的資料夾挑選（伺服器把草稿的 listFiles dirsOnly 改成它；同 dirsOnly 是層級 2）
         yield return ForDevice(ListFolders, 2, [Device(required: true), RequestId(), Text("path", required: false, nullable: true)], ["files", "toast"]);
+
+        // 電腦狀態面板的檔案傳輸（2026-11-09）：瀏覽整台的本機磁碟、下載一個檔、把上傳的檔存進那台的資料夾（同遠端選資料夾與 fileFetch，層級 2）
+        yield return ForDevice(DeviceBrowse, 2, [Device(required: true), RequestId(), Text("path", required: false, nullable: true)], ["files", "toast"]);
+        yield return ForDevice(DeviceFetch, 2, [Device(required: true), RequestId(), Text("path")], ["fileRef", "toast"]);
+        yield return ForDevice(DevicePut, 2, [Device(required: true), RequestId(), Text("folder"), Uploads(required: true)]);
 
         // 排程頁（S3，docs/sync-protocol.md 14.12）：其他電腦或手機對那台的 Windows 排程立即執行、停止、啟用、停用（只有這四個：
         // 不再列出、納入管理是那台自己的選擇，遠端不寫那台的持久設定），交給代理＝在那台的管理對話送出說明（沒有就開一個）
