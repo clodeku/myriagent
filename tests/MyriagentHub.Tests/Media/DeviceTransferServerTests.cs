@@ -162,7 +162,7 @@ public sealed class DeviceTransferServerTests
             BrowserCommandRules.Classify(name).Should().Be(BrowserCommandClass.NotAvailable, "第 4 階段的處理者轉給電腦");
         }
 
-        foreach (var name in new[] { "peerXferSave", "peerXferCancel", "peerXferReveal", "xferPickFolder" })
+        foreach (var name in new[] { "peerXferSave", "peerXferCancel", "peerXferPause", "peerXferResume", "peerXferReveal", "xferPickFolder" })
         {
             RemoteCommandCatalog.IsLocalOnly(name).Should().BeTrue(name);
             BrowserCommandRules.Classify(name).Should().Be(BrowserCommandClass.DesktopOnly, name);

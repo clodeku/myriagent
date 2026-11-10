@@ -58,6 +58,24 @@ export async function runDeviceFiles(ctx, vp, m) {
         } else if (c.cmd === 'deviceFetch') {
           done();
           host.send({ type: 'fileRef', requestId: c.requestId, conversationId: null, url: '/f/' + m.LAB + '-01J9QZ3K8M5R7T2V4W6X8Y0A1B', name: c.path.split('\\').pop(), size: 2_400_000, expiresAt: Date.now() + 7200_000, error: null });
+        } else if (c.cmd === 'peerXferSave' && host.slowXfer) {
+          // 慢慢下載（2026-11-10 的速度、時間、暫停、背景）：每 200 ms 多 300 KB，暫停時停、繼續時接著、中止回 cancelled
+          const x = { id: c.transferId, done: 0, total: 24_000_000, running: true };
+          host.slowXfer = x;
+          x.timer = setInterval(() => {
+            if (!x.running) return;
+            x.done = Math.min(x.total, x.done + 300_000);
+            host.send({ type: 'xferProgress', transferId: x.id, state: 'running', done: x.done, total: x.total, path: null, name: null, error: null });
+          }, 200);
+        } else if (c.cmd === 'peerXferPause' && host.slowXfer && host.slowXfer.id === c.transferId) {
+          host.slowXfer.running = false;
+          host.send({ type: 'xferProgress', transferId: c.transferId, state: 'paused', done: host.slowXfer.done, total: host.slowXfer.total, path: null, name: null, error: null });
+        } else if (c.cmd === 'peerXferResume' && host.slowXfer && host.slowXfer.id === c.transferId) {
+          host.slowXfer.running = true;
+          host.send({ type: 'xferProgress', transferId: c.transferId, state: 'running', done: host.slowXfer.done, total: host.slowXfer.total, path: null, name: null, error: null });
+        } else if (c.cmd === 'peerXferCancel' && host.slowXfer && host.slowXfer.id === c.transferId) {
+          clearInterval(host.slowXfer.timer);
+          host.send({ type: 'xferProgress', transferId: c.transferId, state: 'cancelled', done: host.slowXfer.done, total: host.slowXfer.total, path: null, name: null, error: null });
         } else if (c.cmd === 'peerXferSave') {
           host.send({ type: 'xferProgress', transferId: c.transferId, state: 'running', done: 1_200_000, total: 2_400_000, path: null, name: null, error: null });
           setTimeout(() => host.send({ type: 'xferProgress', transferId: c.transferId, state: 'done', done: 2_400_000, total: 2_400_000, path: 'C:\\Users\\me\\Downloads\\' + c.name, name: c.name, error: null }), 300);
@@ -225,6 +243,67 @@ export async function runDeviceFiles(ctx, vp, m) {
   await shot(page, 'devfiles-network-empty-dark');
   await page.keyboard.press('Escape');
   await until(() => page.evaluate(() => !document.querySelector('.df-dlg')), 2000);
+
+  // 速度、已經過、尚需時間、暫停與繼續、背景執行（2026-11-10 使用者要求）：假宿主慢慢回報一個下載的進度
+  host.slowXfer = true;
+  await page.click((await cardSel('LAB-WORKSTATION')) + ' .mon-name', { button: 'right' });
+  const menu2 = await until(menuItems, 1500);
+  await page.click('.menu.df-menu .menu-item');
+  await until(() => page.evaluate(() => document.querySelectorAll('.df-dlg .df-row').length === 3), 2000);
+  await page.fill('.df-dlg .df-path', 'D:\專案\交付');
+  await page.press('.df-dlg .df-path', 'Enter');
+  await until(() => page.evaluate(() => document.querySelectorAll('.df-dlg .df-row').length === 5), 2000);
+  await page.evaluate(() => { const b = document.querySelector('.df-dlg .df-xfers-head .btn'); if (b) b.click(); }); // 清除已完成
+  await rows.nth(1).click();
+  await page.click('.df-dlg .dlg-foot .btn.primary');
+  const slowRow = () => page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('.df-dlg .df-x[data-dir="down"]')).find((r) => !r.dataset.kind);
+    return row ? { cls: row.className, state: row.querySelector('.df-x-state').textContent, metrics: row.querySelector('.df-x-metrics').textContent,
+      buttons: Array.from(row.querySelectorAll('.df-x-act button')).map((b) => b.title) } : null;
+  });
+  const moving = await until(async () => { const r = await slowRow(); return r && /[KM]B\/s/.test(r.metrics) && /已經過 0:0\d/.test(r.metrics) && /尚需 \d+:\d\d/.test(r.metrics) ? r : null; }, 6000);
+  check('xferMetricsShown', !!moving && moving.buttons.join('|') === '暫停|中止' && /^下載中 \d+%$/.test(moving.state) && menu2 && menu2.some((x) => x.label === '檔案傳輸…'),
+    { moving, now: await slowRow(), menu2 });
+  await shot(page, 'devfiles-xfer-metrics-dark');
+  await page.click('.df-dlg .df-x-act button[title="暫停"]');
+  const pausedRow = await until(async () => { const r = await slowRow(); return r && /^已暫停 \d+%$/.test(r.state) ? r : null; }, 3000);
+  const pausedAt = host.slowXfer.done;
+  await sleep(1200);
+  const stillPaused = await slowRow();
+  check('xferPauseHolds', !!pausedRow && !!host.last('peerXferPause') && pausedRow.buttons.join('|') === '繼續|中止' && !/尚需|B\/s/.test(pausedRow.metrics)
+    && /已經過/.test(pausedRow.metrics) && stillPaused.metrics === pausedRow.metrics && host.slowXfer.done === pausedAt, { pausedRow, stillPaused });
+  await page.click('.df-dlg .df-x-act button[title="繼續"]');
+  const resumed = await until(async () => { const r = await slowRow(); return r && /^下載中/.test(r.state) && host.slowXfer.done > pausedAt ? r : null; }, 3000);
+  check('xferResume', !!resumed && !!host.last('peerXferResume') && host.last('peerXferResume').transferId === host.slowXfer.id, { resumed });
+
+  // 關掉檔案對話框：傳輸在背景繼續，右下角顯示摘要；點了開「檔案傳輸」視窗，可以中止
+  await page.keyboard.press('Escape');
+  const dockText = () => page.evaluate(() => {
+    const d = document.querySelector('.df-dock');
+    return d && !d.hidden && !document.querySelector('.df-dlg') ? d.querySelector('.df-dock-text').textContent : null;
+  });
+  // 剛繼續的速度要累積 1 秒的進度才算得出來：等到摘要帶速度與尚需時間
+  const dockShown = (await until(async () => { const t = await dockText(); return t && /B\/s/.test(t) ? t : null; }, 4000)) || (await dockText());
+  check('xferDockInBackground', !!dockShown && /^傳輸中 1 個・[\d.]+ [KM]B\/s・尚需 \d+:\d\d$/.test(dockShown), dockShown);
+  await shot(page, 'devfiles-xfer-dock-dark');
+  await page.click('.df-dock-main');
+  const panelRow = await until(() => page.evaluate(() => {
+    const row = document.querySelector('.df-xfer-dlg .df-x');
+    return row && !document.querySelector('.df-dock:not([hidden])') ? { name: row.querySelector('.df-x-name').textContent, buttons: Array.from(row.querySelectorAll('.df-x-act button')).map((b) => b.title) } : null;
+  }), 3000);
+  await shot(page, 'devfiles-xfer-panel-dark');
+  await page.click('.df-xfer-dlg .df-x-act button[title="中止"]');
+  const cancelled = await until(() => page.evaluate(() => {
+    const row = document.querySelector('.df-xfer-dlg .df-x');
+    return row && row.querySelector('.df-x-state').textContent === '已取消' ? { buttons: row.querySelector('.df-x-act').children.length } : null;
+  }), 3000);
+  check('xferPanelCancel', !!panelRow && panelRow.name.startsWith('LAB-WORKSTATION：') && panelRow.buttons.join('|') === '暫停|中止' && !!cancelled && cancelled.buttons === 0
+    && !!host.last('peerXferCancel'),
+    { panelRow, cancelled });
+  await page.keyboard.press('Escape');
+  const noDock = await until(() => page.evaluate(() => !document.querySelector('.df-xfer-dlg') && !document.querySelector('.df-dock:not([hidden])')), 2000);
+  check('xferDockGoneWhenDone', !!noDock, noDock);
+  host.slowXfer = null;
 
   // 遠端桌面（remotedesk.js）：選單開 → deskOpen（帶 commandId）→ 假宿主送一個真的 JPEG 影格與游標 → 畫在 canvas 上；
   // 滑鼠點、鍵盤按 A 換成輸入事件，確認併在輸入裡送；那台結束時收起畫面並提示

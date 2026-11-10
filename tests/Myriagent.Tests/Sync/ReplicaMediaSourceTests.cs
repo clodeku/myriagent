@@ -426,6 +426,51 @@ public sealed class ReplicaMediaSourceTests : IDisposable
         relay.Requests.Should().HaveCount(1);
     }
 
+    [Fact]
+    public async Task 分段下載_從暫停的游標接著要_一直寫回位置()
+    {
+        var file = Bytes(20 * Mb);
+        ServeFile(file);
+        var cursor = new PeerDownloadCursor { Offset = 11 * Mb, Total = file.Length, ETag = "\"v1\"", FileName = "a.bin" };
+        using var target = new MemoryStream();
+
+        var result = await source.DownloadAsync(key, target, null, CancellationToken.None, cursor);
+
+        result.Should().NotBeNull();
+        target.ToArray().Should().Equal(file[(11 * Mb)..]);
+        relay.Requests.Select(r => r.Header("Range")).Should().Equal($"bytes={11 * Mb}-{19 * Mb - 1}", $"bytes={19 * Mb}-{20 * Mb - 1}");
+        cursor.Offset.Should().Be(file.Length);
+    }
+
+    [Fact]
+    public async Task 分段下載_暫停期間檔案變了_ETag不同_放棄()
+    {
+        ServeFile(Bytes(10 * Mb));
+        var cursor = new PeerDownloadCursor { Offset = 8 * Mb, Total = 10 * Mb, ETag = "\"v0\"" };
+        using var target = new MemoryStream();
+
+        (await source.DownloadAsync(key, target, null, CancellationToken.None, cursor)).Should().BeNull();
+        target.Length.Should().Be(0, "第一段核對不過就不寫");
+    }
+
+    [Fact]
+    public async Task 分段下載_暫停時取消_游標停在已經寫進去的位置()
+    {
+        var file = Bytes(20 * Mb);
+        using var cts = new CancellationTokenSource();
+        ServeFile(file, cut: (n, _) => { if (n == 1) cts.Cancel(); return null; });
+        var cursor = new PeerDownloadCursor();
+        using var target = new MemoryStream();
+
+        var act = () => source.DownloadAsync(key, target, null, cts.Token, cursor);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        cursor.Offset.Should().Be(target.Length, "游標就是寫進去的長度");
+        cursor.Offset.Should().Be(8 * Mb);
+        cursor.Total.Should().Be(file.Length);
+        cursor.ETag.Should().Be("\"v1\"");
+    }
+
     /// <summary>讀到 <c>after</c> 個位元組之後丟 IOException（連線被切斷）</summary>
     private sealed class BreakingStream(byte[] data, int after) : Stream
     {

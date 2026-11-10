@@ -46,7 +46,10 @@ export function cardMenuItems(row) {
     { label: '上傳檔案到這台…', icon: 'arrowUp', disabled: !avail.enabled, desc: why, onSelect: () => openDeviceFiles(row.id, { upload: true }) },
     // 遠端桌面（2026-11-09）：條件同檔案傳輸（那台的「可以操作」）；版本太舊的由伺服器說明
     { label: '遠端桌面…', icon: 'desktop', disabled: !avail.enabled, desc: why, onSelect: () => openRemoteDesk(row.id, row.name || nameOf(row.id)) },
-  ];
+    // 檔案傳輸（2026-11-10）：所有電腦的傳輸，可以暫停、繼續、中止；有傳輸時才列
+    transfers.length && { type: 'sep' },
+    transfers.length && { label: '檔案傳輸…', icon: 'download', desc: R.dockText(R.dockSummary(summaryRows(Date.now()))) || '看傳輸的進度、暫停或中止', onSelect: () => openTransfers() },
+  ].filter(Boolean);
 }
 
 /** 卡片上按右鍵或長按：開選單（沒有選單的卡片不處理） */
@@ -100,7 +103,8 @@ function buildDialog(s) {
   s.list = h('div', { class: 'df-list', role: 'listbox', 'aria-multiselectable': 'true', tabIndex: 0 });
   s.status = h('div', { class: 'df-status', 'aria-live': 'polite' });
   s.xfers = h('div', { class: 'df-xfers' });
-  s.xferHead = h('div', { class: 'df-xfers-head' }, h('span', { text: '傳輸' }), h('span', { class: 'grow' }),
+  s.xferHead = h('div', { class: 'df-xfers-head' }, h('span', { text: '傳輸' }),
+    h('span', { class: 'df-hint', text: '關掉這個視窗，傳輸會在背景繼續' }), h('span', { class: 'grow' }),
     h('button', { type: 'button', class: 'btn btn-sm', text: '清除已完成', onClick: () => { clearFinished(); renderXfers(); } }));
   s.xferWrap = h('div', { class: 'df-xfer-wrap' }, s.xferHead, s.xfers);
   s.fileInput = h('input', { type: 'file', multiple: true, hidden: true });
@@ -173,7 +177,8 @@ function buildDialog(s) {
   footer.push(s.uploadBtn, s.downloadBtn);
   s.d = openDialog({
     title: '「' + nameOf(s.deviceId) + '」的檔案', body, footer, className: 'df-dlg', width: 860, initialFocus: s.list,
-    onClose: () => { if (session === s) session = null; s.d = null; },
+    // 關掉之後傳輸在背景繼續：右下角顯示摘要（renderDock）
+    onClose: () => { if (session === s) session = null; s.d = null; renderXfers(); },
   });
   s.name = name;
   renderDest(s);
@@ -394,6 +399,7 @@ export function onXferFolder(m) {
 // ───── 下載（deviceFetch → peerXferSave／瀏覽器下載） ─────
 
 function queueDownloads(s, files) {
+  dockDismissed = false;
   for (const f of files) {
     transfers.push({ id: ++seq, dir: 'down', deviceId: s.deviceId, name: f.name, path: f.path, size: typeof f.size === 'number' ? f.size : null, state: 'queued', done: 0, total: f.size || 0 });
   }
@@ -425,7 +431,10 @@ export function onFileRef(m) {
   if (t.state !== 'fetching') return true;
   if (m.error || typeof m.url !== 'string' || !m.url.startsWith('/f/')) { fail(t, m.error || '那台不給這個檔案（憑證、金鑰類的檔名不能下載）'); return true; }
   if (typeof m.size === 'number') t.total = m.size;
-  saveDownload(t, m.url, typeof m.name === 'string' ? m.name : t.name);
+  if (typeof m.name === 'string') t.name = m.name;
+  // 要網址的期間按了暫停：拿到網址先停著，繼續時照常開始
+  if (t.hold) { t.url = m.url; t.hold = false; t.state = 'paused'; t.pauseMode = 'hold'; renderXfers(); pump(); return true; }
+  saveDownload(t, m.url, t.name);
   return true;
 }
 
@@ -458,36 +467,71 @@ function saveDownload(t, url, name) {
   renderXfers();
 }
 
-/** 瀏覽器版：把資料夾裡的一個檔寫進選的資料夾（照相對路徑建子資料夾；同名加「 (2)」） */
+/**
+ * 瀏覽器版：把資料夾裡的一個檔寫進選的資料夾（照相對路徑建子資料夾；同名加「 (2)」）。一段一段（≤8 MB 的 Range）要，
+ * 每段核對起點、總長與 ETag；暫停（t.pauseRequested）時把已經寫的留著，繼續時從 t.got 接著要（2026-11-10）。中止或失敗刪掉寫到一半的檔
+ */
 async function writeToDirectory(t, url, name) {
   t.state = 'running';
+  t.abortCtl = new AbortController();
   renderXfersSoon();
+  let writable = null;
   try {
     let dir = t.dirHandle;
     for (const part of String(t.subfolder || '').split('\\').filter(Boolean)) dir = await dir.getDirectoryHandle(part, { create: true });
-    const exists = async (n) => { try { await dir.getFileHandle(n); return true; } catch { return false; } };
-    const finalName = await R.uniqueBrowserName(name, exists);
-    if (!finalName) throw new Error('同名的檔太多');
-    const res = await fetchTransfer(url);
-    if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
-    const handle = await dir.getFileHandle(finalName, { create: true });
-    const writable = await handle.createWritable();
-    let got = 0;
-    const counter = new TransformStream({ transform(chunk, ctl) { got += chunk.byteLength; t.done = got; renderXfersSoon(); ctl.enqueue(chunk); } });
-    await res.body.pipeThrough(counter).pipeTo(writable);
+    t.dirResolved = dir;
+    if (!t.finalName) {
+      const exists = async (n) => { try { await dir.getFileHandle(n); return true; } catch { return false; } };
+      t.finalName = await R.uniqueBrowserName(name, exists);
+      if (!t.finalName) throw new Error('同名的檔太多');
+    }
+    const handle = await dir.getFileHandle(t.finalName, { create: true });
+    const got = t.got || 0;
+    // 接著下載：保留已經寫的、截到確實寫進去的長度，從尾端接著寫
+    writable = await handle.createWritable({ keepExistingData: got > 0 });
+    if (got > 0) { await writable.truncate(got); await writable.seek(got); }
+    const w = writable;
+    const fin = await R.streamSegments({
+      got, total: t.total, etag: t.etag, signal: t.abortCtl.signal,
+      fetchRange: (range, signal) => fetchTransfer(url, signal, range),
+      write: (chunk) => w.write(chunk),
+      onProgress: (g, total, tag) => { t.got = g; t.done = g; t.total = total; t.etag = tag; renderXfersSoon(); },
+    });
+    t.total = fin.total;
+    await writable.close();
+    writable = null;
     t.state = 'done';
     t.done = t.total;
   } catch (e) {
-    t.state = 'failed';
-    t.error = '存不進選的資料夾：' + (e && e.message ? e.message : '寫入失敗');
+    if (writable) { try { await writable.close(); } catch { /* 已經關了 */ } }
+    if (t.pauseRequested) {
+      t.pauseRequested = false;
+      t.state = 'paused';
+      t.pauseMode = 'stream';
+    } else {
+      if (t.state !== 'cancelled') { t.state = 'failed'; t.error = '存不進選的資料夾：' + (e && e.message ? e.message : '寫入失敗'); }
+      removePartial(t);
+    }
   }
+  t.abortCtl = null;
   renderXfers();
   pump();
+}
+
+/** 瀏覽器版：刪掉寫到一半的檔（中止、失敗） */
+function removePartial(t) {
+  if (!t.dirResolved || !t.finalName) return;
+  const dir = t.dirResolved;
+  const name = t.finalName;
+  t.got = 0;
+  t.finalName = null;
+  dir.removeEntry(name).catch(() => { /* 已經沒有了 */ });
 }
 
 // ───── 整個資料夾的下載（deviceTree → deviceFetchMany → 各檔照上面的方式存） ─────
 
 function queueFolderDownload(s, folder, dirHandle) {
+  dockDismissed = false;
   const g = { id: ++seq, kind: 'folder', dir: 'down', deviceId: s.deviceId, name: folder.name, path: folder.path, state: 'listing', dirHandle };
   transfers.push(g);
   const rid = nextRequestId('dt');
@@ -549,7 +593,8 @@ export function onFileRefs(m) {
     if (r && typeof r.url === 'string' && r.url.startsWith('/f/')) {
       t.url = r.url;
       if (typeof r.size === 'number') { t.size = r.size; t.total = r.size; }
-      t.state = 'queued';
+      // 整個資料夾按了暫停：拿到網址的也先停著
+      if (t.hold) { t.hold = false; t.state = 'paused'; t.pauseMode = 'hold'; } else t.state = 'queued';
     } else {
       t.state = 'failed';
       t.error = (r && r.error) || '那台不給這個檔案';
@@ -568,6 +613,9 @@ export function onXferProgress(m) {
   if (m.state === 'done') { t.state = 'done'; t.savedPath = m.path || null; t.savedName = m.name || null; }
   else if (m.state === 'failed') fail(t, m.error || '下載失敗');
   else if (m.state === 'cancelled') t.state = 'cancelled';
+  // 暫停（宿主保留下載到一半的檔）；繼續被擋（同時下載太多）時也回 paused 並帶說明
+  else if (m.state === 'paused') { t.state = 'paused'; t.pauseMode = 'host'; t.pausing = false; if (m.error) toast(m.error, 'info'); }
+  else if (m.state === 'running' && t.state === 'paused') t.state = 'running';
   renderXfers();
   if (m.state !== 'running') pump();
   return true;
@@ -579,6 +627,7 @@ export function onXferProgress(m) {
 function queueUploads(s, items) {
   const folder = s.path;
   if (!R.canUploadHere(folder)) return;
+  dockDismissed = false;
   // 同一個最上層資料夾的歸成一筆
   const groups = new Map();
   for (const { file, rel } of items) {
@@ -638,7 +687,8 @@ export function onPeerUploadProgress(m) {
 }
 
 function finishUpload(t, status, json) {
-  if (t.state === 'cancelled') { pump(); return; }
+  // 中止或暫停（上傳停下來；繼續時這個檔從頭上傳）的結果不理
+  if (t.state === 'cancelled' || t.state === 'paused') { pump(); return; }
   if (json && json.error === 'no_path') { fail(t, '這個檔案沒有本機路徑（請改用「上傳到這裡…」選檔）'); return; }
   const res = uploadResult(status, json, t.uploadId, t.name);
   if (!res.ok) { fail(t, res.error); return; }
@@ -712,20 +762,83 @@ function fail(t, text) {
 function cancel(t) {
   if (t.kind === 'folder') {
     t.cancelled = true;
+    t.paused = false;
     for (const c of transfers) if (c.group === t.id && !R.isFinished(c)) { if (c.state === 'waiting') c.state = 'cancelled'; else cancel(c); }
     if (t.state === 'listing') t.state = 'cancelled';
     renderXfers();
     return;
   }
   if (R.isFinished(t)) return;
-  if (t.dir === 'down' && t.state === 'running' && t.transferId) { post({ cmd: 'peerXferCancel', transferId: t.transferId }); return; }
+  // 桌面的下載（下載中或暫停中）交給宿主：它刪掉暫存檔、回 cancelled
+  if (t.dir === 'down' && t.transferId && (t.state === 'running' || (t.state === 'paused' && t.pauseMode === 'host'))) {
+    post({ cmd: 'peerXferCancel', transferId: t.transferId });
+    return;
+  }
   if (t.dir === 'up' && t.state === 'uploading') {
     if (t.abort) t.abort.abort();
     else if (t.uploadId) post({ cmd: 'peerUploadCancel', uploadId: t.uploadId });
   }
   if (t.state === 'receiving' || t.state === 'sending') return; // 那台已經接下了：取消不了
+  const wasStreaming = t.state === 'running' && t.abortCtl;
   t.state = 'cancelled';
   t.file = null;
+  t.hold = false;
+  // 瀏覽器版寫進資料夾的：下載中的停下來（收尾時刪掉寫到一半的檔），暫停中的直接刪
+  if (wasStreaming) t.abortCtl.abort();
+  else removePartial(t);
+  renderXfers();
+  pump();
+}
+
+/** 暫停一筆或整個資料夾（devicefilesrules.pauseMode：還沒開始的停著、桌面下載交給宿主、瀏覽器的資料夾檔停在目前的位置、上傳停下來之後從頭來） */
+function pause(t) {
+  if (t.kind === 'folder') {
+    t.paused = true;
+    for (const c of childrenOf(t)) if (R.pauseMode(c, isHub)) pause(c);
+    renderXfers();
+    pump();
+    return;
+  }
+  const mode = R.pauseMode(t, isHub);
+  if (!mode) return;
+  if (mode === 'hold') {
+    // 等網址的（資料夾裡的、向那台要檔案中）拿到網址才停；排隊中的直接停
+    if (t.state === 'queued') { t.state = 'paused'; t.pauseMode = 'hold'; } else t.hold = true;
+  } else if (mode === 'host') {
+    t.pausing = true;
+    post({ cmd: 'peerXferPause', transferId: t.transferId });
+  } else if (mode === 'stream') {
+    t.pauseRequested = true;
+    if (t.abortCtl) t.abortCtl.abort();
+  } else if (mode === 'restart') {
+    t.state = 'paused';
+    t.pauseMode = 'restart';
+    if (t.abort) t.abort.abort();
+    else if (t.uploadId) { hostUploads.delete(t.uploadId); post({ cmd: 'peerUploadCancel', uploadId: t.uploadId }); }
+  }
+  renderXfers();
+  pump();
+}
+
+/** 繼續一筆或整個資料夾：桌面的下載請宿主接著下載，其他排回佇列（上傳從頭來、瀏覽器的資料夾檔從停下的位置接著要） */
+function resume(t) {
+  if (t.kind === 'folder') {
+    t.paused = false;
+    for (const c of childrenOf(t)) { c.hold = false; if (c.state === 'paused') resume(c); }
+    renderXfers();
+    pump();
+    return;
+  }
+  t.hold = false;
+  if (t.state !== 'paused') return;
+  if (t.pauseMode === 'host' && t.transferId) {
+    t.state = 'running';
+    post({ cmd: 'peerXferResume', transferId: t.transferId });
+  } else {
+    if (t.pauseMode === 'restart') { t.done = 0; t.uploadId = null; t.abort = null; }
+    t.state = 'queued';
+  }
+  t.pauseMode = null;
   renderXfers();
   pump();
 }
@@ -747,42 +860,192 @@ function renderXfersSoon() {
   xferTimer = setTimeout(() => { xferTimer = 0; renderXfers(); }, 200);
 }
 
-function renderXfers() {
-  const s = session;
-  if (!s || !s.xfers) return;
-  const mine = transfers.filter((t) => t.deviceId === s.deviceId && t.group === undefined);
-  setHidden(s.xferWrap, !mine.length);
-  s.xfers.textContent = '';
-  for (const t of mine.slice().reverse()) {
-    if (t.kind === 'folder') { s.xfers.append(folderRow(t)); continue; }
-    const pct = R.percent(t.done, t.total);
-    const bar = h('div', { class: 'df-bar-track' }, h('div', { class: 'df-bar-fill' }));
-    bar.firstChild.style.transform = 'scaleX(' + ((pct ?? 0) / 100) + ')';
-    const actions = h('span', { class: 'df-x-act' });
-    if (!R.isFinished(t) && t.state !== 'receiving' && t.state !== 'sending') actions.append(iconBtn('x', '取消', () => cancel(t)));
-    if (t.dir === 'down' && t.state === 'done' && t.transferId && !isHub) actions.append(iconBtn('folderOpen', '在檔案總管顯示', () => post({ cmd: 'peerXferReveal', transferId: t.transferId })));
-    s.xfers.append(h('div', { class: 'df-x df-x-' + t.state, dataset: { dir: t.dir } },
-      h('span', { class: 'df-x-ic' }, icon(t.dir === 'down' ? 'download' : 'arrowUp')),
-      h('span', { class: 'df-x-name', text: t.name, title: t.dir === 'down' ? t.path : t.folder + '\\' + (t.subfolder ? t.subfolder + '\\' : '') + t.name }),
-      h('span', { class: 'df-x-size', text: typeof t.size === 'number' ? fmtBytes(t.size) : '' }),
-      h('span', { class: 'df-x-state', text: R.stateText(t, '「' + nameOf(t.deviceId) + '」') }),
-      actions, bar));
+// ───── 速度、經過與尚需時間（2026-11-10） ─────
+
+/** 一筆傳輸的速度與時間：順便更新它的計時（排隊、暫停不算）與最近的進度樣本 */
+function metricsOf(t, now) {
+  t.clock = R.tickClock(t.clock, t.state, now);
+  if (R.RATE_STATES.includes(t.state)) {
+    if (t.sampledDone !== t.done || t.sampledState !== t.state) {
+      // 換了階段（上傳到伺服器 → 那台接收）進度從 0 重來：樣本也重來
+      t.samples = R.pushSample(t.sampledState === t.state ? t.samples : [], now, t.done ?? 0);
+      t.sampledDone = t.done;
+      t.sampledState = t.state;
+    }
+  } else {
+    t.samples = [];
+    t.sampledDone = undefined;
+    t.sampledState = undefined;
   }
+  const rate = R.RATE_STATES.includes(t.state) ? R.rateOf(t.samples, now) : null;
+  return { rate, elapsed: R.elapsedMs(t.clock, now), remaining: R.remainingMs(t.done, t.total, rate) };
 }
 
-/** 整個資料夾那一列：第幾個檔／共幾個、位元組的進度條；可以取消還沒做完的 */
-function folderRow(g) {
-  const p = R.folderProgress(g, childrenOf(g));
-  const pct = p.total > 0 ? R.percent(p.done, p.total) : (p.files ? R.percent(p.finished, p.files) : null);
-  const bar = h('div', { class: 'df-bar-track' }, h('div', { class: 'df-bar-fill' }));
-  bar.firstChild.style.transform = 'scaleX(' + ((pct ?? 0) / 100) + ')';
+/** 資料夾：底下各檔合計的位元組進度、有任何一個在傳就計時 */
+function folderMetrics(g, p, children, now) {
+  let rate = null;
+  for (const c of children) {
+    const m = metricsOf(c, now);
+    if (m.rate !== null) rate = (rate ?? 0) + m.rate;
+  }
+  const active = children.some((c) => R.CLOCK_STATES.includes(c.state));
+  g.clock = R.tickClock(g.clock, active ? 'running' : 'queued', now);
+  return { rate, elapsed: R.elapsedMs(g.clock, now), remaining: R.remainingMs(p.done, p.total, rate) };
+}
+
+/** 資料夾底下還沒結束的都暫停了（含等網址時按了暫停的） */
+function folderPaused(g, children) {
+  const open = children.filter((c) => !R.isFinished(c));
+  return open.length > 0 && open.every((c) => c.state === 'paused' || (c.hold && (c.state === 'waiting' || c.state === 'fetching')));
+}
+
+// ───── 傳輸清單（檔案對話框裡這台的、「檔案傳輸」視窗裡全部的） ─────
+
+function renderXfers() {
+  const now = Date.now();
+  const s = session;
+  if (s && s.xfers) {
+    const mine = transfers.filter((t) => t.deviceId === s.deviceId && t.group === undefined);
+    setHidden(s.xferWrap, !mine.length);
+    s.xfers.textContent = '';
+    for (const t of mine.slice().reverse()) s.xfers.append(t.kind === 'folder' ? folderRow(t, now, false) : fileRow(t, now, false));
+  }
+  if (panel && panel.list) {
+    const all = transfers.filter((t) => t.group === undefined);
+    panel.list.textContent = '';
+    if (!all.length) panel.list.append(h('div', { class: 'df-x-empty', text: '沒有傳輸' }));
+    for (const t of all.slice().reverse()) panel.list.append(t.kind === 'folder' ? folderRow(t, now, true) : fileRow(t, now, true));
+  }
+  renderDock(now);
+  scheduleTick();
+}
+
+/** 一列的按鈕：暫停／繼續、中止（可以的才有）、桌面下載完的在檔案總管顯示 */
+function rowActions(t, children) {
   const actions = h('span', { class: 'df-x-act' });
-  if (!['done', 'failed', 'cancelled'].includes(p.state)) actions.append(iconBtn('x', '取消整個資料夾', () => cancel(g)));
-  const text = g.empty ? '資料夾是空的' : R.folderText(g, p);
-  return h('div', { class: 'df-x df-x-' + (p.state === 'listing' ? 'queued' : p.state === 'running' ? 'running' : p.state), dataset: { dir: g.dir, kind: 'folder' } },
+  const folder = t.kind === 'folder';
+  if (R.canResume(t, children)) actions.append(iconBtn('play', folder ? '繼續整個資料夾' : '繼續', () => resume(t)));
+  else if (R.canPause(t, isHub, children) && !t.pausing) actions.append(iconBtn('pause', folder ? '暫停整個資料夾' : (t.dir === 'up' ? '暫停（繼續時這個檔從頭上傳）' : '暫停'), () => pause(t)));
+  const finished = folder ? ['done', 'failed', 'cancelled'].includes(R.folderProgress(t, children).state) : R.isFinished(t);
+  if (!finished && t.state !== 'receiving' && t.state !== 'sending') actions.append(iconBtn('x', folder ? '中止整個資料夾' : '中止', () => cancel(t)));
+  if (!folder && t.dir === 'down' && t.state === 'done' && t.transferId && !isHub) actions.append(iconBtn('folderOpen', '在檔案總管顯示', () => post({ cmd: 'peerXferReveal', transferId: t.transferId })));
+  return actions;
+}
+
+function progressBar(pct) {
+  const b = h('div', { class: 'df-bar-track' }, h('div', { class: 'df-bar-fill' }));
+  b.firstChild.style.transform = 'scaleX(' + ((pct ?? 0) / 100) + ')';
+  return b;
+}
+
+const BS = String.fromCharCode(92);
+
+/** 一個檔那一列。withDevice：「檔案傳輸」視窗裡全部電腦的，名稱前面標是哪台 */
+function fileRow(t, now, withDevice) {
+  const m = metricsOf(t, now);
+  const state = t.pausing ? '暫停中…' : R.stateText(t, '「' + nameOf(t.deviceId) + '」');
+  return h('div', { class: 'df-x df-x-' + t.state, dataset: { dir: t.dir } },
+    h('span', { class: 'df-x-ic' }, icon(t.dir === 'down' ? 'download' : 'arrowUp')),
+    h('span', { class: 'df-x-name', text: (withDevice ? nameOf(t.deviceId) + '：' : '') + t.name, title: t.dir === 'down' ? t.path : t.folder + BS + (t.subfolder ? t.subfolder + BS : '') + t.name }),
+    h('span', { class: 'df-x-size', text: typeof t.size === 'number' ? fmtBytes(t.size) : '' }),
+    h('span', { class: 'df-x-state', text: state }),
+    rowActions(t, null),
+    h('span', { class: 'df-x-metrics', text: R.metricsText({ state: t.state, ...m }) }),
+    progressBar(R.percent(t.done, t.total)));
+}
+
+/** 整個資料夾那一列：第幾個檔／共幾個、合計的速度與時間、位元組的進度條；可以暫停、繼續、中止還沒做完的 */
+function folderRow(g, now, withDevice) {
+  const children = childrenOf(g);
+  const p = R.folderProgress(g, children);
+  const pct = p.total > 0 ? R.percent(p.done, p.total) : (p.files ? R.percent(p.finished, p.files) : null);
+  const paused = p.state === 'running' && folderPaused(g, children);
+  const m = folderMetrics(g, p, children, now);
+  const text = g.empty ? '資料夾是空的' : paused ? '已暫停・' + p.finished + ' / ' + p.files + ' 個檔' : R.folderText(g, p);
+  const cls = paused ? 'paused' : p.state === 'listing' ? 'queued' : p.state === 'running' ? 'running' : p.state;
+  return h('div', { class: 'df-x df-x-' + cls, dataset: { dir: g.dir, kind: 'folder' } },
     h('span', { class: 'df-x-ic' }, icon('folder')),
-    h('span', { class: 'df-x-name', text: g.name, title: g.dir === 'down' ? (g.path || '') : (g.folder || '') + '\\' + g.name }),
+    h('span', { class: 'df-x-name', text: (withDevice ? nameOf(g.deviceId) + '：' : '') + g.name, title: g.dir === 'down' ? (g.path || '') : (g.folder || '') + BS + g.name }),
     h('span', { class: 'df-x-size', text: p.total ? fmtBytes(p.total) : '' }),
     h('span', { class: 'df-x-state', text }),
-    actions, bar);
+    rowActions(g, children),
+    h('span', { class: 'df-x-metrics', text: R.metricsText({ state: paused ? 'paused' : p.state === 'running' ? 'running' : p.state, ...m }) }),
+    progressBar(pct));
+}
+
+// ───── 背景傳輸：檔案對話框關著時右下角的摘要，點了開「檔案傳輸」視窗（2026-11-10） ─────
+
+let dock = null;
+let panel = null;
+/** 背景的傳輸都結束了：摘要改成「傳輸完成」留著，直到點掉 */
+let dockFinished = null;
+/** 使用者關掉了摘要：這一批傳輸不再顯示（有新的傳輸加進來才再出現） */
+let dockDismissed = false;
+
+/** 摘要的列：一筆傳輸（資料夾算一筆）的狀態、進度、速度與尚需時間 */
+function summaryRows(now) {
+  return transfers.filter((t) => t.group === undefined).map((t) => {
+    if (t.kind !== 'folder') {
+      const m = metricsOf(t, now);
+      return { state: t.state, done: t.done, total: t.total, rate: m.rate, remaining: m.remaining };
+    }
+    const children = childrenOf(t);
+    const p = R.folderProgress(t, children);
+    const m = folderMetrics(t, p, children, now);
+    const state = p.state === 'running' && folderPaused(t, children) ? 'paused' : p.state === 'listing' ? 'queued' : p.state;
+    return { state, done: p.done, total: p.total, rate: m.rate, remaining: m.remaining };
+  });
+}
+
+function renderDock(now) {
+  const rows = summaryRows(now);
+  const sum = R.dockSummary(rows);
+  if (sum) dockFinished = null;
+  else if (dock && !dock.hidden && !dockFinished && rows.length) {
+    const failed = rows.filter((r) => r.state === 'failed').length;
+    dockFinished = '傳輸完成' + (failed ? '（' + failed + ' 個失敗）' : '');
+  }
+  // 檔案對話框或「檔案傳輸」視窗開著時不必另外顯示；使用者關掉的這一批不再顯示
+  const show = !session && !panel && !dockDismissed && (sum || dockFinished);
+  if (!show) { if (dock) setHidden(dock, true); return; }
+  if (!dock) {
+    dock = h('div', { class: 'df-dock', role: 'status', 'aria-live': 'polite' },
+      h('button', { type: 'button', class: 'df-dock-main', title: '開啟檔案傳輸（可以暫停、繼續、中止）', onClick: () => openTransfers() },
+        h('span', { class: 'df-dock-ic' }, icon('download')), h('span', { class: 'df-dock-text' }), progressBar(0)),
+      h('button', { type: 'button', class: 'df-dock-close', title: '關閉（傳輸照常在背景進行）', 'aria-label': '關閉', onClick: () => { dockDismissed = true; dockFinished = null; setHidden(dock, true); } }, icon('x')));
+    document.body.append(dock);
+  }
+  setHidden(dock, false);
+  dock.classList.toggle('df-dock-done', !sum);
+  dock.querySelector('.df-dock-text').textContent = sum ? R.dockText(sum) : dockFinished;
+  dock.querySelector('.df-bar-fill').style.transform = 'scaleX(' + ((sum ? sum.pct ?? 0 : 100) / 100) + ')';
+}
+
+/** 「檔案傳輸」視窗：所有電腦的傳輸，可以暫停、繼續、中止、清除已完成 */
+export function openTransfers() {
+  if (panel && panel.d) return;
+  dockFinished = null;
+  const list = h('div', { class: 'df-xfers df-xfers-all' });
+  const clear = h('button', { type: 'button', class: 'btn', text: '清除已完成', onClick: () => { clearFinished(); renderXfers(); } });
+  const p = { list };
+  panel = p;
+  p.d = openDialog({
+    title: '檔案傳輸', className: 'df-dlg df-xfer-dlg', width: 720,
+    body: h('div', { class: 'df-body' }, h('div', { class: 'df-hint', text: '關掉這個視窗，傳輸會在背景繼續，右下角會顯示進度' }), list),
+    footer: [h('span', { class: 'grow' }), clear],
+    onClose: () => { if (panel === p) panel = null; renderXfers(); },
+  });
+  renderXfers();
+}
+
+/** 有傳輸在動時每秒重畫一次（經過時間、尚需時間、速度在沒有新進度時也要更新）；都停了就不排 */
+let tickTimer = 0;
+function scheduleTick() {
+  const active = transfers.some((t) => R.CLOCK_STATES.includes(t.state) || t.state === 'listing');
+  if (!active) {
+    if (tickTimer) { clearTimeout(tickTimer); tickTimer = 0; }
+    return;
+  }
+  if (tickTimer) return;
+  tickTimer = setTimeout(() => { tickTimer = 0; renderXfers(); }, 1000);
 }

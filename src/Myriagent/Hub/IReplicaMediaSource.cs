@@ -64,10 +64,26 @@ internal interface IPeerFileSource
     /// <summary>
     /// 電腦狀態面板的檔案傳輸（2026-11-09）：以 E11 分段（每段 ≤8 MB 的 Range）把整個檔寫進 <paramref name="target"/>，沒有大小上限；
     /// 每寫完一段以 <paramref name="progress"/>（已收到、總長）回報。鍵不合格、伺服器拒絕、連不上、檔案在途中變了（ETag 或總長不同）回 null；
-    /// 取消時丟 <see cref="OperationCanceledException"/>
+    /// 取消時丟 <see cref="OperationCanceledException"/>。<paramref name="cursor"/>：接著上次暫停的位置下載（從它的 Offset 往下要，總長與 ETag 要和上次相同，
+    /// 不同回 null）；下載途中一直寫回目前的位置，暫停（取消）之後拿它繼續
     /// </summary>
-    Task<PeerDownload?> DownloadAsync(string key, Stream target, Action<long, long>? progress, CancellationToken ct)
+    Task<PeerDownload?> DownloadAsync(string key, Stream target, Action<long, long>? progress, CancellationToken ct, PeerDownloadCursor? cursor = null)
         => Task.FromResult<PeerDownload?>(null);
+}
+
+/// <summary>
+/// 分段下載到哪裡了（電腦狀態面板的下載暫停與繼續，2026-11-10）：已經寫進目標的位元組數、總長、第一段的 ETag 與檔名。
+/// 下載的執行緒寫、暫停之後 UI 執行緒讀（下載結束之後才讀，不同時）
+/// </summary>
+internal sealed class PeerDownloadCursor
+{
+    public long Offset { get; set; }
+
+    public long? Total { get; set; }
+
+    public string? ETag { get; set; }
+
+    public string? FileName { get; set; }
 }
 
 /// <summary>取到的檔案：內容與檔名（Content-Disposition 的檔名；沒有是 null）</summary>

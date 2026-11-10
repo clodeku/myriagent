@@ -170,6 +170,7 @@ export function stateText(t, deviceName) {
     case 'sending': return '交給' + who + '…';
     case 'receiving': return t.late ? who + '還沒有回報進度（面板開著才會更新）' : who + '接收中' + p;
     case 'saved': return t.savedName && t.savedName !== t.name ? '已存成「' + t.savedName + '」' : '已存到' + who;
+    case 'paused': return pausedText(t);
     case 'cancelled': return '已取消';
     case 'failed': return t.error || '失敗';
     default: return '';
@@ -295,4 +296,229 @@ export async function uniqueBrowserName(name, exists) {
     if (!(await exists(candidate))) return candidate;
   }
   return null;
+}
+
+// ───── 速度、經過與尚需時間、暫停（2026-11-10 使用者要求：顯示上下載速度、已經過多少時間／尚需多少時間，可以暫停、繼續、中止，在背景執行） ─────
+
+/** 算速度看最近多久的進度 */
+export const RATE_WINDOW_MS = 5000;
+
+/** 計時（已經過）的狀態：真的在傳或等那台的時候才算，排隊與暫停不算 */
+export const CLOCK_STATES = Object.freeze(['fetching', 'running', 'uploading', 'sending', 'receiving']);
+
+/** 算得出速度與尚需時間的狀態（位元組在動的） */
+export const RATE_STATES = Object.freeze(['running', 'uploading', 'receiving']);
+
+/**
+ * 記一筆進度：samples 是 [{ at, done }]（依時間）。done 倒退（重新開始、從頭重傳）就重來；只留 RATE_WINDOW_MS 內的（最少留一筆）。
+ * 回新的陣列，不改傳入的
+ */
+export function pushSample(samples, at, done) {
+  const list = Array.isArray(samples) ? samples.slice() : [];
+  if (num(at) === null || num(done) === null) return list;
+  const last = list[list.length - 1];
+  if (last && done < last.done) list.length = 0;
+  if (last && list.length && last.at === at) list[list.length - 1] = { at, done };
+  else list.push({ at, done });
+  while (list.length > 1 && at - list[0].at > RATE_WINDOW_MS) list.shift();
+  return list;
+}
+
+/**
+ * 每秒幾個位元組：最近 RATE_WINDOW_MS 內第一筆到 now 的平均（最後一筆之後沒有進度也算進時間，卡住時速度會降下來）；
+ * 不到 1 秒的資料、或最後一筆已經超過視窗回 null（算不出來）
+ */
+export function rateOf(samples, now) {
+  const list = Array.isArray(samples) ? samples : [];
+  if (list.length < 2 || num(now) === null) return list.length === 1 && now - list[0].at > RATE_WINDOW_MS ? 0 : null;
+  const first = list[0];
+  const last = list[list.length - 1];
+  if (now - last.at > RATE_WINDOW_MS) return 0;
+  const span = Math.max(now, last.at) - first.at;
+  if (span < 1000) return null;
+  return Math.max(0, (last.done - first.done) / (span / 1000));
+}
+
+/**
+ * 計時：在 CLOCK_STATES 時從 since 起算，離開時把這一段加進 spent（毫秒）。回 { spent, since }（不改傳入的）
+ */
+export function tickClock(clock, state, now) {
+  const spent = num(clock && clock.spent) ?? 0;
+  const since = num(clock && clock.since);
+  const running = CLOCK_STATES.includes(state);
+  if (running) return { spent, since: since ?? now };
+  return { spent: since === null ? spent : spent + Math.max(0, now - since), since: null };
+}
+
+/** 已經過的毫秒（計時中的那一段算到 now） */
+export function elapsedMs(clock, now) {
+  const spent = num(clock && clock.spent) ?? 0;
+  const since = num(clock && clock.since);
+  return spent + (since === null ? 0 : Math.max(0, now - since));
+}
+
+/** 尚需幾毫秒：剩下的位元組除以速度；速度算不出來或是 0、不知道總長回 null */
+export function remainingMs(done, total, rate) {
+  const d = num(done);
+  const t = num(total);
+  const r = num(rate);
+  if (d === null || t === null || t <= 0 || r === null || r <= 0) return null;
+  return Math.max(0, Math.round(((t - Math.min(d, t)) / r) * 1000));
+}
+
+/** 速度的文字：「12.3 MB/s」（B/s、KB/s、MB/s、GB/s；1024 進位、三位有效數字左右） */
+export function fmtRate(rate) {
+  const r = num(rate);
+  if (r === null) return '';
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  let v = Math.max(0, r);
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  const text = i === 0 ? String(Math.round(v)) : v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+  return text + ' ' + units[i];
+}
+
+/** 時間長度：「0:42」、「12:05」、「1:02:03」（無條件捨去到秒） */
+export function fmtDuration(ms) {
+  const v = num(ms);
+  if (v === null || v < 0) return '';
+  const s = Math.floor(v / 1000);
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const two = (n) => String(n).padStart(2, '0');
+  return hh > 0 ? hh + ':' + two(mm) + ':' + two(ss) : mm + ':' + two(ss);
+}
+
+/**
+ * 速度與時間那一行：「12.3 MB/s・已經過 0:42・尚需 3:10」。沒有在跑也沒有經過時間回 ''；
+ * 在跑但還算不出速度時只有經過時間；卡住（速度 0）時寫「等待中」
+ */
+export function metricsText({ state, rate, elapsed, remaining }) {
+  const parts = [];
+  const moving = RATE_STATES.includes(state);
+  if (moving && num(rate) !== null) parts.push(rate > 0 ? fmtRate(rate) : '等待中');
+  if (num(elapsed) !== null && elapsed >= 1000) parts.push('已經過 ' + fmtDuration(elapsed));
+  if (moving && num(remaining) !== null) parts.push('尚需 ' + fmtDuration(remaining));
+  return parts.join('・');
+}
+
+/**
+ * 暫停一筆傳輸要怎麼做：
+ * 'hold'（還沒開始：排隊中、資料夾裡還在等網址的、向那台要檔案中——拿到網址就停著）、
+ * 'host'（桌面的下載：宿主保留下載到一半的檔，繼續時接著下載）、
+ * 'stream'（瀏覽器版下載資料夾裡的檔：一段一段寫進選的資料夾，繼續時接著要）、
+ * 'restart'（上傳到伺服器：伺服器只收一次送完的檔，暫停是停下來，繼續時這個檔從頭上傳）；
+ * 不能暫停（已經交給那台、結束了、交給瀏覽器下載的）回 null
+ */
+export function pauseMode(t, hub) {
+  if (!isObj(t) || t.kind === 'folder' || isFinished(t) || t.state === 'paused') return null;
+  if (t.state === 'queued' || t.state === 'waiting' || t.state === 'fetching') return 'hold';
+  if (t.dir === 'down' && t.state === 'running') return hub ? (t.dirHandle ? 'stream' : null) : (t.transferId ? 'host' : null);
+  if (t.dir === 'up' && t.state === 'uploading') return 'restart';
+  return null;
+}
+
+/** 這筆可以暫停嗎（資料夾：底下有可以暫停的） */
+export function canPause(t, hub, children) {
+  if (isObj(t) && t.kind === 'folder') return !t.paused && (Array.isArray(children) ? children : []).some((c) => pauseMode(c, hub) !== null);
+  return pauseMode(t, hub) !== null;
+}
+
+/** 這筆可以繼續嗎（資料夾：暫停過、底下還有暫停的） */
+export function canResume(t, children) {
+  if (isObj(t) && t.kind === 'folder') return !!t.paused || (Array.isArray(children) ? children : []).some((c) => c && c.state === 'paused');
+  return isObj(t) && t.state === 'paused';
+}
+
+/** 暫停中的說明（狀態文字） */
+export function pausedText(t) {
+  if (!isObj(t)) return '已暫停';
+  const pct = percent(t.done, t.total);
+  const p = pct === null || !t.done ? '' : ' ' + pct + '%';
+  return '已暫停' + p + (t.pauseMode === 'restart' ? '（繼續時從頭上傳）' : '');
+}
+
+/**
+ * 背景的傳輸摘要（對話框關著時右下角那一塊）：還沒結束的筆數（資料夾算一筆）、合計速度、總進度、最長的尚需時間。
+ * rows：[{ state, done, total, rate, remaining, paused }]；沒有還沒結束的回 null
+ */
+export function dockSummary(rows) {
+  const list = (Array.isArray(rows) ? rows : []).filter((r) => isObj(r) && !['done', 'saved', 'failed', 'cancelled'].includes(r.state));
+  if (!list.length) return null;
+  const paused = list.filter((r) => r.state === 'paused' || r.paused).length;
+  const rate = list.reduce((a, r) => a + (num(r.rate) ?? 0), 0);
+  const done = list.reduce((a, r) => a + (num(r.done) ?? 0), 0);
+  const total = list.reduce((a, r) => a + (num(r.total) ?? 0), 0);
+  const remaining = list.reduce((a, r) => (num(r.remaining) === null ? a : Math.max(a ?? 0, r.remaining)), null);
+  return { count: list.length, paused, rate, done, total, remaining, pct: percent(done, total) };
+}
+
+/** 摘要的文字：「傳輸中 3 個・12.3 MB/s・尚需 4:10」；全部暫停時「已暫停 2 個」 */
+export function dockText(sum) {
+  if (!isObj(sum)) return '';
+  if (sum.paused === sum.count) return '已暫停 ' + sum.count + ' 個傳輸';
+  const parts = ['傳輸中 ' + (sum.count - sum.paused) + ' 個'];
+  if (sum.paused) parts.push('暫停 ' + sum.paused + ' 個');
+  if (sum.rate > 0) parts.push(fmtRate(sum.rate));
+  if (num(sum.remaining) !== null) parts.push('尚需 ' + fmtDuration(sum.remaining));
+  return parts.join('・');
+}
+
+/** 瀏覽器版下載資料夾裡的檔：一次要多少（伺服器 /f/ 帶 Range 時一次最多給 8 MB） */
+export const BROWSER_SEGMENT_BYTES = 8 * 1024 * 1024;
+
+/** 下一段的 Range：從 got 起、最多 BROWSER_SEGMENT_BYTES；知道總長時不超過最後一個位元組 */
+export function segmentRange(got, total) {
+  const from = Math.max(0, num(got) ?? 0);
+  let to = from + BROWSER_SEGMENT_BYTES - 1;
+  const t = num(total);
+  if (t !== null && t > 0) to = Math.min(to, t - 1);
+  return 'bytes=' + from + '-' + to;
+}
+
+/** Content-Range「bytes 0-99/1000」→ { from, to, size }；「bytes *\/0」（空的檔）→ { from: null, to: null, size: 0 }；不合格回 null */
+export function parseContentRange(value) {
+  if (typeof value !== 'string') return null;
+  const m = /^bytes\s+(?:(\d+)-(\d+)|\*)\/(\d+)$/.exec(value.trim());
+  if (!m) return null;
+  const size = Number(m[3]);
+  if (m[1] === undefined) return { from: null, to: null, size };
+  const from = Number(m[1]);
+  const to = Number(m[2]);
+  return to >= from ? { from, to, size } : null;
+}
+
+/**
+ * 瀏覽器版下載資料夾裡的一個檔：從 got 起一段一段要（fetchRange(range, signal) 回 Response；≤8 MB 的 Range）、核對起點、總長、ETag，
+ * 每塊交給 write(chunk)，每塊之後 onProgress(got, total, etag)（暫停時拿它記下的位置繼續）。要完回 { got, total, etag }；
+ * 中斷（signal）時丟 AbortError，檔案變了、本文提早結束、HTTP 不是 206 時丟 Error（訊息給人看）
+ */
+export async function streamSegments({ got = 0, total = null, etag = null, fetchRange, write, onProgress, signal }) {
+  let pos = num(got) ?? 0;
+  let size = num(total);
+  let tag = str(etag);
+  for (;;) {
+    if (size !== null && pos >= size) break;
+    const res = await fetchRange(segmentRange(pos, size), signal);
+    const range = parseContentRange(res.headers.get('Content-Range'));
+    if (res.status === 416 && pos === 0 && range && range.size === 0) { size = 0; break; } // 空的檔
+    if (res.status !== 206 || !range || range.from !== pos || !res.body) throw new Error('HTTP ' + res.status);
+    if (size !== null && size > 0 && range.size !== size) throw new Error('檔案在下載途中變了');
+    const next = res.headers.get('ETag');
+    if (tag && next && next !== tag) throw new Error('檔案在下載途中變了');
+    tag = tag || next || null;
+    size = range.size;
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      await write(value);
+      pos += value.byteLength;
+      if (onProgress) onProgress(pos, size, tag);
+    }
+    if (pos < range.to + 1) throw new Error('本文提早結束');
+    if (pos >= size) break;
+  }
+  return { got: pos, total: size ?? pos, etag: tag };
 }

@@ -3156,6 +3156,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         if (!disposed)
         {
             DisposeRemoteDesk();
+            DisposePeerXfers();
             PersistQueuesOnExit();
             // 背景排著的紀錄先寫完（最多 10 秒），接著執行中的對話照常同步存最後一份（SaveConversation 會先等背景那份，順序不會顛倒）
             itemsWriter?.Drain(TimeSpan.FromSeconds(10));

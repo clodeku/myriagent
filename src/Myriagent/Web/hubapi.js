@@ -149,9 +149,11 @@ export function uploadFile(uploadId, file, onProgress, signal) {
  * 〔電腦狀態〕瀏覽器版下載整個資料夾的一個檔：GET 本站的 /f/{key}（fileRefs 給的網址），回 Response（呼叫端以 body 串流寫進選的資料夾）。
  * 只收本站 /f/ 開頭的相對網址；401（登入失效）→ location.replace('/')
  */
-export async function fetchTransfer(url, signal) {
+export async function fetchTransfer(url, signal, range) {
   if (typeof url !== 'string' || !url.startsWith('/f/')) throw new Error('網址不合格');
-  const res = await fetch(url, { credentials: 'same-origin', signal });
+  // range：「bytes=0-8388607」（電腦狀態面板的資料夾下載一段一段要，暫停之後接著要；2026-11-10）
+  const headers = typeof range === 'string' && /^bytes=\d+-\d*$/.test(range) ? { Range: range } : undefined;
+  const res = await fetch(url, { credentials: 'same-origin', signal, headers });
   if (res.status === 401) location.replace('/');
   return res;
 }

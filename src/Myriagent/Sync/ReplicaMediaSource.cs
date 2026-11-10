@@ -184,7 +184,7 @@ internal sealed class ReplicaMediaSource : IReplicaMediaSource, IPeerUploader, I
     /// 每段核對起點、總長與 ETag 都和第一段相同（檔案在途中被改就停）。暫時的失敗（連線中斷、本文提早結束、逾時、502／503／504、
     /// 沒有權杖）從斷掉的位置接著試，連續失敗超過 <see cref="PeerDownloadRetryRules.FailBudget"/> 才放棄（2026-11-10：來源電腦在下載途中換版重開）
     /// </summary>
-    public async Task<PeerDownload?> DownloadAsync(string key, Stream target, Action<long, long>? progress, CancellationToken ct)
+    public async Task<PeerDownload?> DownloadAsync(string key, Stream target, Action<long, long>? progress, CancellationToken ct, PeerDownloadCursor? cursor = null)
     {
         ArgumentNullException.ThrowIfNull(target);
         if (Volatile.Read(ref disposed) != 0 || !MediaKeyRules.TryParse(key, out _, out _))
@@ -192,10 +192,11 @@ internal sealed class ReplicaMediaSource : IReplicaMediaSource, IPeerUploader, I
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, stopping.Token);
         using var transfer = FileTransferActivity.Begin();
         var path = ReplicaMediaRules.DeviceMediaPrefix + key + "?purpose=" + MediaPurposes.File;
-        long offset = 0;
-        long? total = null;
-        string? name = null;
-        string? etag = null;
+        // 接著暫停的位置（cursor）：起點、總長、ETag、檔名都沿用上次的，第一段照樣核對（檔案在暫停期間變了就停）
+        long offset = cursor?.Offset ?? 0;
+        long? total = cursor?.Total;
+        string? name = cursor?.FileName;
+        string? etag = cursor?.ETag;
         var buffer = new byte[CopyBufferBytes];
         var failures = 0;
         long? failingSince = null;
@@ -274,6 +275,17 @@ internal sealed class ReplicaMediaSource : IReplicaMediaSource, IPeerUploader, I
         {
             Log.Info($"分段下載其他電腦的檔案失敗：{ex.Message}");
             return null;
+        }
+        finally
+        {
+            // 暫停（取消）、失敗、完成都寫回到哪裡了：繼續時從這裡接著要
+            if (cursor is not null)
+            {
+                cursor.Offset = offset;
+                cursor.Total = total;
+                cursor.ETag = etag;
+                cursor.FileName = name;
+            }
         }
 
         // 一段的回應：核對範圍與 ETag、把本文寫進 target（每讀到一塊就把 offset 往前推：中途斷了，下一次從這裡接著要）。
