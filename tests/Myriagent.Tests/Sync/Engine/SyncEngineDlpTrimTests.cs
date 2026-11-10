@@ -390,6 +390,10 @@ public sealed class SyncEngineDlpTrimTests
         var heap = new FakeHeap();
         await using var rig = new Rig { Heap = heap };
         rig.H.Server.ConnectFailure = _ => EngineHarness.Transient();
+        // 模擬曾經成功連上支援對話同步的伺服器；從沒連過時不會離線投影。
+        using (var store = SyncStore.Open(rig.H.Paths.DatabaseFile, rig.H.DeviceId))
+            store.SetKv(SyncStoreSchema.ConvArmed, "1");
+        CredentialLeakRules.ReleaseCompiledPatterns();
         await rig.StartAsync();
 
         await rig.AdvanceAsync(Quiet - TimeSpan.FromSeconds(5));
