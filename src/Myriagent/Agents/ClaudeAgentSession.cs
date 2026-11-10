@@ -251,6 +251,15 @@ internal sealed class ClaudeAgentSession : IAgentSession
     private string? sessionTitle;
     private string? titleOverride;
 
+    /// <summary>
+    /// 送出、還沒收到回應的 rename_session（請求 id → 整理過的名稱；只屬於目前的程序）：這段期間 CLI 回報的其他名稱是 session 原本存的，
+    /// 不交給中樞（SessionTitleRules.IsStaleReport）。程序啟動時就登記（CLI 啟動後約 0.3 秒先回報既有的名稱）
+    /// </summary>
+    private readonly Dictionary<string, string> pendingTitles = new(StringComparer.Ordinal);
+
+    /// <summary>程序啟動時預先登記的 rename_session 請求 id（SendSessionTitle 用它送）</summary>
+    private string? startupTitleRequestId;
+
     /// <summary>最近開啟成功的遠端工作階段與當時的帳戶（AccountKey）：程序重開時接回同一個工作階段；換了帳戶就不接</summary>
     private string? remoteBridgeSessionId;
     private string? remoteBridgeAccountKey;
@@ -937,6 +946,9 @@ internal sealed class ClaudeAgentSession : IAgentSession
             remoteControlOverride = null;
             sessionTitle = titleOverride ?? settings.Title;
             titleOverride = null;
+            // 名稱的回報可能比 SendSessionTitle 先被讀到：啟動時就登記這次要送的名稱
+            pendingTitles.Clear();
+            startupTitleRequestId = RegisterPendingTitleLocked();
             if (autoTurnStart != null)
             {
                 // 自動接續的一輪：這個程序一啟動就算執行中（CLI 自己開始，不是 SendAsync 開始的）；不能拿使用者上一則訊息重送
@@ -971,22 +983,38 @@ internal sealed class ClaudeAgentSession : IAgentSession
         RequestRemoteControl(started);
         // 工作階段名稱跟著對話標題（續接清單也看得到）。remote_control 帶的 name 不算工作階段的名稱（實測開啟時不送 session_title_changed，
         // 接回時也不一定改名），所以 Remote Control 連上後另外再送一次（HandleRemoteControlResponse）
-        SendSessionTitle(started);
+        SendSessionTitle(started, startupTitleRequestId);
         return started;
     }
 
     /// <summary>以目前的工作階段名稱送 rename_session 給這個程序（沒有名稱不送）；回應不等（失敗只是名稱沒改，CLI 的錯誤回應沒有人等就略過）</summary>
-    private void SendSessionTitle(AgentProcess target)
+    private void SendSessionTitle(AgentProcess target, string? requestId = null)
     {
         string? line;
         lock (gate)
         {
             if (disposed || !ReferenceEquals(process, target))
                 return;
-            line = ClaudeStreamRules.BuildRenameSessionRequest(NextRequestId("rn"), sessionTitle);
+            requestId ??= RegisterPendingTitleLocked();
+            if (requestId == null)
+                return;
+            line = ClaudeStreamRules.BuildRenameSessionRequest(requestId, sessionTitle);
+            if (line == null)
+                pendingTitles.Remove(requestId);
         }
         if (line != null)
             _ = WriteQuietlyAsync(target, line);
+    }
+
+    /// <summary>以目前的工作階段名稱登記一個要送的 rename_session（回請求 id；沒有名稱回 null）。在 gate 裡呼叫</summary>
+    private string? RegisterPendingTitleLocked()
+    {
+        // 登記實際送出的名稱（RemoteControlName 可能截短），CLI 回送的是它整理過的
+        if (Hub.SessionTitleRules.Normalize(ClaudeStreamRules.RemoteControlName(sessionTitle)) is not { } name)
+            return null;
+        var requestId = NextRequestId("rn");
+        pendingTitles[requestId] = name;
+        return requestId;
     }
 
     public Task RenameAsync(string title)
@@ -1415,6 +1443,15 @@ internal sealed class ClaudeAgentSession : IAgentSession
         var result = currentParser.Parse(line);
         foreach (var ev in result.Events)
         {
+            if (ev is AgentSessionTitleEvent reportedTitle)
+            {
+                bool stale;
+                lock (gate)
+                    stale = Hub.SessionTitleRules.IsStaleReport(pendingTitles.Values, reportedTitle.Title);
+                // 送出的改名還沒回送：這是 session 原本存的名稱（啟動時先回報），交給中樞會把剛改好的對話標題改回去
+                if (stale)
+                    continue;
+            }
             if (ev is AgentSessionStartedEvent sessionStarted)
             {
                 lock (gate)
@@ -1809,6 +1846,16 @@ internal sealed class ClaudeAgentSession : IAgentSession
 
     private void HandleControlResponse(AgentProcess source, ClaudeControlResponse response)
     {
+        if (response.RequestId.StartsWith("rn-", StringComparison.Ordinal))
+        {
+            // rename_session 的回應（成功時回送的 session_title_changed 已經先到）：之後的名稱回報照常交給中樞
+            lock (gate)
+            {
+                if (ReferenceEquals(source, process))
+                    pendingTitles.Remove(response.RequestId);
+            }
+            return;
+        }
         if (response.RequestId.StartsWith("rc-", StringComparison.Ordinal))
         {
             HandleRemoteControlResponse(source, response);

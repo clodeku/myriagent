@@ -52,6 +52,14 @@ internal static class SessionTitleRules
     }
 
     /// <summary>
+    /// 會話送了 rename_session、還沒收到那個請求的回應（<paramref name="pending"/>：送出的名稱，整理過的）時，CLI 回報的名稱不是其中之一：
+    /// 是 session 原本存的名稱（程序啟動時 CLI 先回報既有的名稱，接著才回送這次的改名，實測 2.1.322），
+    /// 不能交給中樞——中樞會把它當成在 claude.ai 改的，把剛改好的對話標題改回舊的（程序不在時改名，例如從其他電腦改，下次啟動就被蓋回去）
+    /// </summary>
+    public static bool IsStaleReport(IReadOnlyCollection<string> pending, string? reported)
+        => pending.Count > 0 && Normalize(reported) is { } name && !pending.Contains(name);
+
+    /// <summary>
     /// CLI 回報了工作階段名稱：要改成的對話標題，不必改回 null。
     /// 是 app 自己送出的名稱（含連續改名時較早的那幾個）就是回送：連同更早的一起從 sent 拿掉、不改；
     /// 和目前的標題相同（整理、截斷後）也不改（啟動時與同名重送）；其他是在 claude.ai／Claude App 改的，截到上限後改成它

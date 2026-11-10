@@ -769,6 +769,19 @@ public sealed class AgentSessionIntegrationTests : IDisposable
             output.WriteLine("續接時收到的名稱：" + string.Join("、", titles));
             titles.Should().OnlyContain(t => t == "Myriagent 整合測試 改名後", "續接時 CLI 報的既有名稱與宿主的改名都是新名稱");
         }
+
+        // 程序不在時改名（例如從其他電腦改）：續接時 CLI 先報 session 存的「改名後」、才回送新名稱；舊的不能交給中樞
+        titles.Clear();
+        using (var renamedOffline = new ClaudeAgentSession())
+        {
+            renamedOffline.EventReceived += OnTitle;
+            var events = await RunTurnAsync(renamedOffline, new AgentTurnInput("只回覆 OK 兩個字母", Array.Empty<AgentAttachment>()),
+                Settings(AgentProvider.Claude, sessionId, started: true, ClaudeModel) with { Title = "Myriagent 整合測試 不在時改名" });
+            events.OfType<AgentTurnCompletedEvent>().Last().Outcome.Should().Be(AgentTurnOutcome.Completed);
+            await WaitForAsync(() => titles.Contains("Myriagent 整合測試 不在時改名"), "續接的程序照不在時改的名稱");
+            output.WriteLine("不在時改名、續接時收到的名稱：" + string.Join("、", titles));
+            titles.Should().OnlyContain(t => t == "Myriagent 整合測試 不在時改名", "CLI 先報的舊名稱（session 存的）不交給中樞");
+        }
     }
 
     [EnvFact("MYRIAGENT_IT", Reason)]

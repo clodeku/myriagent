@@ -106,10 +106,15 @@ public abstract class ClaudeSessionFakeCliTestsBase : IDisposable
                 return
             }
             if ($subtype -eq 'rename_session') {
-                # 照實測 2.1.308：回 success，接著回送 system/session_title_changed（宿主自己改的也回送）
+                # 照實測 2.1.322：session 原本有名稱（FAKE_STORED_TITLE）時，程序啟動後先回報一次既有的名稱，
+                # 比宿主這次的改名早到；改名先回送 system/session_title_changed（宿主自己改的也回送），接著才回 success
+                if ($env:FAKE_STORED_TITLE -and -not $script:storedReported) {
+                    $script:storedReported = $true
+                    Emit ('{"type":"system","subtype":"session_title_changed","title":' + (Js $env:FAKE_STORED_TITLE) + ',"session_id":"' + $sessionId + '"}')
+                }
                 Note ('rename=' + $msg.request.title)
-                Emit ('{"type":"control_response","response":{"subtype":"success","request_id":"' + $msg.request_id + '"}}')
                 Emit ('{"type":"system","subtype":"session_title_changed","title":' + (Js $msg.request.title) + ',"session_id":"' + $sessionId + '"}')
+                Emit ('{"type":"control_response","response":{"subtype":"success","request_id":"' + $msg.request_id + '"}}')
                 return
             }
             if ($subtype -eq 'get_context_usage') {
@@ -1021,6 +1026,27 @@ public sealed class ClaudeSessionFakeCliTests : ClaudeSessionFakeCliTestsBase
 
         var second = await Turn(session, log, Settings("rc", started: true) with { Title = "月報" });
         Text(second).Should().Be("turn2:rename=報表整理,rename=月報", "同一個程序：改名只送一次，送出不重送");
+    }
+
+    [Fact]
+    public async Task 工作階段名稱_程序不在時改名_下次啟動CLI先回報的舊名稱不交給中樞()
+    {
+        // 2026-11-10 使用者回報：從其他電腦改名之後又變回舊名稱。程序不在時改名，下次啟動 CLI 先回報 session 原本存的名稱、
+        // 接著才回送這次的改名；舊名稱交給中樞會被當成在 claude.ai 改的，而新名稱的回送被當成自己的回送略過，標題就停在舊的
+        using var session = new ClaudeAgentSession();
+        using var log = new EventLog(session);
+        var env = new Dictionary<string, string> { ["FAKE_STORED_TITLE"] = "舊名稱" };
+
+        // 中樞送出時的設定帶的是對話標題（改名已經寫進對話）；session 存的還是舊名稱
+        var first = await Turn(session, log, Settings("rc", started: true, env: env) with { Title = "新名稱" });
+
+        Text(first).Should().Be("turn1:rename=新名稱", "下次啟動照對話標題命名");
+        first.OfType<AgentSessionTitleEvent>().Select(e => e.Title).Should().Equal(["新名稱"], "啟動時先回報的舊名稱不交給中樞");
+
+        // 回應到了之後，在 claude.ai 改的名稱照常交給中樞
+        await session.RenameAsync("月報");
+        await log.UntilAsync(e => e is AgentSessionTitleEvent { Title: "月報" }, seconds: 10);
+        log.All.OfType<AgentSessionTitleEvent>().Select(e => e.Title).Should().NotContain("舊名稱");
     }
 
     [Fact]

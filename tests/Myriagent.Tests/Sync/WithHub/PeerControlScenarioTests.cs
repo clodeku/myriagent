@@ -100,6 +100,18 @@ public sealed class PeerControlScenarioTests(ITestOutputHelper output)
             .Should().BeTrue("A 發布新的 meta 之後，B 開著的副本標頭顯示新的模型");
         (await a.Runtime.OnUi(() => a.Runtime.Settings.DefaultsFor(accountA.Id).Model)).Should().NotBe("sonnet-a", "遠端只改這個對話，不記成 A 這個帳戶的預設（D23）");
 
+        // 2b. B 改 A 這個對話的名稱（2026-11-10 使用者回報「從電腦 A 改電腦 B 的對話名稱好像會失敗」）：A 的標題換了、結果回 B、B 的副本標頭跟著變
+        var renameId = NewCommandId();
+        const string renamed = "B 改的名稱";
+        await b.Runtime.CommandAsync("rename", new JObject { ["conversationId"] = wireId, ["title"] = renamed, ["commandId"] = renameId });
+        var renameResult = await b.Runtime.WaitUntilAsync(() => Result(b, renameId) is not null, Wait);
+        renameResult.Should().BeTrue("rename 的結果回到 B 的視窗");
+        (await b.Runtime.OnUi(() => Result(b, renameId)!.Value<string>("state"))).Should().Be(RemoteResultStates.Done);
+        (await a.Runtime.WaitUntilAsync(() => ((IConversationPublishSource)a.Runtime.Hub).SnapshotMeta([chat.ConversationId]).Single().Meta.Title == renamed, Wait))
+            .Should().BeTrue("A 的對話改了名稱");
+        (await b.Runtime.WaitUntilAsync(() => ReplicaHeader(b, wireId)?.Value<string>("title") == renamed, Wait))
+            .Should().BeTrue($"A 發布新的 meta 之後，B 開著的副本標頭顯示新的名稱：{await b.Runtime.OnUi(() => ReplicaHeader(b, wireId)?.Value<string>("title"))}");
+
         // 3. B 把草稿改開在 A（A 的邏輯帳戶）、第一次送出：A 建立對話，B 的草稿換成副本
         // 邏輯帳戶 id 在帳戶目錄（AccountView 的 logicalId，宿主照目錄裝飾）：A 的網頁重新 ready，從 init 的 accounts 取
         string? logical = null;

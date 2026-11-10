@@ -58,6 +58,17 @@ public class SessionTitleRulesTests
     }
 
     [Fact]
+    public void IsStaleReport_改名還沒回應時_其他名稱是session原本存的()
+    {
+        SessionTitleRules.IsStaleReport(Array.Empty<string>(), "舊名稱").Should().BeFalse("沒有送出中的改名：照常交給中樞");
+        var pending = new[] { "新名稱" };
+        SessionTitleRules.IsStaleReport(pending, "舊名稱").Should().BeTrue("啟動時先回報的既有名稱");
+        SessionTitleRules.IsStaleReport(pending, "新名稱").Should().BeFalse("這次改名的回送");
+        SessionTitleRules.IsStaleReport(pending, " 新名稱\t").Should().BeFalse("照 CLI 整理名稱的方式比較");
+        SessionTitleRules.IsStaleReport(pending, "  ").Should().BeFalse("空的名稱中樞本來就略過");
+    }
+
+    [Fact]
     public void RememberSent_最多記MaxPending個_空白不記()
     {
         var sent = new List<string>();
