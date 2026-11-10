@@ -168,17 +168,23 @@ internal static class DeviceHubMethods
     /// <summary>伺服器 → 裝置（Send，<see cref="DeskPacket"/>）：轉給工作階段的另一邊</summary>
     public const string DeskDown = "DeskDown";
 
+    /// <summary>裝置 → 伺服器（Invoke，<see cref="ComposerDraftPublish"/>，draft1）：這台輸入框打到一半的字（空字串＝清掉）</summary>
+    public const string ComposerDraftPublish = "ComposerDraftPublish";
+
+    /// <summary>伺服器 → 裝置（Send，<see cref="ComposerDraftUpdate"/>，draft1）：其他電腦與瀏覽器版的草稿（第一份是整份，之後逐則）</summary>
+    public const string ComposerDraftUpdate = "ComposerDraftUpdate";
+
     /// <summary>
     /// 裝置 → 伺服器的方法（伺服器裝置 hub 的公開方法就是這些；WP4.1 步 12 的 <c>DeviceHubFilter</c> 以它當允許清單，清單外的一律 HubException）
     /// </summary>
     public static IReadOnlyList<string> DeviceToServer { get; } =
         [Hello, Prove, PublishBatch, Pull, Heartbeat, UsagePublish, GetTrust, RefreshAccessToken, LiveRelay, LiveDelta, CommandResult, CommandOutput, PeerCmd, StatsPublish, TokensPublish,
-            HandoffPreview, HandoffStart, HandoffCancel, HandoffProgress, HandoffReady, ExecOutput, ExecCancel, SchedulesPublish, CollabCmd, DeskUp];
+            HandoffPreview, HandoffStart, HandoffCancel, HandoffProgress, HandoffReady, ExecOutput, ExecCancel, SchedulesPublish, CollabCmd, DeskUp, ComposerDraftPublish];
 
     /// <summary>伺服器 → 裝置的方法（桌面的 SignalR 用戶端以 <c>On</c> 登記；第 4 階段的由用到它的工作包才登記）</summary>
     public static IReadOnlyList<string> ServerToDevice { get; } =
         [BatchAck, Notify, UsageAssign, TrustChanged, ServerNotice, WatchChanged, LiveResync, SnapshotRequest, MediaRequest, CommandDelivery, PeerReply, StatsUpdate, TokensUpdate,
-            HandoffRequest, HandoffUpdate, LogRepair, ExecReply, ExecAbort, SchedulesUpdate, CollabUpdate, DeskDown];
+            HandoffRequest, HandoffUpdate, LogRepair, ExecReply, ExecAbort, SchedulesUpdate, CollabUpdate, DeskDown, ComposerDraftUpdate];
 }
 
 /// <summary>錯誤代碼（BatchAck.error、hub 例外訊息、HTTP 錯誤的 error 欄位）</summary>

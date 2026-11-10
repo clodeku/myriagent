@@ -830,6 +830,7 @@ export class ConvView {
     this.composer.setComposer(msg.composer || null);
     this.settleQueued(msg.composer);
     if (msg.draft) this.composer.restoreText(msg.draft); // app 更新前沒送出的字（宿主只送一次；輸入框是空的才填入）
+    this.composer.draftSync.loaded(); // 其他電腦、瀏覽器版打到一半的字（draftsync.js）
     this.afterChange(true);
     this.setStick(true); // 經過 setStick 才會一併收起「最新」鈕（重送整個對話時可能正顯示著）
     this.scrollToBottom();

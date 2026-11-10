@@ -1069,6 +1069,22 @@ Claude 帳戶已對應或宣告了邏輯帳戶、這台**沒有發布過**這個
 - **結束**：任一邊 `close`／`end`；看的瀏覽器斷線（伺服器替它送 `close`）、發起的電腦 30 秒沒有連線、被看的電腦離線（伺服器替它送 `end`）；那台的提示列按「中斷」、遠端操作政策不再是「可以操作」（每 2 秒與每個封包都看）、同步斷線、app 結束。伺服器 10 分鐘沒有封包的工作階段忘掉。工作階段進行中 app 自我更新不自動重啟（`AppRestartBlocker.RemoteDeskActive`）。
 - **提示列**：被看的電腦主螢幕上方置中、置頂、不搶焦點，以 `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` 不出現在傳出去的畫面裡（`UI/RemoteDeskBanner.cs`）。
 
+### 14.17 輸入框的草稿（`draft1`；2026-11-10）
+
+使用者要求：在某台電腦或手機打到一半、還沒送出的字，其他電腦與瀏覽器版也看得到。給人看的、可丟：不寫持久事件、不進 sync.db。
+
+| 方向 | 方法 | 送法 | 內容 |
+|---|---|---|---|
+| 裝置→伺服器 | `ComposerDraftPublish` | Invoke | `{conversationId, text}` → 無：這台某個對話輸入框的字（空白＝清掉） |
+| 伺服器→裝置 | `ComposerDraftUpdate` | Send | `{drafts: [{conversationId, text, rev, updatedAt, from}], full}` |
+
+- **檢查**（`ComposerDraftRules`）：`conversationId` 是線上 id、`text` 不是 null 而且 ≤16,000 字（同 `RemoteCommandShapeRules.MaxAgentTextLength`）；不合格、連線沒協商出 `draft1` 回 `invalid`（裝置丟掉那一則、不重連）。疑似權杖的（`CredentialLeakRules.HasLeak`，同對話內容的 DLP）桌面不送、伺服器不存不轉（`ComposerDraftRules.Syncable`）：打進輸入框的密碼或金鑰不離開那台，別處留著的是含權杖之前的那一份。
+- **伺服器**（`ComposerDraftStore`）：每個對話只留最後一份，放在記憶體、變了 2 秒後寫 `db\composer-drafts.json`（暫存檔再換名；停機時照寫，重開時讀回，壞掉當成沒有）——不進 sync.db，部署回滾到上一版也不受影響。`rev` 是伺服器給的（`max(上一個 + 1, 收到的毫秒)`，整台共用一個計數），`from` 是那台在裝置名冊上的名字或「網頁版」。和目前的相同、清掉本來就沒有的不算變動；14 天沒再改的、超過 500 個時最舊的丟掉。
+- **`ComposerDraftUpdate`**（`ComposerDraftFanout`）：協商出 `draft1` 的已證明連線（只更新的除外）證明完成 2 秒後收一份整份的（`full: true`，只有沒清掉的），之後每次有草稿變了收那一則（清掉是 `text` 空字串；送來的那條連線不送回去）。每條連線依序送：整份送出之前的變動不另外送（整份已經包含它）。
+- **桌面**（`SyncEngine.ComposerDrafts.cs`、`Hub/AgentHub.ComposerDrafts.cs`）：網頁的 `composerDraft`（web-protocol）先轉給這台的其他視窗；這台的對話同步政策是 full、其他電腦的對話那台同步了內容（`metadata`、`paused` 的內容不上線，打的字也不送）才交給引擎。引擎每個對話只留最新一份、同時只有一則在途，送成功而且期間沒再變才拿掉；沒有連線時留著（最多 200 個對話）等下一條連線。收到的交給中樞時附上還沒送成功的對話：中樞不拿伺服器的蓋掉它們，整份的沒列出也不清掉。中樞記每個對話最後一份（不存檔），比記得的 `rev` 舊的不要；整份的沒列出、伺服器給過的當成清掉了；變了的以 `composerDrafts` 轉給每個視窗。
+- **瀏覽器**：`composerDraft` 由伺服器處理（只收擁有者、要是這條連線看得到的對話），擁有者的連線在 `init` 之後收整份的 `composerDrafts`（伺服器一則都沒有時不送）、之後收變了的那則（送來的那條連線不送回去）；協作人不送也不收。
+- **誰蓋過誰由網頁決定**（`Web/draftsyncrules.js`，使用者 2026-11-10 選的）：輸入框沒改過就換成別處的；正在打的（改過、或剛打過字還有焦點）不蓋掉，在輸入框上方提示「換成它／保留這裡的」（保留＝馬上把這裡的送出去）；別處清掉了而這裡正在打時不理。
+
 ## 15. app 下載端點（app 自我更新 U2）
 
 桌面以存取權杖取得最新版與套件（U3 的 `HubReleaseSource`）。路由是 `AppReleaseRoutes`（`Update/AppReleaseMessages.cs`）的常數，回應以 `SyncJson` 序列化（1.2），形狀只加選用欄位（1.4 的不變式）。

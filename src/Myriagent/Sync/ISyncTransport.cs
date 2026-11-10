@@ -58,6 +58,11 @@ internal interface ISyncSessionEvents
     {
     }
 
+    /// <summary><c>draft1</c>：其他電腦與瀏覽器版的輸入框草稿（14.17）；測試替身不必實作</summary>
+    void OnComposerDraftUpdate(ComposerDraftUpdate update)
+    {
+    }
+
 
     /// <summary><c>collab1</c>：協作人清單與分享（整份取代，14.14）；測試替身不必實作</summary>
     void OnCollabUpdate(CollaboratorsState state)
@@ -149,6 +154,9 @@ internal interface ISyncSession : IAsyncDisposable
 
     /// <summary>Invoke（<c>sched1</c>）：這台排程頁的摘要（14.12）；測試替身不必實作（什麼都不做）</summary>
     Task SchedulesPublishAsync(SchedulesPublish p, CancellationToken ct) => Task.CompletedTask;
+
+    /// <summary>Invoke（<c>draft1</c>）：這台某個對話的輸入框草稿（14.17）；測試替身不必實作（什麼都不做）</summary>
+    Task ComposerDraftPublishAsync(ComposerDraftPublish p, CancellationToken ct) => Task.CompletedTask;
 
     /// <summary>Invoke（<c>exec1</c>）：這台執行的遠端執行指令的一段輸出（14.11）；回伺服器還要不要它</summary>
     Task<ExecOutputResult> ExecOutputAsync(ExecChunk c, CancellationToken ct);

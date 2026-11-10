@@ -137,7 +137,7 @@ internal static class RemoteCommandCatalog
     /// </summary>
     public static IReadOnlySet<string> ServerOnlyCommands { get; } = Set(
         "ready", "layout", "open", "close", "visible", "loadOlder", "setting", "accountUpdate", "accountReorder", "deviceRename",
-        "newConversation", "copyItem", "monitor", "clientError", "searchConversations",
+        "newConversation", "copyItem", "monitor", "clientError", "searchConversations", "composerDraft",
         // 遠端桌面的影格確認、輸入、結束（14.16）：伺服器只轉給這條連線開的工作階段的那台
         "desk",
         // 多人協作（2026-10-30）：擁有者管理協作人與對話的分享，伺服器處理（桌面經裝置 hub 的 CollabCmd 交給伺服器）

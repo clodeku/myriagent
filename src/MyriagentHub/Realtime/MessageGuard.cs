@@ -194,7 +194,10 @@ internal static class MessageGuard
     private static bool WithinSecondStage(string name, JObject root, JObject cmd) =>
         CommandRouteRules.Routes(name)
             ? Encoding.UTF8.GetByteCount(cmd.ToString(Formatting.None)) <= RemoteCommandShapeRules.MaxBodyBytes
-            : WithinShape(root);
+            // 輸入框的草稿（draft1）：最多 16,000 字（同送給代理的文字）
+            : name == "composerDraft"
+                ? WithinShape(root, MaxRoutedStringLength, MaxNameLength)
+                : WithinShape(root);
 
     private static (BrowserCommand? Command, string? Error) ParseServerCommand(string name, JObject cmd) => name switch
     {
@@ -205,6 +208,7 @@ internal static class MessageGuard
         "deviceRename" => ParseDeviceRename(cmd),
         "monitor" => ParseMonitor(cmd),
         "desk" => ParseDesk(cmd),
+        "composerDraft" => ParseComposerDraft(cmd),
         "clientError" => ClientErrorRules.TryParse(cmd) is { } report ? (new ClientErrorCommand(report), null) : (null, BrowserErrorCodes.Invalid),
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, "伺服器處理的指令沒有對應的解析"),
     };
@@ -295,6 +299,16 @@ internal static class MessageGuard
         return DeskRules.Check(packet, fromTarget: false) is null ? (new DeskCommand(packet), null) : (null, BrowserErrorCodes.Invalid);
     }
 
+    /// <summary><c>composerDraft {conversationId, text}</c>：輸入框打到一半的字（draft1；<see cref="ComposerDraftRules.Check"/>）</summary>
+    private static (BrowserCommand?, string?) ParseComposerDraft(JObject cmd)
+    {
+        if (cmd["conversationId"] is not JValue { Type: JTokenType.String, Value: string conversationId }
+            || cmd["text"] is not JValue { Type: JTokenType.String, Value: string text }
+            || ComposerDraftRules.Check(conversationId, text) is not null)
+            return (null, BrowserErrorCodes.Invalid);
+        return (new ComposerDraftCommand(conversationId, text), null);
+    }
+
     /// <summary><c>monitor {on}</c>：on 要是布林（stat1；web-protocol 第二節）</summary>
     private static (BrowserCommand?, string?) ParseMonitor(JObject cmd) =>
         cmd["on"] is { Type: JTokenType.Boolean } on ? (new MonitorCommand((bool)on), null) : (null, BrowserErrorCodes.Invalid);
@@ -345,6 +359,9 @@ internal sealed record DeviceRenameCommand(string DeviceId, string Name) : Brows
 
 /// <summary>遠端桌面看的一方的封包（14.16）</summary>
 internal sealed record DeskCommand(Myriagent.Sync.DeskPacket Packet) : BrowserCommand("desk");
+
+/// <summary>輸入框打到一半的字（draft1）</summary>
+internal sealed record ComposerDraftCommand(string ConversationId, string Text) : BrowserCommand("composerDraft");
 
 /// <summary>這條連線要不要收各電腦的即時狀態（stat1）</summary>
 internal sealed record MonitorCommand(bool On) : BrowserCommand("monitor");

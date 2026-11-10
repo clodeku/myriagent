@@ -431,6 +431,17 @@ app 更新排空完成、要換版之前，宿主向每個視窗要輸入框裡�
 { "type": "draftSnapshotRequest", "requestId": "…" }
 ```
 
+### `composerDrafts`〔草稿同步〕
+其他電腦、瀏覽器版與這台其他視窗的輸入框打到一半的字（2026-11-10；sync-protocol 14.17 的 draft1）。`full: true` 是整份（`init` 之後送一次：桌面是宿主記得的、瀏覽器版是伺服器存的；一則都沒有時不送），否則是變了的那幾則。
+```jsonc
+{ "type": "composerDrafts", "full": false, "drafts": [
+  { "conversationId": "…", "text": "打到一半的字（空字串＝清掉了，例如在那邊送出了）", "rev": 1762800000123, "at": 1762800000123, "from": "辦公室桌機" | "網頁版" | null }
+] }
+```
+- `conversationId` 是這個網頁用的 id（桌面：這台的對話是資料夾名、其他電腦的是線上 id）；`rev` 是伺服器給的（越大越新），桌面上這台其他視窗打的是 0、`from` 是 null。
+- 網頁照 `Web/draftsyncrules.js` 處理：輸入框沒改過（和上次同步的一樣、也沒有剛打過字）就換上；正在打的不蓋掉，在輸入框上方提示「換成它／保留這裡的」；別處清掉而這裡正在打時不理。整份的沒列出、而且伺服器給過的，當成清掉了。
+- 協作人不收（草稿是擁有者打的字）。
+
 ### `sendRejected`
 宿主沒有送出這則訊息（工作資料夾不存在、帳戶未登入、npm 正在更新這個 CLI、對話紀錄檔暫時讀不到…）：網頁送出時已清空輸入框，把原文還回去（輸入框目前是空的才還）；附件留在輸入區（以宿主的 `composer` 為準）。對話欄裡同樣文字的「送出中」那則標成沒有送出（見下）。
 ```jsonc
@@ -814,6 +825,7 @@ app 更新排空完成、要換版之前，宿主向每個視窗要輸入框裡�
 | `cliApplyNow` | `provider`（"Claude"／"Codex"／"Antigravity"／"Grok"）或 `conversationId`，擇一 | 〔熱更新〕「立即套用 CLI 更新」：不等安全點，立刻以目前安裝的版本重開（被打斷的工具結果未知，接續訊息會說明；待回應的卡片作廢，代理會以新的請求重提）。`provider`＝這種 CLI 所有待重開或還在跑舊版的對話（CLI 卡的按鈕）；更新屏障排空中（`CliView.update.phase` 為 `draining`）就是「現在中斷」。`conversationId`＝只有這個對話（`Header.restart.canApplyNow` 的按鈕）。沒有可套用的就忽略 |
 | `cliContinue` | `conversationId` | 〔熱更新〕「繼續」（`Header.restart.canContinue`）：換版後沒有自動接續的對話，宿主送出接續訊息（不顯示成使用者訊息，對話加一則 Notice：`noticeKind: "cliUpdate"`；app 更新後、app 重新啟動後沒有接續的對話是 `"appUpdate"`），之後跟一般的一輪一樣。對話不在可繼續的狀態就忽略 |
 | `cliCancelUpdate` | `provider` | 〔熱更新〕更新屏障排空中（`CliView.update.phase` 為 `draining`）的「取消更新」：不跑更新，已停下的對話以目前的版本重開並接續。換檔已開始（其他 phase）就忽略——npm 半途不能中斷 |
+| `composerDraft` | `conversationId`、`text`（空字串＝清掉；最多 16,000 字） | 〔草稿同步〕輸入框打到一半的字（2026-11-10）：打字停下 0.7 秒送（送出、刪光之後送空字串），超過上限的不送。桌面：宿主轉給這台的其他視窗（`composerDrafts`，`from` 是 null），可以同步的對話（這台的對話同步政策是 full、其他電腦的對話那台同步了內容）再經同步送給伺服器（疑似權杖的不送，伺服器也不存）；不在這台的對話、還沒建立的草稿對話略過。瀏覽器版：伺服器處理（只收擁有者、對話 id 要是線上的；存下來、轉給其他連線與電腦，sync-protocol 14.17），被拒不送 toast；協作人送了回 `invalid`。沒有回覆 |
 | `draftSnapshot` | `requestId`、`drafts: [{conversationId, text}]` | 回應 `draftSnapshotRequest`：這個視窗每個開著的對話（含藏在後面的分頁）輸入框裡還沒送出的字，空白的不列。宿主存進 `resume.json`，新版啟動後以 `conversation.draft` 還回來 |
 | `appUpdateCheck` | — | 設定頁「立即檢查」app 的新版（結果看 `appUpdate`） |
 | `appUpdateRestartNow` | — | 「立即重啟」：已備妥的新版不等使用者閒置（也不等開著 Claude Remote Control 的對話沒有動靜；自動開始時這也算使用者在用，`blocker` 會說明）、也不管取消後的冷卻，馬上開始套用（排空、換版、重啟後接續）；CLI 正在更新、登入視窗開著、正在安裝到這台電腦時仍等它結束 |
@@ -1759,7 +1771,7 @@ CLI 在執行中被更新（app 觸發、使用者在終端機更新、互動式
 
    | 類別 | 指令 | 結果 |
    |---|---|---|
-   | 伺服器處理 | `ready`、`setting`（只收四個漫遊鍵）、`accountUpdate`（只收 `label`、`color`）、`accountReorder`、`deviceRename`；〔遠端〕WP4.2 起另有 `newConversation`（伺服器草稿）、`copyItem`（回 `clipboard`），2026-10-23 起另有 `searchConversations`（回 `conversationSearch`），見表下的說明；〔電腦狀態〕`monitor`（記在這條連線，第 8 點）；`clientError`（寫進伺服器的記錄，不寫資料庫、不稽核、被拒也不送 toast） | 本機提交後 `accepted:true` |
+   | 伺服器處理 | `ready`、`setting`（只收四個漫遊鍵）、`accountUpdate`（只收 `label`、`color`）、`accountReorder`、`deviceRename`；〔遠端〕WP4.2 起另有 `newConversation`（伺服器草稿）、`copyItem`（回 `clipboard`），2026-10-23 起另有 `searchConversations`（回 `conversationSearch`），見表下的說明；〔電腦狀態〕`monitor`（記在這條連線，第 8 點）；〔草稿同步〕`composerDraft`（存在伺服器、轉給其他連線與電腦，2026-11-10；被拒不送 toast）；`clientError`（寫進伺服器的記錄，不寫資料庫、不稽核、被拒也不送 toast） | 本機提交後 `accepted:true` |
    | 接受、不處理 | `layout`、`open`、`close`、`visible`、`loadOlder`（〔遠端〕WP4.2 起 `open`、`close`、`visible`、`loadOlder` 由伺服器處理，見表下的說明） | `accepted:true` |
    | 桌面專屬（`desktop_only`） | 所有 `sync` 開頭的指令（`syncPair`、`syncCancelPair`、`syncUnpair`、`syncPause`、`syncRetry`、`syncConfirm`、`syncSetPolicy`，〔遠端〕`syncSetConversationPolicy`、`syncLoadRemoteAudit`）、`setConversationDefault`、`cliApplyNow`、`cliContinue`、`cliCancelUpdate`、`chooseFolder`、`attach`、`addFiles`、`pasteImage`、`addPathAttachment`、`openFolder`、`openPath`、`revealPath`、`saveFile`、`copyMedia`、`openLink`、`copyText`、`popout`、〔多視窗〕`newWindow`、`tabDrag`、`tabDragEnd`、`tabMoveIn`、`moveToNewWindow`、`closeWindow`、`accountOpenFolder`、`accountResetCredit`、`autoTitle`、`setAgent`、`setOutputStyle`、`codexControl`、`goalClear`、`taskDetail`、`taskStop`、`promptHistory`、`cancelSteer`、`quotaWaitCancel`、`rewindPreview`、`rewind`、`forkConversation`、`listExternalConversations`、`importExternalConversation`、`gitRefresh`、`launchAction`、`launchSelect`、`launchLog`、`launchRescan`、`programStop`、`mcpCheck`、`mcpAction`、`healthCheck`、`healthFix`、排程頁的 `scheduleWatch`、`scheduleRefresh`、`timedSave`、`timedAction`、`peerUpload`、`peerUploadCancel`、`peerFileSave`、`draftSetDevice`、電腦狀態面板的 `peerXferSave`、`peerXferCancel`、`peerXferPause`、`peerXferResume`、`peerXferReveal`、`xferPickFolder`、app 自我更新的 `draftSnapshot`、`appUpdateCheck`、`appUpdateRestartNow`、`appUpdateForce`、`appUpdateCancel`、`appInstallHere`；`setting` 的 `instructions`、`closeToTray`、`autoUpdateCli`、`autoUpdateApp`、`cliRestartPolicy`、`claudeRemoteControl`、`autoSwitchAccount`、`autoSwitchCrossProvider`、`shareCrossCliCustomizations`、`claudeFallbackModel`、`claudeIdleResumeWarning`、`autoResumeAfterQuota`；帶 `safeMode` 或 `shareCustomizations` 的 `accountUpdate`（整筆不套用） | `accepted:false` |
    | 〔遠端〕轉送電腦（WP4.5 起） | 轉給對話的擁有者：`send`、`voiceMessage`（2026-10-23）、`cancelQueued`、`stop`、`answer`、`skipQuestion`、`approve`、`approvePlan`、`rename`、`delete`、`setOption`、`setAccount`、`setFolder`、`resetFolder`、`removeAttachment`，WP4.7 起另有 `listFiles`、`fileSearch`、`addUploaded`、`fileFetch`（輸出 `files`、`fileSearch`、`fileRef` 經伺服器投影與改寫，見第一節；`addUploaded` 先查上傳，見第 12 點的 E4）；轉給指定的電腦：`accountAdd`、`accountLogin`、`accountLoginCancel`、`accountLogout`、`accountRemove`、`accountRefresh`、`cliCheck`、`cliInstall`、`cliUpdate`、`accountLoginDevice`、`accountLoginCode`（2026-10-26）、排程頁的 `scheduleAction`、`scheduleAgent`（2026-10-26，S3）、電腦狀態面板的 `deviceBrowse`、`deviceFetch`、`devicePut`（2026-11-09；輸出 `files`、`fileRef` 的 `conversationId` 是 null，`fileRef` 的參照是 `xfer`）與整個資料夾的 `deviceTree`、`deviceFetchMany`（輸出 `fileTree`、`fileRefs`，`fileRefs` 的參照同樣是 `xfer`）、遠端桌面的 `deskOpen`（之後的影格與輸入走 `desk`，見第一節） | 一律要帶 commandId（沒帶回 `invalid`）。伺服器簽好信封、寫進指令列之後回 `accepted:true`，結果一律看 `commandResult`（第一節；電腦不在線、不支援、不是擁有者等也是 `commandResult rejected`）。`Cmd` 只回伺服器自己判得出的錯：`invalid`（形狀不合格、指定的電腦不存在或已撤銷）、`conflict`（對話或帳戶已刪除，另送 `conversationClosed` 或 toast）、`unavailable`（寫不進去）。仍是 `not_available` 的：沒帶 `deviceId` 而判不出目標的指令（沒有帳戶的 `cliCheck`、`accountRefresh {accountId:null}`、帳戶連結到兩台以上、`accountAdd` 沒有 `deviceId`；「所有電腦登出」〔`accountLogout` 不帶 `deviceId`〕例外，見第一節 `commandResult`），以及 `conversationId` 是第 3 階段網頁的本機 id 的。`conversationId` 是伺服器草稿的見表下的說明 |

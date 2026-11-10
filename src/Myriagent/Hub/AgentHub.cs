@@ -637,6 +637,10 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                         CancelCliUpdate(cancelProvider);
                     break;
                 // app 自我更新（AgentHub.AppUpdate.cs）
+                case "composerDraft":
+                    // 輸入框打到一半的字（AgentHub.ComposerDrafts.cs）：轉給這台的其他視窗、可以同步的再送上伺服器
+                    ComposerDraftCommand(view, Str("conversationId"), command["text"] is JValue { Type: JTokenType.String, Value: string draftText } ? draftText : null);
+                    break;
                 case "draftSnapshot":
                     OnDraftSnapshot(view, Str("requestId"), command["drafts"] as JArray);
                     break;
@@ -828,6 +832,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             ["collaborators"] = view.IsPopout ? null : RenderCollaborators(),
             ["viewer"] = new JObject { ["role"] = "owner" },
         });
+        PostComposerDraftsTo(view); // 〔草稿同步〕其他電腦、瀏覽器版與這台其他視窗打到一半的字（AgentHub.ComposerDrafts.cs）
         ReplayDeviceCodes(view);   // 〔帳戶目錄〕進行中的裝置碼登入重送驗證碼（AgentHub.AccountDirectory.cs）
         RunPendingMoveIn(view);    // 〔多視窗〕拖出分頁、「移到新視窗」開的視窗：把對話搬進來（AgentHub.Windows.cs）
 

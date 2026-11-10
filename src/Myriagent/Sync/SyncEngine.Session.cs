@@ -367,6 +367,9 @@ internal sealed partial class SyncEngine
         // 各電腦的排程（SyncEngine.Schedules.cs）
         if (IsCurrent(conn))
             StartSchedules(conn);
+        // 輸入框的草稿（SyncEngine.ComposerDrafts.cs）
+        if (IsCurrent(conn))
+            StartDrafts(conn);
     }
 
     private bool TrySaveToken(string token)
@@ -457,6 +460,7 @@ internal sealed partial class SyncEngine
         StopStats(conn);
         StopTokens(conn);
         StopSchedules(conn);
+        StopDrafts(conn);
     }
 
     private void EnterBackoff(SyncFailure? failure)

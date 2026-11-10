@@ -18,6 +18,7 @@ import { accountSuggestions, accountMention, mentionPlain } from './accountmenti
 import { contextShown, contextPercent, contextLabel, contextSeverity, contextMark, contextSummary, contextTitle } from './contextrules.js';
 import { HISTORY_KEY, LEGACY_HISTORY_KEY, parseStore, historyOf, pushStore, moveStore, idleNav, historyMove } from './historyrules.js';
 import { tokenCounter } from './tokenfx.js';
+import { createDraftSync } from './draftsync.js';
 import { parseTurnTokens, gaugeFx, meterCells, infoWindows, rttLabel, tokenRate, pruneRateSamples, rateLabel, compactDrop, fmtTokK, byteRate, uploadReadout, smoothRate, delegateMeta } from './fxrules.js';
 import { sessionTotals } from './remoterules.js';
 import { MATRIX_GLYPHS, fmtShort, fmtTokens } from './tokenrules.js';
@@ -325,9 +326,11 @@ export class Composer {
     this.quotaSig = '';
     this.quotaEl = h('div', { class: 'steered quotawait', hidden: true, dataset: { field: 'quotaWait' } },
       h('div', { class: 'steer-head' }, icon('clock', 'steer-ic'), this.quotaText, this.quotaCells, this.quotaCancelBtn));
-    this.el = h('div', { class: 'dock' }, this.queueEl, this.steerEl, this.quotaEl, this.todo, this.settleEl, this.box, this.roEl, this.gateEl, this.info);
+    // 輸入框草稿的同步（draftsync.js）：別處有不同的草稿、這裡又正在打時，在輸入框上方提示「換成它／保留這裡的」
+    this.draftSync = createDraftSync(this);
+    this.el = h('div', { class: 'dock' }, this.queueEl, this.steerEl, this.quotaEl, this.todo, this.draftSync.el, this.settleEl, this.box, this.roEl, this.gateEl, this.info);
 
-    this.ta.addEventListener('input', () => { this.autosize(); this.updateSend(); this.checkTrigger(); });
+    this.ta.addEventListener('input', () => { this.draftSync.input(); this.autosize(); this.updateSend(); this.checkTrigger(); });
     this.ta.addEventListener('keydown', (e) => this.onKeyDown(e));
     this.ta.addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') this.checkTrigger(); });
     this.ta.addEventListener('click', () => this.checkTrigger());
@@ -372,6 +375,8 @@ export class Composer {
     this.voice.cancel(); // 分頁關了：錄到一半的不送、關掉麥克風
     clearTimeout(this.rttTimer);
     clearTimeout(this.ctxNoteTimer);
+    this.draftSync.flush(); // 分頁關了：還沒送的草稿馬上送
+    this.draftSync.destroy();
     this.destroyed = true;
     live.delete(this);
     for (const c of this.uploads) inFlight.delete(c);
@@ -1183,6 +1188,7 @@ export class Composer {
   }
 
   updateSend() {
+    if (this.draftSync) this.draftSync.changed(); // 字變了就排著同步（沒變什麼都不做）
     const running = this.runningNow();
     const has = this.ta.value.trim().length > 0 || this.state.attachments.length > 0 || this.attachedUploads().length > 0;
     const resume = !has && this.queuePaused();

@@ -134,6 +134,8 @@ internal sealed partial class SyncEngine
 
         void ISyncSessionEvents.OnSchedulesUpdate(SchedulesUpdate update) => engine.Deliver(this, () => engine.OnPhase4Message(this, update));
 
+        void ISyncSessionEvents.OnComposerDraftUpdate(ComposerDraftUpdate update) => engine.Deliver(this, () => engine.OnPhase4Message(this, update));
+
         void ISyncSessionEvents.OnCollabUpdate(CollaboratorsState state) => engine.Deliver(this, () => engine.OnPhase4Message(this, state));
 
         void ISyncSessionEvents.OnLiveResync(LiveResync resync) => engine.Deliver(this, () => engine.OnPhase4Message(this, resync));

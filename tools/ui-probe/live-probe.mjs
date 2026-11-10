@@ -827,6 +827,29 @@ async function runPaneZoom() {
   await HP.closePage(app);
 }
 
+// 輸入框草稿的同步（瀏覽器版，draftsync.js）：打字停下送 composerDraft 給伺服器；伺服器推來的（其他電腦）沒改過就換上；
+// 重連後的整份沒列出（在別處送出了）就清掉
+async function runComposerDraft() {
+  const app = await openWithLayout('composer-draft', layoutOf([[[LF.CONV.idle], LF.CONV.idle]]));
+  const { page, hub } = app;
+  await waitLoaded(app, [LF.CONV.idle]);
+  const ta = '.conv[data-conv="' + LF.CONV.idle + '"] .cinput';
+  await page.click(ta);
+  await page.keyboard.type('在手機上打到一半');
+  await sleep(1100);
+  const sent = hub.cmds('composerDraft').map((c) => c.cmd);
+  await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  hub.push({ type: 'composerDrafts', full: false, drafts: [{ conversationId: LF.CONV.idle, text: '在桌機上接著打', rev: 10, at: Date.now(), from: '辦公室桌機' }] });
+  const applied = await until(() => page.$eval(ta, (t) => (t.value === '在桌機上接著打' ? t.value : null)), 3000);
+  await sleep(900);
+  const echoed = hub.cmds('composerDraft').length;
+  hub.push({ type: 'composerDrafts', full: true, drafts: [] });
+  const cleared = await until(() => page.$eval(ta, (t) => (t.value === '' ? 'empty' : null)), 3000);
+  check('hubComposerDraft', sent.length === 1 && sent[0].conversationId === LF.CONV.idle && sent[0].text === '在手機上打到一半'
+    && applied === '在桌機上接著打' && echoed === 1 && cleared === 'empty', { sent, applied, echoed, cleared });
+  await HP.closePage(app);
+}
+
 async function runClosedClosesPane() {
   const app = await openWithLayout('closed-closes-pane', layoutOf([[[LF.CONV.idle], LF.CONV.idle], [[LF.CONV.codex], LF.CONV.codex]]));
   const { hub } = app;
@@ -6114,6 +6137,7 @@ const SCENARIOS = [
   { checks: ['hubVoiceDictationIosRepeat', 'hubVoiceDictationIosRecover'], run: runVoiceDictationIosRepeat },
   { checks: ['hubVoiceDictationMeter'], run: runVoiceDictationMeter },
   { checks: ['hubPaneZoom'], run: runPaneZoom },
+  { checks: ['hubComposerDraft'], run: runComposerDraft },
   { checks: ['hubVoiceDictationDiag', 'hubVoiceDictationDiagMode'], run: runVoiceDictationDiag },
   { checks: ['hubResyncReopens', 'hubResyncNullNoop'], run: runResync },
   { checks: ['hubClipboardWrite', 'hubClipboardDeniedFallback', 'hubClipboardUnsolicitedIgnored', 'hubClipboardExpiredIgnored'], run: runClipboard },

@@ -69,6 +69,7 @@ const REPLICA_RESTORE_ONLY = process.argv.includes('--replica-restore'); // 只�
 const FORK_ONLY = process.argv.includes('--fork'); // 只跑延伸成新對話（fork-probe.mjs）
 const SIDETABS_ONLY = process.argv.includes('--side-tabs'); // 只跑分頁放左側（runSideTabs）
 const PANEZOOM_ONLY = process.argv.includes('--pane-zoom'); // 只跑點了暫時放大窗格（runPaneZoom）
+const DRAFTSYNC_ONLY = process.argv.includes('--draft-sync'); // 只跑輸入框草稿的同步（runDraftSync）
 const LOGIN_ONLY = process.argv.includes('--login'); // 只跑登入到期的檢查（runLoginExpiry）
 const CONTEXT_ONLY = process.argv.includes('--context'); // 只跑輸入框的上下文用量提示（runContext）
 const BG_ONLY = process.argv.includes('--bg'); // 只跑等背景工作回報的樣貌（runBackgroundWait）
@@ -2065,6 +2066,68 @@ function paneZoomState() {
       w: Math.round(r.width), h: Math.round(r.height) }];
   }));
   return { ws: { top: Math.round(wr.top), bottom: Math.round(wr.bottom), left: Math.round(wr.left), right: Math.round(wr.right) }, panes };
+}
+
+// 輸入框草稿的同步（draftsync.js、web-protocol 的 composerDraft／composerDrafts）：打字停下會送；沒改過的換上別處的；
+// 正在打的不蓋掉、在輸入框上方提示，「換成它」換上；別處清掉了跟著清；送出之後送空字串
+async function runDraftSync(vp) {
+  const app = await openApp('draft-sync', { vp, layout: { panes: [{ id: 'p1', tabs: ['c2'], active: 'c2' }], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' } });
+  const { page, host } = app;
+  await waitConv(page, 'c2');
+  await settle(page, 300);
+  const ta = convSel('c2') + ' .cinput';
+  const offerSel = convSel('c2') + ' [data-field="draftOffer"]';
+  const drafts = () => host.received.filter((m) => m.cmd === 'composerDraft');
+  const state = () => page.evaluate(([t, o]) => {
+    const offer = document.querySelector(o);
+    return { value: document.querySelector(t).value, offer: !!offer && !offer.hidden, offerText: offer ? offer.textContent : '' };
+  }, [ta, offerSel]);
+  const blur = () => page.evaluate(() => document.activeElement && document.activeElement.blur());
+
+  await page.click(ta);
+  await page.keyboard.type('我在這台打的');
+  await sleep(1100);
+  const sent = drafts();
+  check('draftSyncPublish', sent.length === 1 && sent[0].conversationId === 'c2' && sent[0].text === '我在這台打的', { sent });
+
+  await blur();
+  await host.send({ type: 'composerDrafts', full: false, drafts: [{ conversationId: 'c2', text: '手機改過的', rev: 5, at: Date.now(), from: '網頁版' }] });
+  await settle(page, 150);
+  const s1 = await state();
+  await sleep(900);
+  check('draftSyncApply', s1.value === '手機改過的' && !s1.offer && drafts().length === 1, { s1, sent: drafts().length });
+
+  await page.click(ta);
+  await page.keyboard.press('End');
+  await page.keyboard.type('，再加一句');
+  await host.send({ type: 'composerDrafts', full: false, drafts: [{ conversationId: 'c2', text: '筆電改的', rev: 6, at: Date.now(), from: '辦公室筆電' }] });
+  await settle(page, 150);
+  const s2 = await state();
+  check('draftSyncOffer', s2.value === '手機改過的，再加一句' && s2.offer && s2.offerText.includes('辦公室筆電') && s2.offerText.includes('筆電改的'), { s2 });
+  await shot(page, 'draft-sync-offer-' + vp.w);
+
+  await page.click(offerSel + ' [data-field="draftTake"]');
+  await settle(page, 150);
+  const s3 = await state();
+  check('draftSyncTake', s3.value === '筆電改的' && !s3.offer, { s3 });
+
+  await blur();
+  await sleep(1100);
+  const beforeClear = drafts().length;
+  await host.send({ type: 'composerDrafts', full: false, drafts: [{ conversationId: 'c2', text: '', rev: 7, at: Date.now(), from: '辦公室筆電' }] });
+  await settle(page, 150);
+  const s4 = await state();
+  await sleep(900);
+  check('draftSyncClear', s4.value === '' && !s4.offer && drafts().length === beforeClear, { s4, before: beforeClear, after: drafts().length });
+
+  await page.click(ta);
+  await page.keyboard.type('送出這一則');
+  await sleep(1000);
+  await page.keyboard.press('Enter');
+  await sleep(1100);
+  const last = drafts().slice(-2).map((m) => m.text);
+  check('draftSyncSendClears', last[0] === '送出這一則' && last[1] === '' && host.received.some((m) => m.cmd === 'send' && m.text === '送出這一則'), { last });
+  await closeApp(app);
 }
 
 async function runPaneZoom(vp) {
@@ -6638,6 +6701,7 @@ try {
     if (FORK_ONLY) { if (full) await runFork(searchCtx, vp); continue; }
     if (SIDETABS_ONLY) { if (full) await runSideTabs(vp); continue; }
     if (PANEZOOM_ONLY) { if (full) await runPaneZoom(vp); continue; }
+    if (DRAFTSYNC_ONLY) { if (full) await runDraftSync(vp); continue; }
     if (REPLICA_RESTORE_ONLY) { if (full) await runReplicaRestore(vp); continue; }
     if (FX_ONLY) { if (full) await runFx(searchCtx, vp); continue; }
     if (SETTINGS_ONLY) { if (full) await runSettings(searchCtx, vp); continue; }
@@ -6654,7 +6718,7 @@ try {
     if (!HOT_ONLY && !SYNC_ONLY) {
       await runMain(vp, full);
       await runPopout(vp, full);
-      if (full) { await runExtras(vp); await runSideTabs(vp); await runPaneZoom(vp); await runNoLayout(vp); await runDraftRestore(vp); await runReplicaRestore(vp); await runLight(vp); await runVisualChecks(); }
+      if (full) { await runExtras(vp); await runSideTabs(vp); await runPaneZoom(vp); await runDraftSync(vp); await runNoLayout(vp); await runDraftRestore(vp); await runReplicaRestore(vp); await runLight(vp); await runVisualChecks(); }
       if (full) await runDashboard(vp);
       if (full) await runDashGrid();
       if (full) await runTokens(vp);

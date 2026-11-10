@@ -67,6 +67,7 @@ import { applyCollaborators, onCollabResult, applyViewerChrome, isCollaborator }
 import { initSpotlight } from './spotlight.js';
 import { longPressAsContextMenu } from './longpress.js';
 import { isMediaTarget } from './mediamenu.js';
+import { onComposerDrafts } from './draftsync.js';
 
 // 錯誤回報最先裝上（之後的初始化出錯也收得到）
 installErrorReporting();
@@ -539,6 +540,7 @@ function handle(m) {
     case 'showView': if (state.mode !== 'popout') setView(m.view); break; // 系統匣選單「帳戶儀表板」
     case 'files': { if (devfiles.onFiles(m)) break; const cv = ws.getConv(id); if (cv && cv.drawer) cv.drawer.apply(m); break; } // 電腦狀態面板的檔案傳輸（deviceBrowse）：conversationId 是 null
     case 'fileSearch': { const cv = ws.getConv(id); if (cv) cv.composer.applyFileSearch(m); break; }
+    case 'composerDrafts': onComposerDrafts(m, (cid) => ws.getConv(cid)); break; // 其他電腦、瀏覽器版、這台其他視窗打到一半的字（draftsync.js）
     case 'gitStatus': { const cv = ws.getConv(id); if (cv) cv.setGit(m.git || null); break; } // 工作資料夾的 git 狀態（只有桌面）
     case 'launchStatus': { const cv = ws.getConv(id); if (cv) cv.setLaunch(m.launch || null); break; } // 執行列（只有桌面）
     case 'launchLog': { const cv = ws.getConv(id); if (cv) cv.applyLaunchLog(m); break; }

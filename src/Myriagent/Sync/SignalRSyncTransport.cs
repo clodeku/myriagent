@@ -155,6 +155,7 @@ internal sealed class SignalRSyncTransport(TimeSpan? connectTimeout = null) : IS
             connection.On<StatsUpdate>(DeviceHubMethods.StatsUpdate, events.OnStatsUpdate);
             connection.On<TokensUpdate>(DeviceHubMethods.TokensUpdate, events.OnTokensUpdate);
             connection.On<SchedulesUpdate>(DeviceHubMethods.SchedulesUpdate, events.OnSchedulesUpdate);
+            connection.On<ComposerDraftUpdate>(DeviceHubMethods.ComposerDraftUpdate, events.OnComposerDraftUpdate);
             connection.On<CollaboratorsState>(DeviceHubMethods.CollabUpdate, events.OnCollabUpdate);
             connection.On<LiveResync>(DeviceHubMethods.LiveResync, events.OnLiveResync);
             // 第 5 階段（WP5.1）：沒協商 hand1／log1 的伺服器不送；送了也由引擎略過
@@ -229,6 +230,12 @@ internal sealed class SignalRSyncTransport(TimeSpan? connectTimeout = null) : IS
         {
             EnsureFits(p, "排程摘要", null);
             return RunAsync(() => connection.InvokeAsync(DeviceHubMethods.SchedulesPublish, p, ct), handshake: false, ct);
+        }
+
+        public Task ComposerDraftPublishAsync(ComposerDraftPublish p, CancellationToken ct)
+        {
+            EnsureFits(p, "輸入框草稿", null);
+            return RunAsync(() => connection.InvokeAsync(DeviceHubMethods.ComposerDraftPublish, p, ct), handshake: false, ct);
         }
 
         public Task TokensPublishAsync(TokensPublish p, CancellationToken ct)

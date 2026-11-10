@@ -34,7 +34,8 @@ internal sealed class BrowserCommandHandler(
     IBrowserCommandRouter? router = null,
     CollaboratorDirectory? collaborators = null,
     CollaboratorCommandService? collaboratorCommands = null,
-    DeskRelays? desk = null)
+    DeskRelays? desk = null,
+    MyriagentHub.Sync.ComposerDraftStore? composerDrafts = null)
 {
     private readonly LogThrottle clientErrorThrottle = new(TimeSpan.FromMinutes(10), TimeProvider.System);
 
@@ -61,6 +62,7 @@ internal sealed class BrowserCommandHandler(
             {
                 ReadyCommand ready => Ready(connection, ready),
                 MonitorCommand monitor => Monitor(connection, monitor),
+                ComposerDraftCommand draft => ComposerDraft(connection, draft),
                 DeskCommand deskCommand => await DeskAsync(connection, deskCommand, cancellationToken),
                 ClientErrorCommand clientError => ClientError(connection, clientError),
                 PassiveCommand => null,
@@ -203,6 +205,20 @@ internal sealed class BrowserCommandHandler(
                 DeskRules.EndBody("gone", "遠端桌面已經結束"))));
         }
 
+        return null;
+    }
+
+    /// <summary>
+    /// 輸入框打到一半的字（draft1，14.17）：存進伺服器（只有擁有者；協作人在白名單就被擋），其他瀏覽器分頁與電腦會收到。
+    /// 對話 id 要是這條連線看得到的；不寫資料庫、不稽核
+    /// </summary>
+    private string? ComposerDraft(BrowserConnection connection, ComposerDraftCommand draft)
+    {
+        if (composerDrafts is null)
+            return BrowserErrorCodes.NotAvailable;
+        if (connection.IsCollaborator || !gateway.CanSeeConversation(connection, draft.ConversationId))
+            return BrowserErrorCodes.Invalid;
+        composerDrafts.Publish(draft.ConversationId, draft.Text, Myriagent.Sync.ComposerDraftRules.BrowserFrom, BrowserGateway.BrowserOrigin(connection.ConnectionId));
         return null;
     }
 

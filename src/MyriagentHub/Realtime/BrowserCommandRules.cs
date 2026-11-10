@@ -48,7 +48,7 @@ internal static class BrowserCommandRules
     /// 伺服器處理的指令；<c>monitor</c> 是這條連線要不要收各電腦的即時狀態（stat1，<c>deviceStats</c>），<c>clientError</c> 是網頁的錯誤回報
     /// （寫進伺服器的記錄，2026-10-23）
     /// </summary>
-    public static IReadOnlySet<string> ServerCommands { get; } = Set("ready", "setting", "accountUpdate", "accountReorder", "deviceRename", "monitor", "clientError", "desk");
+    public static IReadOnlySet<string> ServerCommands { get; } = Set("ready", "setting", "accountUpdate", "accountReorder", "deviceRename", "monitor", "clientError", "desk", "composerDraft");
 
     public static IReadOnlySet<string> IgnoredCommands { get; } = Set("layout", "open", "close", "visible", "loadOlder");
 
@@ -137,7 +137,7 @@ internal static class BrowserCommandRules
     /// 第 3 階段每次 init 都會讓網頁送 newConversation，提示了等於每次連線都跳錯誤（D17）
     /// </summary>
     public static IReadOnlySet<string> SilentCommands { get; } = Set(
-        ["newConversation", "listFiles", "fileSearch", "draftSnapshot", "monitor", "clientError", "searchConversations", "desk", .. IgnoredCommands]);
+        ["newConversation", "listFiles", "fileSearch", "draftSnapshot", "monitor", "clientError", "searchConversations", "desk", "composerDraft", .. IgnoredCommands]);
 
     /// <summary>
     /// 電腦的結果與立即拒絕要不要另送 toast（<paramref name="cmd"/> 是送給電腦的指令名稱）：<see cref="SilentCommands"/> 不送；

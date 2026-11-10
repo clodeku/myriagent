@@ -161,6 +161,7 @@ internal sealed partial class SyncEngine
         ContributeStatsFeatures(features);
         ContributeTokensFeatures(features);
         ContributeSchedulesFeatures(features);
+        ContributeDraftFeatures(features);
         ContributeLogFeatures(features);
         Probe(nameof(ContributeLogFeatures), features);
         ContributeHandoffFeatures(features);
@@ -395,6 +396,10 @@ internal sealed partial class SyncEngine
                 OnSchedulesUpdate(conn, schedules);
                 Probe(nameof(OnSchedulesUpdate), schedules);
                 break;
+            case ComposerDraftUpdate drafts:
+                OnComposerDraftUpdate(conn, drafts);
+                Probe(nameof(OnComposerDraftUpdate), drafts);
+                break;
             case CollaboratorsState collaborators:
                 OnCollabUpdate(conn, collaborators);
                 Probe(nameof(OnCollabUpdate), collaborators);
@@ -441,6 +446,7 @@ internal sealed partial class SyncEngine
         StatsUpdate => DeviceHubMethods.StatsUpdate,
         TokensUpdate => DeviceHubMethods.TokensUpdate,
         SchedulesUpdate => DeviceHubMethods.SchedulesUpdate,
+        ComposerDraftUpdate => DeviceHubMethods.ComposerDraftUpdate,
         CollaboratorsState => DeviceHubMethods.CollabUpdate,
         LiveResync => DeviceHubMethods.LiveResync,
         HandoffRequest => DeviceHubMethods.HandoffRequest,

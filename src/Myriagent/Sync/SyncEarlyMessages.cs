@@ -61,7 +61,7 @@ internal sealed class SyncEarlyMessages
                 messages.RemoveAll(m => m.GetType() == message.GetType());
                 messages.Add(message);
                 return true;
-            case WatchChanged or SnapshotRequest or MediaRequest or PeerReply or HandoffRequest or HandoffUpdate or LogRepair:
+            case WatchChanged or SnapshotRequest or MediaRequest or PeerReply or HandoffRequest or HandoffUpdate or LogRepair or ComposerDraftUpdate:
                 if (messages.Count - commands >= MaxOthers)
                 {
                     messages.RemoveAt(messages.FindIndex(m => m is not CommandDelivery));

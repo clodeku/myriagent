@@ -74,6 +74,11 @@ internal interface ISyncBridge
     {
     }
 
+    /// <summary>這台某個對話的輸入框草稿變了（線上 id；空字串＝清掉）：同步引擎據此排著送給伺服器（draft1，sync-protocol 14.17）</summary>
+    void OnComposerDraft(string conversationId, string text)
+    {
+    }
+
     /// <summary>
     /// 替擁有者送協作人的管理指令（多人協作，collab1，sync-protocol 14.14）：經目前的連線交給伺服器。未配對、沒有連線、伺服器太舊（或測試替身）回 unavailable
     /// </summary>

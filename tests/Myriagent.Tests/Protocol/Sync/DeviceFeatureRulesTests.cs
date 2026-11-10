@@ -11,7 +11,7 @@ public sealed class DeviceFeatureRulesTests
     [Fact]
     public void 這版認得的功能()
     {
-        DeviceFeatureRules.Known.Should().Equal("conv1", "live1", "live2", "cmd1", "media1", "update1", "peer1", "prov1", "stat1", "tok1", "tok2", "log1", "hand1", "exec1", "sched1", "collab1", "xfer1", "xfer2", "desk1");
+        DeviceFeatureRules.Known.Should().Equal("conv1", "live1", "live2", "cmd1", "media1", "update1", "peer1", "prov1", "stat1", "tok1", "tok2", "log1", "hand1", "exec1", "sched1", "collab1", "xfer1", "xfer2", "desk1", "draft1");
         DeviceFeatureRules.Known.Should().AllSatisfy(name => DeviceFeatureRules.IsValidName(name).Should().BeTrue());
     }
 
@@ -126,6 +126,8 @@ public sealed class DeviceFeatureRulesTests
             [DeviceHubMethods.SchedulesUpdate] = DeviceFeatureRules.Sched1,
             [DeviceHubMethods.CollabCmd] = DeviceFeatureRules.Collab1,
             [DeviceHubMethods.CollabUpdate] = DeviceFeatureRules.Collab1,
+            [DeviceHubMethods.ComposerDraftPublish] = DeviceFeatureRules.Draft1,
+            [DeviceHubMethods.ComposerDraftUpdate] = DeviceFeatureRules.Draft1,
         };
 
         DeviceHubMethods.DeviceToServer.Concat(DeviceHubMethods.ServerToDevice).Should().BeEquivalentTo(expected.Keys, "每個方法都列在這張表");

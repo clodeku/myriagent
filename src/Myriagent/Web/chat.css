@@ -776,6 +776,10 @@
 .steer-head .ic { width: 13px; height: 13px; flex: none; }
 .steer-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .steer-cancel { height: 20px; padding: 0 8px; flex: none; }
+/* 別處有不同的草稿（draftsync.js）：輸入框上方，「換成它／保留這裡的」 */
+.draft-offer { border-color: color-mix(in srgb, var(--acc) 45%, transparent); background: color-mix(in srgb, var(--acc) 6%, transparent); }
+.draft-offer .steer-head { color: var(--text); }
+.draft-offer .btn { height: 20px; padding: 0 8px; flex: none; }
 .queue-head .ic { width: 13px; height: 13px; flex: none; }
 .queue-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queue-chev { opacity: .7; }

@@ -110,8 +110,14 @@ internal static class DeviceFeatureRules
     /// </summary>
     public const string Desk1 = "desk1";
 
+    /// <summary>
+    /// 輸入框的草稿（docs/sync-protocol.md 14.17；2026-11-10）：協商出它的連線可以呼叫 <c>ComposerDraftPublish</c>（這台輸入框打到一半的字）、
+    /// 收 <c>ComposerDraftUpdate</c>（其他電腦與瀏覽器版的草稿）
+    /// </summary>
+    public const string Draft1 = "draft1";
+
     /// <summary>這版認得的功能（不認得的名稱照收、不啟用：交集裡不會有它）</summary>
-    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1, Xfer1, Xfer2, Desk1];
+    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1, Xfer1, Xfer2, Desk1, Draft1];
 
     public const int MaxFeatures = 32;
 
@@ -196,6 +202,7 @@ internal static class DeviceFeatureRules
         DeviceHubMethods.ExecOutput or DeviceHubMethods.ExecCancel or DeviceHubMethods.ExecReply or DeviceHubMethods.ExecAbort => Exec1,
         DeviceHubMethods.CollabCmd or DeviceHubMethods.CollabUpdate => Collab1,
         DeviceHubMethods.DeskUp or DeviceHubMethods.DeskDown => Desk1,
+        DeviceHubMethods.ComposerDraftPublish or DeviceHubMethods.ComposerDraftUpdate => Draft1,
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "不認得的裝置 hub 方法"),
     };
 }

@@ -39,7 +39,8 @@ internal sealed partial class BrowserGateway(
     BrowserDrafts? drafts = null,
     DeviceStatsBoard? stats = null,
     IHostEnvironment? environment = null,
-    MyriagentHub.Auth.CollaboratorDirectory? collaborators = null) : BackgroundService
+    MyriagentHub.Auth.CollaboratorDirectory? collaborators = null,
+    ComposerDraftStore? composerDrafts = null) : BackgroundService
 {
     public const string SlowClientReason = "slow_client";
 
@@ -287,6 +288,8 @@ internal sealed partial class BrowserGateway(
             if (list is not null)
                 connection.MarkConversationListSent(list);
             resync |= EnqueueControl(connection, nowMs);
+            // 輸入框的草稿（draft1）：整份的跟在 init 後面
+            resync |= EnqueueComposerDrafts(connection, nowMs);
             return resync;
         }
         if (!connection.InitSent || connection.IsCollaborator)
@@ -444,7 +447,8 @@ internal sealed class BrowserGatewayWiring(
     LiveOverlay? overlay = null,
     DeviceStatsBoard? stats = null,
     TokenTallies? tokens = null,
-    DeviceScheduleStore? schedules = null) : IHostedService
+    DeviceScheduleStore? schedules = null,
+    ComposerDraftStore? composerDrafts = null) : IHostedService
 {
     private CancellationTokenRegistration stopping;
 
@@ -463,6 +467,8 @@ internal sealed class BrowserGatewayWiring(
             tokens.Changed += OnTokensChanged;
         if (schedules is not null)
             schedules.Changed += OnSchedulesChanged;
+        if (composerDrafts is not null)
+            composerDrafts.Changed += gateway.OnComposerDraftChanged;
         stopping = lifetime.ApplicationStopping.Register(OnStopping);
         return Task.CompletedTask;
     }
@@ -482,6 +488,8 @@ internal sealed class BrowserGatewayWiring(
             tokens.Changed -= OnTokensChanged;
         if (schedules is not null)
             schedules.Changed -= OnSchedulesChanged;
+        if (composerDrafts is not null)
+            composerDrafts.Changed -= gateway.OnComposerDraftChanged;
         stopping.Dispose();
         return Task.CompletedTask;
     }
