@@ -76,7 +76,7 @@ internal sealed class TaskbarProgress : IDisposable
             tb.SetOverlayIcon(hwnd, text.Length == 0 ? IntPtr.Zero : OverlayIcon(text, form.DeviceDpi).Handle, TaskbarRules.OverlayDescription(view.Overlay));
             return true;
         }
-        catch (COMException)
+        catch (Exception e) when (e is COMException or NotImplementedException)
         {
             return false;
         }
@@ -92,7 +92,7 @@ internal sealed class TaskbarProgress : IDisposable
             tb.HrInit();
             list = tb;
         }
-        catch (Exception e) when (e is COMException or InvalidCastException or NotSupportedException)
+        catch (Exception e) when (e is COMException or InvalidCastException or NotSupportedException or NotImplementedException)
         {
             unavailable = true;
         }

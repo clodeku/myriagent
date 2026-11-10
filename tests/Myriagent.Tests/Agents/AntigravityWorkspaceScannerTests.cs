@@ -90,4 +90,58 @@ public sealed class AntigravityWorkspaceScannerTests
         fromSub.Agents.Select(a => a.Name).Should().Contain("nested-architect")
             .And.NotContain(new[] { "sub-only", "off-agent" });
     }
+
+    [Fact]
+    public void SkillsJson與PluginsJson_驗證1_5_2相對子路徑安全規則_並支援工作區與全域規則檔掃描()
+    {
+        using var temp = new TempDirectory("agy-ws-manifests");
+        var work = temp.CreateDirectory("repo");
+        var outside = temp.CreateDirectory("outside");
+        var agyDir = temp.CreateDirectory(@".gemini\antigravity-cli");
+
+        // 1) 安全的相對子路徑與不安全的越界／絕對路徑
+        AntigravityWorkspaceScanner.IsSafeWorkspaceSubpath(work, "custom-skills/my-skill", out var safePath).Should().BeTrue();
+        safePath.Should().Be(Path.Combine(work, "custom-skills", "my-skill"));
+        AntigravityWorkspaceScanner.IsSafeWorkspaceSubpath(work, "../outside", out _).Should().BeFalse("拒絕 .. 越界");
+        AntigravityWorkspaceScanner.IsSafeWorkspaceSubpath(work, @"C:\Windows\System32", out _).Should().BeFalse("拒絕絕對路徑");
+        AntigravityWorkspaceScanner.IsSafeWorkspaceSubpath(work, @"\\server\share", out _).Should().BeFalse("拒絕 UNC 路徑");
+        AntigravityWorkspaceScanner.IsSafeWorkspaceSubpath(work, ".", out _).Should().BeFalse("拒絕工作區根目錄本身");
+
+        // 2) .agents/skills.json 與 .agents/plugins.json
+        temp.WriteFile(@"outside\escaped-skill\SKILL.md", "---\nname: escaped-skill\ndescription: 越界技能\n---");
+        temp.WriteFile(@"repo\custom\single-skill\SKILL.md", "---\nname: single-skill\ndescription: 單一技能目錄\n---");
+        temp.WriteFile(@"repo\.agents\skills.json", """
+            {
+              "skills": [
+                "custom/single-skill",
+                "../outside/escaped-skill",
+                { "path": "custom/disabled-skill", "enabled": false }
+              ]
+            }
+            """);
+
+        temp.WriteFile(@"repo\ws-plugins\my-pack\.claude-plugin\plugin.json", """{"name":"my-pack"}""");
+        temp.WriteFile(@"repo\ws-plugins\my-pack\skills\pack-skill\SKILL.md", "---\nname: pack-skill\ndescription: 外掛技能\n---");
+        temp.WriteFile(@"repo\ws-plugins\my-pack\commands\pack-cmd.md", "---\nname: pack-cmd\ndescription: 外掛指令\n---");
+        temp.WriteFile(@"repo\ws-plugins\my-pack\agents\pack-agent.md", "---\nname: pack-agent\nlabel: 外掛代理\ndescription: 外掛代理說明\n---");
+        temp.WriteFile(@"repo\.agents\plugins.json", """["ws-plugins/my-pack", "../outside"]""");
+
+        var scanned = AntigravityWorkspaceScanner.Scan(work, agyDir);
+        scanned.Commands.Select(c => c.Name).Should().Contain(new[] { "single-skill", "pack-skill", "pack-cmd" })
+            .And.NotContain("escaped-skill");
+        scanned.Agents.Select(a => a.Name).Should().Contain("pack-agent");
+
+        // 3) 規則檔掃描（.agents/rules、_agents/rules、~/.gemini/config/rules、~/.gemini/rules）
+        temp.WriteFile(@"repo\.agents\rules\coding-style.md", "---\nname: coding-style\ndescription: 專案編碼規範\nalwaysApply: true\n---\n內容");
+        temp.WriteFile(@"repo\_agents\rules\scoped-rule.md", "---\ndescription: 條件觸發規則\nalwaysApply: false\n---\n內容");
+        temp.WriteFile(@".gemini\config\rules\global-cfg-rule.md", "---\ndescription: 全域 config 規則\n---\n內容");
+        temp.WriteFile(@".gemini\rules\global-root-rule.md", "---\ndescription: 全域根目錄規則\n---\n內容");
+
+        var rules = AntigravityWorkspaceScanner.DiscoverWorkspaceRules(work, agyDir);
+        rules.Select(r => (r.Name, r.Description, r.AlwaysApply)).Should().Equal(
+            ("coding-style", "專案編碼規範", true),
+            ("scoped-rule", "條件觸發規則", false),
+            ("global-cfg-rule", "全域 config 規則", true),
+            ("global-root-rule", "全域根目錄規則", true));
+    }
 }

@@ -608,17 +608,21 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
                 scan.Instructions.Add(new InstructionFileStat(full, "main", HealthTextRules.Measure(text, FileLength(full) ?? 0), LinkTarget(full)));
         }
         ScanAntigravityRules(scan, Path.Combine(globalConfig, "rules"), seen);
+        ScanAntigravityRules(scan, Path.Combine(gemini, "rules"), seen);
+        ScanAntigravityRules(scan, Path.Combine(dir, "rules"), seen);
 
         // config.json：Antigravity CLI 的設定檔（含 plugins 的 enabled 覆寫）
         var configJsonPath = Path.Combine(dir, "config.json");
         JObject? agyConfig = TryReadJsonConfig(scan, configJsonPath);
 
-        // hooks.json（全域生命週期 hooks）：有語法錯誤時一併提醒
-        var globalHooksPath = Path.Combine(globalConfig, "hooks.json");
-        if (File.Exists(globalHooksPath))
-            _ = TryReadJsonConfig(scan, globalHooksPath);
+        // hooks.json（全域生命週期 hooks，支援 ~/.gemini/config/hooks.json 與 ~/.gemini/antigravity-cli/hooks.json）：有語法錯誤時一併提醒
+        foreach (var hooksCandidate in new[] { Path.Combine(globalConfig, "hooks.json"), Path.Combine(dir, "hooks.json") })
+        {
+            if (File.Exists(hooksCandidate))
+                _ = TryReadJsonConfig(scan, hooksCandidate);
+        }
 
-        // 使用者層 Skills（~/.gemini/config/skills/<name>/SKILL.md）
+        // 使用者層 Skills（~/.gemini/config/skills/<name>/SKILL.md）與自訂代理（~/.gemini/config/agents/*.md）
         var listing = new StringBuilder();
         var skills = 0;
         foreach (var skill in SkillFiles(Path.Combine(globalConfig, "skills")))
@@ -626,8 +630,11 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
             skills++;
             AddListing(listing, scan, skill.Name, skill.File, "skill", "user", null);
         }
+        var agents = MarkdownFiles(Path.Combine(globalConfig, "agents")).Count()
+                     + MarkdownFiles(Path.Combine(dir, "agents")).Count();
 
-        // 外掛（~/.gemini/config/plugins/<plugin>/plugin.json）：預設啟用，config.json 的 plugins[dirName].enabled 優先於 plugin.json 的 disabled
+        // 外掛（~/.gemini/config/plugins/<plugin>/plugin.json，或 agy plugin import claude 匯入的 .claude-plugin/plugin.json）：
+        // 預設啟用，config.json 的 plugins[dirName].enabled 優先於 plugin.json 的 disabled
         var mcp = new List<string>();
         var plugins = new List<PluginStat>();
         var pluginSkills = 0;
@@ -662,14 +669,29 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
                 AddListing(listing, scan, skill.Name, skill.File, "skill", "plugin", displayName);
             pluginSkills += pSkills.Count;
 
+            var pCommands = MarkdownFiles(Path.Combine(pluginDir, "workflows"))
+                .Concat(MarkdownFiles(Path.Combine(pluginDir, "commands")))
+                .ToList();
+            foreach (var cmdFile in pCommands)
+                AddListing(listing, scan, displayName + ":" + Path.GetFileNameWithoutExtension(cmdFile), cmdFile, "command", "plugin", displayName);
+
+            var pAgents = MarkdownFiles(Path.Combine(pluginDir, "agents")).Count();
+            agents += pAgents;
+
             ScanAntigravityRules(scan, Path.Combine(pluginDir, "rules"), seen);
 
             var pMcp = AntigravityMcpServers(Path.Combine(pluginDir, "mcp_config.json"));
+            foreach (var claudeMcp in AntigravityMcpServers(Path.Combine(pluginDir, ".mcp.json")))
+            {
+                if (!pMcp.Contains(claudeMcp, StringComparer.OrdinalIgnoreCase))
+                    pMcp.Add(claudeMcp);
+            }
             foreach (var serverName in pMcp)
                 mcp.Add(serverName + "（" + displayName + "）");
 
-            var hasHooks = File.Exists(Path.Combine(pluginDir, "hooks.json"));
-            plugins.Add(new PluginStat(displayName, pSkills.Count, 0, 0, pMcp.Count > 0, hasHooks, Missing: false));
+            var hasHooks = File.Exists(Path.Combine(pluginDir, "hooks.json"))
+                           || File.Exists(Path.Combine(pluginDir, "hooks", "hooks.json"));
+            plugins.Add(new PluginStat(displayName, pSkills.Count, pCommands.Count, pAgents, pMcp.Count > 0, hasHooks, Missing: false));
         }
 
         // 全域 MCP 伺服器（~/.gemini/config/mcp_config.json）
@@ -683,6 +705,7 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
 
         scan.Skills = skills + pluginSkills;
         scan.PluginSkills = pluginSkills;
+        scan.Agents = agents;
         scan.Plugins = plugins;
         scan.McpServers = mcp;
         scan.SkillListingTokens = HealthTextRules.EstimateTokens(listing.ToString());
@@ -728,6 +751,7 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
                      "plugin.json",
                      Path.Combine(".antigravity-plugin", "plugin.json"),
                      Path.Combine(".gemini-plugin", "plugin.json"),
+                     Path.Combine(".claude-plugin", "plugin.json"),
                  })
         {
             var candidate = Path.Combine(pluginDir, rel);

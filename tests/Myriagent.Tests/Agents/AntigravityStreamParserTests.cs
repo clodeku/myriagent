@@ -762,4 +762,37 @@ public class AntigravityStreamParserTests
         var capped = AntigravityTranscriptRules.CapArtifactMarkdown(hugeMd);
         capped.Should().Contain("\n```\n\n> [!NOTE]\n> 預覽內容較長");
     }
+
+    [Fact]
+    public void 子代理模型歸屬_finished_reason判定_與外掛登入提示()
+    {
+        var parser = new AntigravityStreamParser("p");
+        parser.BeginTurn();
+        parser.Parse("""{"event":"init","conversation_id":"conv-1","init":{"model":"gemini-3-pro"}}""");
+
+        // 1) 子代理 subagent_info.model 指定了 flash：token 歸屬到 flash，工具卡標題與摘要顯示模型
+        var subStep = """
+            {"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":2,"state":"DONE","step_type":"tool","tool_name":"invoke_subagent","tool_info":{"name":"invoke_subagent","parameters":{"TypeName":"research","Role":"Quick Lookup","Model":"flash","Prompt":"查設定"},"output":"完成"},"subagent_info":{"conversation_id":"sub-77","type":"research","model":"gemini-3-flash","usage":{"input_tokens":200,"output_tokens":50,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":250}}}}
+            """;
+        var subEvents = parser.Parse(subStep).Events;
+        subEvents.OfType<AgentTokenUsageEvent>().Single().Model.Should().Be("gemini-3-flash");
+        subEvents.OfType<AgentToolStartedEvent>().Single().Title.Should().Be("Quick Lookup（research・gemini-3-flash）");
+        subEvents.OfType<AgentToolCompletedEvent>().Single().Output.Should().Contain("模型：gemini-3-flash");
+
+        // 2) 外掛 OAuth 未授權提示（純文字行）轉為 AgentNoticeEvent
+        var plainRes = parser.Parse("⚠ The github plugin needs you to sign in. Open /plugin to sign in.");
+        plainRes.PlainText.Should().NotBeNull();
+        plainRes.Events.OfType<AgentNoticeEvent>().Single().Message.Should().Contain("github");
+
+        // 3) finished_reason = interrupted（即使 status = ERROR）視為 Interrupted
+        var interruptedRes = parser.Parse("""{"event":"result","result":{"conversation_id":"conv-1","status":"ERROR","finished_reason":"interrupted","error":"context canceled"}}""");
+        interruptedRes.Events.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Interrupted);
+
+        // 4) finished_reason = print_timeout 且無 error 時給出明確逾時訊息
+        parser.BeginTurn();
+        var timeoutRes = parser.Parse("""{"event":"result","result":{"conversation_id":"conv-1","status":"ERROR","finished_reason":"print_timeout"}}""");
+        var timeoutCompleted = timeoutRes.Events.OfType<AgentTurnCompletedEvent>().Single();
+        timeoutCompleted.Outcome.Should().Be(AgentTurnOutcome.Failed);
+        timeoutCompleted.ErrorMessage.Should().Contain("print_timeout");
+    }
 }

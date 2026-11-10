@@ -287,9 +287,13 @@ internal sealed class AntigravityAgentSession : IAgentSession
                 return;
             var launcher = settings.Launcher
                 ?? throw new AgentCliUnavailableException(AgentProvider.Antigravity, "這台電腦尚未安裝 Antigravity CLI，請到「設定 → CLI」安裝");
+            var cliArgs = cliSlash.SubcommandArgs ?? new[] { "-p", cliSlash.PromptCommand! };
+            var cmdDisplay = cliSlash.SubcommandArgs != null
+                ? string.Join(' ', cliSlash.SubcommandArgs)
+                : $"-p {cliSlash.PromptCommand}";
             var run = await CliRunner.RunAsync(
                 launcher,
-                new[] { "-p", cliSlash.PromptCommand! },
+                cliArgs,
                 settings.ConfigureEnvironment,
                 CliSlashCommandTimeout,
                 preparation.Token,
@@ -306,14 +310,14 @@ internal sealed class AntigravityAgentSession : IAgentSession
 
             if (run.TimedOut)
             {
-                Raise(new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, $"agy -p {cliSlash.PromptCommand} 逾時沒有回應", null));
+                Raise(new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, $"agy {cmdDisplay} 逾時沒有回應", null));
                 return;
             }
             var text = (run.Stdout ?? string.Empty).Trim();
             var err = (run.Stderr ?? string.Empty).Trim();
             if (run.ExitCode != 0 && text.Length == 0)
             {
-                Raise(new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, err.Length > 0 ? err : $"agy -p {cliSlash.PromptCommand} 結束碼 {run.ExitCode}", null));
+                Raise(new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, err.Length > 0 ? err : $"agy {cmdDisplay} 結束碼 {run.ExitCode}", null));
                 return;
             }
             if (text.Length > 0)
@@ -524,7 +528,8 @@ internal sealed class AntigravityAgentSession : IAgentSession
                 mode,
                 settings.ConversationDirectory,
                 settings.UseLocalCustomizations,
-                settings.Agent),
+                settings.Agent,
+                settings.WorkingDirectory),
             settings.WorkingDirectory,
             settings.ConfigureEnvironment,
             ct);
@@ -606,6 +611,11 @@ internal sealed class AntigravityAgentSession : IAgentSession
             source.AppendStderr(parsed.PlainText);
             if (AntigravityStreamRules.IsSignInPrompt(parsed.PlainText))
                 StopForSignIn(source);
+            else if (IsCurrent(source))
+            {
+                foreach (var ev in parsed.Events)
+                    Raise(ev);
+            }
             return;
         }
 
@@ -724,6 +734,12 @@ internal sealed class AntigravityAgentSession : IAgentSession
         if (AntigravityStreamRules.IsSignInPrompt(line))
         {
             StopForSignIn(source);
+            return;
+        }
+        if (AntigravityStreamRules.TryParsePluginSignInNotice(line, out var pluginNotice) && pluginNotice != null)
+        {
+            if (IsCurrent(source))
+                Raise(new AgentNoticeEvent(pluginNotice, IsError: false));
             return;
         }
         if (AntigravityStreamRules.ParseConversationNotFoundWarning(line) is { } missing)

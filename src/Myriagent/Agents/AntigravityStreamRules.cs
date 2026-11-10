@@ -46,7 +46,7 @@ internal static partial class AntigravityStreamRules
     public const string DisableAutoUpdateValue = "true";
 
     /// <summary>「預設」模型可選的推理強度（agy --effort；模型 id 本身帶強度時不另外傳，見 ModelEncodesEffort）</summary>
-    public static IReadOnlyList<string> DefaultModelEfforts { get; } = new[] { "low", "medium", "high" };
+    public static IReadOnlyList<string> DefaultModelEfforts { get; } = new[] { "low", "medium", "high", "xhigh", "max" };
 
     /// <summary>列出模型（要登入才列得出來，所以同時用來判斷登入狀態）</summary>
     public static IReadOnlyList<string> ModelsArguments { get; } = new[] { "models" };
@@ -72,6 +72,27 @@ internal static partial class AntigravityStreamRules
     /// <summary>無頭查 AI 點數餘額（agy 1.4.6 實測：command.data.remaining_credits）</summary>
     public static IReadOnlyList<string> CreditsArguments { get; } = new[] { "-p", "/credits", "--output-format", "json" };
 
+    /// <summary>無頭查目前預設模型與可選推理強度（agy 1.5.4 實測：command.data 含 adjustable、current、available）</summary>
+    public static IReadOnlyList<string> EffortArguments { get; } = new[] { "-p", "/effort", "--output-format", "json" };
+
+    /// <summary>無頭查目前預設模型（agy 1.5.4 實測：command.data 含 id、label、effort、is_default）</summary>
+    public static IReadOnlyList<string> ModelArguments { get; } = new[] { "-p", "/model", "--output-format", "json" };
+
+    /// <summary>無頭查已載入的 Hooks（agy 1.5.4 實測：command.data.hooks）</summary>
+    public static IReadOnlyList<string> HooksArguments { get; } = new[] { "-p", "/hooks", "--output-format", "json" };
+
+    /// <summary>無頭查三層權限規則（agy 1.5.4 實測：command.data.permissions 含 project／shared／global）</summary>
+    public static IReadOnlyList<string> PermissionsArguments { get; } = new[] { "-p", "/permissions", "--output-format", "json" };
+
+    /// <summary>無頭查可用的自訂代理清單（agy 1.5.4 實測：command.data.agents）</summary>
+    public static IReadOnlyList<string> AgentsArguments { get; } = new[] { "-p", "/agents", "--output-format", "json" };
+
+    /// <summary>匯入 Claude Code 已啟用外掛（agy 1.5.x 新增：agy plugin import claude）</summary>
+    public static IReadOnlyList<string> PluginImportClaudeArguments { get; } = new[] { "plugin", "import", "claude" };
+
+    /// <summary>列出已設定的 MCP 伺服器（agy mcp list）</summary>
+    public static IReadOnlyList<string> McpListArguments { get; } = new[] { "mcp", "list" };
+
     /// <summary>
     /// agy 對話中可展開的內建工作流斜線指令（stream-json 可正常送給模型觸發對應工作流；不含 CLI 本地唯讀指令）
     /// </summary>
@@ -81,6 +102,7 @@ internal static partial class AntigravityStreamRules
         new("grill-me", "透過互動訪談釐清需求細節與設計決策，對齊實作計畫", null),
         new("goal", "設定長時間目標，持續徹底執行並驗證直到目標完全達成", null),
         new("teamwork", "啟動多個自主子代理分工協作處理大型任務", null),
+        new("swarm", "將任務拆解並派發給多個平行子代理同時執行", null),
         new("boost", "深度思考、多角度策略規劃與嚴格驗證模式", null),
         new("learn", "將這次的修正或複雜設定整理成規則供日後對話沿用", null),
         new("browser", "使用瀏覽器搜尋網頁或與網頁應用程式互動", null),
@@ -386,6 +408,126 @@ internal static partial class AntigravityStreamRules
         return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"AI 點數餘額 {credits:0.##}");
     }
 
+    /// <summary>agy -p /effort --output-format json 的判讀結果（agy 1.5.4 實測：command.data 含 adjustable、current、available）</summary>
+    internal sealed record EffortEvaluation(bool Adjustable, string? Current, IReadOnlyList<string> Available);
+
+    /// <summary>agy -p /model --output-format json 的判讀結果（agy 1.5.4 實測：command.data 含 id、label、effort、is_default）</summary>
+    internal sealed record ModelEvaluation(string Id, string Label, string? Effort, bool IsDefault);
+
+    /// <summary>agy -p /hooks --output-format json 的單筆 Hook 項目</summary>
+    internal sealed record HookReportEntry(string Event, string Command, string? Matcher, string? Source);
+
+    /// <summary>agy -p /permissions --output-format json 的單一權限範圍（project／shared／global）</summary>
+    internal sealed record PermissionScopeEntry(string Scope, IReadOnlyList<string> Allow, IReadOnlyList<string> Deny, IReadOnlyList<string> Ask);
+
+    /// <summary>解析 agy -p /effort --output-format json 的輸出；失敗或格式不符回 null</summary>
+    public static EffortEvaluation? EvaluateEffortCommand(int exitCode, string? stdout)
+    {
+        if (exitCode != 0)
+            return null;
+        var root = TryParseJsonPayload(stdout);
+        if (root?["command"] is not JObject cmd
+            || !string.Equals(cmd.Value<string>("name"), "effort", StringComparison.OrdinalIgnoreCase)
+            || cmd["data"] is not JObject data)
+        {
+            return null;
+        }
+        bool adjustable = data.Value<bool?>("adjustable") == true;
+        var current = data.Value<string>("current")?.Trim();
+        if (string.IsNullOrWhiteSpace(current))
+            current = null;
+        var available = (data["available"] as JArray)?
+            .OfType<JValue>()
+            .Select(v => v.Value<string>()?.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s!.ToLowerInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(e => Array.IndexOf(EffortOrder, e) is >= 0 and var idx ? idx : int.MaxValue)
+            .ToArray() ?? Array.Empty<string>();
+        return new EffortEvaluation(adjustable, current, available);
+    }
+
+    /// <summary>解析 agy -p /model --output-format json 的輸出；失敗或格式不符回 null</summary>
+    public static ModelEvaluation? EvaluateModelCommand(int exitCode, string? stdout)
+    {
+        if (exitCode != 0)
+            return null;
+        var root = TryParseJsonPayload(stdout);
+        if (root?["command"] is not JObject cmd
+            || !string.Equals(cmd.Value<string>("name"), "model", StringComparison.OrdinalIgnoreCase)
+            || cmd["data"] is not JObject data)
+        {
+            return null;
+        }
+        var id = data.Value<string>("id")?.Trim();
+        if (string.IsNullOrWhiteSpace(id))
+            return null;
+        var label = data.Value<string>("label")?.Trim();
+        if (string.IsNullOrWhiteSpace(label))
+            label = id;
+        var effort = data.Value<string>("effort")?.Trim();
+        if (string.IsNullOrWhiteSpace(effort))
+            effort = null;
+        bool isDefault = data.Value<bool?>("is_default") == true;
+        return new ModelEvaluation(id, label, effort, isDefault);
+    }
+
+    /// <summary>解析 agy -p /hooks --output-format json 的輸出</summary>
+    public static IReadOnlyList<HookReportEntry> EvaluateHooksCommand(int exitCode, string? stdout)
+    {
+        if (exitCode != 0)
+            return Array.Empty<HookReportEntry>();
+        var root = TryParseJsonPayload(stdout);
+        if (root?["command"] is not JObject cmd
+            || !string.Equals(cmd.Value<string>("name"), "hooks", StringComparison.OrdinalIgnoreCase)
+            || cmd["data"]?["hooks"] is not JArray hooks)
+        {
+            return Array.Empty<HookReportEntry>();
+        }
+        var list = new List<HookReportEntry>();
+        foreach (var item in hooks.OfType<JObject>())
+        {
+            var ev = item.Value<string>("event")?.Trim() ?? item.Value<string>("type")?.Trim();
+            var command = item.Value<string>("command")?.Trim();
+            if (string.IsNullOrWhiteSpace(ev) || string.IsNullOrWhiteSpace(command))
+                continue;
+            var matcher = item.Value<string>("matcher")?.Trim();
+            var source = item.Value<string>("source")?.Trim() ?? item.Value<string>("scope")?.Trim();
+            list.Add(new HookReportEntry(
+                ev,
+                command,
+                string.IsNullOrWhiteSpace(matcher) ? null : matcher,
+                string.IsNullOrWhiteSpace(source) ? null : source));
+        }
+        return list;
+    }
+
+    /// <summary>解析 agy -p /permissions --output-format json 的輸出</summary>
+    public static IReadOnlyList<PermissionScopeEntry> EvaluatePermissionsCommand(int exitCode, string? stdout)
+    {
+        if (exitCode != 0)
+            return Array.Empty<PermissionScopeEntry>();
+        var root = TryParseJsonPayload(stdout);
+        if (root?["command"] is not JObject cmd
+            || !string.Equals(cmd.Value<string>("name"), "permissions", StringComparison.OrdinalIgnoreCase)
+            || cmd["data"]?["permissions"] is not JArray perms)
+        {
+            return Array.Empty<PermissionScopeEntry>();
+        }
+        static IReadOnlyList<string> Strings(JToken? token)
+            => (token as JArray)?.OfType<JValue>().Select(v => v.Value<string>()?.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!).ToArray()
+               ?? Array.Empty<string>();
+        var list = new List<PermissionScopeEntry>();
+        foreach (var item in perms.OfType<JObject>())
+        {
+            var scope = item.Value<string>("scope")?.Trim();
+            if (string.IsNullOrWhiteSpace(scope))
+                continue;
+            list.Add(new PermissionScopeEntry(scope, Strings(item["allow"]), Strings(item["deny"]), Strings(item["ask"])));
+        }
+        return list;
+    }
+
     private static JObject? TryParseJsonPayload(string? stdout)
     {
         if (string.IsNullOrWhiteSpace(stdout))
@@ -494,7 +636,9 @@ internal static partial class AntigravityStreamRules
     /// <summary>
     /// 對話程序的參數：--print=（空的提示，訊息改從 stdin 一行一則送）＋雙向 stream-json；續接用 --conversation；
     /// 新對話且非精簡模式時若選了自訂代理則傳 --agent；模型「預設」不傳 --model（用 agy 自己記住的）；模型 id 帶強度時不傳 --effort；
-    /// 權限模式見 PermissionArguments；精簡模式（useLocalCustomizations＝false）傳 --disable-slash-commands；對話資料夾（附件）以 --add-dir 加進工作區
+    /// 權限模式見 PermissionArguments；精簡模式（useLocalCustomizations＝false）傳 --disable-slash-commands；對話資料夾（附件）以 --add-dir 加進工作區；
+    /// 續接既有對話且目前工作資料夾不在對話資料夾內時，額外以 --add-dir 傳入工作資料夾（agy 1.5.2 起續接會還原原對話工作區）；
+    /// 若有額外設定（JSON 或檔案路徑）則傳 --settings（agy 1.4.11+）
     /// </summary>
     public static List<string> BuildArguments(
         string? conversationId,
@@ -503,7 +647,9 @@ internal static partial class AntigravityStreamRules
         AgentPermissionMode mode,
         string conversationDirectory,
         bool useLocalCustomizations = true,
-        string? agent = null)
+        string? agent = null,
+        string? workingDirectory = null,
+        string? settingsJson = null)
     {
         var args = new List<string> { "--print=", "--input-format", "stream-json", "--output-format", "stream-json" };
         if (!string.IsNullOrWhiteSpace(conversationId))
@@ -535,7 +681,40 @@ internal static partial class AntigravityStreamRules
             args.Add("--add-dir");
             args.Add(conversationDirectory);
         }
+        if (!string.IsNullOrWhiteSpace(conversationId)
+            && !string.IsNullOrWhiteSpace(workingDirectory)
+            && !IsSameOrUnderDirectory(workingDirectory, conversationDirectory))
+        {
+            args.Add("--add-dir");
+            args.Add(workingDirectory);
+        }
+        if (!string.IsNullOrWhiteSpace(settingsJson))
+        {
+            args.Add("--settings");
+            args.Add(settingsJson);
+        }
         return args;
+    }
+
+    private static bool IsSameOrUnderDirectory(string candidatePath, string? baseDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(baseDirectory))
+            return false;
+        try
+        {
+            var fullCandidate = Path.GetFullPath(candidatePath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var fullBase = Path.GetFullPath(baseDirectory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(fullCandidate, fullBase, StringComparison.OrdinalIgnoreCase))
+                return true;
+            return fullCandidate.StartsWith(fullBase + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || fullCandidate.StartsWith(fullBase + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -729,16 +908,22 @@ internal static partial class AntigravityStreamRules
         SinglePrompt,
     }
 
-    internal sealed record CliOnlySlashClassification(CliOnlySlashKind Kind, string? PromptCommand = null, string? UiHint = null);
+    internal sealed record CliOnlySlashClassification(
+        CliOnlySlashKind Kind,
+        string? PromptCommand = null,
+        string? UiHint = null,
+        IReadOnlyList<string>? SubcommandArgs = null);
 
     private static readonly HashSet<string> SinglePromptOnlySlashNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "help", "usage", "quota", "credits", "skills", "agents", "plugin", "hooks", "config", "settings", "changelog",
+        "help", "usage", "quota", "credits", "skills", "agents", "plugin", "plugins", "hooks", "config", "settings", "changelog",
     };
 
     /// <summary>
     /// 辨識不可送進 stream-json 的 CLI 本地唯讀斜線指令（agy 1.4.6 實測送進 stream-json 會報錯並 exit 2）：
-    /// model／effort／permissions 提示改用選單；usage／credits／skills／help 等改以單發 -p 執行並回報結果
+    /// model／effort／permissions 提示改用選單；usage／credits／skills／help 等改以單發 -p 執行並回報結果；
+    /// 單獨的 /plugin 或 /plugins 正規化為 /plugin list（agy 1.5.2 起單獨 /plugin 在 -p 模式需明確指定 list）；
+    /// /mcp 改以 agy mcp 子指令執行（agy 1.5.4 起 /mcp 在 -p 仍要求互動式工作階段，但 agy mcp list 可非互動查詢）
     /// </summary>
     public static CliOnlySlashClassification ClassifyCliOnlySlashCommand(string? text)
     {
@@ -760,10 +945,53 @@ internal static partial class AntigravityStreamRules
         if (name.Equals("permissions", StringComparison.OrdinalIgnoreCase))
             return new CliOnlySlashClassification(CliOnlySlashKind.UiManaged, UiHint: "Antigravity 的 stream-json 模式不接受 /permissions 指令；請直接由對話輸入框下方的權限選單切換（下一則訊息生效）。");
 
+        var rest = space > 0 ? trimmed[(space + 1)..].Trim() : string.Empty;
+
+        if (name.Equals("plugin", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("plugins", StringComparison.OrdinalIgnoreCase))
+        {
+            var normalizedPluginCmd = rest.Length == 0 ? "/plugin list" : $"/plugin {rest}";
+            return new CliOnlySlashClassification(CliOnlySlashKind.SinglePrompt, PromptCommand: normalizedPluginCmd);
+        }
+
+        if (name.Equals("mcp", StringComparison.OrdinalIgnoreCase))
+        {
+            var subArgs = new List<string> { "mcp" };
+            if (rest.Length == 0)
+            {
+                subArgs.Add("list");
+            }
+            else
+            {
+                foreach (var token in rest.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    subArgs.Add(token);
+            }
+            return new CliOnlySlashClassification(CliOnlySlashKind.SinglePrompt, PromptCommand: trimmed, SubcommandArgs: subArgs);
+        }
+
         if (SinglePromptOnlySlashNames.Contains(name))
             return new CliOnlySlashClassification(CliOnlySlashKind.SinglePrompt, PromptCommand: trimmed);
 
         return new CliOnlySlashClassification(CliOnlySlashKind.None);
+    }
+
+    /// <summary>
+    /// agy 1.5.3+ 外掛 OAuth 未授權提示（「⚠ The &lt;plugin&gt; plugin needs you to sign in. Open /plugin to sign in.」）：
+    /// 轉為中文提示訊息，不中斷對話
+    /// </summary>
+    public static bool TryParsePluginSignInNotice(string? line, out string? notice)
+    {
+        notice = null;
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+        var match = PluginSignInNoticePattern().Match(line);
+        if (!match.Success)
+            return false;
+        var pluginName = match.Groups["plugin"].Value.Trim();
+        if (pluginName.Length == 0)
+            return false;
+        notice = $"Antigravity 外掛「{pluginName}」需要登入授權（請在終端機執行 agy 並輸入 /plugin 完成登入）。";
+        return true;
     }
 
     // ───────────────────────────── 規劃模式與 RequestFeedback Artifacts 確認卡 ─────────────────────────────
@@ -886,4 +1114,7 @@ internal static partial class AntigravityStreamRules
     /// <summary>顯示名稱尾端的強度：「Gemini 3.8 Flash (Low)」的「 (Low)」</summary>
     [GeneratedRegex(@"\s*\((minimal|low|medium|high|xhigh|max|extra high)\)\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex EffortLabelSuffix();
+
+    [GeneratedRegex(@"(?:⚠\s*)?\bThe\s+(?<plugin>[^\s]+)\s+plugin\s+needs\s+you\s+to\s+sign\s+in\.\s*Open\s+/plugin\s+to\s+sign\s+in\.", RegexOptions.IgnoreCase)]
+    private static partial Regex PluginSignInNoticePattern();
 }

@@ -582,8 +582,95 @@ public class AntigravityRulesTests
 
         AntigravityStreamRules.ClassifyCliOnlySlashCommand("/plan 幫我重構").Kind.Should().Be(AntigravityStreamRules.CliOnlySlashKind.None);
         AntigravityStreamRules.ClassifyCliOnlySlashCommand("/grill-me").Kind.Should().Be(AntigravityStreamRules.CliOnlySlashKind.None);
+        AntigravityStreamRules.ClassifyCliOnlySlashCommand("/swarm 平行處理").Kind.Should().Be(AntigravityStreamRules.CliOnlySlashKind.None);
         AntigravityStreamRules.ClassifyCliOnlySlashCommand("/credits\n第二行").Kind.Should().Be(AntigravityStreamRules.CliOnlySlashKind.None, "多行文字是一般對話訊息");
         AntigravityStreamRules.ClassifyCliOnlySlashCommand("普通訊息").Kind.Should().Be(AntigravityStreamRules.CliOnlySlashKind.None);
+
+        // agy 1.5.2+ 單獨 /plugin 正規化為 /plugin list；/mcp 改用 agy mcp list 子指令
+        AntigravityStreamRules.ClassifyCliOnlySlashCommand("/plugin")
+            .Should().BeEquivalentTo(new { Kind = AntigravityStreamRules.CliOnlySlashKind.SinglePrompt, PromptCommand = "/plugin list" });
+        AntigravityStreamRules.ClassifyCliOnlySlashCommand("/plugins")
+            .Should().BeEquivalentTo(new { Kind = AntigravityStreamRules.CliOnlySlashKind.SinglePrompt, PromptCommand = "/plugin list" });
+        AntigravityStreamRules.ClassifyCliOnlySlashCommand("/plugin install foo")
+            .Should().BeEquivalentTo(new { Kind = AntigravityStreamRules.CliOnlySlashKind.SinglePrompt, PromptCommand = "/plugin install foo" });
+
+        var mcpCmd = AntigravityStreamRules.ClassifyCliOnlySlashCommand("/mcp");
+        mcpCmd.Kind.Should().Be(AntigravityStreamRules.CliOnlySlashKind.SinglePrompt);
+        mcpCmd.SubcommandArgs.Should().Equal("mcp", "list");
+
+        var mcpSub = AntigravityStreamRules.ClassifyCliOnlySlashCommand("/mcp list --json");
+        mcpSub.SubcommandArgs.Should().Equal("mcp", "list", "--json");
+    }
+
+    [Fact]
+    public void BuildArguments_續接對話且工作資料夾不在對話資料夾內時額外傳add_dir_並支援settings()
+    {
+        // 續接且工作資料夾在對話資料夾之外：同時傳兩個 --add-dir
+        AntigravityStreamRules.BuildArguments(
+            "conv-1", "gemini-3.8-pro", "high", AgentPermissionMode.AcceptEdits, @"C:\Users\u\conv\c1",
+            workingDirectory: @"C:\repo\project", settingsJson: """{"theme":"dark"}""")
+            .Should().Equal(
+                "--print=", "--input-format", "stream-json", "--output-format", "stream-json",
+                "--conversation", "conv-1", "--model", "gemini-3.8-pro", "--effort", "high", "--mode", "accept-edits",
+                "--add-dir", @"C:\Users\u\conv\c1", "--add-dir", @"C:\repo\project", "--settings", """{"theme":"dark"}""");
+
+        // 工作資料夾已在對話資料夾底下（或相同）：不重複加第二個 --add-dir
+        AntigravityStreamRules.BuildArguments(
+            "conv-1", "gemini-3.8-pro", "high", AgentPermissionMode.AcceptEdits, @"C:\Users\u\conv\c1",
+            workingDirectory: @"C:\Users\u\conv\c1\sub")
+            .Should().Equal(
+                "--print=", "--input-format", "stream-json", "--output-format", "stream-json",
+                "--conversation", "conv-1", "--model", "gemini-3.8-pro", "--effort", "high", "--mode", "accept-edits",
+                "--add-dir", @"C:\Users\u\conv\c1");
+
+        // 新對話（conversationId 為 null）：CWD 本身就是工作區根目錄，不額外加第二個 --add-dir
+        AntigravityStreamRules.BuildArguments(
+            null, "gemini-3.8-pro", "high", AgentPermissionMode.AcceptEdits, @"C:\Users\u\conv\c1",
+            workingDirectory: @"C:\repo\project")
+            .Should().Equal(
+                "--print=", "--input-format", "stream-json", "--output-format", "stream-json",
+                "--model", "gemini-3.8-pro", "--effort", "high", "--mode", "accept-edits",
+                "--add-dir", @"C:\Users\u\conv\c1");
+    }
+
+    [Fact]
+    public void EvaluateEffort_Model_Hooks_Permissions_解析1_5_4無頭JSON輸出與外掛登入提示()
+    {
+        AntigravityStreamRules.DefaultModelEfforts.Should().Equal("low", "medium", "high", "xhigh", "max");
+        AntigravityStreamRules.BuiltinWorkflowCommands.Select(c => c.Name).Should().Contain("swarm");
+
+        var effort = AntigravityStreamRules.EvaluateEffortCommand(0,
+            """{"status":"SUCCESS","command":{"name":"effort","data":{"adjustable":true,"current":"high","available":["low","medium","high","xhigh","max"]}}}""");
+        effort.Should().NotBeNull();
+        effort!.Adjustable.Should().BeTrue();
+        effort.Current.Should().Be("high");
+        effort.Available.Should().Equal("low", "medium", "high", "xhigh", "max");
+
+        var model = AntigravityStreamRules.EvaluateModelCommand(0,
+            """{"status":"SUCCESS","command":{"name":"model","data":{"id":"gemini-3-flash","label":"Gemini 3 Flash","effort":"high","is_default":true}}}""");
+        model.Should().NotBeNull();
+        model!.Id.Should().Be("gemini-3-flash");
+        model.Label.Should().Be("Gemini 3 Flash");
+        model.Effort.Should().Be("high");
+        model.IsDefault.Should().BeTrue();
+
+        var hooks = AntigravityStreamRules.EvaluateHooksCommand(0,
+            """{"status":"SUCCESS","command":{"name":"hooks","data":{"hooks":[{"event":"PreToolUse","matcher":"run_command","type":"command","command":"echo pre","source":"user"}]}}}""");
+        hooks.Should().ContainSingle().Which.Should().Be(
+            new AntigravityStreamRules.HookReportEntry("PreToolUse", "echo pre", "run_command", "user"));
+
+        var perms = AntigravityStreamRules.EvaluatePermissionsCommand(0,
+            """{"status":"SUCCESS","command":{"name":"permissions","data":{"permissions":[{"scope":"user","allow":["Read"],"ask":["Bash(git push:*)"],"deny":["Write(.env)"]}]}}}""");
+        perms.Should().ContainSingle();
+        perms[0].Scope.Should().Be("user");
+        perms[0].Allow.Should().Equal("Read");
+        perms[0].Ask.Should().Equal("Bash(git push:*)");
+        perms[0].Deny.Should().Equal("Write(.env)");
+
+        AntigravityStreamRules.TryParsePluginSignInNotice("⚠ The linear plugin needs you to sign in. Open /plugin to sign in.", out var notice)
+            .Should().BeTrue();
+        notice.Should().Contain("linear").And.Contain("/plugin");
+        AntigravityStreamRules.TryParsePluginSignInNotice("normal output", out _).Should().BeFalse();
     }
 
     [Fact]

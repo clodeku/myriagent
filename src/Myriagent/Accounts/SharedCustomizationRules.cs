@@ -88,10 +88,11 @@ internal static class SharedCustomizationRules
     /// <summary>skills 資料夾的名稱（逐一以 junction 連過去：資料夾裡有帳戶自己的東西，不能整個連）</summary>
     public const string SkillsDirectoryName = "skills";
 
-    /// <summary>Antigravity 內建的保留工作流名稱（跨 CLI 共用時不把同名 skill 連進 ~/.gemini/config/skills，避免蓋掉內建指令）</summary>
+    /// <summary>Antigravity 內建的保留工作流與技能名稱（跨 CLI 共用時不把同名 skill 連進 ~/.gemini/config/skills，避免蓋掉內建指令與說明技能）</summary>
     private static readonly HashSet<string> AntigravityReservedSkillNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "goal", "compact", "schedule", "browser", "plan", "grill-me", "teamwork", "learn", "boost",
+        "goal", "compact", "schedule", "browser", "plan", "grill-me", "teamwork", "learn", "boost", "swarm",
+        "agy-customizations", "antigravity-guide", "antigravity_guide",
     };
 
     /// <summary>
@@ -401,4 +402,51 @@ internal static class SharedCustomizationRules
     /// <summary>帳戶自己的 Claude MCP 伺服器名稱（user 層與這個專案的 local 層）</summary>
     public static IReadOnlyList<string> ServerNames(JObject? userServers, JObject? projectServers)
         => new[] { userServers, projectServers }.Where(o => o != null).SelectMany(o => o!.Properties().Select(p => p.Name)).Distinct(StringComparer.Ordinal).ToList();
+
+    /// <summary>讀取 Antigravity MCP 設定檔（~/.gemini/config/mcp_config.json）的 mcpServers 物件</summary>
+    public static JObject? ReadAntigravityMcpServers(string? jsonText)
+    {
+        if (string.IsNullOrWhiteSpace(jsonText))
+            return null;
+        try
+        {
+            using var reader = new JsonTextReader(new StringReader(jsonText)) { DateParseHandling = DateParseHandling.None };
+            if (JToken.ReadFrom(reader) is JObject root && root["mcpServers"] is JObject servers)
+                return (JObject)servers.DeepClone();
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 合併共用 MCP 伺服器至 Antigravity 的 mcp_config.json：既有已定義的同名伺服器（含設定 disabled: true 的項目）優先保留不覆蓋
+    /// </summary>
+    public static JObject? BuildAntigravityMcpConfig(JObject? existingMcpConfig, JObject? sharedServers, IReadOnlyCollection<string>? preserveServerNames = null)
+    {
+        if (sharedServers == null || sharedServers.Count == 0)
+            return existingMcpConfig != null ? (JObject)existingMcpConfig.DeepClone() : null;
+
+        var root = existingMcpConfig != null ? (JObject)existingMcpConfig.DeepClone() : new JObject();
+        var servers = root["mcpServers"] as JObject ?? new JObject();
+        var preserved = preserveServerNames != null
+            ? new HashSet<string>(preserveServerNames, StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var existing in servers.Properties())
+            preserved.Add(existing.Name);
+
+        foreach (var prop in sharedServers.Properties())
+        {
+            if (prop.Value is JObject def && !preserved.Contains(prop.Name))
+                servers[prop.Name] = def.DeepClone();
+        }
+
+        if (servers.Count == 0)
+            return null;
+        root["mcpServers"] = servers;
+        return root;
+    }
 }

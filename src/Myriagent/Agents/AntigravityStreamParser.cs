@@ -211,6 +211,8 @@ internal sealed partial class AntigravityStreamParser
         catch (JsonReaderException)
         {
             result.PlainText = line;
+            if (AntigravityStreamRules.TryParsePluginSignInNotice(line, out var pluginNotice) && pluginNotice != null)
+                result.Events.Add(new AgentNoticeEvent(pluginNotice, false));
             return result;
         }
 
@@ -221,7 +223,7 @@ internal sealed partial class AntigravityStreamParser
             case "init":
                 RememberConversation(Str(obj["conversation_id"]) ?? Str(payload["conversation_id"]), result);
                 result.Model = Str(payload["model"]);
-                // token 增量記在這個模型（子代理的步驟也是：agy 沒說子代理用哪個模型）
+                // token 增量記在這個模型（子代理若未回報自身模型時亦沿用）
                 if (!string.IsNullOrWhiteSpace(result.Model))
                     tokenModel = result.Model;
                 break;
@@ -253,16 +255,22 @@ internal sealed partial class AntigravityStreamParser
         bool hasNumericIndex = int.TryParse(index, NumberStyles.Integer, CultureInfo.InvariantCulture, out int numericIndex);
         var stepType = Str(payload["step_type"]);
         var subagentInfo = payload["subagent_info"] as JObject;
+        var toolInfo = payload["tool_info"] as JObject;
 
         var usageObj = payload["usage"] as JObject ?? subagentInfo?["usage"] as JObject;
         if (usageObj != null)
         {
-            // 同一步驟可能再回報一次（用量變大）：token 計數只記比上次多的部分
+            // 同一步驟可能再回報一次（用量變大）：token 計數只記比上次多的部分；子代理若回報自身模型（agy 1.5.3+）則歸入該模型
             var current = AntigravityStepRules.ToUsage(usageObj);
             var added = TokenTallyRules.Increment(stepUsage.GetValueOrDefault(index), current);
             stepUsage[index] = current;
             if (!TokenTallyRules.IsZero(added))
-                result.Events.Add(new AgentTokenUsageEvent(added, tokenModel));
+            {
+                var stepModel = subagentInfo != null
+                    ? AntigravityStepRules.ResolveSubagentModel(subagentInfo, toolInfo) ?? tokenModel
+                    : tokenModel;
+                result.Events.Add(new AgentTokenUsageEvent(added, stepModel));
+            }
         }
 
         if (string.Equals(stepType, "user_input", StringComparison.OrdinalIgnoreCase))
@@ -279,7 +287,6 @@ internal sealed partial class AntigravityStreamParser
         if (AntigravityStepRules.IsHiddenStep(stepType))
             return;
 
-        var toolInfo = payload["tool_info"] as JObject;
         var toolName = Str(payload["tool_name"]) ?? Str(toolInfo?["name"]);
         bool isToolStep = !string.IsNullOrEmpty(toolName) || toolInfo != null || subagentInfo != null;
 
@@ -690,9 +697,14 @@ internal sealed partial class AntigravityStreamParser
             result.Events.Add(new AgentNoticeEvent(AntigravityStepRules.DeniedNotice(names), false));
 
         var status = Str(payload["status"]);
-        var outcome = AntigravityStepRules.ClassifyResultStatus(status);
+        var finishedReason = Str(payload["finished_reason"]);
+        var outcome = AntigravityStepRules.ClassifyResultStatus(status, finishedReason);
         var error = outcome == AgentTurnOutcome.Failed
-            ? AntigravityStepRules.ErrorText(payload["error"]) is { Length: > 0 } e ? e : $"agy 回報這一輪失敗（{status ?? "沒有狀態"}）"
+            ? AntigravityStepRules.ErrorText(payload["error"]) is { Length: > 0 } e
+                ? e
+                : string.Equals(finishedReason, "print_timeout", StringComparison.OrdinalIgnoreCase)
+                    ? "agy 執行逾時（print_timeout）"
+                    : $"agy 回報這一輪失敗（{status ?? "沒有狀態"}）"
             : null;
 
         if (outcome == AgentTurnOutcome.Completed && pendingPlanReview is { } planReview)
@@ -789,13 +801,45 @@ internal static class AntigravityStepRules
         => string.Equals(stepType, "user_input", StringComparison.OrdinalIgnoreCase)
            || string.Equals(stepType, "system_message", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>result 的 status：SUCCESS＝完成；CANCELED／INTERRUPTED＝已停止；其他（ERROR、INVALID…）＝失敗</summary>
-    public static AgentTurnOutcome ClassifyResultStatus(string? status) => (status ?? string.Empty).ToUpperInvariant() switch
+    /// <summary>
+    /// result 的 status 與 finished_reason（agy 1.4.11+）：
+    /// finished_reason 為 interrupted／canceled 時視為已停止（即使 status 為 ERROR）；
+    /// status 為 SUCCESS＝完成；CANCELED／INTERRUPTED＝已停止；其他（ERROR、INVALID、print_timeout…）＝失敗
+    /// </summary>
+    public static AgentTurnOutcome ClassifyResultStatus(string? status, string? finishedReason = null)
     {
-        "SUCCESS" => AgentTurnOutcome.Completed,
-        "CANCELED" or "CANCELLED" or "INTERRUPTED" => AgentTurnOutcome.Interrupted,
-        _ => AgentTurnOutcome.Failed,
-    };
+        if (!string.IsNullOrWhiteSpace(finishedReason))
+        {
+            var reason = finishedReason.Trim().ToUpperInvariant();
+            if (reason is "INTERRUPTED" or "CANCELED" or "CANCELLED")
+                return AgentTurnOutcome.Interrupted;
+        }
+        return (status ?? string.Empty).ToUpperInvariant() switch
+        {
+            "SUCCESS" => AgentTurnOutcome.Completed,
+            "CANCELED" or "CANCELLED" or "INTERRUPTED" => AgentTurnOutcome.Interrupted,
+            _ => AgentTurnOutcome.Failed,
+        };
+    }
+
+    /// <summary>
+    /// 解析子代理步驟實際使用的模型（agy 1.5.3+ subagent_info.model／model_id 或 invoke_subagent 參數 Model）；
+    /// inherit／default／空值回傳 null（沿用父對話模型）
+    /// </summary>
+    public static string? ResolveSubagentModel(JObject? subagentInfo, JObject? toolInfo = null)
+    {
+        var raw = FirstParameter(subagentInfo, "model", "model_id", "modelId")
+            ?? FirstParameter(toolInfo?["parameters"] as JObject, "Model", "model");
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+        var trimmed = raw.Trim();
+        if (trimmed.Equals("inherit", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("default", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        return trimmed;
+    }
 
     /// <summary>
     /// agy 的 usage → AgentUsage：input_tokens 不含 cache_read_tokens（total_tokens＝input＋output），
@@ -903,9 +947,10 @@ internal static class AntigravityStepRules
         {
             var role = FirstParameter(parameters, "Role", "TaskName", "Name");
             var subType = FirstParameter(parameters, "TypeName") ?? FirstParameter(subagentInfo, "type", "agent_type");
+            var subModel = ResolveSubagentModel(subagentInfo, info);
             var prompt = FirstParameter(parameters, "Prompt", "Task", "Message", "Description");
             var agentTitle = !string.IsNullOrWhiteSpace(role) && !string.IsNullOrWhiteSpace(subType)
-                ? $"{role}（{subType}）"
+                ? (subModel != null ? $"{role}（{subType}・{subModel}）" : $"{role}（{subType}）")
                 : role ?? subType ?? prompt ?? (string.IsNullOrEmpty(toolName) ? name : toolName);
             var agentDetail = !string.IsNullOrWhiteSpace(prompt)
                 ? ClaudeStreamRules.Truncate(prompt, ClaudeStreamRules.MaxToolDetailLength)
@@ -964,7 +1009,7 @@ internal static class AntigravityStepRules
         return string.IsNullOrEmpty(normalized) ? subNote : normalized + "\n\n" + subNote;
     }
 
-    /// <summary>整理 step_update.subagent_info（conversation_id、usage、log_uri 轉本機路徑）供工具卡顯示</summary>
+    /// <summary>整理 step_update.subagent_info（conversation_id、model、usage、log_uri 轉本機路徑）供工具卡顯示</summary>
     public static string? FormatSubagentInfo(JObject? subagentInfo)
     {
         if (subagentInfo == null || subagentInfo.Count == 0)
@@ -973,6 +1018,10 @@ internal static class AntigravityStepRules
         var convId = FirstParameter(subagentInfo, "conversation_id", "conversationId");
         if (!string.IsNullOrWhiteSpace(convId))
             parts.Add($"子代理對話：{convId}");
+
+        var subModel = ResolveSubagentModel(subagentInfo);
+        if (!string.IsNullOrWhiteSpace(subModel))
+            parts.Add($"模型：{subModel}");
 
         if (subagentInfo["usage"] is JObject usageObj)
         {
