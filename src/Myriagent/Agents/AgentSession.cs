@@ -430,6 +430,16 @@ internal interface IAgentSession : IDisposable
         => Task.FromResult(new AgentBackgroundStopResult(0, "這種代理不支援停止背景工作"));
 
     /// <summary>
+    /// 把執行中的前景指令與子代理移到背景（web-protocol 的 backgroundTasks，2026-11-11 使用者要求；等於終端機的 Ctrl+B）：工具立刻以
+    /// 「在背景執行」結束、這一輪接著做，工作在背景跑完時照背景工作回報。toolUseId 只移那一個，null＝全部。回 null＝CLI 收下了，否則是給人看的原因。
+    /// 只有 Claude 支援（<see cref="CanMoveToBackground"/>）
+    /// </summary>
+    Task<string?> MoveToBackgroundAsync(string? toolUseId) => Task.FromResult<string?>("這種代理不能把執行中的工作移到背景");
+
+    /// <summary>支援把執行中的前景工作移到背景（MoveToBackgroundAsync）：Claude</summary>
+    bool CanMoveToBackground => false;
+
+    /// <summary>
     /// 取消插進這一輪、CLI 還沒讀走的那則（cancel_async_message；messageUuid 是送出時的 AgentTurnInput.MessageUuid）。
     /// 回 true＝那則不會被代理看到（會話已回到插入之前的狀態）；false＝已被讀走或做不到。只有 Claude 支援
     /// </summary>

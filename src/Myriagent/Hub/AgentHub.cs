@@ -490,6 +490,10 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                     // 等背景工作回報那一行的「停止」（AgentHub.TaskStop.cs）：帶 stopId 停一個，不帶是全部
                     _ = StopBackgroundTaskAsync(view, Conv(), Str("stopId"));
                     break;
+                case "backgroundTasks":
+                    // 執行中那一行的「移到背景」（AgentHub.MoveToBackground.cs）：前景的指令與子代理全部移到背景
+                    _ = MoveToBackgroundAsync(view, Conv());
+                    break;
                 case "setAccount":
                     SetAccount(view, Conv(), Str("accountId"), atTurnEnd: AccountSwitchRules.IsAtTurnEnd(Str("when")),
                         explicitNow: AccountSwitchRules.IsExplicitNow(Str("when")));

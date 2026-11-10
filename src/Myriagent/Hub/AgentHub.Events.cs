@@ -311,6 +311,17 @@ internal sealed partial class AgentHub
                 break;
             }
 
+            case AgentColdResumeQuotaEvent coldResume:
+                // 快取過期後整份重送的額度成本（送出前的快取提醒用；記在 meta：app 重開之後回到閒置的對話照樣提醒）
+                if (c.Meta.ColdResume != coldResume.Quota)
+                {
+                    c.Meta.ColdResume = coldResume.Quota;
+                    MarkHeaderDirty(c);
+                    if (!c.IsReplica && !c.IsDraft)
+                        SaveConversation(c, saveItems: false);
+                }
+                break;
+
             case AgentRateLimitEvent rate:
                 accounts.ReportSessionRateLimit(c.Meta.AccountId, rate.Provider, rate.Raw);
                 break;
@@ -563,8 +574,14 @@ internal sealed partial class AgentHub
                 break;
             case AgentTurnOutcome.Interrupted:
                 // 為了換帳戶停下的：不算「已停止」（換過去之後加換帳戶的提示、佇列照常接著送）；這一輪結束時才換的是使用者按了停止，照常
+                // Claude 按停止不砍背景工作（initialize 的 perTaskStopAffordance）：還有背景工作在跑時說明它們繼續執行
                 if (userSwitch is not { AtTurnEnd: false })
-                    AddItem(c, new AgentChatItem { Kind = AgentItemKind.Notice, Text = c.Queue.Count > 0 ? "已停止這一輪（排隊的訊息暫停，按送出繼續）" : "已停止這一輪" });
+                    AddItem(c, new AgentChatItem
+                    {
+                        Kind = AgentItemKind.Notice,
+                        Text = BackgroundWorkRules.StoppedTurnNotice(c.Queue.Count > 0,
+                            c.Meta.Provider == AgentProvider.Claude && BackgroundOf(c) is { } left ? left.Count : 0),
+                    });
                 break;
             default:
                 if (accountSwitch?.NoCandidateNotice is { } noCandidate)

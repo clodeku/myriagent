@@ -143,6 +143,19 @@ internal static class BackgroundWorkRules
     }
 
     /// <summary>
+    /// 使用者按停止之後的提示：「已停止這一輪」，排隊的訊息暫停時加說明；Claude 按停止不砍背景工作（initialize 宣告 perTaskStopAffordance，
+    /// 2026-11-11），還有背景工作在跑時說明它們繼續執行、完成時 Claude 會接著處理、要停下怎麼做
+    /// </summary>
+    public static string StoppedTurnNotice(bool queuePaused, int backgroundLeft)
+    {
+        var head = queuePaused ? "已停止這一輪（排隊的訊息暫停，按送出繼續）" : "已停止這一輪";
+        if (backgroundLeft <= 0)
+            return head;
+        var what = backgroundLeft == 1 ? "背景工作" : $"{backgroundLeft} 個背景工作";
+        return head + $"。{what}繼續執行，完成時 Claude 會收到通知並接著處理；要停下按狀態列的「停止」。";
+    }
+
+    /// <summary>
     /// 一輪正常結束時的通知標題：背景工作還在跑就不是「已完成」（代理回一句「等測試跑完」就結束這一輪，完成後 CLI 自己接著開的那一輪結束時才是完成）。
     /// 照樣通知：背景跑的可能是一直不會結束的開發伺服器，代理的回覆（網址、說明）使用者要看得到
     /// </summary>

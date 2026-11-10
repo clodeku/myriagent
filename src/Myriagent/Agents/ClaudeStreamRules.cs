@@ -949,8 +949,25 @@ internal static partial class ClaudeStreamRules
             ["request"] = request,
         }.ToString(Formatting.None);
 
+    /// <summary>
+    /// initialize：宣告 perTaskStopAffordance（2026-11-11）——app 有逐一停止背景工作的介面（taskStop 的 stop_task），所以 interrupt（按停止）
+    /// 只結束這一輪、不砍背景子代理（沒宣告時 CLI 一併砍掉背景子代理；背景指令本來就不砍）。實測見 protocol-notes
+    /// 「Claude：停止不砍背景工作、移到背景、重送成本與閒置壓縮」（tools/probes/claude_cli8_probe.py --mode stop）
+    /// </summary>
     public static string BuildInitializeRequest(string requestId)
-        => BuildControlRequest(requestId, new JObject { ["subtype"] = "initialize", ["hooks"] = JValue.CreateNull() });
+        => BuildControlRequest(requestId, new JObject { ["subtype"] = "initialize", ["hooks"] = JValue.CreateNull(), ["perTaskStopAffordance"] = true });
+
+    /// <summary>
+    /// 把執行中的前景工作移到背景（background_tasks，等於終端機的 Ctrl+B；2026-11-11）：toolUseId 只移那一個工具開的，null＝前景的指令與子代理全部。
+    /// 每個被移走的工具立刻回「在背景執行」的工具結果、這一輪接著做，工作在背景跑完時送 task_notification
+    /// </summary>
+    public static string BuildBackgroundTasksRequest(string requestId, string? toolUseId)
+    {
+        var request = new JObject { ["subtype"] = "background_tasks" };
+        if (!string.IsNullOrEmpty(toolUseId))
+            request["tool_use_id"] = toolUseId;
+        return BuildControlRequest(requestId, request);
+    }
 
     public static string BuildInterruptRequest(string requestId)
         => BuildControlRequest(requestId, new JObject { ["subtype"] = "interrupt" });

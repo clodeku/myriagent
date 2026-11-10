@@ -2,7 +2,8 @@
 // 檢查名稱 claudeOpt*：輸入列的「代理」「風格」選單（setAgent、setOutputStyle）、標頭的目標晶片與清除（goalClear）、
 // 已插入這一輪的那則與取消插入（cancelSteer、steerCancelled）、等背景工作回報時的詳細（taskDetail）與強制停止（taskStop）、
 // 使用者訊息的回溯（rewindPreview、rewind、rewound）。2026-10-26 起另有：子代理用量（Header.subagents）畫在 Agent 工具卡上、
-// 等額度重置後自動接著做的那一行與取消（Header.quotaWait、quotaWaitCancel）、閒置超過一小時送出前的快取提醒（Header.idleSince、claudeIdleResumeWarning）。
+// 等額度重置後自動接著做的那一行與取消（Header.quotaWait、quotaWaitCancel）、閒置超過一小時送出前的快取提醒（Header.idleSince、claudeIdleResumeWarning；
+// 2026-11-11 起照 Header.coldResume 算的額度百分比到門檻才問）、執行中把前景的工作移到背景（Header.canBackground、backgroundTasks）。
 // 第九批（2026-10-26）：那一行的 12 格倒數與時間到時輸入框閃一下（claudeOptQuotaCells、claudeOptQuotaGo）、上下文圓環外圈的提示快取倒數（claudeOptCacheRing）。
 // 截圖 claudeopt-*.png
 
@@ -104,6 +105,23 @@ export async function runClaudeOpt(ctx, vp) {
   await settle(page, 150);
   const s4 = await page.evaluate(composerState, sel);
   check('claudeOptSteerCancel', !!cancel && cancel.id === 'i1' && !s4.steer && s4.draft.includes('順便把整合測試也跑一下'), { cancel, s4 });
+
+  // 執行中把前景的指令與子代理移到背景（Header.canBackground、backgroundTasks，2026-11-11）：狀態列的「移到背景」，沒有 canBackground 就藏起來
+  const toBgState = () => page.evaluate((s) => {
+    const b = document.querySelector(s + ' .run-tobg');
+    return b && !b.hidden && b.getBoundingClientRect().width > 0 ? { text: b.textContent, title: b.title, disabled: b.disabled } : null;
+  }, sel);
+  const noToBg = await toBgState();
+  await push({ canBackground: true });
+  const toBg = await toBgState();
+  await page.locator(`${sel} .runline`).screenshot({ path: outFile('claudeopt-tobg-dark.png') });
+  await page.click(`${sel} .run-tobg`);
+  const toBgSent = await until(() => host.last('backgroundTasks'), 2000);
+  const toBgDisabled = (await toBgState())?.disabled;
+  await push({ canBackground: undefined });
+  const toBgGone = await toBgState();
+  check('claudeOptMoveToBackground', !noToBg && !!toBg && toBg.text === '移到背景' && /Ctrl\+B/.test(toBg.title) && !!toBgSent && toBgSent.conversationId === 'c1'
+    && toBgDisabled === true && !toBgGone, { noToBg, toBg, toBgSent, toBgDisabled, toBgGone });
 
   // 等背景工作回報：詳細、強制停止（每一個都有 stopId：子代理看不到輸出但停得了）
   const bgTasks = [{ key: 'tping', tool: '執行指令', title: 'ping -n 30 127.0.0.1', startedAt: Date.now() - 90e3, taskId: 'b1', stopId: 'b1' },
@@ -314,7 +332,8 @@ export async function runClaudeOpt(ctx, vp) {
     && cr4.cls === 'cache-expired' && cr4.dash === '' && cr4.cssDash !== 'none' && /已經過期（閒置 2 小時）/.test(cr4.title), { cr1, cr2, cr3, cr4 });
 
   // 閒置超過一小時、上下文大的 Claude 對話：送出前先問；取消不送，照樣送出才送；勾「以後不再提醒」關掉設定、之後不再問
-  await push({ idleSince: Date.now() - 2 * 3600e3, context: { used: 150000, window: 1000000, percent: 15, autoCompactAt: null, severity: 'ok' } });
+  await push({ idleSince: Date.now() - 2 * 3600e3, context: { used: 150000, window: 1000000, percent: 15, autoCompactAt: null, severity: 'ok' },
+    coldResume: { perMillion: 40, minPercent: 5 } });
   const sendCount = () => host.received.filter((m) => m.cmd === 'send').length;
   const typeAndSend = async (text) => {
     await page.fill(`${sel} .cbox textarea`, text);
@@ -332,7 +351,7 @@ export async function runClaudeOpt(ctx, vp) {
   await page.click('.dlg-back:not(.leaving) .dlg .dlg-foot .btn:first-child');
   await settle(page, 200);
   const afterCancel = { sends: sendCount() - before, draft: await page.inputValue(`${sel} .cbox textarea`) };
-  check('claudeOptCacheWarn', warn.title === '快取已經過期' && /閒置 2 小時/.test(warn.msg) && /約 150K tokens/.test(warn.msg) && warn.check && warn.ok === '照樣送出'
+  check('claudeOptCacheWarn', warn.title === '快取已經過期' && /閒置 2 小時/.test(warn.msg) && /約 150K tokens/.test(warn.msg) && /約用掉 5 小時額度的 6%/.test(warn.msg) && warn.check && warn.ok === '照樣送出'
     && afterCancel.sends === 0 && afterCancel.draft === '接著把報表做完', { warn, afterCancel });
   await page.press(`${sel} .cbox textarea`, 'Enter');
   await page.waitForSelector('.dlg-back:not(.leaving) .dlg', { timeout: 3000 });

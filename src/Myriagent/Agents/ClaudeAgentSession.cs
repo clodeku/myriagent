@@ -704,6 +704,30 @@ internal sealed class ClaudeAgentSession : IAgentSession
 
     public bool CanCancelSteer => true;
 
+    public bool CanMoveToBackground => true;
+
+    /// <summary>
+    /// 前景的指令與子代理移到背景（background_tasks；實測見 protocol-notes「Claude：停止不砍背景工作、移到背景…」）：
+    /// 程序活著、這一輪在執行才送；CLI 回 success 就是收下了（被移走的工具接著以「在背景執行」結束，之後照背景工作回報）
+    /// </summary>
+    public async Task<string?> MoveToBackgroundAsync(string? toolUseId)
+    {
+        AgentProcess target;
+        lock (gate)
+        {
+            if (disposed || process == null || process.HasExited)
+                return "Claude 程序已經結束了";
+            if (!running)
+                return "這一輪已經結束了";
+            target = process;
+        }
+        var response = await RequestControlAsync(target, "bgt", id => ClaudeStreamRules.BuildBackgroundTasksRequest(id, toolUseId)).ConfigureAwait(false);
+        // 實測回 {backgrounded: true}；沒有前景工作可移（剛好結束了）時是 false
+        if (response is { Success: true })
+            return response.Response?["backgrounded"] is JValue { Type: JTokenType.Boolean, Value: false } ? "目前沒有可以移到背景的指令或子代理" : null;
+        return response == null ? "Claude 沒有回應（逾時或程序已結束）" : string.IsNullOrWhiteSpace(response.Error) ? "Claude 沒有移到背景" : response.Error.Trim();
+    }
+
     /// <summary>
     /// 取消最近插入、CLI 還沒讀走的那則（cancel_async_message；實測見 protocol-notes）：只在有工具執行中時試——插入的訊息在工具結果之後才被讀走，
     /// 回應一定比這一輪的 result 先到；沒有工具在執行時那則排在 result 之後，result 可能在還原之前就到（會話以為那是別一輪的 result、這一輪停不下來），不試。
@@ -1872,6 +1896,7 @@ internal sealed class ClaudeAgentSession : IAgentSession
                 var (window, autoCompact) = ContextUsageRules.ParseClaudeContextResponse(response.Response);
                 if (window != null || autoCompact != null)
                     Raise(new AgentContextUsageEvent(null, window, autoCompact));
+                Raise(new AgentColdResumeQuotaEvent(ContextUsageRules.ParseColdResumeQuota(response.Response)));
             }
             return;
         }

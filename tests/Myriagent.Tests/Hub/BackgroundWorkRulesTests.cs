@@ -4,6 +4,18 @@ using Newtonsoft.Json.Linq;
 
 namespace Myriagent.Tests.Hub;
 
+public sealed class BackgroundWorkStoppedTurnNoticeTests
+{
+    [Fact]
+    public void 停止的提示_排隊與背景工作()
+    {
+        BackgroundWorkRules.StoppedTurnNotice(false, 0).Should().Be("已停止這一輪");
+        BackgroundWorkRules.StoppedTurnNotice(true, 0).Should().Be("已停止這一輪（排隊的訊息暫停，按送出繼續）");
+        BackgroundWorkRules.StoppedTurnNotice(false, 1).Should().Be("已停止這一輪。背景工作繼續執行，完成時 Claude 會收到通知並接著處理；要停下按狀態列的「停止」。");
+        BackgroundWorkRules.StoppedTurnNotice(true, 3).Should().StartWith("已停止這一輪（排隊的訊息暫停，按送出繼續）。3 個背景工作繼續執行");
+    }
+}
+
 public sealed class BackgroundWorkRulesTests
 {
     [Fact]

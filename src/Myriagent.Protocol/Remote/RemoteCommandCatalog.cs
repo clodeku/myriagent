@@ -163,6 +163,8 @@ internal static class RemoteCommandCatalog
         "goalClear", "codexControl", "codexDoctor",
         // 背景工作的詳細與強制停止：問這台活著的 CLI 程序（標頭的背景工作只有這台的對話有）
         "taskDetail", "taskStop",
+        // 前景的指令與子代理移到背景：以這台活著的 Claude 程序（標頭的 canBackground 只有這台的對話有）
+        "backgroundTasks",
         // 「最近的指令」的歷史指令：讀這台的對話紀錄（瀏覽器版從已載入的項目找）
         "promptHistory",
         // 取消插進這一輪的訊息：只有這台本機送出的那則可以（以這台活著的 Claude 程序取消）

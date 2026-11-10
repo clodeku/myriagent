@@ -119,6 +119,27 @@ internal static class ContextUsageRules
         return (window, auto);
     }
 
+    /// <summary>
+    /// get_context_usage 回應的 coldResumeQuota（形狀 {percentPerMillionTokens: 0.9, minPercent: 5}）：快取過期後整份重送的額度成本。
+    /// CLI 不知道價格（沒有訂閱方案、沒有這個模型的費率、關掉提示快取）或閒置壓縮已經寫好摘要時沒有這個欄位；形狀不對也回 null
+    /// </summary>
+    public static ColdResumeQuota? ParseColdResumeQuota(JObject? response)
+    {
+        if (response?["coldResumeQuota"] is not JObject quota)
+            return null;
+        var perMillion = Number(quota["percentPerMillionTokens"]);
+        var min = Number(quota["minPercent"]);
+        return perMillion is > 0 && min is > 0 ? new ColdResumeQuota(perMillion.Value, min.Value) : null;
+    }
+
+    /// <summary>重送 tokens 個上下文用掉 5 小時額度的幾 %</summary>
+    public static double ColdResumePercent(ColdResumeQuota quota, long tokens) => tokens <= 0 ? 0 : tokens / 1_000_000d * quota.PercentPerMillionTokens;
+
+    private static double? Number(JToken? token)
+        => token is JValue { Type: JTokenType.Integer or JTokenType.Float } v && double.IsFinite(Convert.ToDouble(v.Value, System.Globalization.CultureInfo.InvariantCulture))
+            ? Convert.ToDouble(v.Value, System.Globalization.CultureInfo.InvariantCulture)
+            : null;
+
     // ───────────────────────────── Codex ─────────────────────────────
 
     /// <summary>

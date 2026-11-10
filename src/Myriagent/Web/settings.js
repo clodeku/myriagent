@@ -182,7 +182,7 @@ export function openSettings(opts = {}) {
   put('app', null, appSec && appSec.node);
   put('chat', '輸入',
     row('Enter 送出', '關閉時改用 Ctrl+Enter 送出，Enter 換行。手機與平板的 Enter 一律換行，用送出鈕送出。', enterSw, 'enterToSend'),
-    idleWarnSw && row('閒置很久的 Claude 對話送出前提醒', 'Claude 的提示快取保留 1 小時：閒置超過 1 小時、上下文有 10 萬 tokens 以上的對話，下一則會把整份上下文重算一次、用掉不少 5 小時額度。開著時送出前先問一聲。', idleWarnSw, 'claudeIdleResumeWarning'),
+    idleWarnSw && row('閒置很久的 Claude 對話送出前提醒', 'Claude 的提示快取保留 1 小時：閒置超過 1 小時的對話，下一則會把整份上下文重算一次。開著時，Claude 估計這一則會用掉 5 小時額度的 5% 以上（Claude 給的門檻）才在送出前先問一聲。', idleWarnSw, 'claudeIdleResumeWarning'),
     cont.node);
   put('quota', '額度用完時',
     switchSw && row('自動換帳戶繼續', '對話執行到一半碰到用量上限（例如 Claude 的 5 小時額度）時，自動改用同一種代理、能用同一個模型、還有額度的其他帳戶接著做；有好幾個時選最快重置的（先用掉快要重置的額度）。新帳戶會收到先前對話的節錄，從中斷處繼續，但看不到先前的工具結果。原本的帳戶額度恢復後，對話閒置時或下一則訊息送出之前會自動換回原帳戶（你自己換過帳戶的對話不換回）。支援 Claude Code、Codex、Antigravity 與 Grok Build；關掉時照舊停下，等你手動換帳戶或等額度重置。', switchSw, 'autoSwitchAccount'),

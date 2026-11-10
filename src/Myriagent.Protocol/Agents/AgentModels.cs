@@ -637,7 +637,22 @@ internal sealed class AgentConversation
     /// 重開後照樣換過去。可為 null、null 時不寫進 meta.json，前一版忽略。只在這台有意義（不上線）
     /// </summary>
     public DeferredAccountSwitch? DeferredAccount { get; set; }
+
+    /// <summary>
+    /// Claude 回報的快取過期後整份重送的額度成本（get_context_usage 的 coldResumeQuota）：送出前的快取提醒以它算這一則約用掉
+    /// 5 小時額度的幾 %（網頁 claudeoptrules.cacheResumeWarning）。每一輪之後的回應更新；CLI 不知道價格（沒有訂閱方案）時是 null、不提醒。
+    /// 記在 meta 是因為使用者常在 app 重開之後才回到閒置的對話。可為 null、null 時不寫進 meta.json，前一版忽略。只在這台有意義（不上線）
+    /// </summary>
+    public ColdResumeQuota? ColdResume { get; set; }
 }
+
+/// <summary>
+/// 快取過期後重送整份上下文的額度成本（<see cref="AgentConversation.ColdResume"/>；Claude Code 的 get_context_usage.coldResumeQuota，
+/// 終端機「Resume this conversation?」對話框用的同一份）
+/// </summary>
+/// <param name="PercentPerMillionTokens">重送一百萬 tokens 用掉 5 小時額度的幾 %（大於 0）</param>
+/// <param name="MinPercent">值得提醒使用者的最小百分比（至少 1）</param>
+internal sealed record ColdResumeQuota(double PercentPerMillionTokens, double MinPercent);
 
 /// <summary>等額度重置後自動接著做（<see cref="AgentConversation.QuotaWait"/>）</summary>
 /// <param name="AccountId">等的帳戶（對話換了帳戶就不等）</param>

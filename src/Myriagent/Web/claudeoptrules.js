@@ -151,8 +151,25 @@ export function agentUsageView(u) {
 
 /** Claude 的提示快取保留多久（訂閱帳戶實測是 1 小時的快取：result 的 cache_creation.ephemeral_1h_input_tokens） */
 export const CACHE_TTL_MS = 60 * 60 * 1000;
-/** 上下文到這麼多 tokens 以上才提醒（整份重算會用掉明顯的一段 5 小時額度） */
-export const CACHE_WARN_TOKENS = 100000;
+/** CLI 沒給門檻時，重送用掉 5 小時額度的幾 % 以上才提醒（coldResumeQuota.minPercent 通常是 5） */
+export const COLD_RESUME_MIN_PERCENT = 5;
+
+/**
+ * 快取過期後整份重送用掉 5 小時額度的幾 %（2026-11-11）：Header.coldResume.perMillion 是 Claude 回報的每百萬 tokens 的成本
+ * （get_context_usage 的 coldResumeQuota，終端機「Resume this conversation?」用的同一份），Header.context.used 是目前的上下文；不知道回 null
+ */
+export function coldResumePercent(hd) {
+  const q = hd && hd.coldResume;
+  const used = hd && hd.context && Number.isFinite(hd.context.used) ? hd.context.used : 0;
+  if (!q || !(q.perMillion > 0) || !(used > 0)) return null;
+  return used / 1e6 * q.perMillion;
+}
+
+/** 百分比的寫法：10% 以上取整數、0.1% 以上一位小數，更小的寫「不到 0.1%」 */
+export function percentText(p) {
+  if (!(p >= 0.1)) return '不到 0.1%';
+  return p >= 10 ? Math.round(p) + '%' : p.toFixed(1).replace(/\.0$/, '') + '%';
+}
 
 function spanText(ms) {
   const mins = Math.floor(ms / 60000);
@@ -167,21 +184,26 @@ function tokensText(n) {
 }
 
 /**
- * 送出前的快取提醒（Header.idleSince、Header.context）：Claude 對話閒置超過快取的保留時間、上下文很大時，這一則會把整份上下文重算一次
- * （CLI 2.1.304 起在終端機恢復閒置的對話前也會這樣提醒）。設定 claudeIdleResumeWarning 關掉、執行中、草稿不提醒；回 null 或 {title, message, detail}
+ * 送出前的快取提醒（Header.idleSince、Header.context、Header.coldResume）：Claude 對話閒置超過快取的保留時間，這一則會把整份上下文重算一次；
+ * 2026-11-11 起照 Claude 回報的成本算這一則約用掉 5 小時額度的幾 %，到 Claude 給的門檻（minPercent，通常是 5%）才提醒——以前一律以 10 萬 tokens 為界，
+ * 訂閱方案的費率下 50 萬 tokens 可能只用掉不到 1%，提醒的說法也不對。Claude 沒回報成本（沒有訂閱方案、閒置壓縮已經寫好摘要）不提醒。
+ * 設定 claudeIdleResumeWarning 關掉、執行中、草稿不提醒；回 null 或 {title, message, detail, percent}
  */
 export function cacheResumeWarning(hd, now, settings) {
   if (!hd || hd.provider !== 'Claude' || hd.running || hd.isDraft) return null;
   if (settings && settings.claudeIdleResumeWarning === false) return null;
-  const used = hd.context && Number.isFinite(hd.context.used) ? hd.context.used : 0;
-  if (used < CACHE_WARN_TOKENS || !Number.isFinite(hd.idleSince)) return null;
+  if (!Number.isFinite(hd.idleSince)) return null;
   const idle = now - hd.idleSince;
   if (idle < CACHE_TTL_MS) return null;
+  const percent = coldResumePercent(hd);
+  const min = hd.coldResume && hd.coldResume.minPercent > 0 ? hd.coldResume.minPercent : COLD_RESUME_MIN_PERCENT;
+  if (percent == null || percent < min) return null;
   return {
     title: '快取已經過期',
-    message: '這個對話已經閒置 ' + spanText(idle) + '，Claude 的提示快取（保留 1 小時）已經過期：這一則會把約 ' + tokensText(used)
-      + ' tokens 的上下文從頭再算一次，會用掉不少 5 小時額度。',
+    message: '這個對話已經閒置 ' + spanText(idle) + '，Claude 的提示快取（保留 1 小時）已經過期：這一則會把約 ' + tokensText(hd.context.used)
+      + ' tokens 的上下文從頭再算一次，約用掉 5 小時額度的 ' + percentText(percent) + '（Claude 估的）。',
     detail: '要做的事和這個對話關係不大的話，開新對話比較省。',
+    percent,
   };
 }
 
@@ -198,7 +220,9 @@ export function cacheCountdown(hd, now) {
   const idle = Math.max(0, now - hd.idleSince);
   const left = CACHE_TTL_MS - idle;
   if (left <= 0) {
-    return { frac: 0, state: 'expired', mins: 0, title: '提示快取已經過期（閒置 ' + spanText(idle) + '）：下一則會把整份上下文從頭再算一次' };
+    const cost = coldResumePercent(hd);
+    return { frac: 0, state: 'expired', mins: 0, title: '提示快取已經過期（閒置 ' + spanText(idle) + '）：下一則會把整份上下文從頭再算一次'
+      + (cost != null ? '，約用掉 5 小時額度的 ' + percentText(cost) : '') };
   }
   const mins = Math.ceil(left / 60000);
   return {

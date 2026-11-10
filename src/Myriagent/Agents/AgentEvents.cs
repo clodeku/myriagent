@@ -151,6 +151,12 @@ internal sealed record AgentTokenUsageEvent(AgentUsage Delta, string? Model = nu
 internal sealed record AgentContextUsageEvent(long? UsedTokens, long? WindowTokens, long? AutoCompactTokens = null, bool Compacted = false) : AgentEvent;
 
 /// <summary>
+/// Claude 回報的快取過期後整份重送的額度成本（get_context_usage 的 coldResumeQuota，每一輪之後問一次；2026-11-11）。
+/// Quota 是 null＝這次的回應沒有（不知道價格，或閒置壓縮已經寫好摘要：快取過期之後送的是摘要）
+/// </summary>
+internal sealed record AgentColdResumeQuotaEvent(ColdResumeQuota? Quota) : AgentEvent;
+
+/// <summary>
 /// 對話程序回報的額度資訊（原始 JSON）：Claude 是 rate_limit_event.rate_limit_info、Codex 是 account/rateLimits/updated 的 rateLimits。
 /// 解析與合併由 Usage 模組負責（UsageRules），會話層不必懂時間窗的意義。
 /// </summary>

@@ -475,7 +475,16 @@ export class ConvView {
     // 等背景工作回報時強制停止背景工作（taskStop，2026-10-25；liverules.backgroundStopMenu）：選單裡選停哪一個或全部
     this.runStop = h('button', { type: 'button', class: 'btn sm run-stop', hidden: true, title: '強制停止背景工作', dataset: { field: 'taskStop' } }, icon('stop'), h('span', { text: '停止' }));
     this.runStop.addEventListener('click', () => this.openTaskStop());
-    this.runEl = h('div', { class: 'runline', hidden: true, role: 'status' }, this.runSpin, this.runBg, this.runText, this.runTime, this.runDetail, this.runStop);
+    // 執行中把前景的指令與子代理移到背景（backgroundTasks，2026-11-11；同終端機的 Ctrl+B）：標頭帶 canBackground 才有，只有桌面這台的對話
+    this.runToBg = h('button', { type: 'button', class: 'btn sm run-tobg', hidden: true,
+      title: '把執行中的指令或子代理移到背景繼續跑，這一輪接著往下做（同終端機的 Ctrl+B）', dataset: { field: 'backgroundTasks' } },
+    icon('arrowDown'), h('span', { text: '移到背景' }));
+    this.runToBg.addEventListener('click', () => {
+      post({ cmd: 'backgroundTasks', conversationId: this.id });
+      this.runToBg.disabled = true;
+      setTimeout(() => { this.runToBg.disabled = false; }, 5000);
+    });
+    this.runEl = h('div', { class: 'runline', hidden: true, role: 'status' }, this.runSpin, this.runBg, this.runText, this.runTime, this.runToBg, this.runDetail, this.runStop);
     // 載入中：很快就回來時不閃一下，稍等才出現；load() 移除
     // 第十一批：狀態列（轉圈、說明、自動重試用了幾次的 3 格）＋底下幾塊靜態的訊息骨架（點狀網格與四角括號，同圖片的佔位；不做流光）
     this.loadText = h('span', { class: 'run-text', text: '載入對話中…' });
@@ -1311,6 +1320,9 @@ export class ConvView {
     // 停止只有桌面這台的對話（背景工作屬於這台活著的 CLI 程序）；新的標頭到了就能再按（停了的話背景工作的清單也跟著變）
     this.runStop.hidden = !bg || isHub || this.isReplica();
     this.runStop.disabled = false;
+    // 移到背景：執行中、宿主說前景有能移的指令或子代理（Header.canBackground）
+    this.runToBg.hidden = !sl.spinning || hd.canBackground !== true || isHub || this.isReplica();
+    this.runToBg.disabled = false;
     this.runText.textContent = sl.spinning ? sl.text || '思考中…' : bg ? bg.text : sl.text || '';
     this.renderDevice();
     this.tick(Date.now());

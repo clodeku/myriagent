@@ -665,6 +665,19 @@ internal sealed class FakeSession : IAgentSession
         return Task.FromResult(TaskOutput);
     }
 
+    /// <summary>MoveToBackgroundAsync 收到的 toolUseId（全部記成 "*"）、要回的原因（null＝成功）；支不支援照代理種類（Claude）</summary>
+    public Recorder<string> BackgroundMoves { get; } = new();
+
+    public string? MoveToBackgroundError { get; set; }
+
+    public bool CanMoveToBackground => Provider == AgentProvider.Claude;
+
+    public Task<string?> MoveToBackgroundAsync(string? toolUseId)
+    {
+        BackgroundMoves.Add(toolUseId ?? "*");
+        return Task.FromResult(MoveToBackgroundError);
+    }
+
     /// <summary>StopBackgroundWorkAsync 收到的 stopId（全部記成 "*"）與要回的結果</summary>
     public Recorder<string> StopRequests { get; } = new();
 

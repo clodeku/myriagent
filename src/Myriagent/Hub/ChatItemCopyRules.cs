@@ -97,6 +97,7 @@ internal static class ChatItemCopyRules
             // 不可變的記錄，共用同一個
             QuotaHome = meta.QuotaHome,
             DeferredAccount = meta.DeferredAccount,
+            ColdResume = meta.ColdResume,
         };
     }
 

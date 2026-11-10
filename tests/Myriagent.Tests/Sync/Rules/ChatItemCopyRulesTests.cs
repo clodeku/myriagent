@@ -20,7 +20,7 @@ public sealed class ChatItemCopyRulesTests
     [InlineData(typeof(AgentQuestionOption), 3)]
     [InlineData(typeof(AgentPlanStep), 2)]
     [InlineData(typeof(AgentMediaRef), 3)]
-    [InlineData(typeof(AgentConversation), 36)]
+    [InlineData(typeof(AgentConversation), 37)]
     public void 屬性數釘住(Type type, int count)
         => PublishTestItems.Properties(type).Should().HaveCount(count, type.Name);
 
@@ -177,6 +177,7 @@ public sealed class ChatItemCopyRulesTests
             QuotaHome = new QuotaHomeAccount("acc0", new DateTimeOffset(2026, 10, 26, 15, 0, 0, TimeSpan.FromHours(8)), new DateTimeOffset(2026, 10, 26, 10, 0, 0, TimeSpan.FromHours(8)),
                 "opus", "max", AgentPermissionMode.AcceptEdits, null, null, "sonnet", "high"),
             DeferredAccount = new DeferredAccountSwitch("acc2", RememberAccount: true),
+            ColdResume = new ColdResumeQuota(0.9, 5),
         };
         var fresh = new AgentConversation();
         foreach (var property in PublishTestItems.Properties(typeof(AgentConversation)))

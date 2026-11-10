@@ -268,6 +268,11 @@ public class ClaudeStreamRulesTests
         init["type"]!.ToString().Should().Be("control_request");
         init["request_id"]!.ToString().Should().Be("init-1");
         init["request"]!["subtype"]!.ToString().Should().Be("initialize");
+        init["request"]!["perTaskStopAffordance"]!.Value<bool>().Should().BeTrue("按停止不砍背景子代理：app 有逐一停止的介面");
+
+        var all = JObject.Parse(ClaudeStreamRules.BuildBackgroundTasksRequest("bgt-1", null))["request"]!;
+        all.ToString(Newtonsoft.Json.Formatting.None).Should().Be("""{"subtype":"background_tasks"}""", "不帶 tool_use_id＝前景的全部（Ctrl+B）");
+        JObject.Parse(ClaudeStreamRules.BuildBackgroundTasksRequest("bgt-2", "toolu_1"))["request"]!.Value<string>("tool_use_id").Should().Be("toolu_1");
 
         JObject.Parse(ClaudeStreamRules.BuildInterruptRequest("x-2"))["request"]!["subtype"]!.ToString().Should().Be("interrupt");
 

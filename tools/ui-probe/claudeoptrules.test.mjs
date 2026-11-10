@@ -167,27 +167,53 @@ test('quotaWaitCells（第九批）：剩下的比例換成 12 格、無條件�
   assert.equal(R.quotaWaitCells(NOW + HOUR, NOW, HOUR, 5), 5);
 });
 
-test('cacheResumeWarning_閒置超過一小時而且上下文大才提醒', () => {
-  const w = R.cacheResumeWarning(hd(), NOW, {});
+// 2026-11-11：Claude 回報的重送成本（Header.coldResume；perMillion 40＝每百萬 tokens 用掉 5 小時額度的 40%，150K 是 6%）
+const costly = (over) => hd({ coldResume: { perMillion: 40, minPercent: 5 }, ...over });
+
+test('cacheResumeWarning_閒置超過一小時而且重送成本到Claude給的門檻才提醒', () => {
+  const w = R.cacheResumeWarning(costly(), NOW, {});
   assert.equal(w.title, '快取已經過期');
   assert.match(w.message, /閒置 2 小時/);
   assert.match(w.message, /約 150K tokens/);
-  assert.equal(R.cacheResumeWarning(hd({ idleSince: NOW - HOUR + 1 }), NOW, {}), null, '還在 1 小時內');
-  assert.ok(R.cacheResumeWarning(hd({ idleSince: NOW - HOUR }), NOW, {}), '剛好 1 小時');
-  assert.equal(R.cacheResumeWarning(hd({ context: { used: R.CACHE_WARN_TOKENS - 1 } }), NOW, {}), null, '上下文小');
-  assert.equal(R.cacheResumeWarning(hd({ context: null }), NOW, {}), null);
-  assert.equal(R.cacheResumeWarning(hd({ idleSince: null }), NOW, {}), null);
+  assert.match(w.message, /約用掉 5 小時額度的 6%（Claude 估的）/);
+  assert.ok(Math.abs(w.percent - 6) < 1e-9);
+  assert.equal(R.cacheResumeWarning(costly({ idleSince: NOW - HOUR + 1 }), NOW, {}), null, '還在 1 小時內');
+  assert.ok(R.cacheResumeWarning(costly({ idleSince: NOW - HOUR }), NOW, {}), '剛好 1 小時');
+  assert.equal(R.cacheResumeWarning(costly({ context: { used: 124999 } }), NOW, {}), null, '不到 5%');
+  assert.ok(R.cacheResumeWarning(costly({ context: { used: 125000 } }), NOW, {}), '剛好 5%');
+  assert.equal(R.cacheResumeWarning(costly({ context: null }), NOW, {}), null);
+  assert.equal(R.cacheResumeWarning(costly({ idleSince: null }), NOW, {}), null);
+});
+
+test('cacheResumeWarning_Claude沒回報成本不提醒_50萬tokens只用掉不到1%也不提醒', () => {
+  assert.equal(R.cacheResumeWarning(hd(), NOW, {}), null, '沒有 coldResume（沒有訂閱方案、閒置壓縮已寫好摘要）');
+  assert.equal(R.cacheResumeWarning(hd({ coldResume: { perMillion: 0.9, minPercent: 5 }, context: { used: 500000 } }), NOW, {}), null);
+  assert.ok(R.cacheResumeWarning(costly({ coldResume: { perMillion: 40 } }), NOW, {}), '沒有 minPercent 時以 5% 為界');
+  assert.equal(R.cacheResumeWarning(costly({ coldResume: { perMillion: 40, minPercent: 7 } }), NOW, {}), null, '照 Claude 給的門檻');
+  assert.equal(R.cacheResumeWarning(costly({ coldResume: { perMillion: 0 } }), NOW, {}), null);
 });
 
 test('cacheResumeWarning_設定關掉_執行中_草稿_其他代理不提醒', () => {
-  assert.equal(R.cacheResumeWarning(hd(), NOW, { claudeIdleResumeWarning: false }), null);
-  assert.ok(R.cacheResumeWarning(hd(), NOW, { claudeIdleResumeWarning: true }));
-  assert.ok(R.cacheResumeWarning(hd(), NOW, null), '設定還沒到：照預設提醒');
-  assert.equal(R.cacheResumeWarning(hd({ running: true }), NOW, {}), null);
-  assert.equal(R.cacheResumeWarning(hd({ isDraft: true }), NOW, {}), null);
-  assert.equal(R.cacheResumeWarning(hd({ provider: 'Codex' }), NOW, {}), null);
+  assert.equal(R.cacheResumeWarning(costly(), NOW, { claudeIdleResumeWarning: false }), null);
+  assert.ok(R.cacheResumeWarning(costly(), NOW, { claudeIdleResumeWarning: true }));
+  assert.ok(R.cacheResumeWarning(costly(), NOW, null), '設定還沒到：照預設提醒');
+  assert.equal(R.cacheResumeWarning(costly({ running: true }), NOW, {}), null);
+  assert.equal(R.cacheResumeWarning(costly({ isDraft: true }), NOW, {}), null);
+  assert.equal(R.cacheResumeWarning(costly({ provider: 'Codex' }), NOW, {}), null);
   assert.equal(R.cacheResumeWarning(null, NOW, {}), null);
-  assert.match(R.cacheResumeWarning(hd({ idleSince: NOW - 3 * 24 * HOUR }), NOW, {}).message, /閒置 3 天/);
+  assert.match(R.cacheResumeWarning(costly({ idleSince: NOW - 3 * 24 * HOUR }), NOW, {}).message, /閒置 3 天/);
+});
+
+test('coldResumePercent與percentText', () => {
+  assert.ok(Math.abs(R.coldResumePercent(costly()) - 6) < 1e-9);
+  assert.equal(R.coldResumePercent(hd()), null);
+  assert.equal(R.coldResumePercent(costly({ context: { used: 0 } })), null);
+  assert.equal(R.percentText(0.46), '0.5%');
+  assert.equal(R.percentText(6), '6%');
+  assert.equal(R.percentText(12.4), '12%');
+  assert.equal(R.percentText(0.04), '不到 0.1%');
+  const expired = R.cacheCountdown(hd({ coldResume: { perMillion: 0.9, minPercent: 5 }, context: { used: 500000 } }), NOW);
+  assert.match(expired.title, /，約用掉 5 小時額度的 0\.5%$/, '過期的圓環說明寫出重送成本');
 });
 
 test('quotaWaitView_帳戶與重置時間_剩不到一分鐘不寫還有多久', () => {

@@ -121,6 +121,23 @@ public class ContextUsageRulesTests
         ContextUsageRules.ParseClaudeContextResponse(null).Should().Be(((long?)null, (long?)null));
     }
 
+    [Fact]
+    public void Claude的重送成本_coldResumeQuota_沒有或形狀不對是null()
+    {
+        // 範例：每百萬 tokens 用掉 5 小時額度的 0.9%、值得提醒的門檻 5%
+        var real = JObject.Parse("""{"totalTokens":500000,"maxTokens":1000000,"coldResumeQuota":{"percentPerMillionTokens":0.9,"minPercent":5}}""");
+        var quota = ContextUsageRules.ParseColdResumeQuota(real);
+        quota.Should().Be(new ColdResumeQuota(0.9, 5));
+        ContextUsageRules.ColdResumePercent(quota!, 500_000).Should().BeApproximately(0.45, 0.0001);
+        ContextUsageRules.ColdResumePercent(quota!, 0).Should().Be(0);
+
+        ContextUsageRules.ParseColdResumeQuota(JObject.Parse("""{"totalTokens":1}""")).Should().BeNull("沒有訂閱方案或閒置壓縮已經寫好摘要時沒有這個欄位");
+        ContextUsageRules.ParseColdResumeQuota(JObject.Parse("""{"coldResumeQuota":{"percentPerMillionTokens":0,"minPercent":5}}""")).Should().BeNull();
+        ContextUsageRules.ParseColdResumeQuota(JObject.Parse("""{"coldResumeQuota":{"percentPerMillionTokens":"1","minPercent":5}}""")).Should().BeNull();
+        ContextUsageRules.ParseColdResumeQuota(JObject.Parse("""{"coldResumeQuota":null}""")).Should().BeNull();
+        ContextUsageRules.ParseColdResumeQuota(null).Should().BeNull();
+    }
+
     private static string Line(object value) => JObject.FromObject(value).ToString(Newtonsoft.Json.Formatting.None);
 
     private static string ClaudeStart(string id, string model, long input, long creation, long read, long output, string? parent = null)

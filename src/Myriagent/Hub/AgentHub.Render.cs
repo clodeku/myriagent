@@ -936,9 +936,17 @@ internal sealed partial class AgentHub
         // 等額度重置後自動接著做（AgentHub.QuotaWait.cs；沒有就不帶）
         if (RenderQuotaWait(c) is { } quotaWait)
             header["quotaWait"] = quotaWait;
-        // Claude 的提示快取從什麼時候開始閒置（送出前的提醒，網頁 claudeoptrules.cacheResumeWarning；執行中、副本不帶）
+        // Claude 的提示快取從什麼時候開始閒置與快取過期後整份重送的額度成本（送出前的提醒，網頁 claudeoptrules.cacheResumeWarning；
+        // 執行中、副本不帶；CLI 沒回報成本時不帶 coldResume、網頁不提醒）
         if (c.Meta.Provider == AgentProvider.Claude && !c.Running && !c.IsReplica && !c.IsDraft)
+        {
             header["idleSince"] = ToUnixMs(c.LastActivity);
+            if (c.Meta.ColdResume is { } coldResume)
+                header["coldResume"] = new JObject { ["perMillion"] = coldResume.PercentPerMillionTokens, ["minPercent"] = coldResume.MinPercent };
+        }
+        // 前景有指令或子代理在跑、可以移到背景（AgentHub.MoveToBackground.cs；不能就不帶）
+        if (CanMoveToBackground(c))
+            header["canBackground"] = true;
         // 子代理的即時用量（AgentHub.Subagents.cs；沒有就不帶）
         if (RenderSubagentUsages(c) is { } subagents)
             header["subagents"] = subagents;

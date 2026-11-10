@@ -74,6 +74,8 @@ internal static class BrowserCommandRules
         "goalClear",
         // 背景工作的詳細與強制停止：問那台活著的 CLI 程序（瀏覽器版的標頭沒有背景工作）
         "taskDetail", "taskStop",
+        // 前景的指令與子代理移到背景：以那台活著的 Claude 程序（瀏覽器版的標頭沒有 canBackground）
+        "backgroundTasks",
         // 「最近的指令」的歷史指令：讀那台的對話紀錄（瀏覽器版從已載入的項目找）
         "promptHistory",
         // 取消插進這一輪的訊息：只有那台本機送出的那則可以（瀏覽器版的輸入區沒有這一行）
