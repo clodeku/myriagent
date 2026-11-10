@@ -152,6 +152,8 @@ internal sealed class MediaServer : IDisposable
     {
         var ct = cancel.Token;
         GuardedFile? file = null;
+        // 替別台送檔案（電腦狀態面板的檔案傳輸）：送的期間與之後一小段時間不自動換版重啟（FileTransferActivity）
+        using var transfer = job.Request.Purpose == MediaPurposes.File ? FileTransferActivity.Begin() : null;
         try
         {
             var reply = counted ? await PrepareAsync(job, opened => file = opened, ct).ConfigureAwait(false) : new Reply(503);

@@ -335,6 +335,124 @@ public sealed class ReplicaMediaSourceTests : IDisposable
         relay.Requests.Should().HaveCount(1);
     }
 
+    // ── 分段下載（電腦狀態面板的檔案傳輸）──
+
+    /// <summary>假的來源檔：照 Range 回 206；<paramref name="cut"/> 回傳要在這次回應的第幾個位元組之後斷線（null＝不斷）</summary>
+    private void ServeFile(byte[] file, Func<int, long, int?>? cut = null, Func<int, HttpStatusCode?>? status = null)
+    {
+        var count = 0;
+        relay.Responder = request =>
+        {
+            var n = count++;
+            if (status?.Invoke(n) is { } fail)
+                return new HttpResponseMessage(fail) { Content = new ByteArrayContent([]) };
+            var range = request.Header("Range")!["bytes=".Length..].Split('-');
+            var from = long.Parse(range[0]);
+            var to = Math.Min(long.Parse(range[1]), file.Length - 1);
+            var part = file[(int)from..(int)(to + 1)];
+            HttpContent content = cut?.Invoke(n, from) is { } after
+                ? new StreamContent(new BreakingStream(part, after))
+                : new ByteArrayContent(part) as HttpContent;
+            content.Headers.TryAddWithoutValidation("Content-Range", $"bytes {from}-{to}/{file.Length}");
+            content.Headers.ContentLength = part.Length;
+            var response = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = content };
+            response.Headers.ETag = new EntityTagHeaderValue("\"v1\"");
+            return response;
+        };
+    }
+
+    /// <summary>下載到結束；期間一直推進假時鐘（重試的等待用它）</summary>
+    private async Task<(PeerDownload? Result, byte[] Bytes)> DownloadPumpingAsync()
+    {
+        using var target = new MemoryStream();
+        var pending = source.DownloadAsync(key, target, null, CancellationToken.None);
+        var deadline = Environment.TickCount64 + 30_000;
+        while (!pending.IsCompleted && Environment.TickCount64 < deadline)
+        {
+            time.Advance(TimeSpan.FromSeconds(1));
+            await Task.Delay(5);
+        }
+        var result = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+        return (result, target.ToArray());
+    }
+
+    [Fact]
+    public async Task 分段下載_中途連線被切斷_從斷掉的位置接著下載_內容一致()
+    {
+        // 2026-11-10：來源電腦在下載途中換版重開，正在轉送的那一段被切斷，以前整個檔放棄
+        var file = Bytes(20 * Mb);
+        ServeFile(file, cut: (n, _) => n == 1 ? 3 * Mb : null);
+
+        var (result, bytes) = await DownloadPumpingAsync();
+
+        result.Should().NotBeNull();
+        result!.Total.Should().Be(file.Length);
+        bytes.Should().Equal(file);
+        relay.Requests.Select(r => r.Header("Range")).Should().Equal(
+            $"bytes=0-{8 * Mb - 1}", $"bytes={8 * Mb}-{16 * Mb - 1}", $"bytes={11 * Mb}-{19 * Mb - 1}", $"bytes={19 * Mb}-{20 * Mb - 1}");
+    }
+
+    [Fact]
+    public async Task 分段下載_來源離線一陣子_503之後恢復_照樣下載完()
+    {
+        var file = Bytes(10 * Mb);
+        ServeFile(file, status: n => n is >= 1 and <= 6 ? HttpStatusCode.ServiceUnavailable : null);
+
+        var (result, bytes) = await DownloadPumpingAsync();
+
+        result.Should().NotBeNull();
+        bytes.Should().Equal(file);
+    }
+
+    [Fact]
+    public async Task 分段下載_一直503超過三分鐘_放棄()
+    {
+        ServeFile(Bytes(Mb), status: _ => HttpStatusCode.ServiceUnavailable);
+
+        var (result, _) = await DownloadPumpingAsync();
+
+        result.Should().BeNull();
+        relay.Requests.Count.Should().BeGreaterThan(5, "期間照間隔重試");
+    }
+
+    [Fact]
+    public async Task 分段下載_被拒_不重試()
+    {
+        ServeFile(Bytes(Mb), status: _ => HttpStatusCode.NotFound);
+
+        var (result, _) = await DownloadPumpingAsync();
+
+        result.Should().BeNull();
+        relay.Requests.Should().HaveCount(1);
+    }
+
+    /// <summary>讀到 <c>after</c> 個位元組之後丟 IOException（連線被切斷）</summary>
+    private sealed class BreakingStream(byte[] data, int after) : Stream
+    {
+        private int position;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => data.Length;
+        public override long Position { get => position; set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (position >= after)
+                throw new IOException("遠端主機已強制關閉一個現存的連線。");
+            var n = Math.Min(count, after - position);
+            Array.Copy(data, position, buffer, offset, n);
+            position += n;
+            return n;
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         var deadline = Environment.TickCount64 + 10_000;

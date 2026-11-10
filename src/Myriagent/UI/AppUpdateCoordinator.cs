@@ -807,7 +807,8 @@ internal sealed class AppUpdateCoordinator : IAppUpdateCommands, IDisposable
             RemoteExecRunning: staged && hub.RemoteExecRunning,
             BackgroundWork: staged && hub.BackgroundWorkRunning,
             Forced: forced,
-            RemoteDeskActive: staged && hub.RemoteDeskActive);
+            RemoteDeskActive: staged && hub.RemoteDeskActive,
+            FileTransfer: staged && hub.FileTransferActive);
     }
 
     /// <summary>

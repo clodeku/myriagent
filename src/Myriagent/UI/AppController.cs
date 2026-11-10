@@ -158,6 +158,8 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         remoteExec = new RemoteExecService(Sync, new RemoteExecConfirmer(this), Path.Combine(Path.GetTempPath(), "myriagent-remote-exec"),
             RemoteExecPipeRules.PipeName(AppPaths.Root), ConversationTitleAsync);
         Hub.AttachRemoteExec(remoteExec.Runner);
+        // 正在和其他電腦傳檔案時 app 自我更新不自動重啟（AppRestartBlocker.FileTransfer）
+        Hub.AttachFileTransferActivity(() => Myriagent.Sync.FileTransferActivity.Active);
         Sync.AttachRemoteExec(remoteExec);
         var remoteTool = Path.Combine(AppContext.BaseDirectory, RemoteExecHubRules.ToolFileName);
         var remoteSync = Sync;

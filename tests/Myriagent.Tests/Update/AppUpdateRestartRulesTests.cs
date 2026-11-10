@@ -66,6 +66,18 @@ public sealed class AppUpdateRestartRulesTests
         AppUpdateRestartRules.DescribeBlocker(AppRestartBlocker.LaunchDebugging).Should().Contain("Debug");
     }
 
+    /// <summary>2026-11-10：下載另一台的 9.8 GB 資料夾時，來源那台在途中自動換版重開，一個檔失敗——傳檔案期間不自動開始</summary>
+    [Fact]
+    public void 正在和其他電腦傳檔案_列成阻擋原因_不自動開始_按立即重啟就開始()
+    {
+        var transferring = Idle() with { FileTransfer = true };
+        AppUpdateRestartRules.Blocker(transferring).Should().Be(AppRestartBlocker.FileTransfer, "重啟會切斷傳輸");
+        AppUpdateRestartRules.CanBegin(transferring, AppUpdateRestartRules.IdleThreshold).Should().BeFalse();
+        AppUpdateRestartRules.CanBegin(transferring with { UserRequested = true }, AppUpdateRestartRules.IdleThreshold).Should().BeTrue();
+        AppUpdateRestartRules.Blocker(transferring with { RemoteExecRunning = true }).Should().Be(AppRestartBlocker.RemoteExecRunning);
+        AppUpdateRestartRules.DescribeBlocker(AppRestartBlocker.FileTransfer).Should().Contain("傳檔案");
+    }
+
     /// <summary>
     /// 2026-10-28 使用者要求桌面版換版一直等到背景工作都完成（以前排空最多等 30 分鐘就停掉，先停下的對話這段時間一直停著）：
     /// 有對話的背景工作還在跑就不開始，按「立即重啟」也等（重啟會停掉它們）；系統工作與冷卻照舊優先說明

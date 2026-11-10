@@ -50,6 +50,21 @@ internal sealed partial class AgentHub
     /// <summary>測試：接收中與剛收完的檔</summary>
     internal DeviceXferBoard DeviceXfers => deviceXfers;
 
+    /// <summary>
+    /// 這台正在和其他電腦傳檔案（電腦狀態面板的檔案傳輸；UI 執行緒）：從別台下載（peerXferSave）、上傳給別台（peerUpload）、
+    /// 接收別台送來的（devicePut）、替別台送檔案的分段轉送（FileTransferActivity）。app 自我更新以它擋住自動重啟
+    /// （AppRestartBlocker.FileTransfer；2026-11-10：來源那台在下載途中自動換版，正在轉送的那一段被切斷）
+    /// </summary>
+    internal bool FileTransferActive => peerXfers.Count > 0 || peerUploads.Count > 0 || deviceXfers.AnyActive() || fileTransferActivity();
+
+    /// <summary>
+    /// 替別台送檔案的分段轉送與同步層的下載、上傳（整個程序共用的 Sync.FileTransferActivity）。中樞預設不看（測試裡別的測試做過的傳輸
+    /// 不能算進來），只有 AppController 以 <see cref="AttachFileTransferActivity"/> 接上
+    /// </summary>
+    private Func<bool> fileTransferActivity = () => false;
+
+    internal void AttachFileTransferActivity(Func<bool> active) => fileTransferActivity = active ?? throw new ArgumentNullException(nameof(active));
+
     /// <summary>給電腦狀態的接收進度（任何執行緒；沒有是 null）</summary>
     internal IReadOnlyList<XferStats>? DeviceXferSnapshot() => deviceXfers.Snapshot();
 

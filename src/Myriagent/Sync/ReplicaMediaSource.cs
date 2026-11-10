@@ -107,6 +107,7 @@ internal sealed class ReplicaMediaSource : IReplicaMediaSource, IPeerUploader, I
             return new PeerUploadResult(0, null);
         using var timeout = new CancellationTokenSource(UploadTimeout, time);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token, stopping.Token);
+        using var transfer = FileTransferActivity.Begin();
         var opened = new List<FileStream>();
         try
         {
@@ -180,7 +181,8 @@ internal sealed class ReplicaMediaSource : IReplicaMediaSource, IPeerUploader, I
 
     /// <summary>
     /// 電腦狀態面板的檔案傳輸（<see cref="IPeerFileSource.DownloadAsync"/>）：E11 每段 ≤8 MB 的 Range，依序寫進 <paramref name="target"/>；
-    /// 每段核對起點、總長與 ETag 都和第一段相同（檔案在途中被改就停）。503（伺服器或那台忙）等 2 秒重試，每段最多 5 次
+    /// 每段核對起點、總長與 ETag 都和第一段相同（檔案在途中被改就停）。暫時的失敗（連線中斷、本文提早結束、逾時、502／503／504、
+    /// 沒有權杖）從斷掉的位置接著試，連續失敗超過 <see cref="PeerDownloadRetryRules.FailBudget"/> 才放棄（2026-11-10：來源電腦在下載途中換版重開）
     /// </summary>
     public async Task<PeerDownload?> DownloadAsync(string key, Stream target, Action<long, long>? progress, CancellationToken ct)
     {
@@ -188,12 +190,15 @@ internal sealed class ReplicaMediaSource : IReplicaMediaSource, IPeerUploader, I
         if (Volatile.Read(ref disposed) != 0 || !MediaKeyRules.TryParse(key, out _, out _))
             return null;
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, stopping.Token);
+        using var transfer = FileTransferActivity.Begin();
         var path = ReplicaMediaRules.DeviceMediaPrefix + key + "?purpose=" + MediaPurposes.File;
         long offset = 0;
         long? total = null;
         string? name = null;
         string? etag = null;
         var buffer = new byte[CopyBufferBytes];
+        var failures = 0;
+        long? failingSince = null;
         try
         {
             while (total is null || offset < total)
@@ -201,76 +206,60 @@ internal sealed class ReplicaMediaSource : IReplicaMediaSource, IPeerUploader, I
                 var end = offset + MediaRelayRules.MaxSegmentBytes - 1;
                 if (total is { } known)
                     end = Math.Min(end, known - 1);
-                HttpResponseMessage? response = null;
-                for (var attempt = 0; ; attempt++)
+                var attemptFrom = offset;
+                string? transient = null;
+                try
                 {
                     using var timeout = new CancellationTokenSource(SegmentTimeout, time);
                     using var segment = CancellationTokenSource.CreateLinkedTokenSource(linked.Token, timeout.Token);
                     var from = offset;
                     var to = end;
-                    response = await http.SendAsync(() =>
+                    using var response = await http.SendAsync(() =>
                     {
                         var request = new HttpRequestMessage(HttpMethod.Get, path);
                         request.Headers.TryAddWithoutValidation("Range", "bytes=" + from.ToString(CultureInfo.InvariantCulture) + "-" + to.ToString(CultureInfo.InvariantCulture));
                         return request;
                     }, HttpCompletionOption.ResponseHeadersRead, segment.Token).ConfigureAwait(false);
                     if (response is null)
-                        return null;
-                    if (response.StatusCode != HttpStatusCode.ServiceUnavailable || attempt >= 4)
-                        break;
-                    response.Dispose();
-                    await Task.Delay(TimeSpan.FromSeconds(2), time, linked.Token).ConfigureAwait(false);
+                        transient = "這台目前沒有連上伺服器";
+                    else if (PeerDownloadRetryRules.IsTransientStatus(response.StatusCode))
+                        transient = "HTTP " + (int)response.StatusCode;
+                    else if (await ReadSegmentAsync(response) is { } stop)
+                    {
+                        if (stop == SegmentStop.Fatal)
+                            return null;
+                        if (stop == SegmentStop.Empty)
+                            break;
+                        transient = "本文提早結束";
+                    }
                 }
-
-                using (response)
+                catch (OperationCanceledException) when (!linked.IsCancellationRequested)
                 {
-                    long length;
-                    switch (response.StatusCode)
-                    {
-                        case HttpStatusCode.PartialContent when response.Content.Headers.ContentRange is { From: { } start, To: { } stop, Length: { } size }
-                                                               && start == offset && stop >= start && size > 0:
-                            if (total is { } t && t != size)
-                                return null;
-                            total = size;
-                            length = stop - start + 1;
-                            break;
-                        case HttpStatusCode.OK when offset == 0 && response.Content.Headers.ContentLength is { } whole:
-                            total = whole;
-                            length = whole;
-                            break;
-                        // 空的檔：伺服器對 (0, …) 回 416 bytes */0
-                        case HttpStatusCode.RequestedRangeNotSatisfiable when offset == 0 && UnsatisfiedLength(ContentRangeOf(response)) == 0:
-                            total = 0;
-                            length = 0;
-                            break;
-                        default:
-                            Log.Info($"分段下載其他電腦的檔案被拒（{(int)response.StatusCode}）：{key}");
-                            return null;
-                    }
-
-                    var tag = response.Headers.ETag?.Tag;
-                    if (etag is null)
-                        etag = tag;
-                    else if (!string.Equals(etag, tag, StringComparison.Ordinal))
-                        return null;
-                    name ??= response.Content.Headers.ContentDisposition?.FileNameStar ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"');
-                    if (length == 0)
-                        break;
-
-                    await using var body = await response.Content.ReadAsStreamAsync(linked.Token).ConfigureAwait(false);
-                    long got = 0;
-                    while (got < length)
-                    {
-                        var read = await body.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, length - got)), linked.Token).ConfigureAwait(false);
-                        if (read == 0)
-                            return null;
-                        await target.WriteAsync(buffer.AsMemory(0, read), linked.Token).ConfigureAwait(false);
-                        got += read;
-                    }
-
-                    offset += got;
-                    progress?.Invoke(offset, total ?? offset);
+                    transient = "逾時";
                 }
+                catch (Exception ex) when (ex is HttpRequestException or IOException)
+                {
+                    transient = ex.Message;
+                }
+
+                if (offset > attemptFrom)
+                {
+                    progress?.Invoke(offset, total ?? offset);
+                    failures = 0;
+                    failingSince = null;
+                }
+                if (transient is null)
+                    continue;
+
+                failingSince ??= time.GetTimestamp();
+                if (PeerDownloadRetryRules.NextDelay(failures, time.GetElapsedTime(failingSince.Value)) is not { } delay)
+                {
+                    Log.Info($"分段下載其他電腦的檔案失敗（{transient}；連續 {failures + 1} 次、已到 {offset} 位元組）：{key}");
+                    return null;
+                }
+                Log.Info($"分段下載其他電腦的檔案暫時失敗（{transient}），{delay.TotalSeconds:0} 秒後從 {offset} 位元組接著下載：{key}");
+                failures++;
+                await Task.Delay(delay, time, linked.Token).ConfigureAwait(false);
             }
 
             await target.FlushAsync(linked.Token).ConfigureAwait(false);
@@ -286,6 +275,71 @@ internal sealed class ReplicaMediaSource : IReplicaMediaSource, IPeerUploader, I
             Log.Info($"分段下載其他電腦的檔案失敗：{ex.Message}");
             return null;
         }
+
+        // 一段的回應：核對範圍與 ETag、把本文寫進 target（每讀到一塊就把 offset 往前推：中途斷了，下一次從這裡接著要）。
+        // 寫完整段回 null；空的檔回 Empty；範圍、總長或 ETag 對不上回 Fatal；本文提早結束回 Short
+        async Task<SegmentStop?> ReadSegmentAsync(HttpResponseMessage response)
+        {
+            long length;
+            switch (response.StatusCode)
+            {
+                case HttpStatusCode.PartialContent when response.Content.Headers.ContentRange is { From: { } start, To: { } stop, Length: { } size }
+                                                       && start == offset && stop >= start && size > 0:
+                    if (total is { } t && t != size)
+                        return SegmentStop.Fatal;
+                    total = size;
+                    length = stop - start + 1;
+                    break;
+                case HttpStatusCode.OK when offset == 0 && response.Content.Headers.ContentLength is { } whole:
+                    total = whole;
+                    length = whole;
+                    break;
+                // 空的檔：伺服器對 (0, …) 回 416 bytes */0
+                case HttpStatusCode.RequestedRangeNotSatisfiable when offset == 0 && UnsatisfiedLength(ContentRangeOf(response)) == 0:
+                    total = 0;
+                    length = 0;
+                    break;
+                default:
+                    Log.Info($"分段下載其他電腦的檔案被拒（{(int)response.StatusCode}）：{key}");
+                    return SegmentStop.Fatal;
+            }
+
+            var tag = response.Headers.ETag?.Tag;
+            if (etag is null)
+                etag = tag;
+            else if (!string.Equals(etag, tag, StringComparison.Ordinal))
+                return SegmentStop.Fatal;
+            name ??= response.Content.Headers.ContentDisposition?.FileNameStar ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"');
+            if (length == 0)
+                return SegmentStop.Empty;
+
+            await using var body = await response.Content.ReadAsStreamAsync(linked.Token).ConfigureAwait(false);
+            long got = 0;
+            while (got < length)
+            {
+                var read = await body.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, length - got)), linked.Token).ConfigureAwait(false);
+                if (read == 0)
+                    return SegmentStop.Short;
+                await target.WriteAsync(buffer.AsMemory(0, read), linked.Token).ConfigureAwait(false);
+                got += read;
+                offset += read;
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>分段下載的一段沒有寫完整段的原因</summary>
+    private enum SegmentStop
+    {
+        /// <summary>空的檔（沒有本文，下載完成）</summary>
+        Empty,
+
+        /// <summary>範圍、總長或 ETag 對不上、被拒：放棄</summary>
+        Fatal,
+
+        /// <summary>本文提早結束：從斷掉的位置接著試</summary>
+        Short,
     }
 
     /// <summary>上傳的本文：讀的時候回報已送出的位元組（電腦狀態面板的檔案傳輸）</summary>

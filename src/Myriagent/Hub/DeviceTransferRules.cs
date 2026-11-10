@@ -219,6 +219,13 @@ internal sealed class DeviceXferBoard
         this.measure = measure ?? MeasureFile;
     }
 
+    /// <summary>有任何一筆還在排隊或接收中（app 自我更新不自動重啟：AgentHub.FileTransferActive）</summary>
+    public bool AnyActive()
+    {
+        lock (gate)
+            return entries.Any(e => e.FinishedAt is null);
+    }
+
     /// <summary>還在排隊或接收中（同一個上傳 id 不收第二次）</summary>
     public bool IsActive(string id)
     {
