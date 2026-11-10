@@ -104,6 +104,8 @@ internal static class BrowserCommandRules
         "usageSegments",
         // app 自我更新是這台電腦自己的（伺服器的 init 沒有 appUpdate，瀏覽器版不顯示橫幅與設定區塊）
         "draftSnapshot", "appUpdateCheck", "appUpdateRestartNow", "appUpdateForce", "appUpdateCancel", "appInstallHere",
+        // 臨時對話（2026-11-11）：桌面面板的結束與朗讀（瀏覽器版結束用 close／delete、朗讀由瀏覽器自己念）
+        "quickChatEnd", "speakItem", "speakStop",
         // 桌面遠端操作的附件與檔案下載（sync-protocol 14.7）：桌面的宿主以裝置的存取權杖代傳，瀏覽器版走 E4 與 /f/
         "peerUpload", "peerUploadCancel", "peerFileSave", "draftSetDevice",
         // 電腦狀態面板的檔案傳輸（2026-11-09）：桌面的宿主把其他電腦的檔下載進這台的資料夾、挑這台的資料夾、暫停與接著下載；瀏覽器版交給瀏覽器下載
@@ -115,7 +117,7 @@ internal static class BrowserCommandRules
     /// newConversation、copyItem、searchConversations（側欄的對話搜尋，2026-10-23）由對話指令處理；只有第 5 階段的 takeover、handoffCancel 仍真的回 not_available
     /// </summary>
     public static IReadOnlySet<string> NotAvailableCommands { get; } = Set(
-        "newConversation", "send", "cancelQueued", "stop", "answer", "skipQuestion", "approve", "approvePlan",
+        "newConversation", "quickChat", "send", "cancelQueued", "stop", "answer", "skipQuestion", "approve", "approvePlan",
         "rename", "delete", "setOption", "setAccount", "setFolder", "resetFolder", "removeAttachment",
         "listFiles", "fileSearch", "copyItem", "searchConversations",
         "accountAdd", "accountLogin", "accountLoginCancel", "accountLogout", "accountRemove", "accountRefresh",
@@ -139,7 +141,7 @@ internal static class BrowserCommandRules
     /// 第 3 階段每次 init 都會讓網頁送 newConversation，提示了等於每次連線都跳錯誤（D17）
     /// </summary>
     public static IReadOnlySet<string> SilentCommands { get; } = Set(
-        ["newConversation", "listFiles", "fileSearch", "draftSnapshot", "monitor", "clientError", "searchConversations", "desk", "composerDraft", .. IgnoredCommands]);
+        ["newConversation", "quickChat", "listFiles", "fileSearch", "draftSnapshot", "monitor", "clientError", "searchConversations", "desk", "composerDraft", .. IgnoredCommands]);
 
     /// <summary>
     /// 電腦的結果與立即拒絕要不要另送 toast（<paramref name="cmd"/> 是送給電腦的指令名稱）：<see cref="SilentCommands"/> 不送；

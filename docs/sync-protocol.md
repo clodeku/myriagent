@@ -1085,6 +1085,16 @@ Claude 帳戶已對應或宣告了邏輯帳戶、這台**沒有發布過**這個
 - **瀏覽器**：`composerDraft` 由伺服器處理（只收擁有者、要是這條連線看得到的對話），擁有者的連線在 `init` 之後收整份的 `composerDrafts`（伺服器一則都沒有時不送）、之後收變了的那則（送來的那條連線不送回去）；協作人不送也不收。
 - **誰蓋過誰由網頁決定**（`Web/draftsyncrules.js`，使用者 2026-11-10 選的）：輸入框沒改過就換成別處的；正在打的（改過、或剛打過字還有焦點）不蓋掉，在輸入框上方提示「換成它／保留這裡的」（保留＝馬上把這裡的送出去）；別處清掉了而這裡正在打時不理。
 
+### 14.18 臨時對話（`quick1`；2026-11-11）
+
+使用者要求：右上角的對話鈕開一個浮動面板，問日常、不屬於任何專案的問題，問完不留紀錄（web-protocol 的 `quickChat`）。桌面開的臨時對話是 localOnly，不上伺服器；這一節只關於瀏覽器版開的。
+
+- **功能**：`quick1` 不對應任何 hub 方法。伺服器宣告；桌面一律宣告（這版的中樞收得了帶 `ephemeral` 的 `conversationCreate`）。
+- **開**：瀏覽器的 `quickChat` 開一份 `Ephemeral` 的伺服器草稿（標題「臨時對話」、標頭帶 `ephemeral`）。第一次 `send` 組成的 `conversationCreate` 多帶 `ephemeral: true`（型錄的選填布林）；目標那條連線沒有協商出 `quick1` 時伺服器立即拒絕（`unsupported`，說明那台要先更新或換一台）——舊版的桌面不認得這個欄位，會整則拒絕、使用者看不懂。
+- **那台**（`AgentHub.RemoteHandlers.cs`）：建成 `Ephemeral` 的對話（對話自己的工作區），同步政策照常是 full（瀏覽器版要看得到內容）。meta 的同步內容（`ConversationMetaPayload`）多一個選填的 `ephemeral`（只有 true 時帶，前一版忽略）。
+- **不列**：伺服器讀對話清單時略過 meta_json 有 `ephemeral` 的（`ConversationReader.List`），標頭照帶 `ephemeral`；其他電腦的副本也不列（`ReplicaRules.ToMeta` 帶進 `AgentConversation.Ephemeral`）。
+- **關**：瀏覽器關掉面板時，還沒送出的草稿送 `close`（伺服器丟掉），已建立的送 `delete`：那台收到臨時對話的遠端刪除時直接刪掉（不進回收區，連 CLI 的逐字稿），照一般的刪除發布到伺服器。
+
 ## 15. app 下載端點（app 自我更新 U2）
 
 桌面以存取權杖取得最新版與套件（U3 的 `HubReleaseSource`）。路由是 `AppReleaseRoutes`（`Update/AppReleaseMessages.cs`）的常數，回應以 `SyncJson` 序列化（1.2），形狀只加選用欄位（1.4 的不變式）。

@@ -26,7 +26,7 @@ internal sealed record ConversationListRow(string ConversationId, string? OwnerD
 internal sealed record ConversationHeaderRow(string ConversationId, string? OwnerDeviceId, string? AccountId, AgentProvider Provider, string Title,
     string? Model, string? Effort, string? PermissionMode, bool CustomFolder, string? WorkingDirectory, bool Running, string? StatusText,
     long? TurnStartedAt, ConversationTurnPayload? LastTurn, string? LeaseState, string SyncPolicy, long Epoch, long LastSeq,
-    IReadOnlyList<ConversationModelOption>? Models = null);
+    IReadOnlyList<ConversationModelOption>? Models = null, bool Ephemeral = false);
 
 /// <summary><c>conversation_runtime</c> 的一列：佇列（<c>conv.queue</c> 的快照）與附件處理中的狀態</summary>
 /// <param name="More">佇列裡沒帶到的則數（<c>ConversationQueuePayload.More</c>）</param>
@@ -97,6 +97,9 @@ internal sealed class ConversationReader(SyncWriter writer, ILogger<Conversation
                     continue;
                 var owner = Text(reader, 1);
                 var meta = ParseMeta(id, reader.GetString(5));
+                // 臨時對話（瀏覽器版開的，關掉就刪掉）不列在清單
+                if (meta.Ephemeral)
+                    continue;
                 rows.Add(new ConversationListRow(id, owner, Account(links, owner, meta.LocalAccountId), provider, reader.GetString(3), reader.GetInt64(4),
                     meta.CustomFolder, meta.WorkingDirectory, reader.GetInt64(6) != 0, reader.GetInt64(7) != 0, reader.GetInt64(8)));
             }
@@ -219,7 +222,7 @@ internal sealed class ConversationReader(SyncWriter writer, ILogger<Conversation
         return new ConversationHeaderRow(conversationId, owner, account, provider, reader.GetString(3), meta.Model, meta.Effort, meta.PermissionMode,
             meta.CustomFolder, meta.WorkingDirectory, reader.GetInt64(5) != 0, Text(reader, 6), Long(reader, 7),
             Text(reader, 8) is { } turn ? Parse<ConversationTurnPayload>(conversationId, "last_turn", turn) : null,
-            Text(reader, 9), reader.GetString(10), reader.GetInt64(11), reader.GetInt64(12), meta.Models);
+            Text(reader, 9), reader.GetString(10), reader.GetInt64(11), reader.GetInt64(12), meta.Models, meta.Ephemeral);
     }
 
     private static ConversationPage ReadPage(SqliteConnection connection, SqliteTransaction tx, string conversationId, string? beforeItemId, int limit)
@@ -330,7 +333,8 @@ internal sealed class ConversationReader(SyncWriter writer, ILogger<Conversation
         }
         return new MetaFields(Str(meta, "localAccountId"), Str(meta, "permissionMode"), Str(meta, "model"), Str(meta, "effort"),
             meta["customFolder"] is JValue { Type: JTokenType.Boolean } custom && (bool)custom, Str(meta, "workingDirectory"),
-            ConversationViewRules.PublishedModels(meta["models"]));
+            ConversationViewRules.PublishedModels(meta["models"]),
+            meta["ephemeral"] is JValue { Type: JTokenType.Boolean } ephemeral && (bool)ephemeral);
     }
 
     private T? Parse<T>(string conversationId, string column, string json) where T : class
@@ -387,7 +391,7 @@ internal sealed class ConversationReader(SyncWriter writer, ILogger<Conversation
 
     /// <summary>meta 裡給畫面看的欄位</summary>
     private sealed record MetaFields(string? LocalAccountId, string? PermissionMode, string? Model, string? Effort, bool CustomFolder, string? WorkingDirectory,
-        IReadOnlyList<ConversationModelOption>? Models)
+        IReadOnlyList<ConversationModelOption>? Models, bool Ephemeral = false)
     {
         public static MetaFields Empty { get; } = new(null, null, null, null, false, null, null);
     }

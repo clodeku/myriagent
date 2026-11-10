@@ -20,7 +20,7 @@ public sealed class ChatItemCopyRulesTests
     [InlineData(typeof(AgentQuestionOption), 3)]
     [InlineData(typeof(AgentPlanStep), 2)]
     [InlineData(typeof(AgentMediaRef), 3)]
-    [InlineData(typeof(AgentConversation), 37)]
+    [InlineData(typeof(AgentConversation), 38)]
     public void 屬性數釘住(Type type, int count)
         => PublishTestItems.Properties(type).Should().HaveCount(count, type.Name);
 
@@ -162,6 +162,7 @@ public sealed class ChatItemCopyRulesTests
             RemoteControlSessionId = "rc",
             DelegatedAccountIds = ["acc-codex"],
             ParentConversationId = "fedcba9876543210fedcba9876543211",
+            Ephemeral = true,
             CreatedAt = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Local),
             UpdatedAt = new DateTime(2026, 2, 3, 4, 5, 6, DateTimeKind.Local),
             SyncPolicy = "metadata",

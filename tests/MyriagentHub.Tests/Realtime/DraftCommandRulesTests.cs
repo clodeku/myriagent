@@ -139,6 +139,20 @@ public sealed class DraftCommandRulesTests
     // ───── ConversationCreate ─────
 
     [Fact]
+    public void 臨時對話的草稿_conversationCreate帶ephemeral_標頭帶ephemeral()
+    {
+        var draft = Draft with { Ephemeral = true, Title = BrowserDrafts.QuickChatTitle };
+        var create = DraftCommandRules.ConversationCreate(draft, "問一下");
+        create.Value<bool>("ephemeral").Should().BeTrue();
+        RemoteCommandShapeRules.Check(create).Should().BeNull("型錄的 ephemeral 是選填的布林");
+        DraftCommandRules.ConversationCreate(Draft, "x").Property("ephemeral").Should().BeNull("一般草稿不帶（舊版的電腦不認得）");
+        var header = BrowserDraftRules.Header(draft);
+        header.Value<bool>("ephemeral").Should().BeTrue();
+        header.Value<string>("title").Should().Be("臨時對話");
+        BrowserDraftRules.Header(Draft).Property("ephemeral").Should().BeNull();
+    }
+
+    [Fact]
     public void send組出的conversationCreate過ShapeRules_沒有deviceId()
     {
         var draft = Draft with { Model = "m1", Effort = "high", PermissionMode = "Plan", WorkingDirectory = @"C:\work", CustomFolder = true, Title = "標題", DeviceId = SyncIds.NewDeviceId() };

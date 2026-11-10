@@ -30,6 +30,10 @@ namespace Myriagent.Sync;
 /// 第 5 階段（選用、在最後；docs/sync-protocol.md 第 16 節）：逐字稿的狀態（<see cref="TranscriptStates.MetaValues"/>：missing、held、unportable）；
 /// 省略＝正常。伺服器寫進 <c>conversations.transcript</c>，換電腦時這幾種一律前文節錄。WP5.3 才傳值
 /// </param>
+/// <param name="Ephemeral">
+/// 臨時對話（2026-11-11，桌面的 <c>AgentConversation.Ephemeral</c>；瀏覽器版開的）：伺服器與其他電腦的清單都不列，關掉就刪掉。
+/// 選用、在最後；只有 true 時帶（省略＝一般對話），前一版忽略不認得的欄位
+/// </param>
 /// <param name="WorkingDirectoryRef">
 /// 第 5 階段（選用、在最後）：自訂工作資料夾的跨電腦參照（<see cref="PathRef"/>，<c>{kind, repoKey?, sub?, display?}</c>）；只有 <see cref="CustomFolder"/> 是 true 時帶。
 /// WP5.4 才傳值；前一版伺服器忽略不認得的欄位
@@ -50,7 +54,8 @@ internal sealed record ConversationMetaPayload(
     bool Waiting,
     IReadOnlyList<ConversationModelOption>? Models = null,
     string? Transcript = null,
-    PathRef? WorkingDirectoryRef = null);
+    PathRef? WorkingDirectoryRef = null,
+    bool? Ephemeral = null);
 
 /// <summary>
 /// <see cref="ConversationMetaPayload.Models"/> 的一項（同桌面 <see cref="AgentModelOption"/>）：<paramref name="Value"/> 是 setOption 的值，

@@ -564,6 +564,13 @@ internal sealed class AgentConversation
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public List<string>? DelegatedAccountIds { get; set; }
 
+    /// <summary>
+    /// 臨時對話（右上角的對話鈕開的浮動面板，2026-11-11 使用者要求：問日常的問題、不屬於任何專案、問完不留紀錄）：不列在對話清單、
+    /// 不上伺服器（桌面開的是 localOnly）、關掉面板就連同 CLI 的逐字稿一起刪掉，app 下次啟動時把沒刪掉的也刪掉。null＝一般對話（不寫進 meta.json，前一版忽略）
+    /// </summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public bool? Ephemeral { get; set; }
+
     /// <summary>委派工作的來源對話；子對話不能再往下委派。</summary>
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public string? ParentConversationId { get; set; }

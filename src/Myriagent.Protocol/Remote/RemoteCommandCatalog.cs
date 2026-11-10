@@ -138,6 +138,8 @@ internal static class RemoteCommandCatalog
     public static IReadOnlySet<string> ServerOnlyCommands { get; } = Set(
         "ready", "layout", "open", "close", "visible", "loadOlder", "setting", "accountUpdate", "accountReorder", "deviceRename",
         "newConversation", "copyItem", "monitor", "clientError", "searchConversations", "composerDraft",
+        // 臨時對話（2026-11-11）：瀏覽器版開的是伺服器草稿（第一次送出時以 conversationCreate 帶 ephemeral 交給電腦）
+        "quickChat",
         // 遠端桌面的影格確認、輸入、結束（14.16）：伺服器只轉給這條連線開的工作階段的那台
         "desk",
         // 多人協作（2026-10-30）：擁有者管理協作人與對話的分享，伺服器處理（桌面經裝置 hub 的 CollabCmd 交給伺服器）
@@ -165,6 +167,8 @@ internal static class RemoteCommandCatalog
         "taskDetail", "taskStop",
         // 前景的指令與子代理移到背景：以這台活著的 Claude 程序（標頭的 canBackground 只有這台的對話有）
         "backgroundTasks",
+        // 臨時對話（2026-11-11）：桌面面板的結束與朗讀（瀏覽器版結束用 close／delete、朗讀由瀏覽器自己念）
+        "quickChatEnd", "speakItem", "speakStop",
         // 「最近的指令」的歷史指令：讀這台的對話紀錄（瀏覽器版從已載入的項目找）
         "promptHistory",
         // 取消插進這一輪的訊息：只有這台本機送出的那則可以（以這台活著的 Claude 程序取消）
@@ -306,6 +310,8 @@ internal static class RemoteCommandCatalog
             Text("title", required: false),
             Text("text", RemoteCommandShapeRules.MaxAgentTextLength, required: false),
             Uploads(required: false),
+            // 臨時對話（2026-11-11；瀏覽器的 quickChat）：建成不列在清單、關掉就刪掉的對話。伺服器只送給協商出 quick1 的電腦
+            new("ephemeral", RemoteFieldKind.Bool, Required: false),
         ], ["sendRejected", "toast"], RemoteLimits.ExplicitFolder | RemoteLimits.NoRememberFolder);
         // 瀏覽器新對話的資料夾挑選（伺服器把草稿的 listFiles dirsOnly 改成它；同 dirsOnly 是層級 2）
         yield return ForDevice(ListFolders, 2, [Device(required: true), RequestId(), Text("path", required: false, nullable: true)], ["files", "toast"]);

@@ -279,7 +279,10 @@ function createAssistant(item, ctx) {
     replayClass(n, 'fx-copied', COPY_FX_MS); // 整則的四角括號亮綠、閃兩下（同程式碼框的複製）
   });
   n._copy = copy;
-  n._acts = h('div', { class: 'it-acts' }, copy);
+  // 朗讀（臨時對話，quickchat.js）：只有臨時對話顯示（.conv.quick 的樣式），桌面交給宿主念、瀏覽器版用瀏覽器的語音
+  const speak = h('button', { type: 'button', class: 'code-copy it-speak', title: '朗讀這則回覆', dataset: { field: 'speakItem' } }, icon('audio'), h('span', { text: '朗讀' }));
+  speak.addEventListener('click', () => { if (ctx.speakItem) ctx.speakItem(item.id, n._md); });
+  n._acts = h('div', { class: 'it-acts' }, copy, speak);
   n.append(n._md, n._acts, timeEl(item));
   fillAssistant(n, item, null, ctx);
   return n;

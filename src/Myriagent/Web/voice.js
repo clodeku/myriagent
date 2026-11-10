@@ -243,6 +243,39 @@ function say(text, conversationId, tuning = voiceTuning(), resume = true) {
   synth.speak(u);
 }
 
+/**
+ * 臨時對話的「朗讀」（quickchat.js）：先停下正在念的，再依序念這幾段（使用者按了鈕，發聲限制已解開；不受語音通知的開關與佇列上限影響）。
+ * 回傳 false＝這個瀏覽器不能念
+ */
+export function readAloud(chunks) {
+  if (!voiceSupported() || !Array.isArray(chunks) || !chunks.length) return false;
+  unlocked = true;
+  const synth = window.speechSynthesis;
+  synth.cancel();
+  queued = 0;
+  inFlight.clear();
+  const tuning = voiceTuning();
+  const voice = pickVoice(synth.getVoices());
+  for (const text of chunks) {
+    const u = new window.SpeechSynthesisUtterance(text);
+    u.lang = 'zh-TW';
+    if (voice) u.voice = voice;
+    u.rate = tuning.speed;
+    u.pitch = webPitch(tuning.pitch);
+    u.onstart = () => { plays++; };
+    synth.speak(u);
+  }
+  return true;
+}
+
+/** 停止朗讀（也停下正在念的語音通知） */
+export function stopReadAloud() {
+  if (!voiceSupported()) return;
+  window.speechSynthesis.cancel();
+  queued = 0;
+  inFlight.clear();
+}
+
 /** 第一次點畫面或按鍵：解開發聲限制，補念被擋下的那一句（太久以前的就不念了） */
 function unlock() {
   unlocked = true;

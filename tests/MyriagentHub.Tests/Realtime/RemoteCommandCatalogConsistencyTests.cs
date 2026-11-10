@@ -57,7 +57,7 @@ public sealed class RemoteCommandCatalogConsistencyTests
         foreach (var name in BrowserCommandRules.ServerCommands.Concat(BrowserCommandRules.IgnoredCommands))
             RemoteCommandCatalog.RouteOf(name).Should().Be(RemoteRoute.ServerOnly, name);
         RemoteCommandCatalog.ServerOnlyCommands.Except(BrowserCommandRules.ServerCommands).Except(BrowserCommandRules.IgnoredCommands)
-            .Should().BeEquivalentTo(new[] { "newConversation", "copyItem", "searchConversations" }
+            .Should().BeEquivalentTo(new[] { "newConversation", "copyItem", "searchConversations", "quickChat" }
                 .Concat(BrowserCommandRules.CollaboratorServerCommands),
                 "前兩個在 WP4.2 改由伺服器處理（伺服器草稿、伺服器回 clipboard），之前 not_available；searchConversations（2026-10-23）由伺服器搜清單、回 conversationSearch；"
                 + "協作人的管理（多人協作）由伺服器處理（CollaboratorCommandService）");
@@ -67,7 +67,7 @@ public sealed class RemoteCommandCatalogConsistencyTests
     public void 還沒開放的指令就是型錄裡電腦執行的加上伺服器草稿與第5階段()
     {
         var expected = RemoteCommandCatalog.All.Select(s => s.Name).Where(n => !RemoteCommandCatalog.NonWebCommands.Contains(n))
-            .Concat(["newConversation", "copyItem", "searchConversations"])
+            .Concat(["newConversation", "copyItem", "searchConversations", "quickChat"])
             .Concat(BrowserCommandRules.CollaboratorServerCommands).Concat(Phase5Commands);
         BrowserCommandRules.NotAvailableCommands.Should().BeEquivalentTo(expected, "WP4.1 只立型錄，瀏覽器模式照樣回 not_available");
         foreach (var spec in RemoteCommandCatalog.All.Where(s => !RemoteCommandCatalog.NonWebCommands.Contains(s.Name)))

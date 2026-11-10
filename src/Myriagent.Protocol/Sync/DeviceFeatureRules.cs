@@ -116,8 +116,13 @@ internal static class DeviceFeatureRules
     /// </summary>
     public const string Draft1 = "draft1";
 
+    /// <summary>
+    /// 臨時對話（2026-11-11）：協商出它的連線收帶 <c>ephemeral</c> 的 <c>conversationCreate</c>（瀏覽器版右上角的對話鈕開的；不列在清單、關掉就刪掉）。不對應任何 hub 方法
+    /// </summary>
+    public const string Quick1 = "quick1";
+
     /// <summary>這版認得的功能（不認得的名稱照收、不啟用：交集裡不會有它）</summary>
-    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1, Xfer1, Xfer2, Desk1, Draft1];
+    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1, Xfer1, Xfer2, Desk1, Draft1, Quick1];
 
     public const int MaxFeatures = 32;
 

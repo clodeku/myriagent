@@ -47,6 +47,8 @@ internal static class ReplicaRules
             SyncPolicy = PolicyOf(row.MetaJson),
             OwnerDeviceId = row.OwnerDeviceId,
             LeaseEpoch = row.Epoch,
+            // 臨時對話（瀏覽器版開的）：這台的清單也不列
+            Ephemeral = payload.Ephemeral == true ? true : null,
         };
         var folder = payload.CustomFolder && !string.IsNullOrWhiteSpace(payload.WorkingDirectory) ? payload.WorkingDirectory : null;
         return new ReplicaMeta(row.ConversationId, row.OwnerDeviceId, meta, payload.Running, payload.Waiting, HasItems(row.MetaJson),

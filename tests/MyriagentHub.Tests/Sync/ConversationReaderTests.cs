@@ -38,6 +38,24 @@ public sealed class ConversationReaderTests
     }
 
     [Fact]
+    public async Task 臨時對話不在清單_標頭帶ephemeral()
+    {
+        await using var host = await HubTestHost.StartAsync();
+        var a = await EventLogTests.AddDeviceAsync(host);
+        var quick = Meta("臨時對話");
+        quick["ephemeral"] = true;
+        await Append(host, a, Ev(1, K.Created, Meta("一般"), Id(1)), Ev(2, K.Created, quick, Id(2)));
+        var reader = Reader(host);
+
+        reader.List().Rows.Select(r => r.ConversationId).Should().Equal(Id(1));
+        reader.ReadHeader(Id(2)).Header!.Ephemeral.Should().BeTrue("瀏覽器版開著的面板照樣讀得到它");
+        reader.ReadHeader(Id(1)).Header!.Ephemeral.Should().BeFalse();
+        var header = ConversationViewRules.Header(reader.ReadHeader(Id(2)).Header!, ConversationDeviceInfo.None, rebuilding: false);
+        header.Value<bool>("ephemeral").Should().BeTrue();
+        ConversationViewRules.Header(reader.ReadHeader(Id(1)).Header!, ConversationDeviceInfo.None, rebuilding: false).Property("ephemeral").Should().BeNull("一般對話不帶");
+    }
+
+    [Fact]
     public async Task 排序依顯示時間再依seq()
     {
         await using var host = await HubTestHost.StartAsync();

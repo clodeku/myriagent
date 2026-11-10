@@ -38,6 +38,7 @@ import { openCodexPanel } from './codexcontrols.js';
 import { openRewind } from './rewind.js';
 import { openTaskDetail } from './taskdetail.js';
 import { reportIssue } from './errorreport.js';
+import { speakItem } from './quickchat.js';
 
 /**
  * 項目照實際高度排版的瀏覽器（同 chat.css 的 .it：觸控裝置、不支援捲動錨定的）。每次載入時才問（平板接上或拆下鍵盤會變）
@@ -151,6 +152,8 @@ export class ConvView {
       cards: { pending: new Set(), notes: new Map(), texts: new Map() },
       // 〔遠端〕Assistant 的「複製」：送 copyItem、等伺服器回 clipboard（D7、D42；結果由 markCopied 畫）；沒送出回 false
       copyItem: (itemId) => requestCopy(id, itemId),
+      // 臨時對話的「朗讀」（quickchat.js）：桌面送 speakItem 讓宿主念，瀏覽器版從畫面上的回覆取文字自己念
+      speakItem: (itemId, mdEl) => speakItem(id, itemId, mdEl),
       // 使用者訊息的「回溯」（rewind.js）：只有桌面這台的 Claude 對話、不在執行中
       rewind: isHub ? null : (itemId) => this.openRewindFor(itemId),
       // 子代理的即時用量（Header.subagents）：Agent 工具卡上的 token 晶片（items.paintAgentUsage）
@@ -427,9 +430,9 @@ export class ConvView {
     this.originChip.addEventListener('click', () => { const o = this.origin; if (o && o.open) this.ws.openConversation(o.id); });
     this.progIds = new Set();     // 上一次畫的程式 id（消失的、不是自己按停止的＝自己結束了，晶片閃一下琥珀色）
     this.progStopped = new Set(); // 在選單按了停止的程式 id
-    this.drawerBtn = iconButton('panelRight', '檔案瀏覽器', () => this.toggleDrawer());
-    this.popBtn = iconButton('popout', '在新視窗開啟', () => post({ cmd: 'popout', conversationId: this.id }));
-    this.moreBtn = iconButton('more', '更多動作', () => this.openMoreMenu());
+    this.drawerBtn = iconButton('panelRight', '檔案瀏覽器', () => this.toggleDrawer(), 'ch-drawer');
+    this.popBtn = iconButton('popout', '在新視窗開啟', () => post({ cmd: 'popout', conversationId: this.id }), 'ch-pop');
+    this.moreBtn = iconButton('more', '更多動作', () => this.openMoreMenu(), 'ch-more');
     // 放大／還原這個窗格（workspace.js 的 togglePaneZoom 接點擊）；兩個圖示依 .pane.zoomed 顯示其中一個，只有一個窗格時不顯示（chat.css）
     this.zoomBtn = iconButton('paneExpand', '放大或還原這個窗格', null, 'ch-zoom');
     this.zoomBtn.dataset.field = 'paneZoom';
@@ -1251,8 +1254,10 @@ export class ConvView {
     setAcc(this.root, safeColor(color, hd.provider), hd.provider);
     // 〔同步〕桌面上其他電腦的副本（D22）：唯讀，不能改名、換帳戶、換資料夾、瀏覽檔案；不看 accountMissing
     const replica = this.isReplica();
+    // 臨時對話（quickchat.js）：回覆顯示「朗讀」鈕（chat.css 的 .conv.quick .it-speak）
+    this.root.classList.toggle('quick', !!hd.ephemeral);
     // 自動命名產生了新標題：先閃過亂碼再逐字鎖定（fxrules.titleDecodeFx；手動改名直接換）
-    this.setTitleText(hd.isDraft ? '新對話' : (hd.title || '未命名對話'), !hd.isDraft && titleDecodeFx(prevHd, hd));
+    this.setTitleText(hd.isDraft ? (hd.ephemeral && hd.title ? hd.title : '新對話') : (hd.title || '未命名對話'), !hd.isDraft && titleDecodeFx(prevHd, hd));
     this.titleSpin.hidden = !hd.titling;
     this.autoTitleBtn.hidden = !this.canAutoTitle() || !!hd.titling;
     this.titleEl.title = hd.isDraft ? '新對話（送出第一則訊息後會自動命名）'
@@ -1524,6 +1529,13 @@ export class ConvView {
       this.empty.append(h('div', { class: 'draft-lines', dataset: { field: 'peerCreating' } },
         h('div', { class: 'draft-title' }, spinner(), h('span', { text: '正在' + (dev ? ' ' + dev.name + ' ' : '那台電腦') + '上建立新對話…' })),
         h('div', { class: 'draft-sub', text: '建好之後會自動換成那台的對話。' })));
+      return;
+    }
+    // 臨時對話（header.ephemeral，quickchat.js）：日常的問題、不用工作資料夾、關掉就刪掉
+    if (hd.ephemeral) {
+      this.empty.append(h('div', { class: 'draft-lines', dataset: { field: 'quickChatEmpty' } },
+        h('div', { class: 'draft-title', text: (acc ? '用「' + acc.label + '」' : '') + '問點什麼' }),
+        h('div', { class: 'draft-sub', text: '臨時對話：不用選工作資料夾，不會出現在對話清單；關掉面板就連同紀錄一起刪掉。回覆可以按「朗讀」念出來。' })));
       return;
     }
     const remoteDraft = !isHub && !!hd.isDraft && !!hd.deviceId;

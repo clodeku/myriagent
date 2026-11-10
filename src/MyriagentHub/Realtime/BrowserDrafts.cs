@@ -80,7 +80,10 @@ internal sealed partial class BrowserDrafts : IBrowserDrafts, IDisposable
     /// 開一份草稿（newConversation）：帳戶照 <see cref="BrowserDraftRules.PickAccount"/>，一個帳戶都沒有回 null；超過上限時丟最久沒用的，id 在回傳值裡。
     /// <paramref name="deviceId"/> 是 newConversation 選填的電腦（WP4.5 計畫 K8；呼叫端已確認是裝置 id 的形狀）
     /// </summary>
-    public DraftCreated? Create(string sessionId, string? requestedAccountId, IReadOnlyList<DraftAccount> accounts, string? deviceId = null)
+    /// <summary>臨時對話的標題（同桌面 QuickChatRules.Title）</summary>
+    public const string QuickChatTitle = "臨時對話";
+
+    public DraftCreated? Create(string sessionId, string? requestedAccountId, IReadOnlyList<DraftAccount> accounts, string? deviceId = null, bool ephemeral = false)
     {
         ArgumentNullException.ThrowIfNull(sessionId);
         if (BrowserDraftRules.PickAccount(requestedAccountId, accounts) is not { } account)
@@ -102,7 +105,13 @@ internal sealed partial class BrowserDrafts : IBrowserDrafts, IDisposable
                 id = BrowserDraftRules.NewId(time.GetUtcNow().ToUnixTimeMilliseconds());
             }
             while (session.Drafts.ContainsKey(id));
-            var draft = new BrowserDraft(id, account.Id, account.Provider) { DeviceId = deviceId, Used = ++used };
+            var draft = new BrowserDraft(id, account.Id, account.Provider)
+            {
+                DeviceId = deviceId,
+                Used = ++used,
+                Ephemeral = ephemeral,
+                Title = ephemeral ? QuickChatTitle : null,
+            };
             session.Drafts[id] = draft;
             var evicted = new List<string>();
             foreach (var old in BrowserDraftRules.Evict(session.Drafts.Values.ToList(), max))

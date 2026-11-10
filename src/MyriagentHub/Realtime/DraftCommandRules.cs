@@ -138,6 +138,9 @@ internal static class DraftCommandRules
             cmd["title"] = title;
         if (text.Length > 0)
             cmd["text"] = text;
+        // 臨時對話（quickChat 開的草稿）：那台建成不列在清單、關掉就刪掉的對話
+        if (draft.Ephemeral)
+            cmd["ephemeral"] = true;
         return cmd;
     }
 

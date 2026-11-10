@@ -249,6 +249,10 @@ internal sealed partial class CommandRouter(
         if (name is RemoteCommandCatalog.ScheduleAction or RemoteCommandCatalog.ScheduleAgent && !device.Allows(DeviceHubMethods.SchedulesPublish))
             return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false,
                 "「" + (string.IsNullOrWhiteSpace(devices.Get(target)?.Name) ? PeerRules.UnnamedDevice : devices.Get(target)!.Name!.Trim()) + "」的 Clode Myriagent 版本太舊，還沒有排程頁；請先更新那台"), cancellationToken);
+        // 臨時對話（2026-11-11）：conversationCreate 帶 ephemeral 要那台協商出 quick1（舊版的桌面不認得這個欄位，會整則拒絕、使用者看不懂）
+        if (name == RemoteCommandCatalog.ConversationCreate && mapped["ephemeral"] is { Type: JTokenType.Boolean } && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.Quick1))
+            return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false,
+                "「" + (string.IsNullOrWhiteSpace(devices.Get(target)?.Name) ? PeerRules.UnnamedDevice : devices.Get(target)!.Name!.Trim()) + "」的 Clode Myriagent 版本太舊，還沒有臨時對話；請先更新那台，或在面板上換一台電腦"), cancellationToken);
         // 電腦狀態面板的檔案傳輸（2026-11-09）：目標要協商出 xfer1（舊版的桌面在閘門 5a 回 invalid，使用者看不懂）
         if (RemoteCommandCatalog.DeviceTransferCommands.Contains(name) && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.Xfer1))
             return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false,

@@ -50,11 +50,16 @@ internal sealed partial class SyncEngine : ISyncEngineComposerDrafts
         SendNextDraft();
     });
 
-    /// <summary>Hello 的功能：有 port 才宣告 draft1</summary>
+    /// <summary>
+    /// Hello 的功能：有 port 才宣告 draft1；臨時對話的 quick1（這版的中樞收得了帶 ephemeral 的 conversationCreate，2026-11-11）跟著一起宣告——
+    /// 兩個都由協調者的 EnginePort 接上，正式環境一定同時有
+    /// </summary>
     private void ContributeDraftFeatures(List<string> into)
     {
-        if (DraftsPort is not null)
-            into.Add(DeviceFeatureRules.Draft1);
+        if (DraftsPort is null)
+            return;
+        into.Add(DeviceFeatureRules.Draft1);
+        into.Add(DeviceFeatureRules.Quick1);
     }
 
     /// <summary><c>ComposerDraftUpdate</c>：格式不合格整則略過，否則連同還沒送成功的對話交給協調者</summary>

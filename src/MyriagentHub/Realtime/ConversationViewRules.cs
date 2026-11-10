@@ -131,7 +131,7 @@ internal static class ConversationViewRules
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(device);
         var running = row.Running && device.Online;
-        return new JObject
+        var header = new JObject
         {
             ["id"] = row.ConversationId,
             ["accountId"] = S(row.AccountId),
@@ -159,6 +159,10 @@ internal static class ConversationViewRules
             ["deviceName"] = S(device.DeviceName),
             ["deviceOnline"] = device.Online,
         };
+        // 臨時對話（瀏覽器版開的，meta 的 ephemeral）：網頁在回覆上顯示「朗讀」、關掉面板就刪掉；一般對話不帶（標頭的形狀不變）
+        if (row.Ephemeral)
+            header["ephemeral"] = true;
+        return header;
     }
 
     /// <summary>標頭的狀態列（見 <see cref="Header"/>）</summary>

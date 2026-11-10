@@ -40,6 +40,12 @@ internal sealed record BrowserDraft(string Id, string AccountId, AgentProvider P
     /// <summary>新對話的線上 id（<c>RemoteConversationIdRules.FromCommandId(SentCommandId)</c>；和 <see cref="SentCommandId"/> 一起設、一起清）</summary>
     public string? PendingConversationId { get; init; }
 
+    /// <summary>
+    /// 臨時對話（2026-11-11，瀏覽器的 <c>quickChat</c>）：第一次送出時 conversationCreate 帶 <c>ephemeral</c>，那台建成不列在清單、
+    /// 關掉面板就刪掉的對話（要那台協商出 quick1）
+    /// </summary>
+    public bool Ephemeral { get; init; }
+
     /// <summary>最近使用的順序（數字越大越新；由 <see cref="BrowserDrafts"/> 維護，超過上限時丟最小的）</summary>
     public long Used { get; init; }
 }
@@ -152,7 +158,7 @@ internal static class BrowserDraftRules
         ArgumentNullException.ThrowIfNull(draft);
         var row = new ConversationHeaderRow(draft.Id, OwnerDeviceId: null, draft.AccountId, draft.Provider, draft.Title ?? Title, draft.Model, draft.Effort, draft.PermissionMode,
             draft.CustomFolder, draft.WorkingDirectory, Running: false, StatusText: null, TurnStartedAt: null, LastTurn: null, LeaseState: null,
-            ConversationSyncPolicies.Full, Epoch: 0, LastSeq: 0);
+            ConversationSyncPolicies.Full, Epoch: 0, LastSeq: 0, Ephemeral: draft.Ephemeral);
         var header = ConversationViewRules.Header(row, ConversationDeviceInfo.None, rebuilding: false);
         header["isDraft"] = true;
         header["deviceId"] = draft.DeviceId is { } deviceId ? new JValue(deviceId) : JValue.CreateNull();

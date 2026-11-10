@@ -57,6 +57,9 @@ const DRAFT_SWAP_MS = 20000;
 // 回覆到了才在原對話的窗格旁邊開新窗格：宿主失敗（只送 toast）時不留空窗格
 const pendingForks = new Map();
 const FORK_WAIT_MS = 120000;
+// 嵌在別的頁面裡的對話（臨時對話的浮動面板，2026-11-11）：記號（送給宿主的 paneId）→ { el, id, open, shown, onChange }。
+// 對話照樣在 convs（宿主的更新照常送到），只是不在任何窗格：不進分頁列與版面。open＝面板開著（宿主回的對話才接），shown＝看得到（算進 visible）
+const docks = new Map();
 
 function bump(map, id, delta) {
   const n = (map.get(id) || 0) + delta;
@@ -153,8 +156,9 @@ function waitingItem(cv, itemId) {
 }
 export function visibleConvs() {
   const out = [];
-  if (state.view !== 'chat') return out;
-  for (const p of panes) { const cv = p.active && convs.get(p.active); if (cv && cv.visible) out.push(cv); }
+  if (state.view === 'chat') for (const p of panes) { const cv = p.active && convs.get(p.active); if (cv && cv.visible) out.push(cv); }
+  // 嵌在別頁（臨時對話的面板）而且看得到的
+  for (const d of docks.values()) { const cv = d.shown && d.id ? convs.get(d.id) : null; if (cv && cv.visible) out.push(cv); }
   return out;
 }
 
@@ -564,6 +568,9 @@ export function refreshTab(id) {
 
 /** 在指定窗格加分頁（不送 open；呼叫端決定） */
 function addTab(p, id, index) {
+  // 嵌在別頁的對話搬進窗格（側欄點了它）：面板放開它，ConvView 照用
+  const tk = dockOf(id);
+  if (tk) undock(tk);
   let cv = convs.get(id);
   if (!cv) {
     cv = new ConvView(id, api);
@@ -712,6 +719,9 @@ function sendNewConversation(accountId, paneId, deviceId) {
 }
 
 export function closeTab(id, opts = {}) {
+  // 嵌在別頁的對話（臨時對話的面板）：捨棄草稿、宿主關掉或刪除
+  const tk = dockOf(id);
+  if (tk) { releaseDock(tk, opts.notify !== false); return; }
   const p = paneOf(id);
   const cv = convs.get(id);
   if (!p) { if (cv) { cv.destroy(); convs.delete(id); } return; }
@@ -976,6 +986,10 @@ function bindTabDrop(p) {
 /** conversation：有分頁就載入；沒有就開在 paneId（或聚焦窗格）。reload＝宿主主動重送（不是 open 的回覆）：沒有分頁就丟掉、不算回覆 */
 export function handleConversation(msg) {
   const id = msg.conversationId;
+  // 回給嵌在別頁的面板（quickChat 帶面板的記號當 paneId）
+  if (typeof msg.paneId === 'string' && docks.has(msg.paneId)) { mountDock(msg.paneId, msg); return; }
+  // 〔遠端〕面板裡的草稿換成了正式對話（swapDock）：open 的回覆沒有 paneId，照等著的 id 嵌回面板
+  for (const [tk, d] of docks) if (d.expect === id) { d.expect = null; mountDock(tk, msg); return; }
   let cv = convs.get(id);
   if (!cv) {
     // 已經關掉的分頁不因主動重送而重開（第二輪合併前審查 R1）
@@ -1079,6 +1093,7 @@ export function handleClosed(id, replacedBy) {
     return;
   }
   if (replaceDraft(id, replacedBy)) return;
+  if (swapDock(id, replacedBy)) return;
   if (recreateDraft(id)) return;
   reopenedDrafts.delete(id);
   closeTab(id, { notify: false });
@@ -1309,7 +1324,7 @@ export function setChatVisible(on) {
 function retryOpen(id) {
   const s = {
     deferred: deferredOpen.has(id), awaitingList: awaitingList.has(id), awaitingReply: awaitingReply.get(id) || 0,
-    staleReplies: staleReplies.get(id) || 0, inList: state.convMap.has(id), inPane: !!paneOf(id),
+    staleReplies: staleReplies.get(id) || 0, inList: state.convMap.has(id), inPane: !!paneOf(id) || !!dockOf(id),
   };
   if (s.awaitingList || !s.inPane) return Object.assign({ sent: false }, s);
   deferredOpen.delete(id);
@@ -1317,7 +1332,128 @@ function retryOpen(id) {
   return Object.assign({ sent: true }, s);
 }
 
+// ───── 嵌在別頁的對話（臨時對話的浮動面板）─────
+
+/**
+ * 註冊一個面板：記號（quickChat 的 paneId）、放 ConvView 的元素、嵌著的對話換了時的回呼 onChange(id, reason)：
+ * 'mounted'（嵌進來了）、'released'（放開了：關掉面板、宿主關掉或刪除、換成別的）、'moved'（搬進窗格了：id 是 null）
+ */
+export function registerDock(token, el, onChange) {
+  if (!docks.has(token)) docks.set(token, { el, id: null, open: false, shown: false, onChange: onChange || null });
+}
+
+/** 面板開著（宿主回的對話才嵌進來）、看得到：嵌著的對話跟著顯示或藏起來，visible 重送 */
+export function setDock(token, open, shown) {
+  const d = docks.get(token);
+  if (!d) return;
+  d.open = !!open;
+  d.shown = !!open && !!shown;
+  const cv = d.id ? convs.get(d.id) : null;
+  if (cv) { if (d.shown) cv.show(); else cv.hide(); }
+  reportVisible(false);
+}
+
+/** 嵌著的對話（沒有是 null） */
+export function dockedConv(token) {
+  const d = docks.get(token);
+  return d && d.id ? convs.get(d.id) || null : null;
+}
+
+function dockOf(id) {
+  for (const [tk, d] of docks) if (d.id === id) return tk;
+  return null;
+}
+
+/** 宿主回了要嵌進面板的對話（quickChat 的回覆）：開在窗格裡的先從窗格拿下來（不關掉），面板原本嵌著別的就放開它 */
+function mountDock(token, msg) {
+  const d = docks.get(token);
+  const id = msg.conversationId;
+  const p = paneOf(id);
+  if (!d.open) {
+    // 面板在等回覆的期間關掉了：開在窗格裡的照常更新，否則告訴宿主不看了（草稿就此丟掉）
+    if (p) { const pcv = convs.get(id); if (pcv) pcv.load(msg); } else if (!convs.has(id)) post({ cmd: 'close', conversationId: id });
+    return;
+  }
+  if (d.id && d.id !== id) releaseDock(token, true);
+  if (p) detachTab(p, id);
+  deferredOpen.delete(id);
+  let cv = convs.get(id);
+  if (!cv) { cv = new ConvView(id, api); convs.set(id, cv); }
+  d.el.replaceChildren(cv.root);
+  d.id = id;
+  cv.load(msg);
+  if (d.shown) cv.show(); else cv.hide();
+  if (!msg.reload) bump(awaitingReply, id, -1);
+  reportVisible(false);
+  if (d.onChange) d.onChange(id, 'mounted');
+  if (d.shown) requestAnimationFrame(() => cv.focusInput());
+}
+
+/**
+ * 〔遠端〕面板裡的伺服器草稿第一則送出後換成正式對話（conversationClosed 的 replacedBy；臨時對話的面板）：銷毀草稿的畫面、送 open 新的 id，
+ * 回覆到了照等著的 id 嵌回同一個面板（handleConversation）。不通知面板（不是被關掉）。回 true＝已處理
+ */
+function swapDock(id, newId) {
+  const tk = dockOf(id);
+  if (!tk || typeof newId !== 'string' || !newId || newId === id) return false;
+  const d = docks.get(tk);
+  const cv = convs.get(id);
+  if (cv) { cv.destroy(); convs.delete(id); }
+  d.id = null;
+  d.expect = newId;
+  d.el.replaceChildren(h('div', { class: 'qc-swap' }, icon('clock'), h('span', { text: '對話建立了，載入中…' })));
+  post({ cmd: 'open', conversationId: newId });
+  return true;
+}
+
+/** 面板正在等它換成的正式對話（swapDock 之後、open 的回覆到之前） */
+export function dockExpecting(token) {
+  const d = docks.get(token);
+  return d ? d.expect || null : null;
+}
+
+/** 放開面板嵌著的對話：銷毀 ConvView；notify＝告訴宿主不看了（close：沒送出過的草稿就此丟掉） */
+export function releaseDock(token, notify = true) {
+  const d = docks.get(token);
+  if (d && !d.id && d.expect) { d.expect = null; d.el.replaceChildren(); return; }
+  if (!d || !d.id) return;
+  const id = d.id;
+  d.id = null;
+  const cv = convs.get(id);
+  if (cv) { cv.destroy(); convs.delete(id); }
+  d.el.replaceChildren();
+  if (notify) post({ cmd: 'close', conversationId: id });
+  reportVisible(false);
+  if (d.onChange) d.onChange(null, 'released');
+}
+
+/** 嵌著的對話要搬進窗格（addTab）：面板只是放開它，ConvView 留著給窗格用 */
+function undock(token) {
+  const d = docks.get(token);
+  if (!d || !d.id) return;
+  d.id = null;
+  d.el.replaceChildren();
+  if (d.onChange) d.onChange(null, 'moved');
+}
+
+/** 把分頁從窗格拿下來、對話留著（搬進面板）：不銷毀、不送 close */
+function detachTab(p, id) {
+  const i = p.tabs.indexOf(id);
+  if (i < 0) return;
+  p.tabs.splice(i, 1);
+  p.mru = p.mru.filter((x) => x !== id);
+  if (p.active === id) {
+    p.active = nextAfterClose(p, i);
+    if (p.active) { touchMru(p, p.active); const next = convs.get(p.active); if (next && state.view === 'chat') next.show(); }
+  }
+  if (!p.tabs.length && panes.length > 1 && state.mode !== 'popout') { removePane(p.id); return; }
+  renderTabs(p);
+  emit('active-changed');
+  scheduleLayout();
+}
+
 export const api = {
+  registerDock, setDock, dockedConv, releaseDock, dockExpecting,
   openConversation, flashConversation, newConversation, openHealthFix, openScheduleAgent, closeTab, activateTab, focusPane, splitPane, closePane, moveTab, cycleTab, closeActiveTab,
   notePendingSwitch, activeConversationId, openConversationIds, refreshTab, getConv, paneCount: () => panes.length,
   switchDraftDevice, scheduleLayout, forkConversation, retryOpen,

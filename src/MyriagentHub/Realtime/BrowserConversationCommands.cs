@@ -52,7 +52,10 @@ internal sealed class BrowserConversationCommands(
 
     public const string SearchConversations = "searchConversations";
 
-    public bool Handles(string cmd) => cmd is Open or Close or LoadOlder or Visible or CopyItem || (cmd is NewConversation && drafts is not null)
+    /// <summary>臨時對話（2026-11-11）：開一份 ephemeral 的伺服器草稿，嵌進網頁的浮動面板</summary>
+    public const string QuickChat = "quickChat";
+
+    public bool Handles(string cmd) => cmd is Open or Close or LoadOlder or Visible or CopyItem || (cmd is NewConversation or QuickChat && drafts is not null)
         || (cmd is SearchConversations && search is not null);
 
     public Task<string?> HandleAsync(BrowserConnection connection, string cmd, JObject body, CancellationToken cancellationToken)
@@ -68,6 +71,7 @@ internal sealed class BrowserConversationCommands(
             Visible => SetVisible(connection, body),
             CopyItem => Copy(connection, body),
             NewConversation when drafts is not null => NewDraft(drafts, connection, body),
+            QuickChat when drafts is not null => NewDraft(drafts, connection, body, ephemeral: true),
             SearchConversations when search is not null => Search(search, connection, body),
             _ => throw new ArgumentOutOfRangeException(nameof(cmd), cmd, "不是對話儲存處理的指令"),
         });
@@ -116,10 +120,11 @@ internal sealed class BrowserConversationCommands(
     }
 
     /// <summary>newConversation（步 13、D29）：開一份草稿，<c>conversation</c> 只回給發起的連線；被丟的草稿先送 <c>conversationClosed</c></summary>
-    private string? NewDraft(BrowserDrafts store, BrowserConnection connection, JObject body)
+    private string? NewDraft(BrowserDrafts store, BrowserConnection connection, JObject body, bool ephemeral = false)
     {
         // 選填的 deviceId（WP4.5 計畫 K8）：新對話要在哪台電腦建立；不是裝置 id 的形狀當成沒帶（第一次送出時照預設挑一台）
-        if (store.Create(connection.SessionId, Str(body, "accountId"), gateway.DraftAccounts, Str(body, "deviceId") is { } deviceId && SyncIds.IsDeviceId(deviceId) ? deviceId : null)
+        if (store.Create(connection.SessionId, Str(body, "accountId"), gateway.DraftAccounts, Str(body, "deviceId") is { } deviceId && SyncIds.IsDeviceId(deviceId) ? deviceId : null,
+                ephemeral)
             is not { } created)
             return BrowserErrorCodes.NotAvailable;
         SendClosed(store, connection.SessionId, created.Evicted);

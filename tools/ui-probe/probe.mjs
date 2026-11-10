@@ -71,6 +71,7 @@ const FORK_ONLY = process.argv.includes('--fork'); // 只跑延伸成新對話�
 const SIDETABS_ONLY = process.argv.includes('--side-tabs'); // 只跑分頁放左側（runSideTabs）
 const PANEZOOM_ONLY = process.argv.includes('--pane-zoom'); // 只跑點了暫時放大窗格（runPaneZoom）
 const DRAFTSYNC_ONLY = process.argv.includes('--draft-sync'); // 只跑輸入框草稿的同步（runDraftSync）
+const QUICKCHAT_ONLY = process.argv.includes('--quick-chat'); // 只跑臨時對話的浮動面板（runQuickChat）
 const LOGIN_ONLY = process.argv.includes('--login'); // 只跑登入到期的檢查（runLoginExpiry）
 const CONTEXT_ONLY = process.argv.includes('--context'); // 只跑輸入框的上下文用量提示（runContext）
 const BG_ONLY = process.argv.includes('--bg'); // 只跑等背景工作回報的樣貌（runBackgroundWait）
@@ -295,6 +296,20 @@ class FakeHost {
         this.sendConversation(did, m.paneId);
         break;
       }
+      // 臨時對話（quickchat.js）：同新對話，標頭帶 ephemeral、標題「臨時對話」；送出後不進對話清單
+      case 'quickChat': {
+        const acc = this.accounts.find((a) => a.id === m.accountId) || this.accounts[0];
+        const qid = 'q' + (++this.seq);
+        this.data[qid] = {
+          header: F.baseHeader(qid, acc.id, '臨時對話', { isDraft: true, ephemeral: true, customFolder: false, workingDirectory: 'C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\' + qid + '\\workspace' }),
+          items: [], hasMore: false, composer: { attachments: [], busy: false, busyText: null, queue: [] },
+        };
+        this.sendConversation(qid, m.paneId);
+        break;
+      }
+      case 'quickChatEnd':
+        if (c) { delete this.data[id]; this.send({ type: 'conversationClosed', conversationId: id }); }
+        break;
       case 'loadOlder':
         if (c) {
           const older = c.older || [];
@@ -324,7 +339,7 @@ class FakeHost {
         const wasDraft = c.header.isDraft;
         c.header = Object.assign({}, c.header, { running: true, status: '思考中…', startedAt: Date.now(), isDraft: false, title: c.header.title || m.text.slice(0, 24) });
         this.pushHeader(id); this.pushItem(id, user); this.pushComposer(id);
-        if (wasDraft) {
+        if (wasDraft && !c.header.ephemeral) {
           this.conversations.unshift({ id, accountId: c.header.accountId, provider: c.header.provider, title: c.header.title, group: '今天', updatedAt: Date.now(), workingDirectory: c.header.workingDirectory, running: true, waiting: false, unread: false });
           this.pushConversations();
         }
@@ -2088,6 +2103,62 @@ function paneZoomState() {
 
 // 輸入框草稿的同步（draftsync.js、web-protocol 的 composerDraft／composerDrafts）：打字停下會送；沒改過的換上別處的；
 // 正在打的不蓋掉、在輸入框上方提示，「換成它」換上；別處清掉了跟著清；送出之後送空字串
+// 臨時對話（quickchat.js）：右上角的對話鈕開浮動面板、嵌一個草稿（標頭 ephemeral）；送出後回覆有「朗讀」（一般對話沒有）、
+// 按了送 speakItem；關掉面板送 quickChatEnd；再開是新的一個
+async function runQuickChat(vp) {
+  const app = await openApp('quick-chat', { vp, layout: { panes: [{ id: 'p1', tabs: ['c2'], active: 'c2' }], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' } });
+  const { page, host } = app;
+  await waitConv(page, 'c2');
+  await settle(page, 300);
+  const sent = (cmd) => host.received.filter((m) => m.cmd === cmd);
+  await page.click('#btnQuickChat');
+  await page.waitForSelector('.qc .conv:not(.loading)', { timeout: 4000 }).catch(() => {});
+  await settle(page, 200);
+  const s1 = await page.evaluate(() => {
+    const qc = document.querySelector('.qc');
+    const bar = document.querySelector('.topbar').getBoundingClientRect();
+    const r = qc.getBoundingClientRect();
+    const conv = qc.querySelector('.conv');
+    const empty = qc.querySelector('[data-field="quickChatEmpty"]');
+    return { shown: !qc.hidden, top: r.top, barBottom: bar.bottom, right: r.right, vw: innerWidth, h: r.height, quick: !!conv && conv.classList.contains('quick'),
+      empty: !!empty && empty.offsetParent !== null, pressed: document.getElementById('btnQuickChat').getAttribute('aria-pressed') };
+  });
+  const req = sent('quickChat');
+  check('quickChatOpens', s1.shown && s1.quick && s1.empty && s1.pressed === 'true' && req.length === 1 && req[0].paneId === 'quick:dock', { s1, req });
+  check('quickChatPlacement', s1.top >= s1.barBottom && s1.right <= s1.vw && s1.h >= 300, { s1 });
+  const qid = await page.evaluate(() => { const c = document.querySelector('.qc .conv'); return c ? c.dataset.conv : null; });
+  await page.click('.qc .cinput');
+  await page.keyboard.type('今天適合穿什麼');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => { const n = document.querySelector('.qc .it-assistant:not(.running)'); return !!n; }, null, { timeout: 4000 }).catch(() => {});
+  await settle(page, 200);
+  const s2 = await page.evaluate(() => {
+    const speak = document.querySelector('.qc .it-assistant .it-speak');
+    const other = document.querySelector('.conv[data-conv="c2"] .it-assistant .it-speak');
+    return { speak: !!speak && getComputedStyle(speak).display !== 'none', other: !other || getComputedStyle(other).display === 'none' };
+  });
+  check('quickChatSpeakButton', s2.speak && s2.other && sent('send').some((m) => m.conversationId === qid), { s2, qid });
+  await page.evaluate(() => document.querySelector('.qc .it-assistant .it-speak').click());
+  await settle(page, 100);
+  const sp = sent('speakItem');
+  check('quickChatSpeak', sp.length === 1 && sp[0].conversationId === qid && typeof sp[0].itemId === 'string', { sp });
+  await page.click('.qc [data-field="quickStopSpeak"]');
+  await settle(page, 100);
+  check('quickChatStopSpeak', sent('speakStop').length === 1, {});
+  await shot(page, 'quick-chat-' + vp.w);
+  const listed = await page.evaluate((id) => !!document.querySelector('#sidebar [data-id="' + id + '"], #sidebar [data-conv="' + id + '"]'), qid);
+  await page.click('.qc [data-field="quickClose"]');
+  await settle(page, 200);
+  const s3 = await page.evaluate(() => ({ hidden: document.querySelector('.qc').hidden, docked: !!document.querySelector('.qc .conv') }));
+  const ended = sent('quickChatEnd');
+  check('quickChatEnd', s3.hidden && !s3.docked && !listed && ended.length === 1 && ended[0].conversationId === qid, { s3, ended, listed });
+  await page.click('#btnQuickChat');
+  await page.waitForSelector('.qc .conv:not(.loading)', { timeout: 4000 }).catch(() => {});
+  const qid2 = await page.evaluate(() => { const c = document.querySelector('.qc .conv'); return c ? c.dataset.conv : null; });
+  check('quickChatReopenFresh', sent('quickChat').length === 2 && !!qid2 && qid2 !== qid, { qid, qid2 });
+  await closeApp(app);
+}
+
 async function runDraftSync(vp) {
   const app = await openApp('draft-sync', { vp, layout: { panes: [{ id: 'p1', tabs: ['c2'], active: 'c2' }], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' } });
   const { page, host } = app;
@@ -6720,6 +6791,7 @@ try {
     if (SIDETABS_ONLY) { if (full) await runSideTabs(vp); continue; }
     if (PANEZOOM_ONLY) { if (full) await runPaneZoom(vp); continue; }
     if (DRAFTSYNC_ONLY) { if (full) await runDraftSync(vp); continue; }
+    if (QUICKCHAT_ONLY) { if (full) await runQuickChat(vp); continue; }
     if (REPLICA_RESTORE_ONLY) { if (full) await runReplicaRestore(vp); continue; }
     if (FX_ONLY) { if (full) await runFx(searchCtx, vp); continue; }
     if (SETTINGS_ONLY) { if (full) await runSettings(searchCtx, vp); continue; }
@@ -6737,7 +6809,7 @@ try {
     if (!HOT_ONLY && !SYNC_ONLY) {
       await runMain(vp, full);
       await runPopout(vp, full);
-      if (full) { await runExtras(vp); await runSideTabs(vp); await runPaneZoom(vp); await runDraftSync(vp); await runNoLayout(vp); await runDraftRestore(vp); await runReplicaRestore(vp); await runLight(vp); await runVisualChecks(); }
+      if (full) { await runExtras(vp); await runSideTabs(vp); await runPaneZoom(vp); await runDraftSync(vp); await runQuickChat(vp); await runNoLayout(vp); await runDraftRestore(vp); await runReplicaRestore(vp); await runLight(vp); await runVisualChecks(); }
       if (full) await runDashboard(vp);
       if (full) await runDashGrid();
       if (full) await runTokens(vp);

@@ -742,7 +742,8 @@ internal sealed partial class AgentHub
     /// <summary>對話清單列的對話（不含草稿；本機與複本各有名額），依更新時間新到舊；側欄的搜尋也只搜這些</summary>
     private List<ConversationState> ListedConversations()
     {
-        var shown = conversations.Values.Where(c => !c.IsDraft).ToList();
+        // 臨時對話（AgentHub.QuickChat.cs）不列在清單與搜尋
+        var shown = conversations.Values.Where(c => !c.IsDraft && !QuickChatRules.IsEphemeral(c.Meta)).ToList();
         var locals = shown.Where(c => !c.IsReplica).OrderByDescending(c => c.Meta.UpdatedAt).Take(ConversationListMax);
         // 複本的 UpdatedAt 是擁有者電腦的時鐘：時鐘超前的電腦的複本永遠排在前面，所以名額要分開
         var replicas = shown.Where(c => c.IsReplica).OrderByDescending(c => c.Meta.UpdatedAt).Take(ReplicaListMax);
@@ -862,7 +863,8 @@ internal sealed partial class AgentHub
             ["id"] = c.Meta.Id,
             ["accountId"] = c.Meta.AccountId,
             ["provider"] = c.Meta.Provider.ToString(),
-            ["title"] = c.IsDraft ? "新對話" : c.Meta.Title,
+            // 草稿一律「新對話」；臨時對話的草稿是「臨時對話」
+            ["title"] = c.IsDraft && !QuickChatRules.IsEphemeral(c.Meta) ? "新對話" : c.Meta.Title,
             ["model"] = c.Meta.Model ?? "default",
             ["effort"] = c.Meta.Effort ?? "default",
             ["permission"] = AgentPermissionModes.Normalize(c.Meta.Provider, c.Meta.PermissionMode).ToString(),
@@ -950,6 +952,9 @@ internal sealed partial class AgentHub
         // 子代理的即時用量（AgentHub.Subagents.cs；沒有就不帶）
         if (RenderSubagentUsages(c) is { } subagents)
             header["subagents"] = subagents;
+        // 臨時對話（AgentHub.QuickChat.cs；不是就不帶）：網頁在回覆上顯示「朗讀」、空白畫面改成臨時對話的說法
+        if (QuickChatRules.IsEphemeral(c.Meta))
+            header["ephemeral"] = true;
         RenderCodexControls(c, header);
         // 〔WP4.6〕副本的欄位、本機對話的同步政策（AgentHub.LocalSyncView.cs）
         DecorateHeader(c, header);

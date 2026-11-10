@@ -222,6 +222,9 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         CompletePendingTrashMoves();
         foreach (var meta in store.LoadConversations().Where(m => !IsTrashPending(m.Id)))
         {
+            // 上次沒刪掉的臨時對話（AgentHub.QuickChat.cs）：不載入、刪掉
+            if (LoadEphemeralCleanup(meta))
+                continue;
             var state = new ConversationState(meta);
             conversations[meta.Id] = state;
             RestoreQueue(state);
@@ -644,6 +647,19 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                         CancelCliUpdate(cancelProvider);
                     break;
                 // app 自我更新（AgentHub.AppUpdate.cs）
+                // 臨時對話（AgentHub.QuickChat.cs）：開面板、關面板（刪掉）、朗讀一則回覆、停止朗讀
+                case "quickChat":
+                    QuickChat(view, Str("accountId"), Str("paneId"));
+                    break;
+                case "quickChatEnd":
+                    EndQuickChat(Conv());
+                    break;
+                case "speakItem":
+                    SpeakItem(view, Conv(), Str("itemId"));
+                    break;
+                case "speakStop":
+                    host.StopSpeaking();
+                    break;
                 case "composerDraft":
                     // 輸入框打到一半的字（AgentHub.ComposerDrafts.cs）：轉給這台的其他視窗、可以同步的再送上伺服器
                     ComposerDraftCommand(view, Str("conversationId"), command["text"] is JValue { Type: JTokenType.String, Value: string draftText } ? draftText : null);

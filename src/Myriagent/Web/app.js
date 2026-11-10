@@ -68,6 +68,7 @@ import { initSpotlight } from './spotlight.js';
 import { longPressAsContextMenu } from './longpress.js';
 import { isMediaTarget } from './mediamenu.js';
 import { onComposerDrafts } from './draftsync.js';
+import { quickChatButton, refreshQuickChat } from './quickchat.js';
 
 // 錯誤回報最先裝上（之後的初始化出錯也收得到）
 installErrorReporting();
@@ -155,6 +156,8 @@ if (isHub) {
 const btnMonitor = h('button', { type: 'button', id: 'btnMonitor', class: 'ibtn mon-toggle' }, icon('pulse'));
 btnMonitor.addEventListener('click', () => toggleMonitor());
 $('btnSettings').before(btnMonitor);
+// 臨時對話（quickchat.js）：右上角的對話鈕，開浮動面板
+$('btnSettings').before(quickChatButton());
 
 function buildHubStatus() {
   const text = h('span', { class: 'hub-status-text' });
@@ -489,6 +492,7 @@ function handle(m) {
     case 'init': liveRv.clear(); heldWhileDragging.clear(); remoteDesk.onReconnect(); onInit(m); break;
     case 'accounts':
       setAccounts(m.accounts);
+      refreshQuickChat();
       renderAccounts();
       renderHistory();
       for (const cv of ws.allConvs()) cv.refreshAccount();
@@ -673,6 +677,7 @@ function onInit(m) {
   state.schedules = m.schedules && typeof m.schedules === 'object' ? m.schedules : null; // 排程頁（只有桌面；沒掛讀取器是 null）
   // 多人協作：這份網頁是誰在用（協作人只看分享給他的對話與自己的介面設定）、擁有者看的協作人清單
   state.viewer = m.viewer && typeof m.viewer === 'object' ? m.viewer : null;
+  refreshQuickChat(); // 臨時對話的對話鈕：協作人不顯示（要先有 viewer）
   applyCollaborators(m.collaborators ?? null);
   applyViewerChrome();
   state.voiceInput = m.voiceInput === true; // 桌面這台的語音訊息辨識（voicemsg.js）

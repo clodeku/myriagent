@@ -850,6 +850,32 @@ async function runComposerDraft() {
   await HP.closePage(app);
 }
 
+// 臨時對話（瀏覽器版，quickchat.js）：對話鈕送 quickChat、伺服器回帶面板記號的臨時草稿；第一則送出後草稿換成正式對話（replacedBy），
+// 面板送 open 嵌回同一個；朗讀由瀏覽器自己念（不送 speakItem）；關掉面板送 delete（已建立的）
+async function runQuickChat() {
+  const app = await openWithLayout('quick-chat', layoutOf([[[LF.CONV.idle], LF.CONV.idle]]));
+  const { page, hub } = app;
+  await waitLoaded(app, [LF.CONV.idle]);
+  const QD = LF.draftId(7);
+  hub.onCmd('quickChat', (cmd) => ({ push: [LF.draftMessage(NOW, QD, { paneId: cmd.paneId, header: { ephemeral: true, title: '臨時對話' } })] }));
+  await page.click('#btnQuickChat');
+  const mounted = await until(() => page.evaluate((id) => { const c = document.querySelector('.qc .conv[data-conv="' + id + '"]'); return c && c.classList.contains('quick') ? true : null; }, QD), 4000);
+  const qc = hub.cmds('quickChat').map((c) => c.cmd);
+  hub.push({ type: 'conversationClosed', conversationId: QD, replacedBy: LF.CONV.unlisted });
+  const swapped = await until(() => page.evaluate((id) => !!document.querySelector('.qc .conv[data-conv="' + id + '"]') || null, LF.CONV.unlisted), 4000);
+  const opened = hub.cmds('open').map((c) => c.cmd.conversationId).includes(LF.CONV.unlisted);
+  const inPane = await page.evaluate((id) => !!document.querySelector('#workspace .conv[data-conv="' + id + '"]'), LF.CONV.unlisted);
+  await page.click('.qc [data-field="quickClose"]');
+  await sleep(300);
+  const del = hub.cmds('delete').map((c) => c.cmd);
+  const hidden = await page.evaluate(() => document.querySelector('.qc').hidden);
+  check('hubQuickChat', !!mounted && qc.length === 1 && qc[0].paneId === 'quick:dock' && !!swapped && opened && !inPane && hidden
+    && del.length === 1 && del[0].conversationId === LF.CONV.unlisted && hub.cmds('quickChatEnd').length === 0,
+  { mounted, qc, swapped, opened, inPane, del, hidden });
+  hub.onCmd('quickChat', null);
+  await HP.closePage(app);
+}
+
 async function runClosedClosesPane() {
   const app = await openWithLayout('closed-closes-pane', layoutOf([[[LF.CONV.idle], LF.CONV.idle], [[LF.CONV.codex], LF.CONV.codex]]));
   const { hub } = app;
@@ -6138,6 +6164,7 @@ const SCENARIOS = [
   { checks: ['hubVoiceDictationMeter'], run: runVoiceDictationMeter },
   { checks: ['hubPaneZoom'], run: runPaneZoom },
   { checks: ['hubComposerDraft'], run: runComposerDraft },
+  { checks: ['hubQuickChat'], run: runQuickChat },
   { checks: ['hubVoiceDictationDiag', 'hubVoiceDictationDiagMode'], run: runVoiceDictationDiag },
   { checks: ['hubResyncReopens', 'hubResyncNullNoop'], run: runResync },
   { checks: ['hubClipboardWrite', 'hubClipboardDeniedFallback', 'hubClipboardUnsolicitedIgnored', 'hubClipboardExpiredIgnored'], run: runClipboard },

@@ -81,6 +81,7 @@ internal static class ChatItemCopyRules
             RemoteControlSessionId = meta.RemoteControlSessionId,
             DelegatedAccountIds = meta.DelegatedAccountIds?.ToList(),
             ParentConversationId = meta.ParentConversationId,
+            Ephemeral = meta.Ephemeral,
             CreatedAt = meta.CreatedAt,
             UpdatedAt = meta.UpdatedAt,
             SyncPolicy = meta.SyncPolicy,

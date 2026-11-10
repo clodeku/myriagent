@@ -106,7 +106,8 @@ internal static class ConversationWire
             Running: running,
             Waiting: waiting,
             Transcript: TranscriptStates.MetaValues.Contains(transcript ?? string.Empty, StringComparer.Ordinal) ? transcript : null,
-            WorkingDirectoryRef: custom ? WirePathRef(workingDirectoryRef) : null);
+            WorkingDirectoryRef: custom ? WirePathRef(workingDirectoryRef) : null,
+            Ephemeral: meta.Ephemeral == true ? true : null);
     }
 
     /// <summary>資料夾參照的線上投影（遮蔽、截斷；不合格回 null＝不送）</summary>

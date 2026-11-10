@@ -621,6 +621,12 @@ internal sealed partial class AgentHub
             var now = DateTime.Now;
             created.IsDraft = false;
             created.Meta.Title = RemoteHandlerRules.CreateTitle(request.Title, request.Text);
+            // 臨時對話（瀏覽器版右上角的對話鈕，AgentHub.QuickChat.cs）：不列在清單、瀏覽器關掉面板（delete）就刪掉；內容照常同步給那個瀏覽器
+            if (command["ephemeral"] is JValue { Type: JTokenType.Boolean } ephemeral && (bool)ephemeral)
+            {
+                created.Meta.Ephemeral = true;
+                created.Meta.WorkingDirectory = null;
+            }
             created.Meta.CreatedAt = now;
             created.Meta.UpdatedAt = now;
             created.LastActivity = now;
@@ -753,6 +759,13 @@ internal sealed partial class AgentHub
     /// </summary>
     private void RemoteDelete(RemoteViewContext context, ConversationState c)
     {
+        // 臨時對話：瀏覽器關掉面板＝刪掉，不進回收區、連 CLI 的逐字稿一起刪（AgentHub.QuickChat.cs）
+        if (QuickChatRules.IsEphemeral(c.Meta))
+        {
+            EndQuickChat(c);
+            context.Complete();
+            return;
+        }
         if (!ConversationTrashRules.IsTrashableId(c.Meta.Id))
         {
             context.Reject(RemoteResultCodes.Conflict, "這個對話不能從遠端刪除，請在電腦上刪除", RemoteGateSteps.Handler);
