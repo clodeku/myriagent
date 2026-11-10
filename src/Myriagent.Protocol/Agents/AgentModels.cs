@@ -528,6 +528,9 @@ internal sealed class AgentConversation
     /// <summary>Codex 速度模式的原生 id；null＝照 CLI 設定，default＝標準。</summary>
     public string? CodexServiceTier { get; set; }
 
+    /// <summary>Codex 原生模式：plan／default；null＝尚未覆寫 CLI 設定。</summary>
+    public string? CodexMode { get; set; }
+
     /// <summary>這個對話明確指定的 Codex 技能；送出時以 CLI 的最新清單重驗。</summary>
     public List<AgentSkillSelection>? CodexSkills { get; set; }
 

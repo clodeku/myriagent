@@ -160,7 +160,7 @@ internal static class RemoteCommandCatalog
         // 自訂主代理（Antigravity 工作資料夾的 .agents/agents/*.md、Claude 帳戶的代理）與 Claude 的輸出風格：清單是這台的 CLI 回報的
         "setAgent", "setOutputStyle",
         // Claude 的持續目標：清除這台程序裡的 /goal（標頭的目標只有這台的對話有）
-        "goalClear", "codexControl",
+        "goalClear", "codexControl", "codexDoctor",
         // 背景工作的詳細與強制停止：問這台活著的 CLI 程序（標頭的背景工作只有這台的對話有）
         "taskDetail", "taskStop",
         // 「最近的指令」的歷史指令：讀這台的對話紀錄（瀏覽器版從已載入的項目找）

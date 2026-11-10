@@ -6,6 +6,16 @@ namespace Myriagent.Tests.Cli;
 /// <summary>CliRunner（真的子程序 cmd.exe）：回傳 PID（判斷換版是不是 app 自己觸發的）、啟動當下就回報、起不來沒有 PID</summary>
 public sealed class CliRunnerTests
 {
+    [Fact]
+    public async Task 大量輸出只保留上限加一字元_仍排空管線不阻塞()
+    {
+        var result = await CliRunner.RunAsync(new AgentLauncher(Path.Combine(Environment.SystemDirectory, "findstr.exe"), []),
+            ["^"], null, TimeSpan.FromSeconds(30), input: string.Concat(Enumerable.Repeat("abcdef\n", 100_000)), maxOutputCharacters: 100);
+        result.TimedOut.Should().BeFalse();
+        result.ExitCode.Should().Be(0);
+        result.Stdout.Should().HaveLength(101);
+    }
+
     private static AgentLauncher Cmd => new(Path.Combine(Environment.SystemDirectory, "cmd.exe"), Array.Empty<string>());
 
     [Fact]

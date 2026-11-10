@@ -91,6 +91,8 @@ internal sealed partial class CodexAgentSession
                         .SelectMany(e => (e["errors"] as JArray ?? []).OfType<JObject>()).Select(e => e.Value<string>("message")));
                 }
                 catch (Exception ex) { result["skillsError"] = ex.Message; }
+                try { result["modes"] = (await ControlRequestAsync(current, "collaborationMode/list", new JObject()))["data"]; }
+                catch (Exception ex) { result["modesError"] = ex.Message; }
                 if (thread != null)
                 {
                     try { result["goal"] = (await ControlRequestAsync(current, "thread/goal/get", new JObject { ["threadId"] = thread }))["goal"]; }
@@ -108,6 +110,19 @@ internal sealed partial class CodexAgentSession
                     throw new InvalidOperationException("選取的技能已停用或不在目前工作資料夾的清單中，請重新整理");
                 return new JObject { ["selectedSkills"] = new JArray(selected) };
             }
+            if (action == "mode")
+            {
+                if (IsRunning) throw new InvalidOperationException("請等這一輪結束後再切換規劃模式");
+                var mode = args.Value<string>("mode") ?? "default";
+                await ValidateModeAsync(current, mode);
+                if (mode == "plan" && thread != null)
+                {
+                    var goal = await ControlRequestAsync(current, "thread/goal/get", new JObject { ["threadId"] = thread });
+                    if ((goal["goal"] as JObject)?.Value<string>("status") == "active")
+                        throw new InvalidOperationException("請先暫停持續目標，再切換成先規劃");
+                }
+                return new JObject { ["mode"] = mode };
+            }
             if (action == "speed")
             {
                 var tier = args.Value<string>("serviceTier") ?? "default";
@@ -120,6 +135,8 @@ internal sealed partial class CodexAgentSession
             }
             if (thread == null)
                 throw new InvalidOperationException("請先送出第一則訊息，再設定這個對話的持續目標");
+            if (settings.CodexMode == "plan" && action is "goalSet" or "goalResume")
+                throw new InvalidOperationException("請先切回一般執行，再開始持續目標");
             if (action == "goalClear")
             {
                 var cleared = await ControlRequestAsync(current, "thread/goal/clear", new JObject { ["threadId"] = thread });
@@ -167,12 +184,14 @@ internal sealed partial class CodexAgentSession
         if (NormalizeModel(settings.Model) is { } model) p["model"] = model;
         if (!string.IsNullOrEmpty(settings.Effort) && settings.Effort != "default") p["effort"] = settings.Effort;
         if (settings.CodexServiceTier != null) p["serviceTier"] = settings.CodexServiceTier;
+        await ApplyModeAsync(current, p, settings);
         await ControlRequestAsync(current, "thread/settings/update", p);
     }
 
     private async Task ApplySelectedSkillsAsync(AgentProcess current, JObject turn, AgentSessionSettings settings)
     {
         await ValidateTierAsync(current, settings);
+        await ApplyModeAsync(current, turn, settings);
         if (settings.CodexServiceTier != null)
         {
             turn["serviceTier"] = settings.CodexServiceTier;
@@ -192,6 +211,26 @@ internal sealed partial class CodexAgentSession
         if (settings.CodexServiceTier is not (null or "default") && !CodexControlRules.AllowsTier(
             CodexControlRules.SpeedTiers(await ModelsForControlsAsync(current), settings.Model), settings.CodexServiceTier))
             throw new InvalidOperationException("目前模型不支援已選的速度模式，請在 Codex 工具改回標準或重新選擇");
+    }
+
+    private async Task ValidateModeAsync(AgentProcess current, string mode)
+    {
+        if (mode is not ("plan" or "default")) throw new ArgumentException("不支援的規劃模式");
+        var modes = await ControlRequestAsync(current, "collaborationMode/list", new JObject());
+        if (!(modes["data"] as JArray ?? []).OfType<JObject>().Any(m => m.Value<string>("mode") == mode))
+            throw new InvalidOperationException("這個 Codex CLI 沒有回報所選模式，請更新 CLI 或改回一般執行");
+    }
+
+    private async Task ApplyModeAsync(AgentProcess current, JObject target, AgentSessionSettings settings)
+    {
+        if (settings.CodexMode == null) return;
+        await ValidateModeAsync(current, settings.CodexMode);
+        string? model;
+        lock (gate) model = NormalizeModel(settings.Model) ?? parser.MainModel;
+        if (string.IsNullOrWhiteSpace(model))
+            model = (await ModelsForControlsAsync(current))["data"]?.OfType<JObject>().FirstOrDefault(m => m.Value<bool?>("isDefault") == true)?.Value<string>("model");
+        if (string.IsNullOrWhiteSpace(model)) throw new InvalidOperationException("無法確認規劃模式使用的模型，請先選擇模型");
+        target["collaborationMode"] = CodexControlRules.CollaborationMode(settings.CodexMode, model, settings.Effort);
     }
 
     public async Task<AgentMcpStatusResult> GetMcpStatusAsync(AgentSessionSettings settings)

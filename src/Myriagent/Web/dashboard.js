@@ -20,6 +20,7 @@ import { tickRemoteLogins, originLabelOf, loginDeviceOf, logoutAllMenuItem, REMO
 import { setHealthWorkspace, requestHealth, createHealthStrip, updateHealthStrip, refreshHealthDialog, createInstructionsSection, renderInstructionsSection } from './health.js';
 import { requestMcp, createMcpStrip, updateMcpStrip, refreshMcpDialog } from './mcp.js';
 import { compactPath } from './healthrules.js';
+import { createDoctorStrip, updateDoctorStrip } from './codexdoctor.js';
 // 每週額度每 5% 的 token（只有桌面）
 import { requestUsageSegments, createUsageSegmentsSection, renderUsageSegmentsSection } from './usageseg.js';
 import { loginExpiry, loginExpiryText } from './loginrules.js';
@@ -313,6 +314,7 @@ function createCard(a) {
   const health = createHealthStrip(card);
   // MCP 伺服器（只有桌面這台的 Claude 帳戶；點了開明細、授權、重新連線，mcp.js）
   const mcp = createMcpStrip(card);
+  const doctor = createDoctorStrip(card);
   const sessions = h('div', { class: 'acard-sess' });
   // 瀏覽器版不建新對話、更新用量、登入（伺服器不接受，web-protocol 第六節第 9 點）
   let newBtn = null, refBtn = null, loginBtn = null, hereBtn = null;
@@ -333,8 +335,8 @@ function createCard(a) {
   }
   const foot = h('div', { class: 'acard-foot' }, sessions, h('span', { class: 'grow' }), loginBtn, refBtn, newBtn, hereBtn);
   // HUD 的背景層（帳戶色的光暈、網格、側邊刻度、開場的掃描線；fx.css）：畫在內容底下，不接收滑鼠
-  card.append(h('div', { class: 'acard-fx', 'aria-hidden': 'true' }), head, rings, notes, health, mcp, login, foot);
-  card._els = { mark, name, sub, path, pill, strip, rings, notes, health, mcp, login, sessions, newBtn, refBtn, loginBtn, hereBtn, provider: null };
+  card.append(h('div', { class: 'acard-fx', 'aria-hidden': 'true' }), head, rings, notes, health, mcp, doctor, login, foot);
+  card._els = { mark, name, sub, path, pill, strip, rings, notes, health, mcp, doctor, login, sessions, newBtn, refBtn, loginBtn, hereBtn, provider: null };
   updateCard(card, a, true);
   return card;
 }
@@ -509,6 +511,7 @@ function updateCard(card, a, first) {
   e.notes.hidden = !e.notes.childElementCount;
   updateHealthStrip(e.health, a);
   updateMcpStrip(e.mcp, a);
+  updateDoctorStrip(e.doctor, a);
 
   // 登入提示（Codex 裝置碼登入時另有大字驗證碼與「複製」）：內容沒變不重畫，按下中的「複製」才不會被移出 DOM
   const lm = state.login.get(a.id);

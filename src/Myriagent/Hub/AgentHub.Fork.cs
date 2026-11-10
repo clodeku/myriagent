@@ -110,6 +110,7 @@ internal sealed partial class AgentHub
             Agent = meta.Agent,
             OutputStyle = meta.OutputStyle,
             CodexServiceTier = meta.CodexServiceTier,
+            CodexMode = meta.CodexMode,
             CodexSkills = meta.CodexSkills?.ToList(),
             PermissionMode = meta.PermissionMode,
             // 同一個工作資料夾（原對話用自己的工作區時也指到那裡）：延伸的是同一件事，代理先前寫的檔案、逐字稿裡的路徑都在那裡

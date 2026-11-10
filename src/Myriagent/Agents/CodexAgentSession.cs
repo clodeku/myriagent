@@ -1315,8 +1315,16 @@ internal sealed partial class CodexAgentSession : IAgentSession
                         CanAllowForSession: tool.CanAllowForSession, AllowSessionLabel: tool.CanAllowForSession ? "本對話都允許這個 MCP 工具" : null));
                     return;
                 }
-                _ = WriteQuietlyAsync(source, CodexAppServerRules.BuildResult(request.Id, CodexAppServerRules.BuildMcpElicitationResponse(AgentApprovalChoice.Deny)));
-                Raise(new AgentNoticeEvent(CodexAppServerRules.DescribeUnsupportedElicitation(p), IsError: false));
+                var form = CodexElicitationRules.Parse(p);
+                if (form.Unsupported != null)
+                {
+                    _ = WriteQuietlyAsync(source, CodexAppServerRules.BuildResult(request.Id, McpElicitationRules.Decline()));
+                    Raise(new AgentNoticeEvent(McpElicitationRules.DescribeUnsupported(form), IsError: false));
+                    return;
+                }
+                lock (gate) pendingRequests[request.Key] = request;
+                Raise(new AgentQuestionEvent(request.Key, McpElicitationRules.ToQuestions(form), AnswerAsMessage: false,
+                    Detail: McpElicitationRules.Detail(form), Source: $"MCP：{form.Server}"));
                 return;
             }
             default:
@@ -1375,7 +1383,7 @@ internal sealed partial class CodexAgentSession : IAgentSession
     /// <summary>沒有人回應就收掉的請求（按停止、這一輪結束）：問卷回空答案，核准一律拒絕</summary>
     private static JObject BuildDeclineResult(CodexServerRequest request) => request.Method == "item/tool/requestUserInput"
         ? CodexAppServerRules.BuildUserInputResponse(new Dictionary<string, IReadOnlyList<string>>())
-        : BuildApprovalResult(request, AgentApprovalChoice.Deny);
+        : CodexElicitationRules.IsForm(request) ? McpElicitationRules.Cancel() : BuildApprovalResult(request, AgentApprovalChoice.Deny);
 
     private static string ApprovalKind(string method) => method switch
     {
@@ -1432,7 +1440,7 @@ internal sealed partial class CodexAgentSession : IAgentSession
             permissionMode = normalized;
             if (normalized != AgentPermissionMode.FullAccess)
                 return Task.FromResult(false);
-            waiting = pendingRequests.Values.Where(r => r.Method != "item/tool/requestUserInput").Select(r => r.Key).ToList();
+            waiting = pendingRequests.Values.Where(r => r.Method != "item/tool/requestUserInput" && !CodexElicitationRules.IsForm(r)).Select(r => r.Key).ToList();
         }
 
         foreach (var key in waiting)
@@ -1453,14 +1461,24 @@ internal sealed partial class CodexAgentSession : IAgentSession
 
     public Task<bool> ReattachRemoteControlAsync(AgentSessionSettings settings) => Task.FromResult(false);
 
+    public string? ValidateQuestionAnswer(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers)
+    {
+        lock (gate)
+            return pendingRequests.TryGetValue(requestKey, out var request) && CodexElicitationRules.IsForm(request)
+                ? CodexElicitationRules.BuildResponse(request.Params, answers).Error : null;
+    }
+
     public async Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes = null)
     {
+        if (ValidateQuestionAnswer(requestKey, answers) is { } error) throw new ArgumentException(error);
         var (request, target) = TakePending(requestKey);
         if (request == null || target == null)
             return;
         try
         {
-            await target.WriteLineAsync(CodexAppServerRules.BuildResult(request.Id, CodexAppServerRules.BuildUserInputResponse(QuestionNoteRules.Merge(answers, notes))));
+            var response = CodexElicitationRules.IsForm(request) ? CodexElicitationRules.BuildResponse(request.Params, answers).Response
+                : CodexAppServerRules.BuildUserInputResponse(QuestionNoteRules.Merge(answers, notes));
+            await target.WriteLineAsync(CodexAppServerRules.BuildResult(request.Id, response));
         }
         finally
         {
@@ -1475,7 +1493,8 @@ internal sealed partial class CodexAgentSession : IAgentSession
             return;
         try
         {
-            await target.WriteLineAsync(CodexAppServerRules.BuildResult(request.Id, CodexAppServerRules.BuildUserInputResponse(new Dictionary<string, IReadOnlyList<string>>())));
+            await target.WriteLineAsync(CodexAppServerRules.BuildResult(request.Id, CodexElicitationRules.IsForm(request)
+                ? McpElicitationRules.Decline() : CodexAppServerRules.BuildUserInputResponse(new Dictionary<string, IReadOnlyList<string>>())));
         }
         finally
         {

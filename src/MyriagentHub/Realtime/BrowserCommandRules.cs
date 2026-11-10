@@ -69,7 +69,7 @@ internal static class BrowserCommandRules
         // 自訂主代理（Antigravity 工作資料夾的 .agents/agents/*.md、Claude 帳戶的代理）與 Claude 的輸出風格：清單是那台的 CLI 回報的
         "setAgent", "setOutputStyle",
         // Codex 的目標、技能與速度：由擁有該 CLI 程序的本機視窗控制。
-        "codexControl",
+        "codexControl", "codexDoctor",
         // Claude 的持續目標：清除那台程序裡的 /goal（瀏覽器版的標頭沒有目標）
         "goalClear",
         // 背景工作的詳細與強制停止：問那台活著的 CLI 程序（瀏覽器版的標頭沒有背景工作）

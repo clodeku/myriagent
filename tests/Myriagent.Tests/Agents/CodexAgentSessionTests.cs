@@ -550,7 +550,7 @@ public sealed class CodexAgentSessionTests : CodexAgentSessionTestsBase
     }
 
     [Fact]
-    public async Task MCP工具核准_顯示成核准卡_本對話都允許交給Codex記住_真正的表單才婉拒()
+    public async Task MCP工具核准與表單分開_表單以問卷取得答案()
     {
         using var session = new CodexAgentSession();
         var events = Collect(session);
@@ -560,6 +560,8 @@ public sealed class CodexAgentSessionTests : CodexAgentSessionTestsBase
         {
             if (ev is AgentApprovalEvent approval)
                 await session.RespondApprovalAsync(approval.RequestKey, AgentApprovalChoice.AllowForSession, null);
+            if (ev is AgentQuestionEvent question)
+                await session.AnswerQuestionAsync(question.RequestKey, new Dictionary<string, IReadOnlyList<string>> { ["account"] = ["測試"] });
         });
 
         var card = turn.OfType<AgentApprovalEvent>().Single();
@@ -569,8 +571,8 @@ public sealed class CodexAgentSessionTests : CodexAgentSessionTestsBase
         card.Detail.Should().Contain("create_issue").And.Contain("bug");
         card.CanAllowForSession.Should().BeTrue();
         card.AllowSessionLabel.Should().Be("本對話都允許這個 MCP 工具");
-        turn.OfType<AgentNoticeEvent>().Should().ContainSingle(n => n.Message.Contains("「docs」") && n.Message.Contains("要求填寫表單") && n.Message.Contains("已婉拒"));
-        turn.OfType<AgentTextCompletedEvent>().Single().Text.Should().Be("300=accept/session,301=decline");
+        turn.OfType<AgentQuestionEvent>().Should().ContainSingle(q => q.Source == "MCP：docs" && !q.AnswerAsMessage);
+        turn.OfType<AgentTextCompletedEvent>().Single().Text.Should().Be("300=accept/session,301=accept");
     }
 
     [Fact]

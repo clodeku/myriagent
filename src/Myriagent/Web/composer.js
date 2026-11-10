@@ -906,6 +906,7 @@ export class Composer {
     const optCtx = { isHub, isReplica: this.isReplica() };
     this.codexBtn.hidden = !codexShown(hd, optCtx);
     this.codexBtn.disabled = !!(hd.codex && hd.codex.busy);
+    this.codexBtn.querySelector('.pick-label').textContent = hd.codex && hd.codex.mode === 'plan' ? 'Codex · 先規劃' : 'Codex 工具';
     refreshCodexPanel(this);
     const agentShown = agentChipShown(hd, optCtx);
     this.agentBtn.hidden = !agentShown;

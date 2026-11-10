@@ -98,7 +98,8 @@ internal sealed record AgentSessionSettings(
     IReadOnlyList<AgentSkillSelection>? CodexSkills = null,
     string? DelegationMcpPipeName = null,
     long? AutoCompactTokens = null,
-    int? AutoCompactPercent = null)
+    int? AutoCompactPercent = null,
+    string? CodexMode = null)
 {
     /// <summary>啟動程序前取得共用設定的啟動參數（背景執行緒；不共用回 None）</summary>
     public async Task<AgentSharedLaunch> PrepareSharedAsync()
@@ -330,6 +331,9 @@ internal interface IAgentSession : IDisposable
     Task InterruptAsync();
 
     /// <param name="notes">每題的補充說明（題目 id → 文字；QuestionNoteRules，2026-11-05）：Claude、Grok 放進作答的 annotations.notes，Codex 併進答案；沒有是 null</param>
+    /// <summary>送出前驗證問卷；不消耗尚未回答的請求，錯誤時留在原卡修改。</summary>
+    string? ValidateQuestionAnswer(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers) => null;
+
     Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes = null);
 
     Task DeclineQuestionAsync(string requestKey);

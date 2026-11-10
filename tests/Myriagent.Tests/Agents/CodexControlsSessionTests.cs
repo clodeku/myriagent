@@ -26,6 +26,7 @@ public sealed class CodexControlsSessionTests : IDisposable
                 'initialize' { $r = @{ userAgent = 'fake/0.164.0'; codexHome = 'fake' } }
                 'model/list' { $r = @{ data = @(@{ id = 'fake'; model = 'fake'; isDefault = $true; serviceTiers = @(@{ id = 'priority'; name = 'Fast' }) }); nextCursor = $null } }
                 'skills/list' { $r = @{ data = @(@{ cwd = 'work'; skills = @(@{ name = 'test-skill'; path = 'C:/skills/test/SKILL.md'; description = 'test'; enabled = $true }); errors = @() }) } }
+                'collaborationMode/list' { $r = @{ data = @(@{ mode = 'default'; name = 'Default' }, @{ mode = 'plan'; name = 'Plan' }) } }
                 'thread/goal/get' { $r = @{ goal = $goal } }
                 'thread/goal/set' {
                     $goal.status = $m.params.status
@@ -64,6 +65,23 @@ public sealed class CodexControlsSessionTests : IDisposable
     }
 
     private List<JObject> Calls() => File.ReadAllLines(Path.Combine(temp.Root, "calls.jsonl")).Select(JObject.Parse).ToList();
+
+    [Fact]
+    public async Task 規劃與執行都傳入原生模式_不改寫內建指示()
+    {
+        using var session = new CodexAgentSession();
+        var events = CodexAgentSessionTests.Collect(session);
+        foreach (var mode in new[] { "plan", "default" })
+        {
+            await session.CodexControlAsync("mode", new JObject { ["mode"] = mode }, Settings());
+            await session.SendAsync(new AgentTurnInput("測試", []), Settings() with { CodexMode = mode });
+            await CodexAgentSessionTests.TakeUntilAsync(events, e => e is AgentTurnCompletedEvent);
+            var sent = Calls().Last(c => c.Value<string>("method") == "turn/start")["params"]!["collaborationMode"]!;
+            sent.Value<string>("mode").Should().Be(mode);
+            sent["settings"]!.Value<string>("model").Should().Be("fake");
+            sent["settings"]!["developer_instructions"]!.Type.Should().Be(JTokenType.Null);
+        }
+    }
     public void Dispose() => temp.Dispose();
 
     [Fact]

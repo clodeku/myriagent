@@ -970,6 +970,13 @@ internal sealed partial class CodexEventParser
             case "item/agentMessage/delta":
                 AddDelta(parameters, result, (block, delta) => new AgentTextDeltaEvent(block, delta));
                 break;
+            case "item/plan/delta":
+                AddDelta(parameters, result, (block, delta) => new AgentCodexPlanEvent(block, delta, false));
+                break;
+            case "turn/diff/updated":
+                if (parameters.Value<string>("turnId") is { } diffTurn)
+                    result.Events.Add(new AgentTurnDiffEvent(diffTurn, parameters.Value<string>("diff") ?? string.Empty));
+                break;
             case "item/reasoning/summaryTextDelta":
             case "item/reasoning/textDelta":
                 AddDelta(parameters, result, (block, delta) => new AgentThinkingDeltaEvent(block, delta));
@@ -1223,6 +1230,9 @@ internal sealed partial class CodexEventParser
 
         switch (item.Value<string>("type"))
         {
+            case "plan":
+                result.Events.Add(new AgentCodexPlanEvent(itemId, item.Value<string>("text") ?? string.Empty, true));
+                break;
             case "agentMessage":
             {
                 result.Events.Add(new AgentTextCompletedEvent(itemId, item.Value<string>("text") ?? string.Empty));

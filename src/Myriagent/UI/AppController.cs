@@ -128,6 +128,7 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         Hub.AttachSystemMonitor(systemMonitor);
         // 對話工作資料夾的 git 狀態（只讀，不 fetch；標頭資料夾晶片旁的 git 晶片）
         Hub.AttachGitStatus(new GitStatusReader());
+        Hub.AttachGitTurnReader(new GitTurnReader());
         // 對話開出、這一輪結束後還在跑的背景程式（帳戶卡的標示；每 15 秒與每一輪結束時列一次程序，只讀）
         Hub.AttachBackgroundPrograms(BackgroundProgramMonitor.CreateDefault());
         // 執行列：工作資料夾是視窗程式專案時，輸入區上方的啟動、暫停、停止、重新建置並執行（執行的程式和 app 脫鉤，記在 launch\runs.json、重啟後接回）

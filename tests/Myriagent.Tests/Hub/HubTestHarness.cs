@@ -590,6 +590,9 @@ internal sealed class FakeSession : IAgentSession
     /// <summary>每次作答帶的補充說明（沒有是 null）</summary>
     public Recorder<IReadOnlyDictionary<string, string>?> AnswerNotes { get; } = new();
 
+    public Func<string, IReadOnlyDictionary<string, IReadOnlyList<string>>, string?>? OnValidateQuestion { get; set; }
+    public string? ValidateQuestionAnswer(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers) => OnValidateQuestion?.Invoke(requestKey, answers);
+
     public Task AnswerQuestionAsync(string requestKey, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, IReadOnlyDictionary<string, string>? notes = null)
     {
         AnswerNotes.Add(notes);

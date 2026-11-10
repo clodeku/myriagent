@@ -173,7 +173,7 @@ internal sealed class ItemRenderer
         }
         if (item.Kind == AgentItemKind.PlanApproval)
             result["detailHtml"] = MarkdownToHtml(item, item.Detail ?? string.Empty, localImages, workingDirectory);
-        else if (item.Kind == AgentItemKind.Tool && item.ToolKind is "write" or "edit" && !string.IsNullOrEmpty(item.Text))
+        else if (item.Kind == AgentItemKind.Tool && item.ToolKind is "write" or "edit" or "plan" && !string.IsNullOrEmpty(item.Text))
             result["detailHtml"] = MarkdownToHtml(item, item.Text, localImages, workingDirectory);
         else if (item.Kind == AgentItemKind.Question && !string.IsNullOrEmpty(item.Detail))
             result["detailHtml"] = MarkdownToHtml(item, item.Detail, localImages, workingDirectory);
@@ -184,6 +184,11 @@ internal sealed class ItemRenderer
 
         if (item.Kind == AgentItemKind.Question)
         {
+            if (item.Status == AgentItemStatus.Waiting && item.Output != null)
+            {
+                result["answerError"] = item.Output;
+                result["answerErrorAt"] = item.UpdatedAt.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
             if (!string.IsNullOrEmpty(item.FilePath))
                 result["filePath"] = item.FilePath;
             // 不是代理自己問的（MCP 伺服器的 elicitation：「MCP：伺服器名稱」）：網頁寫在卡片標頭；代理問的省略

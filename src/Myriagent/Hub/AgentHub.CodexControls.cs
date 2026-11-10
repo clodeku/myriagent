@@ -20,6 +20,8 @@ internal sealed partial class AgentHub
         {
             ["goal"] = c.CodexGoal?.DeepClone(), ["busy"] = c.CodexControlBusy,
             ["serviceTier"] = c.Meta.CodexServiceTier,
+            ["mode"] = c.Meta.CodexMode,
+            ["hasPlan"] = c.Items.Any(i => i.Kind == AgentItemKind.Tool && i.ToolKind == "plan" && i.Status == AgentItemStatus.Done && !string.IsNullOrWhiteSpace(i.Text)),
             ["selectedSkills"] = new JArray((c.Meta.CodexSkills ?? []).Select(s => new JObject { ["name"] = s.Name, ["path"] = s.Path })),
         };
     }
@@ -54,6 +56,7 @@ internal sealed partial class AgentHub
                 throw new InvalidOperationException("請先送出第一則訊息，再設定持續目標");
             if (action is "goalSet" or "goalResume" && c.Running)
                 throw new InvalidOperationException("請先停止這一輪，再設定或繼續持續目標");
+            if (action == "mode" && c.Running) throw new InvalidOperationException("請等這一輪結束後再切換規劃模式");
             var session = EnsureSession(c);
             var result = await session.CodexControlAsync(action, command, BuildSessionSettings(c, historyRecap: null));
             if (disposed || !conversations.TryGetValue(c.Meta.Id, out var live) || !ReferenceEquals(c, live)
@@ -63,10 +66,11 @@ internal sealed partial class AgentHub
                 c.Meta.CodexSkills = (result["selectedSkills"] as JArray ?? []).OfType<JObject>()
                     .Select(s => new AgentSkillSelection(s.Value<string>("name")!, s.Value<string>("path")!)).ToList();
             if (action == "speed") c.Meta.CodexServiceTier = result.Value<string>("serviceTier");
+            if (action == "mode") c.Meta.CodexMode = result.Value<string>("mode");
             if (action is "goalSet" or "goalPause" or "goalResume" || action == "inspect" && result.Property("goal") != null)
                 c.CodexGoal = result["goal"]?.DeepClone() as JObject;
             if (action == "goalClear") c.CodexGoal = null;
-            if (!c.IsDraft && action is "skillSelect" or "speed") SaveConversation(c, saveItems: false);
+            if (!c.IsDraft && action is "skillSelect" or "speed" or "mode") SaveConversation(c, saveItems: false);
             reply["result"] = result;
         }
         catch (Exception ex) { reply["error"] = ex.Message; }

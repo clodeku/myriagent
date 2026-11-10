@@ -1,4 +1,4 @@
-// Codex 六項整合的介面契約：真網頁、假宿主，不會呼叫模型或更改使用者的設定。
+// Codex 整合的介面契約：真網頁、假宿主，不會呼叫模型或更改使用者的設定。
 export async function runCodex(ctx, vp) {
   const { openApp, closeApp, check, until, settle, outFile } = ctx;
   for (const theme of ['dark', 'light']) {
@@ -24,6 +24,44 @@ export async function runCodex(ctx, vp) {
       await page.click(sel + ' .codex-tools');
       await page.locator('.menu .menu-item', { hasText: label }).click();
     };
+    await open('規劃模式');
+    await reply('inspect', { modes: [{ mode: 'default' }, { mode: 'plan' }] });
+    await page.getByLabel('規劃模式', { exact: true }).selectOption('plan');
+    await page.getByRole('button', { name: '套用模式', exact: true }).click();
+    const mode = await reply('mode', { mode: 'plan' });
+    check('codexNativePlan-' + theme, mode.mode === 'plan');
+    c.header.codex.mode = 'plan';
+    c.header.codex.hasPlan = true;
+    await host.pushHeader('c2');
+    await page.screenshot({ path: outFile('codex-plan-' + theme + '.png') });
+    await page.keyboard.press('Escape');
+    check('codexPlanIndicator-' + theme, (await page.locator(sel + ' .codex-tools').innerText()).includes('先規劃'));
+
+    await page.locator(sel + ' .cbox textarea').fill('保留計畫草稿');
+    await open('開始執行計畫');
+    const executeMode = await reply('mode', { mode: 'default' });
+    const execute = await until(() => host.last('send', m => m.text === '請依照上方已確認的計畫開始執行。'), 2000);
+    check('codexExecutePlan-' + theme, executeMode.mode === 'default' && !!execute && await page.locator(sel + ' .cbox textarea').inputValue() === '保留計畫草稿');
+    c.header.running = false; c.header.codex.mode = 'default';
+    await host.pushHeader('c2');
+
+    host.ignore.add('answer');
+    const form = { id: 'codex-form', kind: 'Question', status: 'Waiting', time: Date.now(), seq: 900,
+      toolName: 'MCP：測試', questions: [{ id: 'n', text: '請填 1 到 5 的整數', allowOther: true, options: [] }], answers: {} };
+    c.items.push(form); host.pushItem('c2', form);
+    await settle(page, 150);
+    const card = page.locator(sel + ' .it-question').last();
+    await card.locator('.q-other').fill('9');
+    await card.getByRole('button', { name: '送出', exact: true }).click();
+    for (const stamp of ['1', '2']) {
+      Object.assign(form, { answerError: '不得大於 5', answerErrorAt: stamp });
+      host.pushItem('c2', form);
+      await settle(page, 100);
+      check('codexFormRetry-' + theme + stamp, await card.getByRole('button', { name: '送出', exact: true }).isEnabled() && await card.locator('.q-other').inputValue() === '9');
+      if (stamp === '1') await card.getByRole('button', { name: '送出', exact: true }).click();
+    }
+    form.status = 'Done'; form.answers = { n: ['3'] }; host.pushItem('c2', form);
+    host.ignore.delete('answer');
     await open('持續目標');
     await reply('inspect', { goal });
     check('codexGoal-' + theme, /1,200／8,000.*1 分 5 秒/.test(await page.locator('.codex-status').innerText()) && await page.locator('.codex-current img').count() === 0);
@@ -75,5 +113,20 @@ export async function runCodex(ctx, vp) {
     const compact = await until(() => host.last('send', m => m.text === '/compact'), 2000);
     check('codexCompact-' + theme, !!compact);
     await closeApp(app);
+
+    const dash = await openApp('codex-doctor-' + theme, { vp, layout: { panes: [{ id: 'p1', tabs: ['c1'], active: 'c1' }], focusedPane: 'p1', sidebarCollapsed: false, view: 'dashboard' }, settings: { theme }, colorScheme: theme });
+    await dash.host.send({ type: 'showView', view: 'dashboard' });
+    await dash.page.locator('.codex-doctor:visible').first().click();
+    await dash.page.getByRole('button', { name: '只檢查連線', exact: true }).click();
+    const doctor = await until(() => dash.host.last('codexDoctor'), 2000);
+    check('codexDoctorScope-' + theme, !!doctor && doctor.networkOnly === true);
+    await dash.host.send({ type: 'codexDoctor', requestId: doctor.requestId, result: { version: '0.167.0', status: 'warning', checks: [
+      { id: 'network.test', status: 'warning', summary: '<img src=x onerror=alert(1)>', details: { message: '連線測試'.repeat(80) }, remediation: '檢查連線設定' } ] } });
+    await settle(dash.page, 150);
+    check('codexDoctorText-' + theme, await dash.page.locator('.codex-doctor-result img').count() === 0 && await dash.page.getByRole('button', { name: '完整診斷', exact: true }).isEnabled());
+    await dash.page.setViewportSize({ width: 700, height: 700 });
+    check('codexDoctorNarrow-' + theme, await dash.page.locator('.dlg').evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+    await dash.page.screenshot({ path: outFile('codex-doctor-' + theme + '.png') });
+    await closeApp(dash);
   }
 }

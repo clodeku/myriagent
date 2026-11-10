@@ -39,6 +39,18 @@ function sendOperation(composer, text) {
 export function openCodexMenu(composer, anchor) {
   const cx = composer.header.codex || {};
   openMenu(anchor, [
+    { label: '規劃模式…', desc: cx.mode === 'plan' ? '目前先規劃，確認後再執行' : '一般執行', disabled: composer.runningNow(), onSelect: () => openCodexPanel(composer, 'mode') },
+    { label: '開始執行計畫', disabled: composer.runningNow() || cx.mode !== 'plan' || !cx.hasPlan,
+      onSelect: async () => {
+        if (composer.sendGate()) return;
+        if (composer.state.attachments && composer.state.attachments.length || composer.attachedUploads().length) { toast('請先移除附件，再開始執行計畫', 'error'); return; }
+        try {
+          await request(composer, 'mode', { mode: 'default' });
+          composer.header.codex = { ...composer.header.codex, mode: 'default', busy: false };
+          sendOperation(composer, '請依照上方已確認的計畫開始執行。');
+        } catch (ex) { toast(ex.message, 'error'); }
+      } },
+    { type: 'sep' },
     { label: '持續目標…', desc: goalSummary(cx.goal), onSelect: () => openCodexPanel(composer, 'goal') },
     { label: '指定技能…', desc: (cx.selectedSkills || []).map(s => s.name).join('、') || '搜尋這個工作資料夾可用的技能', onSelect: () => openCodexPanel(composer, 'skills') },
     { label: '速度模式…', desc: cx.serviceTier ? (cx.serviceTier === 'default' ? '標準' : '已自訂速度') : '沿用 CLI 設定', onSelect: () => openCodexPanel(composer, 'speed') },
@@ -56,7 +68,7 @@ export function refreshCodexPanel(composer) {
 }
 
 export function openCodexPanel(composer, section) {
-  const names = { goal: '持續目標', skills: '指定技能', speed: '速度模式' };
+  const names = { goal: '持續目標', skills: '指定技能', speed: '速度模式', mode: '規劃模式' };
   const content = h('div', { class: 'codex-content' }, spinner(), h('span', { text: '讀取 Codex 狀態…' }));
   const error = h('p', { class: 'codex-error', role: 'alert', hidden: true });
   const body = h('div', { class: 'codex-panel' }, content, error);
@@ -82,6 +94,22 @@ export function openCodexPanel(composer, section) {
       const data = await request(composer, 'inspect');
       if (closed) return;
       content.replaceChildren();
+      if (section === 'mode') {
+        if (data.modesError) throw new Error(data.modesError);
+        const available = new Set((data.modes || []).map(m => m.mode));
+        const select = h('select', { class: 'input', 'aria-label': '規劃模式' });
+        for (const [value, text] of [['default', '一般執行'], ['plan', '先規劃']])
+          if (available.has(value)) select.append(h('option', { value, text }));
+        select.value = (composer.header.codex || {}).mode || 'default';
+        const apply = h('button', { type: 'button', class: 'btn primary', text: '套用模式', disabled: !select.options.length });
+        apply.addEventListener('click', async () => {
+          const result = await act(apply, 'mode', { mode: select.value });
+          if (result) composer.header.codex.mode = result.mode;
+        });
+        content.append(h('label', { class: 'codex-field' }, h('span', { text: '下一輪的工作方式' }), select),
+          h('p', { class: 'codex-note', text: '先規劃會讓 Codex 調查需求並提出計畫。確認內容後，從 Codex 工具選「開始執行計畫」；也可以繼續送訊息調整計畫。' }),
+          h('div', { class: 'codex-actions' }, apply));
+      }
       if (section === 'goal') {
         if (data.goalError) throw new Error(data.goalError);
         const goal = Object.hasOwn(data, 'goal') ? data.goal : (composer.header.codex || {}).goal;

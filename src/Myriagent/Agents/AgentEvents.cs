@@ -12,6 +12,12 @@ internal abstract record AgentEvent;
 /// <summary>Codex 持久目標的完整狀態；null＝已清除。</summary>
 internal sealed record AgentCodexGoalEvent(JObject? Goal) : AgentEvent;
 
+/// <summary>原生規劃內容；完成時以 CLI 給的全文覆蓋串流。</summary>
+internal sealed record AgentCodexPlanEvent(string ItemId, string Text, bool Completed) : AgentEvent;
+
+/// <summary>這一輪由 CLI 彙整的檔案差異。</summary>
+internal sealed record AgentTurnDiffEvent(string TurnId, string Diff) : AgentEvent;
+
 /// <summary>CLI 端的對話已建立或續接成功</summary>
 internal sealed record AgentSessionStartedEvent(string SessionId, string? Model, string? Detail) : AgentEvent;
 

@@ -116,6 +116,23 @@ public sealed class AgentSessionIntegrationTests : IDisposable
         => string.Join("\n", events.OfType<AgentTextCompletedEvent>().Select(t => t.Text));
 
     [EnvFact("MYRIAGENT_IT", Reason)]
+    public async Task Codex_原生規劃確認後執行_回報整輪差異()
+    {
+        var settings = Settings(AgentProvider.Codex, null, false, CodexModel, AgentPermissionMode.FullAccess) with { CodexMode = "plan" };
+        using var session = new CodexAgentSession();
+        var plan = await RunTurnAsync(session, new AgentTurnInput("請規劃在工作資料夾建立 plan-probe.txt，唯一內容為 PLAN_EXECUTED。需求已確定，不必問問題、不使用工具。只提出簡短計畫，等我確認再寫檔。", []), settings);
+        plan.OfType<AgentTurnCompletedEvent>().Last().Outcome.Should().Be(AgentTurnOutcome.Completed);
+        plan.OfType<AgentCodexPlanEvent>().Should().Contain(p => p.Completed && p.Text.Contains("plan-probe.txt"));
+        File.Exists(Path.Combine(Workspace, "plan-probe.txt")).Should().BeFalse();
+        var thread = plan.OfType<AgentSessionStartedEvent>().Last().SessionId;
+        var execute = await RunTurnAsync(session, new AgentTurnInput("計畫確認，現在用 apply_patch 建立 plan-probe.txt；檔案內容只有 PLAN_EXECUTED，完成後簡短回報。", []),
+            settings with { SessionId = thread, SessionStarted = true, CodexMode = "default" });
+        execute.OfType<AgentTurnCompletedEvent>().Last().Outcome.Should().Be(AgentTurnOutcome.Completed);
+        (await File.ReadAllTextAsync(Path.Combine(Workspace, "plan-probe.txt"))).Trim().Should().Be("PLAN_EXECUTED");
+        execute.OfType<AgentTurnDiffEvent>().Should().Contain(d => d.Diff.Contains("plan-probe.txt"));
+    }
+
+    [EnvFact("MYRIAGENT_IT", Reason)]
     public async Task Codex_原生控制_技能選取_標準速度_審查與手動壓縮()
     {
         var settings = Settings(AgentProvider.Codex, null, false, CodexModel, AgentPermissionMode.FullAccess);

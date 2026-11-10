@@ -460,6 +460,9 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                 case "codexControl":
                     _ = HandleCodexControlAsync(view, Conv(), command);
                     break;
+                case "codexDoctor":
+                    _ = CodexDoctorAsync(view, command);
+                    break;
                 case "quotaWaitCancel":
                     CancelQuotaWait(Conv());
                     break;
@@ -1576,6 +1579,12 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             sendText += PrepareAccountDelegation(c, text, remoteOrigin);
             var sessionSettings = BuildSessionSettings(c, recap);
             session = EnsureSession(c);
+            await BeginTurnDiffAsync(c, sessionSettings.WorkingDirectory);
+            if (c.StopRequested)
+            {
+                CompleteTurn(c, new AgentTurnCompletedEvent(AgentTurnOutcome.Interrupted, null, null));
+                return;
+            }
             await session.SendAsync(new AgentTurnInput(sendText, attachments, cliUuid), sessionSettings);
             c.Restart.RejectedSends = 0;
             if (c.Running && c.StatusText == SendingStatus)
@@ -1734,6 +1743,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             ResumeAt: account.Provider == AgentProvider.Claude ? c.Meta.ResumeAt : null,
             ForkSource: account.Provider == AgentProvider.Claude ? c.Meta.ForkSourceTranscript : null,
             CodexServiceTier: c.Meta.CodexServiceTier,
+            CodexMode: c.Meta.CodexMode,
             CodexSkills: c.Meta.CodexSkills,
             DelegationMcpPipeName: DelegationMcpFor(c)?.PipeName,
             // 自動壓縮上限是這一家 CLI 的設定：已開的對話也套用（改了下次送出時重開程序）
@@ -1844,6 +1854,14 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             Toast("請先選擇或輸入答案");
             return;
         }
+        if (item.RequestKey != null && c.Session?.ValidateQuestionAnswer(item.RequestKey, answers) is { } validationError)
+        {
+            item.Output = validationError;
+            MarkItemDirty(c, item);
+            Toast(validationError, isError: true);
+            return;
+        }
+        item.Output = null;
         // 每題的補充說明（2026-11-05）：Claude、Grok 以 annotations.notes 交給 CLI；畫面、存檔、Codex 與答案當下一則訊息的都併成多一筆「補充說明：…」
         var notes = QuestionNoteRules.Parse(item.Questions, notesJson);
         var shown = QuestionNoteRules.Merge(answers, notes);
@@ -2360,6 +2378,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             c.Meta.Agent = null;
             c.Meta.OutputStyle = null;
             c.Meta.CodexServiceTier = null;
+            c.Meta.CodexMode = null;
             c.Meta.CodexSkills = null;
         }
         else if (!string.IsNullOrEmpty(c.Meta.Model) && c.Meta.Model != "default")
@@ -3096,6 +3115,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         CancelAutoTitles();
         StopGit();
         StopHealth();
+        doctorCancel.Cancel();
         StopSchedules();
         DisposeAccountDelegation();
         StopLaunchAll();
@@ -3177,6 +3197,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             CancelAutoTitles();
             StopGit();
             StopHealth();
+            doctorCancel.Cancel();
             StopSchedules();
             StopAccountMcp();
             DisposeAccountDelegation();

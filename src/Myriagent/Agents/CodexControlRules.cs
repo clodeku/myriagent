@@ -5,7 +5,17 @@ namespace Myriagent.Agents;
 /// <summary>Codex 對話控制的輸入驗證與協定轉換；只接受介面提供的動作，不讓網頁指定任意 RPC。</summary>
 internal static class CodexControlRules
 {
-    public static readonly string[] Actions = ["inspect", "goalSet", "goalPause", "goalResume", "goalClear", "skillSelect", "speed"];
+    public static readonly string[] Actions = ["inspect", "goalSet", "goalPause", "goalResume", "goalClear", "skillSelect", "speed", "mode"];
+
+    public static JObject CollaborationMode(string mode, string model, string? effort)
+    {
+        if (mode is not ("plan" or "default")) throw new ArgumentException("不支援的規劃模式");
+        return new JObject
+        {
+            ["mode"] = mode,
+            ["settings"] = new JObject { ["model"] = model, ["reasoning_effort"] = effort is null or "default" ? null : effort, ["developer_instructions"] = null },
+        };
+    }
 
     public static JObject GoalParams(string thread, string action, JObject input)
     {

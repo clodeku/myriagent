@@ -249,6 +249,26 @@ internal sealed partial class AgentHub
                     TryAutoApprove(c, autoItem);
                 break;
 
+            case AgentCodexPlanEvent proposed:
+            {
+                var key = "codex-plan:" + proposed.ItemId;
+                if (!c.BlockItems.TryGetValue(key, out var card))
+                {
+                    card = new AgentChatItem { Kind = AgentItemKind.Tool, ToolKind = "plan", ToolName = "規劃內容", Title = "Codex 的執行計畫" };
+                    c.BlockItems[key] = card;
+                    AddItem(c, card);
+                }
+                card.Text = proposed.Completed ? proposed.Text : card.Text + proposed.Text;
+                card.Status = proposed.Completed ? AgentItemStatus.Done : AgentItemStatus.Running;
+                MarkItemDirty(c, card);
+                MarkHeaderDirty(c);
+                break;
+            }
+
+            case AgentTurnDiffEvent changes:
+                UpdateTurnDiff(c, changes);
+                break;
+
             case AgentPlanEvent plan:
             {
                 if (c.PlanItem == null || !c.Items.Contains(c.PlanItem))
@@ -466,6 +486,7 @@ internal sealed partial class AgentHub
         // 換版重開期間舊程序的這一輪結束：不加「已停止」、佇列不暫停，由重開的結果接續或收尾
         if (SwallowTurnEndDuringRestart(c, turn))
             return;
+        FinishTurnDiff(c);
 
         // Codex 的拒絕會讓這一輪以 interrupted 結束：使用者沒按停止就不算「已停止」，拒絕附的說明與排隊訊息照常接著送
         bool endedByDeny = turn.Outcome == AgentTurnOutcome.Interrupted && c.DeniedThisTurn && !c.StopRequested;

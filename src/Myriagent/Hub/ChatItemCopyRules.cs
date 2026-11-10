@@ -71,6 +71,7 @@ internal static class ChatItemCopyRules
             Agent = meta.Agent,
             OutputStyle = meta.OutputStyle,
             CodexServiceTier = meta.CodexServiceTier,
+            CodexMode = meta.CodexMode,
             CodexSkills = meta.CodexSkills?.ToList(),
             ResumeAt = meta.ResumeAt,
             QuotaWait = meta.QuotaWait,

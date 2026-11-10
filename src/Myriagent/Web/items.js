@@ -26,7 +26,7 @@ const RENDER = {
   Assistant: { create: createAssistant, fill: fillAssistant },
   Thinking: { create: createThinking, fill: fillThinking },
   Tool: { create: createTool, fill: fillTool },
-  Question: { create: createQuestion, sig: (it) => JSON.stringify([it.status, it.decision, it.answers, it.questions, it.answerAsMessage, it.output, it.detailHtml, it.filePath]) },
+  Question: { create: createQuestion, sig: (it) => JSON.stringify([it.status, it.decision, it.answers, it.questions, it.answerAsMessage, it.output, it.detailHtml, it.filePath, it.answerError, it.answerErrorAt]) },
   Approval: { create: createApproval, sig: (it) => JSON.stringify([it.status, it.decision, it.toolName, it.title, it.detail, it.canAllowForSession, it.allowSessionLabel, it.diff && it.diff.length, it.output]) },
   PlanApproval: { create: createPlanApproval, sig: (it) => JSON.stringify([it.status, it.decision, it.detailHtml, it.output]) },
   Plan: { create: createPlan, fill: fillPlan },
@@ -901,6 +901,10 @@ function createQuestion(item, ctx) {
     n.append(planDet);
   }
   if (!waiting) { n.append(answeredView(item)); if (item.status === 'Cancelled') appendFeedback(n, item); return n; }
+  if (item.answerError) {
+    n.dataset.answerError = 'true';
+    n.append(h('p', { class: 'codex-error', role: 'alert', text: item.answerError }));
+  }
 
   const st = qState(ctx, item);
   n.tabIndex = 0;
@@ -1289,7 +1293,12 @@ function sendCard(n, item, ctx, cmd, extra) {
   ctx.track(id, {
     onSettle: (state, code, origin, elapsed) => {
       cs.pending.delete(item.id);
-      if (state === 'done') { if (ctx.rtt) ctx.rtt(elapsed); return; }
+      if (state === 'done') {
+        if (ctx.rtt) ctx.rtt(elapsed);
+        const cur = (ctx.nodeOf && ctx.nodeOf(item.id)) || n;
+        if (cur.dataset.answerError === 'true') unlockCard(cur, ctx, null);
+        return;
+      }
       const note = settleText(state);
       if (note) cs.notes.set(item.id, note);
       // 等結果時項目可能重畫過（重新 open）：解鎖目前畫面上的那張

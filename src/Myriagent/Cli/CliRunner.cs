@@ -33,7 +33,8 @@ internal static class CliRunner
         string? workingDirectory = null,
         bool killWithApp = true,
         Action<int>? started = null,
-        string? input = null)
+        string? input = null,
+        int? maxOutputCharacters = null)
     {
         var utf8 = new UTF8Encoding(false);
         var psi = new ProcessStartInfo
@@ -79,8 +80,8 @@ internal static class CliRunner
             {
                 Debug.WriteLine($"[CliRunner] 回報 PID 失敗：{ex.Message}");
             }
-            var stdout = process.StandardOutput.ReadToEndAsync(ct);
-            var stderr = process.StandardError.ReadToEndAsync(ct);
+            var stdout = ReadOutputAsync(process.StandardOutput, maxOutputCharacters, ct);
+            var stderr = ReadOutputAsync(process.StandardError, maxOutputCharacters, ct);
             // 不等寫完：程序不讀 stdin 時寫入會卡在管線緩衝區，逾時結束程序樹後管線斷掉，寫入跟著失敗
             _ = WriteInputAsync(process, input);
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -114,6 +115,21 @@ internal static class CliRunner
             }
             return new CliRunResult(process.ExitCode, await stdout, await stderr, false) { ProcessId = processId };
         }
+    }
+
+    // 超出上限仍排空管線；多留一字元，讓呼叫端能辨識截斷，不能把半份 JSON 當成完整報告。
+    private static async Task<string> ReadOutputAsync(StreamReader reader, int? limit, CancellationToken ct)
+    {
+        if (limit == null) return await reader.ReadToEndAsync(ct);
+        var text = new StringBuilder();
+        var buffer = new char[8192];
+        int count;
+        while ((count = await reader.ReadAsync(buffer.AsMemory(), ct)) > 0)
+        {
+            var keep = Math.Min(count, Math.Max(0, limit.Value + 1 - text.Length));
+            text.Append(buffer, 0, keep);
+        }
+        return text.ToString();
     }
 
     /// <summary>

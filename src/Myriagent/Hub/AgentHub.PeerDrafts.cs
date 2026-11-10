@@ -123,6 +123,7 @@ internal sealed partial class AgentHub
         c.Meta.Agent = null;
         c.Meta.CodexSkills = null;
         c.Meta.CodexServiceTier = null;
+        c.Meta.CodexMode = null;
         c.CodexGoal = null;
         if (provider != c.Meta.Provider)
             ApplyDraftProvider(c, provider);

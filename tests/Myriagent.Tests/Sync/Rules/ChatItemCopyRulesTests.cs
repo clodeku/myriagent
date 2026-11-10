@@ -20,7 +20,7 @@ public sealed class ChatItemCopyRulesTests
     [InlineData(typeof(AgentQuestionOption), 3)]
     [InlineData(typeof(AgentPlanStep), 2)]
     [InlineData(typeof(AgentMediaRef), 3)]
-    [InlineData(typeof(AgentConversation), 35)]
+    [InlineData(typeof(AgentConversation), 36)]
     public void 屬性數釘住(Type type, int count)
         => PublishTestItems.Properties(type).Should().HaveCount(count, type.Name);
 
@@ -152,6 +152,7 @@ public sealed class ChatItemCopyRulesTests
             Agent = "reviewer",
             OutputStyle = "Explanatory",
             CodexServiceTier = "priority",
+            CodexMode = "plan",
             CodexSkills = [new("test", "C:/skills/test/SKILL.md")],
             ResumeAt = "7e7e44d7-c310-428c-8c7b-6074ae338563",
             QuotaWait = new QuotaWait("acc", new DateTimeOffset(2026, 10, 26, 15, 1, 0, TimeSpan.FromHours(8))),
