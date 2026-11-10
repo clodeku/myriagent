@@ -80,6 +80,61 @@ public sealed class HealthScannerTests : IDisposable
     }
 
     [Fact]
+    public void Claude_逐一記下skill的明細_claude_ai同步的另外對照()
+    {
+        temp.WriteFile(@".claude\skills\mine\SKILL.md",
+            "---\nname: mine\ndescription: >\n  整理訂單異常\n  並寫成報告\nwhen_to_use: 每天早上\n---\n# 我的 skill\n\n細節見 [參考](references/a.md)、[不見了](references/gone.md#x)、"
+            + "[網站](https://example.com) 與 `[行內](not/a/link.md)`\n\n```\n[程式碼](also/not.md)\n```\n");
+        temp.WriteFile(@".claude\skills\mine\references\a.md", "A\n");
+        temp.WriteFile(@".claude\skills\nofm\SKILL.md", "只有本文\n");
+        temp.WriteFile(@".claude\commands\deploy.md", "部署\n");
+        temp.WriteFile(@".claude\skills\synced\acct-old\docx\SKILL.md", "---\nname: docx\ndescription: 舊的\n---\n");
+        temp.WriteFile(@".claude\skills\synced\acct-new\docx\SKILL.md", "---\nname: docx\ndescription: 新的\n---\n");
+        File.SetLastWriteTimeUtc(temp.Combine(".claude", "skills", "synced", "acct-old", "docx", "SKILL.md"), DateTime.UtcNow.AddDays(-3));
+
+        var scan = Scan(Claude()).Accounts.Single();
+        scan.Skills.Should().Be(3, "claude.ai 同步在帳號資料夾底下的不算進數量（CLI 的清單才知道哪些在用）");
+        var mine = scan.SkillList.Single(s => s.Name == "mine");
+        mine.Description.Should().Be("整理訂單異常 並寫成報告");
+        mine.WhenToUse.Should().Be("每天早上");
+        mine.HasFrontMatter.Should().BeTrue();
+        mine.Source.Should().Be("user");
+        mine.MissingRefs.Should().Equal("references/gone.md");
+        mine.BodyLines.Should().BeGreaterThan(3);
+        var nofm = scan.SkillList.Single(s => s.Name == "nofm");
+        nofm.HasFrontMatter.Should().BeFalse();
+        nofm.Description.Should().BeEmpty();
+        scan.SkillList.Single(s => s.Name == "deploy").Kind.Should().Be("command");
+        scan.SyncedSkills["docx"].Description.Should().Be("新的", "同名的留最新的");
+
+        mine.FrontMatterProblem.Should().BeNull();
+        var list = SkillHealthRules.Evaluate(scan, null);
+        list.Single(v => v.Name == "nofm").Level.Should().Be(HealthLevel.Bad);
+        list.Single(v => v.Name == "mine").Issues.Single().Text.Should().Contain("references/gone.md");
+    }
+
+    [Fact]
+    public void Claude外掛的plugin_json另外指定skill的位置()
+    {
+        var plugin = temp.CreateDirectory(@"plugins\cache\m\ux\2.0.0");
+        temp.WriteFile(@"plugins\cache\m\ux\2.0.0\.claude-plugin\plugin.json", "{ \"name\": \"ux\", \"skills\": \"./.claude/skills/\" }");
+        temp.WriteFile(@"plugins\cache\m\ux\2.0.0\.claude\skills\design\SKILL.md", "---\nname: design\ndescription: 設計\n---\n");
+        temp.WriteFile(@"plugins\cache\m\ux\2.0.0\skills\base\SKILL.md", "---\nname: base\ndescription: 預設位置\n---\n");
+        temp.WriteFile(@"plugins\cache\m\vx\1.0.0\.claude-plugin\plugin.json", "{ \"skills\": [\"./one\", \"../escape\"] }");
+        temp.WriteFile(@"plugins\cache\m\vx\1.0.0\one\SKILL.md", "---\nname: one\ndescription: 單一個\n---\n");
+        temp.WriteFile(@"plugins\cache\m\escape\SKILL.md", "---\nname: escape\n---\n");
+        var vx = temp.Combine("plugins", "cache", "m", "vx", "1.0.0");
+        temp.WriteFile(@".claude\plugins\installed_plugins.json",
+            "{ \"version\": 2, \"plugins\": { \"ux@m\": [ { \"installPath\": " + Newtonsoft.Json.JsonConvert.ToString(plugin) + " } ], "
+            + "\"vx@m\": [ { \"installPath\": " + Newtonsoft.Json.JsonConvert.ToString(vx) + " } ] } }");
+        temp.WriteFile(@".claude\settings.json", "{ \"enabledPlugins\": { \"ux@m\": true, \"vx@m\": true } }");
+
+        var scan = Scan(Claude()).Accounts.Single();
+        scan.SkillList.Select(s => (s.Plugin, s.Name)).Should().BeEquivalentTo(new[] { ("ux", "base"), ("ux", "design"), ("vx", "one") }, "外掛資料夾以外的不算");
+        scan.PluginSkills.Should().Be(3);
+    }
+
+    [Fact]
     public void Claude_設定檔讀不懂_共用設定時記憶看來源()
     {
         var source = temp.CreateDirectory("source-claude");

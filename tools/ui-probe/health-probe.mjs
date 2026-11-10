@@ -1,7 +1,7 @@
 // 儀表板的健康度（web-protocol 的 health／healthCheck／healthFix；Web/health.js、Web/healthrules.js）的情境：probe.mjs 匯入，--health 只跑它，完整執行時也跑。
 // 檢查名稱 health*：切到儀表板送 healthCheck、沒有結果時不顯示、帳戶卡的一行（等級、摘要、不超出卡片）、明細對話框（各項、檔案、符號連結、
 // 項目裡的「用代理精簡…」「用代理整理…」）、電腦層級的指示檔（狀態膠囊、涵蓋率、Grok 的 Claude 相容、缺少的條目、「用代理合併…」選帳戶送 healthFix）、
-// 分析中、良好時的寫法、淺色。截圖 health-*.png
+// 分析中、良好時的寫法、淺色；skill 那一項逐一列出的 skill（篩選、展開、開檔）、帳戶卡的設定資料夾路徑（點了開檔案總管）。截圖 health-*.png
 
 const NOW = Date.now();
 
@@ -21,7 +21,24 @@ export function makeHealth(o = {}) {
             [file('C:\\Users\\Lin\\.claude\\CLAUDE.md', '主檔　CLAUDE.md', '84 行・約 1.3 萬 token', 'ok', 'C:\\repo\\dotfiles\\claude\\CLAUDE.md')]),
           item('memory', '自動記憶索引', 'warn', '22 個專案・1 個接近上限', '每個專案的 MEMORY.md 只載入前 200 行或 25KB（先到者為準），超過的部分不會進入對話。\n接近上限：再記幾條就會開始被截掉，建議先整理。',
             [file('C:\\Users\\Lin\\.claude\\projects\\C--repo-SampleShop\\memory\\MEMORY.md', 'C--repo-SampleShop', '125 行・23.5 KB', 'warn')]),
-          item('skills', 'Skills', 'warn', '74 個・清單 26,041 字元・6 個子代理', 'skill 的名稱與描述每一輪都在脈絡裡（約 7,141 token）。其中 71 個是外掛帶來的。'),
+          Object.assign(item('skills', 'Skills', 'warn', '74 個・清單 26,041 字元・6 個子代理', 'skill 的名稱與描述每一輪都在脈絡裡（約 7,141 token）。其中 71 個是外掛帶來的。\n下方逐一列出 4 個使用中的 skill 與用途，2 個需要注意。'), {
+            skills: [
+              { name: 'ui-polish', label: 'ui-polish', kind: 'skill', source: 'user', plugin: null, path: 'C:\\Users\\Lin\\.claude\\skills\\ui-polish\\SKILL.md',
+                purpose: "Guidance on UI polish, component design, animation decisions, and the invisible details that make software feel great.",
+                description: "Guidance on UI polish, component design, animation decisions, and the invisible details that make software feel great.",
+                tokens: 57, listed: true, level: 'warn', issues: [{ level: 'warn', text: '本文 669 行（建議 500 行以內）：用到時整份載入脈絡，細節可以拆到參考檔、需要時再讀。' }] },
+              { name: 'workflow:test-plan', label: 'workflow:test-plan', kind: 'skill', source: 'plugin', plugin: 'workflow', path: 'C:\\Users\\Lin\\.claude\\plugins\\cache\\workflow\\skills\\test-plan\\SKILL.md',
+                purpose: 'Test planning and baseline management — test pyramid placement, failure investigation funnel, regression scoping.', description: 'Test planning and baseline management — test pyramid placement, failure investigation funnel, regression scoping. Invoke when validating changes. Not for: TDD.',
+                tokens: 12, listed: true, level: 'warn', issues: [{ level: 'warn', text: 'CLI 讀到的描述是「Test Plan」，和 SKILL.md 寫的不一樣，模型看到的是 CLI 讀到的那一句：前置資料的 YAML 讀不懂（description 的值沒加引號、裡面有「: 」），把值用引號包起來。' }] },
+              { name: 'video-ad', label: 'video-ad', kind: 'skill', source: 'user', plugin: null, path: 'C:\\Users\\Lin\\.claude\\skills\\video-ad\\SKILL.md',
+                purpose: '用影片生成服務製作社群廣告短影片的完整流程：企劃分鏡、點數試算、定稿、本機後製、驗收與交付。',
+                description: '用影片生成服務製作社群廣告短影片的完整流程：企劃分鏡、點數試算、定稿、本機後製、驗收與交付。只要使用者提到 影片生成服務 都要用。',
+                tokens: 100, listed: true, level: 'ok', issues: [] },
+              { name: 'anthropic-skills:docx', label: 'docx', kind: 'skill', source: 'synced', plugin: null, path: null,
+                purpose: 'Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx).', description: 'Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx).',
+                tokens: 319, listed: false, level: 'ok', issues: [{ level: 'info', text: '沒有列給模型（只留名稱）：只有直接叫用時才會用到。' }] },
+            ],
+          }),
           item('mcp', 'MCP 伺服器', 'ok', '4 個', '使用者層與外掛的 MCP 伺服器：higgsfield、meta-Hub 主機、playwright（playwright）、context7（context7）。'),
           item('plugins', '外掛', 'info', '12 個啟用', '啟用 12 個，帶來 63 個 skill、8 個斜線指令、6 個子代理、2 個附 MCP、3 個附 hooks。'),
           item('settings', '設定檔', 'ok', '正常', '設定檔讀得懂，大小正常。', [file('C:\\Users\\Lin\\.claude.json', '.claude.json', '171.6 KB', 'ok')]),
@@ -174,6 +191,46 @@ export async function runHealth(ctx, vp) {
   check('healthDialogFixButtons', !!dlg && dlg.fixes.join(',') === 'instructions|trim|用代理精簡…,memory|memory|用代理整理…' && dlg.footButtons === 2, dlg);
   await settle(page, 400);   // 對話框淡入
   await page.screenshot({ path: outFile('health-dialog-dark.png') });
+  // skill 那一項逐一列出：篩選鈕的數字、需要注意的只留兩個、文字篩選、展開看發現與檔案、點路徑送 openPath
+  const sk = await page.evaluate(() => {
+    const box = document.querySelector('.dlg-health .hd-item[data-key="skills"] .hd-skills');
+    if (!box) return null;
+    const rows = Array.from(box.querySelectorAll('.hd-sk'));
+    return {
+      seg: Array.from(box.querySelectorAll('.hd-sk-seg .seg-btn')).map((b) => b.textContent),
+      rows: rows.map((r) => [r.dataset.level, r.querySelector('.hd-sk-name').textContent, r.querySelector('.hd-sk-src').textContent, (r.querySelector('.hd-sk-tok') || {}).textContent].join('|')),
+      tag: (box.querySelector('.hd-sk-tag') || {}).textContent || null,
+      purposeClamped: rows.every((r) => { const p = r.querySelector('.hd-sk-purpose'); return p.scrollHeight <= p.clientHeight + 2 || getComputedStyle(p).webkitLineClamp === '2'; }),
+      overflow: box.scrollWidth > box.clientWidth + 1,
+    };
+  });
+  check('healthSkillList', !!sk && sk.seg.join(',') === '全部4,需要注意2' && sk.rows.length === 4
+    && sk.rows[0] === 'warn|ui-polish|自己的|約 57 token' && sk.rows[1].startsWith('warn|workflow:test-plan|外掛・workflow')
+    && sk.rows[3] === 'ok|docx|claude.ai|約 319 token' && sk.tag === '只留名稱' && sk.purposeClamped && !sk.overflow, sk);
+  await page.click('.dlg-health .hd-sk-seg .seg-btn[data-mode="flagged"]');
+  const flaggedNames = await page.evaluate(() => Array.from(document.querySelectorAll('.dlg-health .hd-sk-name')).map((n) => n.textContent));
+  await page.fill('.dlg-health .hd-sk-q', 'yaml 引號');
+  const searched = await page.evaluate(() => Array.from(document.querySelectorAll('.dlg-health .hd-sk-name')).map((n) => n.textContent));
+  await page.fill('.dlg-health .hd-sk-q', 'zzz');
+  const none = await page.evaluate(() => ({ rows: document.querySelectorAll('.dlg-health .hd-sk').length, empty: !document.querySelector('.dlg-health .hd-sk-empty').hidden }));
+  check('healthSkillFilter', flaggedNames.join(',') === 'ui-polish,workflow:test-plan' && searched.join(',') === 'workflow:test-plan' && none.rows === 0 && none.empty,
+    { flaggedNames, searched, none });
+  await page.fill('.dlg-health .hd-sk-q', '');
+  await page.click('.dlg-health .hd-sk-seg .seg-btn[data-mode="all"]');
+  await page.click('.dlg-health .hd-sk[data-level="warn"] .hd-sk-sum');
+  await settle(page, 100);   // details 的 toggle 事件是非同步的
+  // health 訊息到了整個對話框重畫：展開的狀態照舊
+  await host.send({ type: 'health', health: makeHealth() });
+  await settle(page, 150);
+  const opened1 = await page.evaluate(() => {
+    const d = document.querySelector('.dlg-health .hd-sk-det[open]');
+    return d ? { name: d.querySelector('.hd-sk-name').textContent, issues: Array.from(d.querySelectorAll('.hd-sk-issues li')).map((l) => l.dataset.level + '|' + l.textContent), path: (d.querySelector('.hd-sk-path .hd-path') || {}).textContent } : null;
+  });
+  check('healthSkillExpand', !!opened1 && opened1.name === 'ui-polish' && /^warn\|本文 669 行/.test(opened1.issues[0] || '') && /ui-polish\\SKILL\.md$/.test(opened1.path || ''), opened1);
+  await page.locator('.dlg-health .hd-item[data-key="skills"]').screenshot({ path: outFile('health-skills-dark.png') });
+  await page.click('.dlg-health .hd-sk-det[open] .hd-sk-path .hd-path');
+  const skOpen = await until(() => host.last('openPath', (m) => /SKILL\.md$/.test(m.path)), 2000);
+  check('healthSkillOpenPath', !!skOpen && skOpen.path === 'C:\\Users\\Lin\\.claude\\skills\\ui-polish\\SKILL.md', skOpen);
   // 路徑點了送 openPath
   await page.click('.dlg-health .hd-path');
   const opened = await until(() => host.last('openPath'), 2000);
@@ -221,6 +278,27 @@ export async function runHealth(ctx, vp) {
   }), 2000);
   check('healthDialogNoFixWhenOk', !!okFixes && okFixes.title === '「個人 Pro」的健康度' && okFixes.fixes === 0, okFixes);
   await closeApp(app);
+
+  // 帳戶卡的設定資料夾路徑：桌面這台的帳戶都有，點了送 accountOpenFolder
+  {
+    const p2 = await openApp('health-path', { vp, layout: onePane('c1', 'dashboard') });
+    const paths = await until(() => p2.page.evaluate(() => {
+      const list = Array.from(document.querySelectorAll('#dashboard .acard')).map((c) => {
+        const b = c.querySelector('.acard-path');
+        const r = b && c.getBoundingClientRect(), br = b && b.getBoundingClientRect();
+        return [c.dataset.key, b && !b.hidden ? b.textContent : null, b && !b.hidden ? br.right <= r.right + 0.5 : true];
+      });
+      return list.length ? list : null;
+    }), 3000);
+    const a1Path = paths && paths.find((x) => x[0] === 'a1');
+    const a2Path = paths && paths.find((x) => x[0] === 'a2');
+    check('accountCardPath', !!a1Path && a1Path[1] === 'C:\\Users\\Lin\\.claude' && !!a2Path && /accounts\\a2$/.test(a2Path[1] || '') && paths.every((x) => x[2]), paths);
+    await p2.page.click('#dashboard .acard[data-key="a2"] .acard-path');
+    const of = await until(() => p2.host.last('accountOpenFolder'), 2000);
+    check('accountCardPathOpens', !!of && of.accountId === 'a2', of);
+    await p2.page.locator('#dashboard .acard[data-key="a2"]').screenshot({ path: outFile('health-card-path-dark.png') });
+    await closeApp(p2);
+  }
 
   // 淺色、只有一種 CLI（不顯示指示檔區塊）
   const light = await openApp('health-light', { vp, layout: onePane('c1', 'dashboard'), settings: { theme: 'light' }, colorScheme: 'light' });

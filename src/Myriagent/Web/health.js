@@ -1,5 +1,6 @@
 // 儀表板的健康度（只有桌面；web-protocol 的 health／healthCheck／healthFix）：
-// 帳戶卡上的「健康度」一行（點了開明細）、明細對話框（全域指示、自動記憶索引、skill、MCP、外掛、設定檔，各自的量測與建議），
+// 帳戶卡上的「健康度」一行（點了開明細）、明細對話框（全域指示、自動記憶索引、skill、MCP、外掛、設定檔，各自的量測與建議；
+// skill 那一項另外逐一列出每個使用中的 skill：用途、來源、佔清單的 token、各自的健康度與發現，可以篩選），
 // 以及「電腦層級的指示檔」區塊（各 CLI 使用者層的 CLAUDE.md／AGENTS.md／GEMINI.md 互相缺哪些、要不要合併與同步）。
 // 「用代理合併」與各項裡的「用代理精簡」（全域指示）、「用代理整理」（自動記憶索引）開新對話、輸入框預先填好說明，由使用者看過再送出。
 // 所有數字與句子都由宿主算好，這裡只負責顯示
@@ -7,11 +8,14 @@ import { h, iconButton, fmtRelative, fmtDateTime, replayClass } from './util.js'
 import { icon, providerMark } from './icons.js';
 import { post, state, accountOf, providerInfo, isHub } from './store.js';
 import { openMenu, openDialog, spinner } from './ui.js';
-import { levelOf, levelLabel, accountHealthOf, stripText, instructionsVisible, docStatus, coveragePct, coverageText, fixCandidates, FIX_TASKS, itemFixTask, healthCells } from './healthrules.js';
+import { levelOf, levelLabel, accountHealthOf, stripText, instructionsVisible, docStatus, coveragePct, coverageText, fixCandidates, FIX_TASKS, itemFixTask, healthCells,
+  skillRows, skillFlagged, skillSourceLabel, skillTokensText, filterSkills, skillCounts } from './healthrules.js';
 
 let ws = null;
 /** 開著的明細對話框：{ accountId, render }（health 訊息到了重畫） */
 let openDlg = null;
+/** 逐一 skill 清單的篩選與展開狀態（帳戶 id → { mode, query, open:Set, focused }）：health 訊息到了整個對話框重畫時照舊 */
+const skillUi = new Map();
 
 /** dashboard.js 初始化時給 workspace 的 api（openHealthFix） */
 export function setHealthWorkspace(api) { ws = api; }
@@ -129,7 +133,83 @@ function itemBlock(it, fixTask, accountId) {
       h('span', { class: 'hd-item-value', text: it.value || '' })),
     detail.length ? h('div', { class: 'hd-item-detail' }, detail.map((t) => h('p', { text: t }))) : null,
     files.length ? h('ul', { class: 'hd-files' }, files.map(fileRow)) : null,
+    it.key === 'skills' ? skillList(it, accountId) : null,
     fix);
+}
+
+// ───── 逐一的 skill ─────
+/** skills 那一項底下的清單：篩選列（全部／需要注意、文字篩選）＋每個 skill 一列（點了展開完整描述、發現與檔案） */
+function skillList(it, accountId) {
+  const rows = skillRows(it);
+  if (!rows || !rows.length) return null;
+  let ui = skillUi.get(accountId);
+  if (!ui) { ui = { mode: 'all', query: '', open: new Set(), focused: false }; skillUi.set(accountId, ui); }
+  const counts = skillCounts(rows);
+  if (ui.mode === 'flagged' && !counts.flagged) ui.mode = 'all';
+  const list = h('ul', { class: 'hd-sk-list' });
+  const empty = h('p', { class: 'hd-sk-empty', text: '沒有符合的 skill。', hidden: true });
+  const segBtn = (mode, label, n) => {
+    const b = h('button', { type: 'button', class: 'seg-btn', 'aria-pressed': 'false', dataset: { mode } }, h('span', { text: label }), h('b', { class: 'hd-sk-n', text: String(n) }));
+    b.addEventListener('click', () => { ui.mode = mode; paint(); });
+    return b;
+  };
+  const seg = h('div', { class: 'seg hd-sk-seg', role: 'group', 'aria-label': '顯示哪些 skill' },
+    ...[segBtn('all', '全部', counts.all), counts.flagged ? segBtn('flagged', '需要注意', counts.flagged) : null].filter(Boolean));
+  const input = h('input', { type: 'search', class: 'hd-sk-q', placeholder: '篩選名稱、用途…', 'aria-label': '篩選 skill', spellcheck: 'false' });
+  input.value = ui.query;
+  input.addEventListener('input', () => { ui.query = input.value; paint(); });
+  input.addEventListener('focus', () => { ui.focused = true; });
+  input.addEventListener('blur', () => { ui.focused = false; });
+  const paint = () => {
+    for (const b of seg.children) {
+      const on = b.dataset.mode === ui.mode;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    const shown = filterSkills(rows, ui.mode, ui.query);
+    list.textContent = '';
+    for (const r of shown) list.append(skillRow(r, ui));
+    empty.hidden = shown.length > 0;
+  };
+  paint();
+  const box = h('div', { class: 'hd-skills' },
+    h('div', { class: 'hd-sk-bar' }, seg, h('span', { class: 'grow' }), h('label', { class: 'hd-sk-qbox' }, icon('search', 'hd-sk-qic'), input)),
+    list, empty);
+  // 對話框重畫時（health 訊息）篩選框原本有焦點就還給它
+  if (ui.focused) queueMicrotask(() => { if (input.isConnected) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); } });
+  return box;
+}
+
+/** 一個 skill：摘要列（等級、名稱、來源、token、用途）；展開是完整描述、發現與檔案 */
+function skillRow(r, ui) {
+  const level = levelOf(r.level);
+  const det = h('details', { class: 'hd-sk-det' });
+  det.open = ui.open.has(r.name);
+  det.addEventListener('toggle', () => { if (det.open) ui.open.add(r.name); else ui.open.delete(r.name); });
+  const same = r.issues.filter((i) => i.level === level).length;
+  det.append(
+    h('summary', { class: 'hd-sk-sum' },
+      h('span', { class: 'hd-sk-dot', dataset: { level }, title: levelLabel(level) }),
+      h('span', { class: 'hd-sk-name mono', text: r.label, title: r.label !== r.name ? r.label + '\n' + r.name : r.label }),
+      h('span', { class: 'hd-sk-src', dataset: { source: r.source }, text: skillSourceLabel(r) }),
+      ...[r.listed ? null : h('span', { class: 'hd-sk-tag', text: '只留名稱', title: '沒有列給模型：只有直接叫用時才會用到' }),
+        skillFlagged(r) ? h('span', { class: 'hd-sk-flag', dataset: { level }, text: same > 1 ? same + ' 項' + levelLabel(level) : levelLabel(level) }) : null].filter(Boolean),
+      h('span', { class: 'hd-sk-tok', text: skillTokensText(r.tokens) }),
+      h('span', { class: 'hd-sk-purpose', text: r.purpose || '（沒有描述）' })),
+    h('div', { class: 'hd-sk-body' },
+      ...[r.description && r.description !== r.purpose ? h('p', { class: 'hd-sk-desc', text: r.description }) : null,
+        r.issues.length
+          ? h('ul', { class: 'hd-sk-issues' }, r.issues.map((i) => h('li', { dataset: { level: i.level } }, levelIcon(i.level, 'hd-sk-iic'), h('span', { text: i.text }))))
+          : h('p', { class: 'hd-sk-ok', dataset: { level: 'ok' } }, levelIcon('ok', 'hd-sk-iic'), h('span', { text: '沒有發現問題。' })),
+        r.path ? skillPath(r.path) : h('p', { class: 'hd-sk-nofile', text: '這台找不到它的檔案（只有 CLI 知道這個 skill）。' })].filter(Boolean)));
+  return h('li', { class: 'hd-sk', dataset: { level } }, det);
+}
+
+function skillPath(path) {
+  const open = h('button', { type: 'button', class: 'hd-path mono', text: path, title: '用預設程式開啟\n' + path });
+  open.addEventListener('click', () => post({ cmd: 'openPath', path }));
+  const reveal = iconButton('folderOpen', '在檔案總管中顯示', () => post({ cmd: 'revealPath', path }), 'hd-reveal');
+  return h('div', { class: 'hd-sk-path' }, open, reveal);
 }
 
 /** 檔案一列：名稱與量測；路徑點了用預設程式開、旁邊的按鈕在檔案總管顯示；符號連結另列實際檔案 */

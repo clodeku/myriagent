@@ -43,6 +43,25 @@ internal sealed record MemoryIndexStat(string Project, string Path, int Lines, l
 /// <summary>一個外掛帶來的東西（Claude 的 enabledPlugins）</summary>
 internal sealed record PluginStat(string Id, int Skills, int Commands, int Agents, bool Mcp, bool Hooks, bool Missing);
 
+/// <summary>掃描到的一個 skill 或斜線指令（儀表板逐一列出用途與健康度，SkillHealthRules 評估）</summary>
+/// <param name="Name">CLI 叫它的名稱：skill 是資料夾名稱、指令是檔名；外掛的另外看 Plugin</param>
+/// <param name="Kind">skill 或 command（斜線指令）</param>
+/// <param name="Source">user（使用者層）、plugin（外掛）、synced（claude.ai 同步過來的）</param>
+/// <param name="Plugin">外掛的名稱（不帶 @ 之後的市集）；不是外掛帶的是 null</param>
+/// <param name="File">SKILL.md 或指令檔的路徑</param>
+/// <param name="Readable">讀得到內容</param>
+/// <param name="HasFrontMatter">有 --- 前置資料</param>
+/// <param name="DeclaredName">前置資料的 name；沒有是 null</param>
+/// <param name="Description">前置資料的 description（續行以空白連接）</param>
+/// <param name="WhenToUse">前置資料的 when_to_use</param>
+/// <param name="BodyLines">前置資料之後的行數</param>
+/// <param name="MissingRefs">本文以相對路徑連結、卻不存在的檔（最多 10 個）</param>
+/// <param name="FrontMatterProblem">前置資料的 YAML 會讀錯的寫法（HealthTextRules.FrontMatterProblem）；沒有是 null</param>
+internal sealed record SkillStat(
+    string Name, string Kind, string Source, string? Plugin, string File, bool Readable, bool HasFrontMatter,
+    string? DeclaredName, string Description, string WhenToUse, int BodyLines, IReadOnlyList<string> MissingRefs,
+    string? FrontMatterProblem = null);
+
 /// <summary>一個帳戶的量測（掃描器的輸出、HealthRules 的輸入）</summary>
 internal sealed class AccountScan
 {
@@ -65,6 +84,12 @@ internal sealed class AccountScan
 
     /// <summary>skill 與斜線指令（會列進 skill 清單的）數量；null＝這種代理不分析</summary>
     public int? Skills { get; set; }
+
+    /// <summary>逐一的 skill 與斜線指令（會列進 skill 清單的；照掃描的順序）</summary>
+    public List<SkillStat> SkillList { get; } = new();
+
+    /// <summary>Claude：claude.ai 同步下來、在 skills\synced\&lt;帳號&gt;\&lt;名稱&gt;\ 的 skill（名稱→最新的 SKILL.md）；給 CLI 回報的 claude.ai skill 對檔案用</summary>
+    public Dictionary<string, SkillStat> SyncedSkills { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>其中外掛帶來的</summary>
     public int PluginSkills { get; set; }

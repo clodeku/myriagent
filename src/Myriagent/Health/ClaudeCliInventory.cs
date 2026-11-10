@@ -7,7 +7,12 @@ namespace Myriagent.Health;
 /// <param name="Tokens">CLI 算的清單 token 數</param>
 /// <param name="Source">來源（user、plugin、claude.ai sync、project…）</param>
 /// <param name="Advertised">有列給模型（false＝只有名稱、沒有描述或沒列）</param>
-internal sealed record CliSkill(string Name, int Tokens, string Source, bool Advertised);
+/// <param name="DisplayName">顯示名稱（外掛的帶命名空間；SKILL.md 宣告的 name）；沒有是 null</param>
+/// <param name="Description">CLI 讀到的描述；沒有是 null</param>
+/// <param name="State">on、off 等（CLI 的 state）；沒有是 null</param>
+/// <param name="Unqualified">不帶命名空間的名稱（handles.unqualified_name）；沒有是 null</param>
+internal sealed record CliSkill(string Name, int Tokens, string Source, bool Advertised,
+    string? DisplayName = null, string? Description = null, string? State = null, string? Unqualified = null);
 
 /// <summary>一個 hook（get_hooks_listing）</summary>
 /// <param name="Event">事件（PreToolUse、SessionStart…）</param>
@@ -32,7 +37,11 @@ internal sealed record ClaudeCliInventory(IReadOnlyList<CliSkill>? Skills, IRead
                 Str(o, "name") ?? string.Empty,
                 o["tokens"] is JValue { Type: JTokenType.Integer } t ? Math.Max(0, t.Value<int>()) : 0,
                 Str(o, "source") ?? string.Empty,
-                o["advertised"] is not JValue { Type: JTokenType.Boolean, Value: false }))
+                o["advertised"] is not JValue { Type: JTokenType.Boolean, Value: false },
+                Str(o, "display_name"),
+                Str(o, "description"),
+                Str(o, "state"),
+                o["handles"] is JObject hd ? Str(hd, "unqualified_name") : null))
                 .Where(k => k.Name.Length > 0).ToList()
             : null;
         var hooks = hooksListing?["hooks"] is JArray h

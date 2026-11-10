@@ -877,7 +877,7 @@ Codex 子代理用既有 `toolKind:"agent"` 工具卡顯示（id 前綴 `codex-c
   "label": "工作用 Max",
   "color": "#D97757",                   // 帳戶代表色（分頁、卡片、圓環用）
   "isSystemDefault": true,              // 使用這台電腦預設的設定資料夾（~/.claude、~/.codex），不是 app 建立的隔離帳戶
-  "configDirectory": "C:\\Users\\U\\.claude",
+  "configDirectory": "C:\\Users\\U\\.claude",   // 設定資料夾（profile）；桌面的帳戶卡在名稱底下顯示（太長從中間省略，healthrules.compactPath），點了送 accountOpenFolder 用檔案總管開；瀏覽器版、remoteOnly 不顯示
   "email": "me@example.com" | null,
   "plan": "Claude Max" | "Pro" | null,
   "status": "ready",                    // "checking" | "ready" | "notLoggedIn" | "apiKey" | "notInstalled" | "error"
@@ -1331,13 +1331,29 @@ app 結束（使用者結束、Windows 登出或重新開機）或當掉時還�
     "level": "warn",
     "value": "84 行・約 1.3 萬 token",   // 量測的摘要
     "detail": "每次對話開始都會載入…\n建議：…",   // 說明與建議，多段以換行分開
-    "files": [{ "path": "C:\\Users\\u\\.claude\\CLAUDE.md", "label": "主檔　CLAUDE.md", "note": "84 行・約 1.3 萬 token", "level": "warn", "target": "C:\\repo\\dotfiles\\claude\\CLAUDE.md" | null }]
+    "files": [{ "path": "C:\\Users\\u\\.claude\\CLAUDE.md", "label": "主檔　CLAUDE.md", "note": "84 行・約 1.3 萬 token", "level": "warn", "target": "C:\\repo\\dotfiles\\claude\\CLAUDE.md" | null }],
+    "skills": [SkillHealthView]           // 只有 key 是 skills 的項目才有（2026-11-10；舊宿主沒有這個鍵＝不列）：逐一的使用中 skill
   }]
+}
+SkillHealthView = {
+  "name": "workflow:test-plan",    // CLI 叫它的名稱（外掛的帶命名空間）
+  "label": "workflow:test-plan",   // 顯示名稱（SKILL.md 宣告的 name；斜線指令前面加 /）
+  "kind": "skill" | "command",
+  "source": "user" | "plugin" | "synced" | "…",   // synced＝claude.ai 同步；其他照 CLI 回報的
+  "plugin": "workflow" | null,
+  "path": "C:\\…\\SKILL.md" | null,   // 找不到檔（只有 CLI 知道的）是 null；網頁點了送 openPath
+  "purpose": "Test planning and baseline management — …",   // 用途摘要：描述的第一句（最多 160 字）
+  "description": "…",                  // 完整的描述（含 when_to_use，最多 1,536 字）
+  "tokens": 12,                         // 在 skill 清單裡佔的 token（有 CLI 時是 CLI 算的，否則粗估）
+  "listed": true,                       // false＝沒有列給模型（只留名稱）
+  "level": "ok" | "warn" | "bad",       // 只有 info 的發現時是 ok
+  "issues": [{ "level": "warn", "text": "CLI 讀到的描述是「Test Plan」，和 SKILL.md 寫的不一樣…" }]
 }
 ```
 - `instructions`（全域指示）：每次對話都會載入的檔——Claude 是設定資料夾的 CLAUDE.md、它的 `@` 匯入（最多四跳）與 `rules\` 底下沒有 `paths` 的規則；Codex 是 `AGENTS.override.md`（有內容時）或 `AGENTS.md`；Grok 是 `GROK_HOME` 那一層的 AGENTS.md 等檔、`rules\`，Claude 相容沒關時另加 `~\.claude\CLAUDE.md`；Antigravity 是 `~\.gemini\GEMINI.md`。合計超過 5,000 token 或單檔超過 200 行是 warn；超過 15,000 token、Claude 單檔超過 40,000 字元（CLI 啟動時警告）、Antigravity 單檔超過 24,000 位元組（截斷）是 bad。精簡模式的 Claude、Codex 是 info（不載入）。
 - `memory`（只有 Claude）：每個專案的 `memory\MEMORY.md`（共用設定時是來源的）只載入前 200 行或 25KB，超過是 bad、到九成是 warn。
-- `skills`（Claude、Codex）：skill 與斜線指令的名稱＋描述（單筆最多 1,536 字元）；Claude 超過 8,000 字元（200K 脈絡的 1%）是 warn。
+- `skills`（Claude、Codex、Antigravity）：skill 與斜線指令的名稱＋描述（單筆最多 1,536 字元）；Claude 超過 8,000 字元（200K 脈絡的 1%）是 warn。外掛的 skill 除了預設的 `skills\` 也看 `.claude-plugin\plugin.json` 的 `skills`。
+  - 逐一的 `skills`（`Health/SkillHealthRules.cs`）：Claude 有 CLI 的清單（MCP 檢查順便問的 `get_skills_dialog`）時照它列（state 是 off 的不列、只算在說明的「另有 N 個停用」），檔案從掃描結果對回來（外掛的名稱是「外掛:資料夾」、claude.ai 的在 `skills\synced\<帳號>\<名稱>\`，同名留最新的）；沒有 CLI 時照掃描到的。每個 skill 的發現：讀不到檔、skill 沒有前置資料或沒有描述（bad）、描述超過 1,536 字或太短（粗估不到 8 token）、本文超過 500 行、本文以相對路徑連結的檔不存在、CLI 讀到的描述和檔案不同（前置資料的 YAML 讀不懂，Claude CLI 改用標題）或 YAML 寫法容易讀錯（沒加引號的值裡有「: 」「 #」）、和別的 skill 同名都列給模型（warn）、名稱不合 Agent Skills 規範、沒有列給模型（info）。排序：有問題的在前，再來自己的、指令、claude.ai、外掛。只有使用者自己的（`source` 是 `user`）有問題會拉高 skills 這一項的等級（摘要「skill「x」有問題」「N 個 skill 需要注意」）；外掛與 claude.ai 的只列出。網頁（`health.js` 的 `skillList`、純規則 `healthrules.js` 的 `skillRows`／`filterSkills`）在這一項底下列出：篩選鈕（全部／需要注意）、文字篩選（名稱、用途、描述、來源、發現），每列寫等級、名稱、來源、token、用途（兩行），點了展開完整描述、發現與檔案路徑。
 - `mcp`（Claude、Codex）：使用者層與外掛的 MCP 伺服器，10 個以上是 warn。`plugins`（只有 Claude）：啟用的外掛帶來的東西，啟用了卻沒安裝是 warn。`settings`：settings.json 不是有效的 JSON 是 bad、Claude 的 `.claude.json` 超過 5 MB 是 warn。
 
 ### InstructionsView

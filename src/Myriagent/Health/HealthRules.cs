@@ -21,7 +21,9 @@ internal sealed record HealthFileView(string Path, string Label, string Note, He
 /// <param name="Detail">說明與建議（多段以 \n 分開）</param>
 /// <param name="Files">相關的檔案</param>
 /// <param name="Headline">這一項是帳戶最差的一項時，卡片摘要用的短句（「CLAUDE.md 偏大」）；沒問題是 null</param>
-internal sealed record HealthItem(string Key, string Title, HealthLevel Level, string Value, string Detail, IReadOnlyList<HealthFileView> Files, string? Headline);
+/// <param name="Skills">skills 那一項逐一列出的使用中 skill（用途與健康度）；其他項目是 null</param>
+internal sealed record HealthItem(string Key, string Title, HealthLevel Level, string Value, string Detail, IReadOnlyList<HealthFileView> Files, string? Headline,
+    IReadOnlyList<SkillView>? Skills = null);
 
 /// <summary>一個帳戶的健康度</summary>
 /// <param name="Load">每次對話開始前固定載入的量（「約 1.3 萬 token 指示＋約 6,300 token skill 清單」）；算不出是 null</param>
@@ -126,9 +128,9 @@ internal static class HealthRules
         if (scan.MemoryIndexes != null)
             items.Add(EvaluateMemory(scan, cli));
         if (cli?.Skills != null)
-            items.Add(EvaluateCliSkills(scan, cli.Skills));
+            items.Add(WithSkillList(EvaluateCliSkills(scan, cli.Skills), SkillHealthRules.Evaluate(scan, cli.Skills), SkillHealthRules.DisabledCount(cli.Skills)));
         else if (scan.Skills != null)
-            items.Add(EvaluateSkills(scan));
+            items.Add(SkillsLoaded(scan) ? WithSkillList(EvaluateSkills(scan), SkillHealthRules.Evaluate(scan, null), 0) : EvaluateSkills(scan));
         if (cli?.Hooks != null)
             items.Add(EvaluateHooks(cli.Hooks));
         if (scan.McpServers != null)
@@ -359,6 +361,34 @@ internal static class HealthRules
             $"skill 的名稱與描述每一輪都在脈絡裡（{FormatTokens(scan.SkillListingTokens)}）。" + plugin, Array.Empty<HealthFileView>(), null);
     }
 
+    /// <summary>
+    /// skills 那一項附上逐一的清單：說明多一段數量；使用者自己的 skill 有問題時拉高這一項的等級（外掛與 claude.ai 的只列出、不拉低：不是使用者能改的）
+    /// </summary>
+    internal static HealthItem WithSkillList(HealthItem item, List<SkillView> skills, int disabled)
+    {
+        if (skills.Count == 0)
+            return item with { Skills = skills };
+        var flagged = skills.Count(s => s.Level is HealthLevel.Warn or HealthLevel.Bad);
+        var owned = skills.Where(s => s.OwnedByUser && s.Level is HealthLevel.Warn or HealthLevel.Bad).ToList();
+        var line = $"下方逐一列出 {skills.Count} 個使用中的 skill 與用途"
+            + (flagged > 0 ? $"，{flagged} 個需要注意" : "，都沒有發現問題")
+            + (disabled > 0 ? $"（另有 {disabled} 個停用）" : string.Empty) + "。";
+        if (flagged > owned.Count)
+            line += "外掛與 claude.ai 的 skill 不是你能直接改的，只列出、不計入等級。";
+        var level = item.Level;
+        var headline = item.Headline;
+        if (owned.Count > 0)
+        {
+            var worst = Worst(owned.Select(s => s.Level));
+            if (Rank(worst) > Rank(level))
+            {
+                level = worst;
+                headline = owned.Count == 1 ? $"skill「{owned[0].Label}」{(worst == HealthLevel.Bad ? "有問題" : "需要注意")}" : $"{owned.Count} 個 skill {(worst == HealthLevel.Bad ? "有問題" : "需要注意")}";
+            }
+        }
+        return item with { Level = level, Headline = headline, Detail = item.Detail + "\n" + line, Skills = skills };
+    }
+
     /// <summary>CLI 列給模型的 skill 清單合計的 token 數（沒有列出的不算）</summary>
     private static int CliSkillTokens(IReadOnlyList<CliSkill> skills) => skills.Where(s => s.Advertised).Sum(s => s.Tokens);
 
@@ -523,7 +553,12 @@ internal static class HealthRules
         ["load"] = health.Load,
         ["canTrim"] = health.CanTrim,
         ["canTrimMemory"] = health.CanTrimMemory,
-        ["items"] = new JArray(health.Items.Select(i => new JObject
+        ["items"] = new JArray(health.Items.Select(RenderItem)),
+    };
+
+    private static JObject RenderItem(HealthItem i)
+    {
+        var o = new JObject
         {
             ["key"] = i.Key,
             ["title"] = i.Title,
@@ -531,8 +566,12 @@ internal static class HealthRules
             ["value"] = i.Value,
             ["detail"] = i.Detail,
             ["files"] = new JArray(i.Files.Select(RenderFile)),
-        })),
-    };
+        };
+        // 只有 skills 那一項有逐一的清單（SkillHealthView；舊網頁不認得這個鍵就不顯示）
+        if (i.Skills != null)
+            o["skills"] = new JArray(i.Skills.Select(SkillHealthRules.Render));
+        return o;
+    }
 
     private static JObject RenderFile(HealthFileView f) => new()
     {

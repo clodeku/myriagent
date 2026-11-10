@@ -4,7 +4,7 @@
 // 〔遠端〕在所有電腦登出（WP4.8）與從目錄刪除；對指定電腦的登入、登出與 CLI 操作在矩陣與各電腦 CLI 卡上（remoteaccounts.js）
 // remoteOnly 帳戶（桌面：目錄裡有、這台沒有）：灰色的卡，按鈕與選單都只有「在這台登入」，不算進摘要的帳戶數與新增帳戶的計數
 // （卡上與摘要的對話數照算其他在線電腦的 otherSessions：其他電腦在跑時一樣顯示執行中）
-import { h, iconButton, reconcile, setAcc, setPulse, setTempo, safeColor, fmtReset, fmtRelative, fmtDateTime, fmtSpan, pctText, copyToClipboard, DEFAULT_COLORS, replayClass } from './util.js';
+import { h, iconButton, reconcile, setAcc, setPulse, setTempo, safeColor, fmtReset, fmtRelative, fmtDateTime, fmtSpan, pctText, setHidden, copyToClipboard, DEFAULT_COLORS, replayClass } from './util.js';
 import { icon, providerMark } from './icons.js';
 import { post, state, accountOf, summaryOf, STATUS_LABEL, providerKeys, providerInfo, isHub, on } from './store.js';
 import { openMenu, openDialog, confirmDialog, toast, spinner, showTip, hideTip, switchControl, handleEscape } from './ui.js';
@@ -19,6 +19,7 @@ import { tickRemoteLogins, originLabelOf, loginDeviceOf, logoutAllMenuItem, REMO
 // 健康度（只有桌面）：帳戶卡的一行與明細、電腦層級的指示檔
 import { setHealthWorkspace, requestHealth, createHealthStrip, updateHealthStrip, refreshHealthDialog, createInstructionsSection, renderInstructionsSection } from './health.js';
 import { requestMcp, createMcpStrip, updateMcpStrip, refreshMcpDialog } from './mcp.js';
+import { compactPath } from './healthrules.js';
 // 每週額度每 5% 的 token（只有桌面）
 import { requestUsageSegments, createUsageSegmentsSection, renderUsageSegmentsSection } from './usageseg.js';
 import { loginExpiry, loginExpiryText } from './loginrules.js';
@@ -301,7 +302,10 @@ function createCard(a) {
   const more = iconButton('more', '帳戶動作', () => accountMenu(accountOf(card.dataset.key), more), 'acard-more');
   // 〔同步〕各電腦的登入狀態小點（devices 是陣列的帳戶才有）
   const strip = h('div', { class: 'acard-strip', hidden: true });
-  const head = h('div', { class: 'acard-head' }, mark, h('div', { class: 'acard-id' }, h('div', { class: 'acard-line' }, name, pill), sub, strip), more);
+  // 帳戶的設定資料夾（profile；CLAUDE_CONFIG_DIR、CODEX_HOME、GROK_HOME…）：只有桌面這台的帳戶，點了用檔案總管開（accountOpenFolder）
+  const path = h('button', { type: 'button', class: 'acard-path', hidden: true }, icon('folderOpen', 'acard-path-ic'), h('span', { class: 'acard-path-text mono' }));
+  path.addEventListener('click', () => post({ cmd: 'accountOpenFolder', accountId: card.dataset.key }));
+  const head = h('div', { class: 'acard-head' }, mark, h('div', { class: 'acard-id' }, h('div', { class: 'acard-line' }, name, pill), sub, path, strip), more);
   const rings = h('div', { class: 'rings' });
   const notes = h('div', { class: 'acard-notes' });
   const login = h('div', { class: 'acard-login', hidden: true });
@@ -330,7 +334,7 @@ function createCard(a) {
   const foot = h('div', { class: 'acard-foot' }, sessions, h('span', { class: 'grow' }), loginBtn, refBtn, newBtn, hereBtn);
   // HUD 的背景層（帳戶色的光暈、網格、側邊刻度、開場的掃描線；fx.css）：畫在內容底下，不接收滑鼠
   card.append(h('div', { class: 'acard-fx', 'aria-hidden': 'true' }), head, rings, notes, health, mcp, login, foot);
-  card._els = { mark, name, sub, pill, strip, rings, notes, health, mcp, login, sessions, newBtn, refBtn, loginBtn, hereBtn, provider: null };
+  card._els = { mark, name, sub, path, pill, strip, rings, notes, health, mcp, login, sessions, newBtn, refBtn, loginBtn, hereBtn, provider: null };
   updateCard(card, a, true);
   return card;
 }
@@ -391,6 +395,15 @@ function updateCard(card, a, first) {
   subParts.forEach((t, i) => { if (i) e.sub.append(h('span', { class: 'sep', text: '・' })); e.sub.append(h('span', { text: t })); });
   if (a.isSystemDefault) e.sub.append(h('span', { class: 'tag', text: '本機預設', title: a.configDirectory || '' }));
   if (a.safeMode && providerInfo(a.provider).safeMode) e.sub.append(h('span', { class: 'tag', text: '精簡模式', title: '不載入外掛、hooks、MCP、' + instructionFile(a.provider) }));
+  // 設定資料夾的路徑（瀏覽器版的邏輯帳戶、remoteOnly 沒有；資料夾不存在時宿主會先建立）
+  const dir = !isHub && !remoteOnly && typeof a.configDirectory === 'string' ? a.configDirectory : '';
+  setHidden(e.path, !dir);
+  if (dir && e.path._dir !== dir) {
+    e.path._dir = dir;
+    e.path.lastChild.textContent = compactPath(dir);
+    e.path.title = '設定資料夾（點一下用檔案總管開啟）\n' + dir;
+    e.path.setAttribute('aria-label', '用檔案總管開啟設定資料夾 ' + dir);
+  }
   e.pill.className = 'pill st-' + (a.status || 'checking');
   e.pill.textContent = '';
   if (a.status === 'checking') e.pill.append(spinner('pill-spin'));

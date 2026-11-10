@@ -111,13 +111,14 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
         foreach (var skill in SkillFiles(Path.Combine(dir, "skills")))
         {
             skills++;
-            AddListing(listing, scan, skill.Name, skill.File);
+            AddListing(listing, scan, skill.Name, skill.File, "skill", skill.Synced ? "synced" : "user", null);
         }
         foreach (var command in MarkdownFiles(Path.Combine(dir, "commands")))
         {
             skills++;
-            AddListing(listing, scan, Path.GetFileNameWithoutExtension(command), command);
+            AddListing(listing, scan, Path.GetFileNameWithoutExtension(command), command, "command", "user", null);
         }
+        ScanSyncedSkills(scan, Path.Combine(dir, "skills", "synced"));
         var agents = MarkdownFiles(Path.Combine(dir, "agents")).Count();
 
         // 外掛：enabledPlugins 為 true 的，照 installed_plugins.json 的安裝位置數它帶來的東西
@@ -136,13 +137,13 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
                     plugins.Add(new PluginStat(id, 0, 0, 0, false, false, Missing: true));
                     continue;
                 }
-                var pluginSkillFiles = SkillFiles(Path.Combine(path, "skills")).ToList();
+                var pluginSkillFiles = PluginSkillFiles(path);
                 var pluginCommands = MarkdownFiles(Path.Combine(path, "commands")).ToList();
                 var pluginAgents = MarkdownFiles(Path.Combine(path, "agents")).Count();
                 foreach (var skill in pluginSkillFiles)
-                    AddListing(listing, scan, skill.Name, skill.File);
+                    AddListing(listing, scan, skill.Name, skill.File, "skill", "plugin", PluginName(id));
                 foreach (var command in pluginCommands)
-                    AddListing(listing, scan, Path.GetFileNameWithoutExtension(command), command);
+                    AddListing(listing, scan, Path.GetFileNameWithoutExtension(command), command, "command", "plugin", PluginName(id));
                 pluginSkills += pluginSkillFiles.Count + pluginCommands.Count;
                 agents += pluginAgents;
                 var pluginMcp = PluginMcpServers(path);
@@ -181,11 +182,12 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
 
     private static string PluginName(string id) => id.Split('@')[0];
 
-    /// <summary>skill 清單的一筆：名稱＋描述（單筆描述最多 1,536 字元）</summary>
-    private void AddListing(StringBuilder listing, AccountScan scan, string name, string file)
+    /// <summary>skill 清單的一筆：名稱＋描述（單筆描述最多 1,536 字元）；同時記下這一筆的明細（SkillList）</summary>
+    private void AddListing(StringBuilder listing, AccountScan scan, string name, string file, string kind, string source, string? plugin)
     {
         var text = ReadText(file, 256 * 1024);
         var fm = text != null ? HealthTextRules.ParseFrontMatter(text) : new Dictionary<string, string>();
+        scan.SkillList.Add(SkillStatOf(name, file, kind, source, plugin, text, fm));
         var skillName = HealthTextRules.FrontMatterText(fm, "name") is { Length: > 0 } declared ? declared : name;
         scan.SkillListingChars += HealthTextRules.SkillListingChars(skillName, fm, HealthRules.SkillDescriptionCap);
         var description = HealthTextRules.FrontMatterText(fm, "description");
@@ -196,8 +198,70 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
         listing.Append(skillName).Append(": ").Append(desc).Append('\n');
     }
 
-    /// <summary>skills\ 底下的 skill（每個資料夾的 SKILL.md）；點開頭的略過，synced\ 再往下一層</summary>
-    private static IEnumerable<(string Name, string File)> SkillFiles(string skillsDir)
+    /// <summary>一個 skill 或指令的明細：前置資料、本文行數、本文以相對路徑連結卻不存在的檔</summary>
+    private static SkillStat SkillStatOf(string name, string file, string kind, string source, string? plugin, string? text, IReadOnlyDictionary<string, string> fm)
+    {
+        var hasFrontMatter = false;
+        var body = text != null ? HealthTextRules.BodyAfterFrontMatter(text, out hasFrontMatter) : string.Empty;
+        var missing = new List<string>();
+        var baseDir = Path.GetDirectoryName(file) ?? string.Empty;
+        foreach (var link in HealthTextRules.RelativeLinks(body))
+        {
+            if (missing.Count >= 10)
+                break;
+            try
+            {
+                var full = Path.GetFullPath(Path.Combine(baseDir, link));
+                if (!File.Exists(full) && !Directory.Exists(full))
+                    missing.Add(link);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // 路徑格式不對：不是檔案連結，不提
+            }
+        }
+        var declared = HealthTextRules.FrontMatterText(fm, "name");
+        return new SkillStat(name, kind, source, plugin, file, text != null, hasFrontMatter, declared.Length > 0 ? declared : null,
+            HealthTextRules.FrontMatterText(fm, "description"), HealthTextRules.FrontMatterText(fm, "when_to_use"),
+            text != null ? HealthTextRules.CountLines(body.Trim('\r', '\n')) : 0, missing,
+            text != null ? HealthTextRules.FrontMatterProblem(text) : null);
+    }
+
+    /// <summary>
+    /// claude.ai 同步下來的 skill（skills\synced\&lt;帳號&gt;\&lt;名稱&gt;\SKILL.md）：不算進數量（CLI 的清單才知道哪些在用），
+    /// 只記下明細給 CLI 回報的 claude.ai skill 對檔案；同名的留最新的
+    /// </summary>
+    private void ScanSyncedSkills(AccountScan scan, string syncedDir)
+    {
+        foreach (var accountDir in Directories(syncedDir))
+        {
+            if (Path.GetFileName(accountDir).StartsWith('.') || File.Exists(Path.Combine(accountDir, "SKILL.md")))
+                continue;
+            foreach (var skill in SkillFiles(accountDir).Where(s => !s.Synced))
+            {
+                if (scan.SyncedSkills.TryGetValue(skill.Name, out var had) && LastWrite(had.File) >= LastWrite(skill.File))
+                    continue;
+                var text = ReadText(skill.File, 256 * 1024);
+                var fm = text != null ? HealthTextRules.ParseFrontMatter(text) : new Dictionary<string, string>();
+                scan.SyncedSkills[skill.Name] = SkillStatOf(skill.Name, skill.File, "skill", "synced", null, text, fm);
+            }
+        }
+    }
+
+    private static DateTime LastWrite(string file)
+    {
+        try
+        {
+            return File.GetLastWriteTimeUtc(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return DateTime.MinValue;
+        }
+    }
+
+    /// <summary>skills\ 底下的 skill（每個資料夾的 SKILL.md）；點開頭的略過，synced\ 再往下一層（Synced＝在 synced\ 底下）</summary>
+    private static IEnumerable<(string Name, string File, bool Synced)> SkillFiles(string skillsDir)
     {
         foreach (var sub in Directories(skillsDir))
         {
@@ -207,7 +271,7 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
             var file = Path.Combine(sub, "SKILL.md");
             if (File.Exists(file))
             {
-                yield return (name, file);
+                yield return (name, file, false);
                 continue;
             }
             if (name.Equals("synced", StringComparison.OrdinalIgnoreCase))
@@ -216,7 +280,7 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
                 {
                     var syncedFile = Path.Combine(synced, "SKILL.md");
                     if (!Path.GetFileName(synced).StartsWith('.') && File.Exists(syncedFile))
-                        yield return (Path.GetFileName(synced), syncedFile);
+                        yield return (Path.GetFileName(synced), syncedFile, true);
                 }
             }
         }
@@ -269,6 +333,55 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
         catch (JsonException)
         {
             // 讀不懂就當沒有安裝紀錄
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// 外掛的 skill：預設的 skills 資料夾，加上 .claude-plugin/plugin.json 的 skills（字串或陣列；可以指到放 skill 的資料夾或單一 skill 的資料夾）。
+    /// 同一個 SKILL.md 只算一次
+    /// </summary>
+    private static List<(string Name, string File, bool Synced)> PluginSkillFiles(string pluginDir)
+    {
+        var dirs = new List<string> { Path.Combine(pluginDir, "skills") };
+        if (ReadText(Path.Combine(pluginDir, ".claude-plugin", "plugin.json"), 1024 * 1024) is { } text)
+        {
+            try
+            {
+                var declared = JToken.Parse(text) is JObject root ? root["skills"] : null;
+                var paths = declared switch
+                {
+                    JValue { Type: JTokenType.String } one => new[] { one.ToString() },
+                    JArray many => many.OfType<JValue>().Where(v => v.Type == JTokenType.String).Select(v => v.ToString()).ToArray(),
+                    _ => Array.Empty<string>(),
+                };
+                foreach (var rel in paths)
+                {
+                    if (string.IsNullOrWhiteSpace(rel) || Path.IsPathRooted(rel))
+                        continue;
+                    var full = Path.GetFullPath(Path.Combine(pluginDir, rel));
+                    if (full.StartsWith(Path.GetFullPath(pluginDir), StringComparison.OrdinalIgnoreCase))
+                        dirs.Add(full);
+                }
+            }
+            catch (Exception ex) when (ex is JsonException or ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // plugin.json 讀不懂：只看預設的 skills 資料夾
+            }
+        }
+        var result = new List<(string Name, string File, bool Synced)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var dir in dirs)
+        {
+            var single = Path.Combine(dir, "SKILL.md");
+            IEnumerable<(string Name, string File, bool Synced)> found = File.Exists(single)
+                ? [(Path.GetFileName(dir.TrimEnd(Path.DirectorySeparatorChar)), single, false)]
+                : SkillFiles(dir);
+            foreach (var skill in found)
+            {
+                if (seen.Add(Path.GetFullPath(skill.File)))
+                    result.Add(skill);
+            }
         }
         return result;
     }
@@ -393,6 +506,7 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
             skills++;
             var skillText = ReadText(skill.File, 256 * 1024);
             var fm = skillText != null ? HealthTextRules.ParseFrontMatter(skillText) : new Dictionary<string, string>();
+            scan.SkillList.Add(SkillStatOf(skill.Name, skill.File, "skill", "user", null, skillText, fm));
             scan.SkillListingChars += HealthTextRules.SkillListingChars(skill.Name, fm, HealthRules.SkillDescriptionCap);
             listing.Append(skill.Name).Append(": ").Append(HealthTextRules.FrontMatterText(fm, "description")).Append('\n');
         }
@@ -510,7 +624,7 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
         foreach (var skill in SkillFiles(Path.Combine(globalConfig, "skills")))
         {
             skills++;
-            AddListing(listing, scan, skill.Name, skill.File);
+            AddListing(listing, scan, skill.Name, skill.File, "skill", "user", null);
         }
 
         // 外掛（~/.gemini/config/plugins/<plugin>/plugin.json）：預設啟用，config.json 的 plugins[dirName].enabled 優先於 plugin.json 的 disabled
@@ -545,7 +659,7 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
             var displayName = manifest?.Value<string>("name") is { Length: > 0 } n ? n : dirName;
             var pSkills = SkillFiles(Path.Combine(pluginDir, "skills")).ToList();
             foreach (var skill in pSkills)
-                AddListing(listing, scan, skill.Name, skill.File);
+                AddListing(listing, scan, skill.Name, skill.File, "skill", "plugin", displayName);
             pluginSkills += pSkills.Count;
 
             ScanAntigravityRules(scan, Path.Combine(pluginDir, "rules"), seen);

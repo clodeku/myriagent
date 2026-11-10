@@ -96,3 +96,82 @@ export function healthCells(v) {
   const items = v && Array.isArray(v.items) ? v.items : [];
   return items.filter((i) => i && typeof i === 'object').map((i) => ({ key: String(i.key || ''), title: String(i.title || ''), value: String(i.value || ''), level: levelOf(i.level) }));
 }
+
+// ───── 逐一的 skill（AccountHealthView 的 skills 項目帶的 skills，SkillHealthView）─────
+const str = (v) => (typeof v === 'string' ? v : '');
+
+/** skills 那一項逐一列出的 skill（照宿主的順序）；宿主沒送（舊宿主、其他項目）回 null */
+export function skillRows(it) {
+  if (!it || !Array.isArray(it.skills)) return null;
+  return it.skills.filter((s) => s && typeof s === 'object' && str(s.name)).map((s) => ({
+    name: str(s.name),
+    label: str(s.label) || str(s.name),
+    kind: s.kind === 'command' ? 'command' : 'skill',
+    source: str(s.source) || 'other',
+    plugin: str(s.plugin) || null,
+    path: str(s.path) || null,
+    purpose: str(s.purpose),
+    description: str(s.description),
+    tokens: Number.isFinite(s.tokens) && s.tokens > 0 ? Math.round(s.tokens) : 0,
+    listed: s.listed !== false,
+    level: levelOf(s.level),
+    issues: Array.isArray(s.issues) ? s.issues.filter((i) => i && str(i.text)).map((i) => ({ level: levelOf(i.level), text: str(i.text) })) : [],
+  }));
+}
+
+/** 需要注意的（warn、bad；info 只是說明） */
+export function skillFlagged(row) {
+  return LEVELS[levelOf(row.level)].rank > 0;
+}
+
+/** 來源的晶片文字 */
+export function skillSourceLabel(row) {
+  switch (row.source) {
+    case 'user': return row.kind === 'command' ? '斜線指令' : '自己的';
+    case 'synced': return 'claude.ai';
+    case 'plugin': return row.plugin ? '外掛・' + row.plugin : '外掛';
+    default: return row.source || '其他';
+  }
+}
+
+/** 「約 1,200 token」；0 是空字串 */
+export function skillTokensText(tokens) {
+  return tokens > 0 ? '約 ' + tokens.toLocaleString('en-US') + ' token' : '';
+}
+
+/** 篩選：mode＝all／flagged；query 比對名稱、用途、描述、來源、發現（不分大小寫，空白分開的每個字都要有） */
+export function filterSkills(rows, mode, query) {
+  const words = str(query).trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return (rows || []).filter((r) => {
+    if (mode === 'flagged' && !skillFlagged(r)) return false;
+    if (!words.length) return true;
+    const hay = [r.label, r.name, r.purpose, r.description, skillSourceLabel(r)].concat(r.issues.map((i) => i.text)).join('\n').toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/** 篩選鈕的數字：{ all, flagged } */
+export function skillCounts(rows) {
+  const list = rows || [];
+  return { all: list.length, flagged: list.filter(skillFlagged).length };
+}
+
+/**
+ * 帳戶卡上的設定資料夾：太長時從中間省略、留開頭（磁碟與使用者）與最後兩層，最後一層才是辨認帳戶的部分
+ * （「C:\Users\Lin\…\accounts\a2」）；分隔字元照原本的（\ 或 /）。完整路徑放在滑過的說明
+ */
+export function compactPath(path, max = 56) {
+  const p = typeof path === 'string' ? path : '';
+  if (p.length <= max) return p;
+  const sep = p.includes('\\') ? '\\' : '/';
+  const parts = p.split(/[\\/]/);
+  if (parts.length <= 3) return '…' + p.slice(p.length - max + 1);
+  const tail = parts.slice(-2).join(sep);
+  for (const head of [3, 2, 1]) {
+    if (parts.length - 2 <= head) continue;
+    const s = parts.slice(0, head).join(sep) + sep + '…' + sep + tail;
+    if (s.length <= max) return s;
+  }
+  const last = '…' + sep + tail;
+  return last.length <= max ? last : '…' + p.slice(p.length - max + 1);
+}

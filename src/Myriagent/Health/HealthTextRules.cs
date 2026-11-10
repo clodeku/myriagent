@@ -235,6 +235,108 @@ internal static class HealthTextRules
         return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// skill 前置資料裡 YAML 解析器會出錯或讀錯的寫法（只看 name、description、when_to_use 的單行值）：
+    /// 沒加引號的值裡有「: 」（YAML 當成巢狀的鍵，整份前置資料讀不懂，Claude CLI 就改用標題當描述）、「 #」（後面被當成註解截掉）。
+    /// 沒有問題回 null
+    /// </summary>
+    public static string? FrontMatterProblem(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return null;
+        var lines = SplitLines(text.TrimStart((char)0xFEFF)).ToList();
+        if (lines.Count == 0 || lines[0].TrimEnd() != "---")
+            return null;
+        for (var i = 1; i < lines.Count && lines[i].TrimEnd() != "---"; i++)
+        {
+            var line = lines[i];
+            if (line.Length == 0 || char.IsWhiteSpace(line[0]))
+                continue;
+            var colon = line.IndexOf(':');
+            if (colon <= 0)
+                continue;
+            var key = line[..colon].Trim();
+            if (!key.Equals("name", StringComparison.OrdinalIgnoreCase) && !key.Equals("description", StringComparison.OrdinalIgnoreCase)
+                && !key.Equals("when_to_use", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var value = line[(colon + 1)..].Trim();
+            if (value.Length == 0 || value[0] is '"' or '\'' or '>' or '|' or '[' or '{')
+                continue;
+            if (value.Contains(": ", StringComparison.Ordinal) || value.EndsWith(':'))
+                return $"{key} 的值沒加引號、裡面有「: 」";
+            if (value.Contains(" #", StringComparison.Ordinal))
+                return $"{key} 的值沒加引號、裡面有「 #」（後面會被當成註解）";
+        }
+        return null;
+    }
+
+    /// <summary>前置資料之後的本文（沒有前置資料就是整份）；hasFrontMatter＝檔頭有完整的 --- 前置資料</summary>
+    public static string BodyAfterFrontMatter(string text, out bool hasFrontMatter)
+    {
+        hasFrontMatter = false;
+        if (string.IsNullOrEmpty(text))
+            return string.Empty;
+        var lines = SplitLines(text.TrimStart((char)0xFEFF)).ToList();
+        if (lines.Count == 0 || lines[0].TrimEnd() != "---")
+            return text;
+        for (var i = 1; i < lines.Count; i++)
+        {
+            if (lines[i].TrimEnd() == "---")
+            {
+                hasFrontMatter = true;
+                return string.Join("\n", lines.Skip(i + 1));
+            }
+        }
+        return text;
+    }
+
+    /// <summary>Markdown 連結 [文字](目標)；目標到空白或右括號為止（可以有 "標題"）</summary>
+    private static readonly Regex MarkdownLinkPattern = new(@"\]\((?<t><[^>]+>|[^)\s]+)(?:\s+""[^""]*"")?\)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// skill 本文以相對路徑連結的檔（程式碼區塊與行內程式碼裡的不算）：去掉 #錨點與 ?查詢、解開 %20 這類編碼。
+    /// 網址（含 scheme）、錨點、絕對路徑、~ 開頭、含 { } 範本的都不算
+    /// </summary>
+    public static IReadOnlyList<string> RelativeLinks(string body)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrEmpty(body) || !body.Contains("](", StringComparison.Ordinal))
+            return result;
+        string? fence = null;
+        foreach (var line in SplitLines(StripHtmlComments(body)))
+        {
+            if (FenceMarker(line) is { } marker)
+            {
+                if (fence == null)
+                    fence = marker;
+                else if (line.TrimStart().StartsWith(fence, StringComparison.Ordinal))
+                    fence = null;
+                continue;
+            }
+            if (fence != null || !line.Contains("](", StringComparison.Ordinal))
+                continue;
+            foreach (Match m in MarkdownLinkPattern.Matches(RemoveInlineCode(line)))
+            {
+                var target = m.Groups["t"].Value.Trim('<', '>');
+                var cut = target.IndexOfAny(['#', '?']);
+                if (cut >= 0)
+                    target = target[..cut];
+                if (target.Length == 0 || target.Contains(':') || target[0] is '/' or '\\' or '~' || target.Contains('{') || target.Contains('}'))
+                    continue;
+                try
+                {
+                    target = Uri.UnescapeDataString(target);
+                }
+                catch (UriFormatException)
+                {
+                }
+                if (!result.Contains(target, StringComparer.Ordinal))
+                    result.Add(target);
+            }
+        }
+        return result;
+    }
+
     /// <summary>前置資料的文字值：去掉區塊標記（<c>&gt;</c>、<c>|</c>）與外層引號，續行以空白連接</summary>
     public static string FrontMatterText(IReadOnlyDictionary<string, string> frontMatter, string key)
     {

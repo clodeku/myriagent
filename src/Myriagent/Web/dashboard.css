@@ -42,6 +42,17 @@
 .acard-name { margin: 0; min-width: 0; font-size: 15px; font-weight: 600; color: var(--text-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acard-sub { display: flex; flex-wrap: wrap; align-items: center; margin-top: 3px; font-size: 12px; color: var(--text-2); }
 .acard-sub .sep { padding: 0 3px; color: var(--text-3); }
+/* 設定資料夾的路徑（dashboard.js 的 acard-path）：一行、太長從前面省略不了就尾端省略，點了用檔案總管開 */
+.acard-path {
+  display: flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; margin-top: 3px; padding: 1px 4px 1px 2px; margin-left: -2px;
+  border: 0; border-radius: 4px; background: none; color: var(--text-3); font: inherit; font-size: 11px; text-align: left; cursor: pointer;
+}
+.acard-path[hidden] { display: none; }
+.acard-path:hover { color: var(--link); background: var(--bg-hover); }
+.acard-path:hover .acard-path-text { text-decoration: underline; }
+.acard-path:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.acard-path-ic { width: 12px; height: 12px; flex: none; }
+.acard-path-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acard-more { margin: -4px -6px 0 0; }
 .tag { display: inline-flex; align-items: center; height: 18px; margin-left: 8px; padding: 0 6px; border-radius: 4px; background: var(--bg-active); color: var(--text-2); font-size: 11px; }
 .pill { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
@@ -688,6 +699,46 @@ button.cc-conv:hover { background: color-mix(in srgb, var(--tone-auto) 12%, tran
 .hd-link-ic, .hx-link-ic { width: 11px; height: 11px; flex: none; }
 .hd-item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding-left: 22px; }
 .hd-foot { margin: 0; font-size: 11.5px; color: var(--text-3); }
+
+/* 逐一的 skill（health.js 的 skillList）：篩選列＋每個 skill 一列，點了展開完整描述、發現與檔案 */
+.hd-skills { margin-top: 10px; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.hd-sk-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hd-sk-seg .seg-btn { display: inline-flex; align-items: center; gap: 5px; }
+.hd-sk-n { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.hd-sk-seg .seg-btn.on .hd-sk-n { color: var(--text-hi); }
+.hd-sk-qbox { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 0 1 200px; padding: 0 7px; height: 26px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-sunken); }
+.hd-sk-qbox:focus-within { border-color: var(--focus); }
+.hd-sk-qic { width: 13px; height: 13px; flex: none; color: var(--text-3); }
+.hd-sk-q { flex: 1; min-width: 0; border: 0; background: none; color: var(--text); font: inherit; font-size: 12px; outline: none; }
+.hd-sk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.hd-sk + .hd-sk { border-top: 1px solid var(--border); }
+.hd-sk-sum {
+  display: grid; grid-template-columns: auto minmax(0, max-content) auto auto auto 1fr; grid-template-areas: "dot name src tag flag tok" ". purpose purpose purpose purpose purpose";
+  align-items: center; column-gap: 7px; row-gap: 2px; padding: 6px 10px; cursor: pointer; list-style: none; font-size: 12px;
+}
+.hd-sk-sum::-webkit-details-marker { display: none; }
+.hd-sk-sum:hover { background: var(--bg-hover); }
+.hd-sk-sum:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.hd-sk-dot { grid-area: dot; width: 7px; height: 7px; border-radius: 50%; background: var(--lv); }
+.hd-sk[data-level="info"] .hd-sk-dot { background: var(--text-3); }
+.hd-sk-name { grid-area: name; min-width: 0; color: var(--text-hi); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hd-sk-src, .hd-sk-tag, .hd-sk-flag { flex: none; padding: 0 6px; border-radius: 999px; line-height: 17px; font-size: 10.5px; white-space: nowrap; }
+.hd-sk-src { grid-area: src; color: var(--text-2); background: var(--bg-sunken); border: 1px solid var(--border); max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.hd-sk-src[data-source="user"] { color: var(--link); border-color: color-mix(in srgb, var(--link) 35%, var(--border)); }
+.hd-sk-tag { grid-area: tag; color: var(--text-3); border: 1px dashed var(--border-2); }
+.hd-sk-flag { grid-area: flag; font-weight: 600; color: var(--lv); background: color-mix(in srgb, var(--lv) 14%, transparent); }
+.hd-sk-tok { grid-area: tok; justify-self: end; color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hd-sk-purpose { grid-area: purpose; min-width: 0; color: var(--text-2); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hd-sk-det[open] .hd-sk-purpose { display: block; -webkit-line-clamp: unset; color: var(--text); }
+.hd-sk-body { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 9px 24px; font-size: 12px; line-height: 1.55; }
+.hd-sk-desc { margin: 0; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.hd-sk-issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.hd-sk-issues li, .hd-sk-ok { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--text); }
+.hd-sk-iic { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--lv); }
+.hd-sk-ok { color: var(--text-2); }
+.hd-sk-path { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.hd-sk-nofile { margin: 0; color: var(--text-3); font-size: 11.5px; }
+.hd-sk-empty { margin: 4px 0; color: var(--text-3); font-size: 12px; }
 
 /* 電腦層級的指示檔 */
 .dash-sub { font-size: 12px; color: var(--text-3); }

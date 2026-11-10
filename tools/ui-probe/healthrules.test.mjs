@@ -83,3 +83,45 @@ test('明細各項的「用代理…」：全域指示看 canTrim、記憶索引
   }
   assert.equal(R.FIX_TASKS.memory.label, '用代理整理…');
 });
+
+test('逐一的 skill：正規化、來源、篩選、數字', () => {
+  assert.equal(R.skillRows({ key: 'mcp' }), null, '沒有 skills 的項目（舊宿主）');
+  const rows = R.skillRows({
+    skills: [
+      { name: 'mine', label: 'mine', kind: 'skill', source: 'user', purpose: '整理訂單異常。', description: '整理訂單異常。每天早上用。', tokens: 40, listed: true, level: 'warn', issues: [{ level: 'warn', text: '本文 600 行' }, { level: 'warn' }] },
+      { name: 'deploy', label: '/deploy', kind: 'command', source: 'user', tokens: 0, level: 'ok', issues: [] },
+      { name: 'p:x', label: 'p:x', kind: 'skill', source: 'plugin', plugin: 'p', purpose: 'Draw charts.', tokens: 1234.4, listed: false, level: 'ok', issues: [{ level: 'info', text: '沒有列給模型' }] },
+      { name: 'anthropic-skills:docx', label: 'docx', source: 'synced', level: 'mystery', issues: 'x' },
+      { label: '沒有名稱的不列' }, null,
+    ],
+  });
+  assert.equal(rows.length, 4);
+  assert.deepEqual(rows[0].issues, [{ level: 'warn', text: '本文 600 行' }], '沒有文字的發現不列');
+  assert.equal(rows[2].tokens, 1234);
+  assert.equal(rows[2].listed, false);
+  assert.equal(rows[3].level, 'info', '不認得的等級當說明');
+  assert.deepEqual(rows[3].issues, []);
+  assert.equal(rows[3].kind, 'skill');
+  assert.deepEqual(rows.map(R.skillSourceLabel), ['自己的', '斜線指令', '外掛・p', 'claude.ai']);
+  assert.equal(R.skillTokensText(1234), '約 1,234 token');
+  assert.equal(R.skillTokensText(0), '');
+  assert.deepEqual(R.skillCounts(rows), { all: 4, flagged: 1 });
+  assert.deepEqual(R.filterSkills(rows, 'flagged', '').map((r) => r.name), ['mine']);
+  assert.deepEqual(R.filterSkills(rows, 'all', 'CHARTS').map((r) => r.name), ['p:x'], '不分大小寫、比對用途');
+  assert.deepEqual(R.filterSkills(rows, 'all', '外掛 draw').map((r) => r.name), ['p:x'], '每個字都要有，來源也算');
+  assert.deepEqual(R.filterSkills(rows, 'all', '  ').length, 4);
+  assert.deepEqual(R.filterSkills(rows, 'all', '600 行').map((r) => r.name), ['mine'], '發現的文字也算');
+  assert.deepEqual(R.filterSkills(null, 'all', ''), []);
+});
+
+test('帳戶卡的設定資料夾：太長從中間省略、留最後兩層', () => {
+  assert.equal(R.compactPath('C:\\Users\\Lin\\.claude'), 'C:\\Users\\Lin\\.claude');
+  assert.equal(R.compactPath('C:\\Users\\Lin\\AppData\\Local\\Myriagent\\accounts\\0123456789abcdef0123456789abcdef'),
+    'C:\\Users\\Lin\\…\\accounts\\0123456789abcdef0123456789abcdef');
+  assert.equal(R.compactPath('C:\\Users\\Linda.Chen\\AppData\\Local\\Myriagent\\accounts\\0123456789abcdef0123456789abcdef'),
+    'C:\\Users\\…\\accounts\\0123456789abcdef0123456789abcdef', '放不下使用者名稱就少留一層');
+  assert.equal(R.compactPath('C:\\Users\\Lin\\AppData\\Local\\Myriagent\\accounts\\a2', 30), 'C:\\Users\\Lin\\…\\accounts\\a2');
+  assert.equal(R.compactPath('/home/lin/.local/share/clode/accounts/a2', 30), '/home/lin/…/accounts/a2');
+  assert.ok(R.compactPath('C:\\' + 'x'.repeat(80), 40).length <= 40);
+  assert.equal(R.compactPath(null), '');
+});
