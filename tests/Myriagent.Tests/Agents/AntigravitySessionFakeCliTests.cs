@@ -11,15 +11,15 @@ namespace Myriagent.Tests.Agents;
 /// 啟動參數、背景說明只在新對話的第一則、同一個程序跑多輪、換設定重開以 --conversation 續接、停止、沒登入、續接失敗改開新對話。
 /// 情境由環境變數 FAKE_SCENARIO 決定；假 agy 把收到的參數與訊息以回覆文字（JSON）回報給測試。
 /// </summary>
-public sealed class AntigravitySessionFakeCliTests : IDisposable
+public abstract class AntigravitySessionFakeCliTestsBase : IDisposable
 {
-    private static readonly string PowerShell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+    private protected static readonly string PowerShell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
 
     /// <summary>
     /// 假的 agy：腳本只用 ASCII（Windows PowerShell 讀沒有 BOM 的腳本用系統碼頁）。
     /// 每一輪：user_input、（續接的第一輪）system_message、規劃用的 agent_response（帶 usage）、run_command 工具、回覆文字（DONE 帶最後一段與 usage）、result（usage 是整個對話的累計）
     /// </summary>
-    private const string FakeAgy = """"
+    private protected const string FakeAgy = """"
         $ErrorActionPreference = 'Stop'
         $utf8 = New-Object System.Text.UTF8Encoding $false
         $out = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), $utf8)
@@ -199,11 +199,11 @@ public sealed class AntigravitySessionFakeCliTests : IDisposable
         }
         """";
 
-    private readonly TempDirectory temp = new("fake-agy-session");
-    private readonly string script;
-    private readonly string work;
+    private protected readonly TempDirectory temp = new("fake-agy-session");
+    private protected readonly string script;
+    private protected readonly string work;
 
-    public AntigravitySessionFakeCliTests()
+    protected AntigravitySessionFakeCliTestsBase()
     {
         script = temp.WriteFile("fake-agy.ps1", FakeAgy);
         work = temp.CreateDirectory("work");
@@ -211,14 +211,14 @@ public sealed class AntigravitySessionFakeCliTests : IDisposable
 
     public void Dispose() => temp.Dispose();
 
-    private static AntigravityAgentSession NewSession(TimeSpan? closeGrace = null, TimeSpan? treeTimeout = null) => new()
+    private protected static AntigravityAgentSession NewSession(TimeSpan? closeGrace = null, TimeSpan? treeTimeout = null) => new()
     {
         TranscriptPathResolver = null,
         RestartCloseGrace = closeGrace ?? TimeSpan.FromSeconds(2),
         RestartTreeExitTimeout = treeTimeout ?? TimeSpan.FromSeconds(5),
     };
 
-    private AgentSessionSettings Settings(string scenario, string? sessionId = null, bool started = false, string? model = null, string? effort = null,
+    private protected AgentSessionSettings Settings(string scenario, string? sessionId = null, bool started = false, string? model = null, string? effort = null,
         AgentPermissionMode mode = AgentPermissionMode.Ask, string? workingDirectory = null, CliBinaryIdentity? cli = null, bool useLocalCustomizations = true, string? agent = null)
         => new(
             sessionId,
@@ -242,10 +242,10 @@ public sealed class AntigravitySessionFakeCliTests : IDisposable
             Cli: cli,
             Agent: agent);
 
-    private static AgentTurnInput Input(string text) => new(text, Array.Empty<AgentAttachment>());
+    private protected static AgentTurnInput Input(string text) => new(text, Array.Empty<AgentAttachment>());
 
     /// <summary>會話事件的收集器（事件在程序讀取執行緒發出）</summary>
-    private sealed class EventLog : IDisposable
+    private protected sealed class EventLog : IDisposable
     {
         private readonly IAgentSession session;
         private readonly BlockingCollection<AgentEvent> queue = new();
@@ -292,17 +292,21 @@ public sealed class AntigravitySessionFakeCliTests : IDisposable
         public void Dispose() => session.EventReceived -= handler;
     }
 
-    private static async Task<List<AgentEvent>> TurnAsync(IAgentSession session, EventLog log, AgentSessionSettings settings, string text)
+    private protected static async Task<List<AgentEvent>> TurnAsync(IAgentSession session, EventLog log, AgentSessionSettings settings, string text)
     {
         await session.SendAsync(Input(text), settings);
         return await log.UntilAsync(e => e is AgentTurnCompletedEvent);
     }
 
     /// <summary>假 agy 的回覆（JSON）：turn、conv、args、text、cwd</summary>
-    private static JObject Reply(IEnumerable<AgentEvent> events) => JObject.Parse(events.OfType<AgentTextCompletedEvent>().Single().Text);
+    private protected static JObject Reply(IEnumerable<AgentEvent> events) => JObject.Parse(events.OfType<AgentTextCompletedEvent>().Single().Text);
 
-    private static string[] Args(JObject reply) => reply["args"]!.Select(t => (string)t!).ToArray();
+    private protected static string[] Args(JObject reply) => reply["args"]!.Select(t => (string)t!).ToArray();
+}
 
+// 測試分成幾個 class：xUnit 同一個 class 的測試依序跑，分開才能同時跑
+public sealed class AntigravitySessionFakeCliTests : AntigravitySessionFakeCliTestsBase
+{
     [Fact]
     public async Task 新對話_背景說明只放在第一則_同一個程序跑第二輪_用量是這一輪的()
     {
@@ -469,7 +473,10 @@ public sealed class AntigravitySessionFakeCliTests : IDisposable
         log.Drain(2500).OfType<AgentTextCompletedEvent>().Should().BeEmpty("空白對話的程序已被結束，不會再冒出它的回覆");
         File.Exists(Path.Combine(work, "blank-answered")).Should().BeFalse("空白對話的程序要真的被結束，不能讓它沒有前文就答下去（完全自動時還會執行工具）");
     }
+}
 
+public sealed class AntigravitySessionFakeCliTests2 : AntigravitySessionFakeCliTestsBase
+{
     [Fact]
     public async Task CLI本地唯讀斜線指令_介面管理回提示_單發查詢走減p不中斷既有對話程序()
     {

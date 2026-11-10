@@ -6,15 +6,19 @@ namespace Myriagent.Tests.Git;
 
 /// <summary>
 /// 以這台的 git 讀暫存資料夾裡的 repo（本機的裸 repo 當遠端，不連網路）：未提交、未推送、未拉取、遠端有新提交、分離的 HEAD、子資料夾、
-/// 合併衝突、還沒有提交、不是 repo。準備 repo 的 git 指令不讀使用者的 git 設定（GIT_CONFIG_GLOBAL 指到空檔）
+/// 合併衝突、還沒有提交、不是 repo。準備 repo 的 git 指令不讀使用者的 git 設定（GIT_CONFIG_GLOBAL 指到空檔）。
+/// Windows 上開程序慢（整套測試負載高時更慢）：遠端＋兩個 clone 整個程序只建一次（範本），每個測試複製一份；
+/// 測試分成幾個 class 同時跑（xUnit 同一個 class 的測試依序跑）
 /// </summary>
-public sealed class GitStatusReaderTests : IDisposable
+public abstract class GitStatusReaderTestsBase : IDisposable
 {
-    private readonly TempDirectory tmp = new("git");
-    private readonly GitStatusReader reader = new();
+    private static readonly Lazy<string> Template = new(CreateTemplate, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private protected readonly TempDirectory tmp = new("git");
+    private protected readonly GitStatusReader reader = new();
     private readonly string emptyConfig;
 
-    public GitStatusReaderTests()
+    protected GitStatusReaderTestsBase()
     {
         emptyConfig = tmp.WriteFile("empty.gitconfig", string.Empty);
     }
@@ -33,7 +37,9 @@ public sealed class GitStatusReaderTests : IDisposable
         tmp.Dispose();
     }
 
-    private string Git(string dir, params string[] args)
+    private protected string Git(string dir, params string[] args) => RunGit(dir, emptyConfig, args);
+
+    private static string RunGit(string dir, string emptyConfig, params string[] args)
     {
         var psi = new ProcessStartInfo("git")
         {
@@ -43,7 +49,9 @@ public sealed class GitStatusReaderTests : IDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
-        foreach (var a in new[] { "-c", "user.name=Test", "-c", "user.email=test@example.test", "-c", "init.defaultBranch=main" }.Concat(args))
+        // 自動維護（commit、fetch 之後的 maintenance、push 時遠端的 gc）關掉：每個都是多開一個程序
+        foreach (var a in new[] { "-c", "user.name=Test", "-c", "user.email=test@example.test", "-c", "init.defaultBranch=main",
+            "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "receive.autogc=false" }.Concat(args))
             psi.ArgumentList.Add(a);
         psi.Environment["GIT_CONFIG_GLOBAL"] = emptyConfig;
         psi.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
@@ -55,27 +63,93 @@ public sealed class GitStatusReaderTests : IDisposable
         return p.ExitCode == 0 ? stdout.Result : throw new InvalidOperationException($"git {string.Join(' ', args)} 失敗（{p.ExitCode}）：{stderr.Result}");
     }
 
-    private void Commit(string dir, string file, string content, string message)
+    private protected void Commit(string dir, string file, string content, string message) => CommitWith(dir, emptyConfig, file, content, message);
+
+    private static void CommitWith(string dir, string emptyConfig, string file, string content, string message)
     {
         File.WriteAllText(Path.Combine(dir, file), content);
-        Git(dir, "add", file);
-        Git(dir, "commit", "--no-verify", "-m", message);
+        RunGit(dir, emptyConfig, "add", file);
+        RunGit(dir, emptyConfig, "commit", "--no-verify", "-m", message);
     }
 
-    private string Head(string dir) => Git(dir, "rev-parse", "HEAD").Trim();
+    private protected string Head(string dir) => Git(dir, "rev-parse", "HEAD").Trim();
 
-    /// <summary>裸 repo（遠端）＋已推送一個提交，再複製出 work（遠端/HEAD 指向 main）</summary>
-    private (string Origin, string Work) CreateRemoteAndClone()
+    /// <summary>
+    /// 範本（整個程序一份，放在測試的資料根目錄底下、程序結束時一起刪掉）：裸 repo（遠端）＋已推送一個提交，再 clone 出 work 與 other（遠端/HEAD 指向 main）。
+    /// 物件檔的唯讀屬性拿掉：範本與複製出來的都能直接刪
+    /// </summary>
+    private static string CreateTemplate()
     {
+        var root = Path.Combine(TestEnvironment.DataRoot, "git-template-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(root);
+        var config = Path.Combine(root, "empty.gitconfig");
+        File.WriteAllText(config, string.Empty);
+        var origin = Path.Combine(root, "origin.git");
+        RunGit(root, config, "init", "--bare", "origin.git");
+        RunGit(root, config, "clone", origin, "seed");
+        var seed = Path.Combine(root, "seed");
+        CommitWith(seed, config, "a.txt", "a\n", "first");
+        RunGit(seed, config, "push", "--no-verify", "origin", "main");
+        RunGit(root, config, "clone", origin, "work");
+        RunGit(root, config, "clone", origin, "other");
+        foreach (var f in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+            File.SetAttributes(f, FileAttributes.Normal);
+        Directory.Delete(seed, recursive: true);
+        return root;
+    }
+
+    /// <summary>
+    /// 從範本複製：裸 repo（遠端）＋已推送一個提交、work 與 other 兩個 clone（遠端/HEAD 指向 main），clone 的遠端改指到這一份。
+    /// 遠端的路徑直接改設定檔（git 把反斜線寫成兩個），不另外跑 git remote set-url：每多開一個 git 程序都要時間
+    /// </summary>
+    private protected (string Origin, string Work) CreateRemoteAndClone()
+    {
+        var template = Template.Value;
+        foreach (var name in new[] { "origin.git", "work", "other" })
+            CopyDirectory(Path.Combine(template, name), tmp.Combine(name));
         var origin = tmp.Combine("origin.git");
-        Git(tmp.Root, "init", "--bare", "origin.git");
-        var seed = tmp.Combine("seed");
-        Git(tmp.Root, "clone", origin, "seed");
-        Commit(seed, "a.txt", "a\n", "first");
-        Git(seed, "push", "--no-verify", "origin", "main");
-        Git(tmp.Root, "clone", origin, "work");
+        var from = Path.Combine(template, "origin.git").Replace(@"\", @"\\");
+        foreach (var clone in new[] { "work", "other" })
+        {
+            var config = Path.Combine(tmp.Combine(clone), ".git", "config");
+            var text = File.ReadAllText(config);
+            text.Should().Contain(from, "clone 的遠端是範本的裸 repo");
+            File.WriteAllText(config, text.Replace(from, origin.Replace(@"\", @"\\")));
+        }
         return (origin, tmp.Combine("work"));
     }
+
+    private static void CopyDirectory(string from, string to)
+    {
+        Directory.CreateDirectory(to);
+        foreach (var dir in Directory.EnumerateDirectories(from, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(to, Path.GetRelativePath(from, dir)));
+        foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+            File.Copy(file, Path.Combine(to, Path.GetRelativePath(from, file)));
+    }
+
+    /// <summary>別人推了一個提交（other 的 HEAD）</summary>
+    private protected string PushFromOther(string origin, string file = "o.txt")
+    {
+        var other = tmp.Combine("other");
+        Commit(other, file, "o\n", "other " + file);
+        Git(other, "push", "--no-verify", "origin", "main");
+        return Head(other);
+    }
+
+    /// <summary>照中樞的流程：讀狀態、問遠端、決定、拉取</summary>
+    private protected async Task<(GitPullDecision Decision, GitPullResult? Result)> AutoPullAsync(string work)
+    {
+        var s = (await reader.ReadAsync(work, CancellationToken.None))!;
+        var remote = await reader.CheckRemoteAsync(work, s.RemoteTarget!, CancellationToken.None);
+        var decision = GitAutoPullRules.Decide(s, remote, agentRunning: false);
+        return (decision, decision.Plan is { } plan ? await reader.FastForwardAsync(work, plan, CancellationToken.None) : null);
+    }
+}
+
+// 測試分成幾個 class：xUnit 同一個 class 的測試依序跑，分開才能同時跑
+public sealed class GitStatusReaderTests : GitStatusReaderTestsBase
+{
 
     [Fact]
     public async Task 乾淨的clone_追蹤預設分支_問遠端沒有新提交()
@@ -121,10 +195,7 @@ public sealed class GitStatusReaderTests : IDisposable
     {
         var (origin, work) = CreateRemoteAndClone();
         // 別人推了一個提交
-        Git(tmp.Root, "clone", origin, "other");
-        var other = tmp.Combine("other");
-        Commit(other, "o.txt", "o\n", "other");
-        Git(other, "push", "--no-verify", "origin", "main");
+        var pushed = PushFromOther(origin);
         // 這裡提交一個（未推送），再改檔、暫存、新增
         Commit(work, "w.txt", "w\n", "local");
         File.WriteAllText(Path.Combine(work, "a.txt"), "changed\n");
@@ -141,7 +212,7 @@ public sealed class GitStatusReaderTests : IDisposable
         s.Porcelain.Untracked.Should().Be(1);
 
         var remote = await reader.CheckRemoteAsync(work, s.RemoteTarget!, CancellationToken.None);
-        remote.Sha.Should().Be(Head(other));
+        remote.Sha.Should().Be(pushed);
         GitStatusRules.RemoteHasNew(s.RemoteTarget, remote).Should().BeTrue("遠端有這台還沒下載的提交");
         Git(work, "status", "--porcelain").Should().Contain("new.txt", "讀狀態不改工作樹");
 
@@ -157,26 +228,10 @@ public sealed class GitStatusReaderTests : IDisposable
         sub.Porcelain.Untracked.Should().Be(1);
     }
 
-    /// <summary>別人推了一個提交（other 的 HEAD）</summary>
-    private string PushFromOther(string origin, string file = "o.txt")
-    {
-        var other = tmp.Combine("other");
-        if (!Directory.Exists(other))
-            Git(tmp.Root, "clone", origin, "other");
-        Commit(other, file, "o\n", "other " + file);
-        Git(other, "push", "--no-verify", "origin", "main");
-        return Head(other);
-    }
+}
 
-    /// <summary>照中樞的流程：讀狀態、問遠端、決定、拉取</summary>
-    private async Task<(GitPullDecision Decision, GitPullResult? Result)> AutoPullAsync(string work)
-    {
-        var s = (await reader.ReadAsync(work, CancellationToken.None))!;
-        var remote = await reader.CheckRemoteAsync(work, s.RemoteTarget!, CancellationToken.None);
-        var decision = GitAutoPullRules.Decide(s, remote, agentRunning: false);
-        return (decision, decision.Plan is { } plan ? await reader.FastForwardAsync(work, plan, CancellationToken.None) : null);
-    }
-
+public sealed class GitStatusReaderAutoPullTests : GitStatusReaderTestsBase
+{
     [Fact]
     public async Task 自動拉取_遠端有新提交_fetch並快轉_未追蹤的檔案留著()
     {
@@ -211,6 +266,10 @@ public sealed class GitStatusReaderTests : IDisposable
         Git(work, "rev-parse", "--abbrev-ref", "HEAD").Trim().Should().Be("HEAD", "還是分離的 HEAD");
     }
 
+}
+
+public sealed class GitStatusReaderAutoPullGuardTests : GitStatusReaderTestsBase
+{
     [Fact]
     public async Task 自動拉取_決定之後HEAD變了或有了未提交的變更_不拉()
     {
@@ -250,6 +309,10 @@ public sealed class GitStatusReaderTests : IDisposable
         File.ReadAllText(Path.Combine(work, "clash.txt")).Should().Be("mine\n");
     }
 
+}
+
+public sealed class GitStatusReaderBranchTests : GitStatusReaderTestsBase
+{
     [Fact]
     public async Task 分離的HEAD_和預設分支比()
     {

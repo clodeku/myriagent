@@ -12,7 +12,7 @@ namespace Myriagent.Tests.Agents;
 /// 子代理（multi_agent）的事件、MCP 工具核准、網路存取核准、沙箱狀態、續接被拒、準備期間按停止、啟動就結束。不連網、不耗額度。
 /// 腳本只用 ASCII（Windows PowerShell 讀沒有 BOM 的腳本用系統碼頁）。
 /// </summary>
-public sealed class CodexAgentSessionTests : IDisposable
+public abstract class CodexAgentSessionTestsBase : IDisposable
 {
     internal static readonly string PowerShell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
     internal static readonly TimeSpan Deadline = TimeSpan.FromSeconds(30);
@@ -21,7 +21,7 @@ public sealed class CodexAgentSessionTests : IDisposable
     /// 假 codex：$scenario 決定這一輪做什麼。$calls 記收到的準備請求（建立對話、沙箱設定、turn/start 的沙箱），
     /// $log 記宿主對伺服器請求的回應；結束時以一段回覆文字回報，測試據此確認宿主送了什麼。
     /// </summary>
-    private const string FakeCodex = """"
+    private protected const string FakeCodex = """"
         $ErrorActionPreference = 'Stop'
         $utf8 = New-Object System.Text.UTF8Encoding $false
         $in = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), $utf8)
@@ -272,11 +272,11 @@ public sealed class CodexAgentSessionTests : IDisposable
         while ($in.ReadLine() -ne $null) { }
         """";
 
-    private readonly TempDirectory temp = new("fake-codex");
+    private protected readonly TempDirectory temp = new("fake-codex");
 
     public void Dispose() => temp.Dispose();
 
-    private AgentSessionSettings Settings(string scenario, AgentPermissionMode mode = AgentPermissionMode.FullAccess, string? sessionId = null)
+    private protected AgentSessionSettings Settings(string scenario, AgentPermissionMode mode = AgentPermissionMode.FullAccess, string? sessionId = null)
     {
         var script = temp.WriteFile($"fake-codex-{scenario}.ps1", $"$scenario = '{scenario}'\n" + FakeCodex);
         var work = temp.CreateDirectory("work");
@@ -320,7 +320,11 @@ public sealed class CodexAgentSessionTests : IDisposable
         }
         throw new TimeoutException("假的 codex 沒有在時限內送出預期的事件；收到：" + string.Join("、", collected.Select(e => e.GetType().Name)));
     }
+}
 
+// 測試分成幾個 class：xUnit 同一個 class 的測試依序跑，分開才能同時跑
+public sealed class CodexAgentSessionTests : CodexAgentSessionTestsBase
+{
     [Fact]
     public async Task 子代理先做完_主對話這一輪不算結束_子代理的內容只進專用卡片_還沒回應的子代理核准在這一輪結束時婉拒()
     {
@@ -711,7 +715,10 @@ public sealed class CodexAgentSessionTests : IDisposable
         turn.Concat(events.ToArray()).OfType<AgentSessionStartedEvent>().Should().BeEmpty("停止後不再送 thread/start");
         session.IsRunning.Should().BeFalse();
     }
+}
 
+public sealed class CodexAgentSessionTests2 : CodexAgentSessionTestsBase
+{
     [Fact]
     public async Task 沙箱設定期間按停止後再送出_等原本的設定做完_不重送設定()
     {
@@ -766,18 +773,18 @@ public sealed class CodexAgentSessionTests : IDisposable
 /// 直接殺時待回應的核准隨舊程序作廢、Settings=null 的停下待接續、不接續的情況、執行檔身分改變時換程序。不連網、不耗額度。
 /// 獨立成一個類別：每個情境要等程序與子程序結束（數秒），和其他會話測試平行執行
 /// </summary>
-public sealed class CodexAgentSessionRestartTests : IDisposable
+public abstract class CodexAgentSessionRestartTestsBase : IDisposable
 {
-    private static readonly string PowerShell = CodexAgentSessionTests.PowerShell;
-    private static readonly TimeSpan Deadline = CodexAgentSessionTests.Deadline;
+    private protected static readonly string PowerShell = CodexAgentSessionTests.PowerShell;
+    private protected static readonly TimeSpan Deadline = CodexAgentSessionTests.Deadline;
 
-    private readonly TempDirectory temp = new("fake-codex-restart");
+    private protected readonly TempDirectory temp = new("fake-codex-restart");
 
     public void Dispose() => temp.Dispose();
 
-    private static BlockingCollection<AgentEvent> Collect(IAgentSession session) => CodexAgentSessionTests.Collect(session);
+    private protected static BlockingCollection<AgentEvent> Collect(IAgentSession session) => CodexAgentSessionTests.Collect(session);
 
-    private static Task<List<AgentEvent>> TakeUntilAsync(BlockingCollection<AgentEvent> events, Func<AgentEvent, bool> until, Func<AgentEvent, Task>? onEvent = null)
+    private protected static Task<List<AgentEvent>> TakeUntilAsync(BlockingCollection<AgentEvent> events, Func<AgentEvent, bool> until, Func<AgentEvent, Task>? onEvent = null)
         => CodexAgentSessionTests.TakeUntilAsync(events, until, onEvent);
 
     /// <summary>
@@ -790,7 +797,7 @@ public sealed class CodexAgentSessionRestartTests : IDisposable
     /// safepoint＝核准後指令結束（安全點），再收 interrupt；finish_before_interrupt＝收到 interrupt 時這一輪剛好自己完成；
     /// multi_turn＝每一輪直接回覆完成（換程序的測試）
     /// </summary>
-    private const string FakeRestartCodex = """"
+    private protected const string FakeRestartCodex = """"
         $ErrorActionPreference = 'Stop'
         $utf8 = New-Object System.Text.UTF8Encoding $false
         $in = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), $utf8)
@@ -962,7 +969,7 @@ public sealed class CodexAgentSessionRestartTests : IDisposable
 
     /// <summary>一個重開情境的假 codex：腳本、記錄檔、rollout 與 CODEX_HOME 都在測試的暫存資料夾</summary>
     /// <param name="mode">送出與重開用的權限模式；要顯示核准卡的情境用「每步詢問」（完全自動時宿主直接放行，不顯示卡片）</param>
-    private sealed class RestartFake
+    private protected sealed class RestartFake
     {
         private readonly AgentPermissionMode mode;
 
@@ -1070,12 +1077,16 @@ public sealed class CodexAgentSessionRestartTests : IDisposable
         }
     }
 
-    private static AgentRestartRequest Restart(AgentRestartMode mode, AgentSessionSettings? settings, string? continuation = null, bool autoContinue = true)
+    private protected static AgentRestartRequest Restart(AgentRestartMode mode, AgentSessionSettings? settings, string? continuation = null, bool autoContinue = true)
         => new(AgentRestartReason.CliUpdated, mode, "0.160.1", "0.162.0", autoContinue, continuation, Array.Empty<AgentInterruptedTool>(), settings);
 
-    private static int IndexOf<T>(List<AgentEvent> events, Func<T, bool>? match = null) where T : AgentEvent
+    private protected static int IndexOf<T>(List<AgentEvent> events, Func<T, bool>? match = null) where T : AgentEvent
         => events.FindIndex(e => e is T t && (match == null || match(t)));
+}
 
+// 測試分成幾個 class：xUnit 同一個 class 的測試依序跑，分開才能同時跑
+public sealed class CodexAgentSessionRestartTests : CodexAgentSessionRestartTestsBase
+{
     [Fact]
     public async Task 重開_工具執行中立即套用_interrupt後關程序_確認舊指令都結束_截尾_resume並以turnStart送接續訊息()
     {
@@ -1251,7 +1262,10 @@ public sealed class CodexAgentSessionRestartTests : IDisposable
         IndexOf<AgentTurnStartedByCliEvent>(after).Should().BeLessThan(IndexOf<AgentTurnCompletedEvent>(after));
         fake.Log().Should().ContainInOrder("p1:approval 0=accept", $"p1:turn/interrupt thread={fake.ThreadId} turn=p1-turn-1", "p2:turn/start text=接續");
     }
+}
 
+public sealed class CodexAgentSessionRestartTests2 : CodexAgentSessionRestartTestsBase
+{
     [Fact]
     public async Task 重開_只停下時回Stopped_停下待接續的一輪之後帶設定再呼叫才續接()
     {

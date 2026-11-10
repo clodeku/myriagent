@@ -13,14 +13,14 @@ namespace Myriagent.Tests.Agents;
 /// 假 CLI 把逐字稿寫到 FAKE_TRANSCRIPT（比 stdout 晚寫入工具結果、最後留半行，驗證重開前會等它寫入並截掉半行），
 /// 以回覆文字（JSON）回報自己收到的參數與 RESUME 環境變數。
 /// </summary>
-public sealed class ClaudeSessionRestartTests : IDisposable
+public abstract class ClaudeSessionRestartTestsBase : IDisposable
 {
-    private static readonly string PowerShell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+    private protected static readonly string PowerShell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
 
-    private const string Continuation = "（系統通知：測試用的接續訊息，不是使用者拒絕。）";
+    private protected const string Continuation = "（系統通知：測試用的接續訊息，不是使用者拒絕。）";
 
     /// <summary>假的 claude -p：腳本只用 ASCII（Windows PowerShell 讀沒有 BOM 的腳本用系統碼頁）</summary>
-    private const string FakeClaude = """"
+    private protected const string FakeClaude = """"
         $ErrorActionPreference = 'Stop'
         $utf8 = New-Object System.Text.UTF8Encoding $false
         $out = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), $utf8)
@@ -239,14 +239,14 @@ public sealed class ClaudeSessionRestartTests : IDisposable
         }
         """";
 
-    private readonly TempDirectory temp = new("fake-claude-restart");
-    private readonly string script;
-    private readonly string work;
-    private readonly string config;
-    private readonly string markers;
-    private readonly string sessionId = Guid.NewGuid().ToString();
+    private protected readonly TempDirectory temp = new("fake-claude-restart");
+    private protected readonly string script;
+    private protected readonly string work;
+    private protected readonly string config;
+    private protected readonly string markers;
+    private protected readonly string sessionId = Guid.NewGuid().ToString();
 
-    public ClaudeSessionRestartTests()
+    protected ClaudeSessionRestartTestsBase()
     {
         script = temp.WriteFile("fake-claude.ps1", FakeClaude);
         work = temp.CreateDirectory("work");
@@ -257,9 +257,9 @@ public sealed class ClaudeSessionRestartTests : IDisposable
     public void Dispose() => temp.Dispose();
 
     /// <summary>CLI 放這個 session 逐字稿的位置（假 CLI 也寫在這裡）</summary>
-    private string Transcript => ClaudeStreamRules.TranscriptPath(config, sessionId, work);
+    private protected string Transcript => ClaudeStreamRules.TranscriptPath(config, sessionId, work);
 
-    private AgentSessionSettings Settings(string scenario, bool started = false, string version = "2.1.296", CliBinaryIdentity? cli = null,
+    private protected AgentSessionSettings Settings(string scenario, bool started = false, string version = "2.1.296", CliBinaryIdentity? cli = null,
         IReadOnlyDictionary<string, string>? env = null)
         => new(
             sessionId,
@@ -286,17 +286,17 @@ public sealed class ClaudeSessionRestartTests : IDisposable
             UseLocalCustomizations: true,
             Cli: cli);
 
-    private static AgentRestartRequest Request(AgentRestartMode mode, AgentSessionSettings? settings, bool autoContinue = true,
+    private protected static AgentRestartRequest Request(AgentRestartMode mode, AgentSessionSettings? settings, bool autoContinue = true,
         AgentRestartReason reason = AgentRestartReason.CliUpdated)
         => new(reason, mode, "2.1.296", "2.1.297", autoContinue, Continuation, Array.Empty<AgentInterruptedTool>(), settings);
 
-    private static AgentTurnInput Input(string text) => new(text, Array.Empty<AgentAttachment>());
+    private protected static AgentTurnInput Input(string text) => new(text, Array.Empty<AgentAttachment>());
 
     /// <summary>假 CLI 回覆裡的回報（參數與環境變數）</summary>
-    private static JObject Report(IEnumerable<AgentEvent> events) => JObject.Parse(events.OfType<AgentTextCompletedEvent>().Last().Text);
+    private protected static JObject Report(IEnumerable<AgentEvent> events) => JObject.Parse(events.OfType<AgentTextCompletedEvent>().Last().Text);
 
     /// <summary>會話事件的收集器（事件在程序讀取執行緒發出）</summary>
-    private sealed class EventLog : IDisposable
+    private protected sealed class EventLog : IDisposable
     {
         private readonly IAgentSession session;
         private readonly BlockingCollection<AgentEvent> queue = new();
@@ -347,7 +347,11 @@ public sealed class ClaudeSessionRestartTests : IDisposable
 
         public void Dispose() => session.EventReceived -= handler;
     }
+}
 
+// 測試分成幾個 class：xUnit 同一個 class 的測試依序跑，分開才能同時跑
+public sealed class ClaudeSessionRestartTests : ClaudeSessionRestartTestsBase
+{
     [Fact]
     public async Task 沒有程序時_重開什麼都不做回Restarted_閒置算安全點()
     {
@@ -511,7 +515,10 @@ public sealed class ClaudeSessionRestartTests : IDisposable
         log.Drain(500).OfType<AgentTurnCompletedEvent>().Should().BeEmpty("Failed 時被打斷的那一輪由中樞收尾，也不能拿使用者的訊息自動重送");
         log.All.OfType<AgentNoticeEvent>().Should().NotContain(n => n.Message.Contains("找不到原本的 Claude 對話紀錄"));
     }
+}
 
+public sealed class ClaudeSessionRestartTests2 : ClaudeSessionRestartTestsBase
+{
     [Fact]
     public async Task 上一輪已完成_重開只關程序不接續_下次送出照常續接_不帶RESUME變數且關閉自動更新()
     {

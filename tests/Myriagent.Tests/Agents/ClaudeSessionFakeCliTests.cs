@@ -11,12 +11,12 @@ namespace Myriagent.Tests.Agents;
 /// 權限模式的同步、「本對話都允許」的範圍與重開程序後帶回、換工作資料夾續接、續接時的雜訊 result 與寫入競態、中斷看門狗、CLI 撤回請求。
 /// 情境由環境變數 FAKE_SCENARIO 決定；假 CLI 把收到的回應與模式切換記下來，以回覆文字回報給測試。
 /// </summary>
-public sealed class ClaudeSessionFakeCliTests : IDisposable
+public abstract class ClaudeSessionFakeCliTestsBase : IDisposable
 {
-    private static readonly string PowerShell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+    private protected static readonly string PowerShell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
 
     /// <summary>假的 claude -p：腳本只用 ASCII（Windows PowerShell 讀沒有 BOM 的腳本用系統碼頁）</summary>
-    private const string FakeClaude = """"
+    private protected const string FakeClaude = """"
         $ErrorActionPreference = 'Stop'
         $utf8 = New-Object System.Text.UTF8Encoding $false
         $out = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), $utf8)
@@ -567,13 +567,13 @@ public sealed class ClaudeSessionFakeCliTests : IDisposable
         }
         """";
 
-    private readonly TempDirectory temp = new("fake-claude-session");
-    private readonly string script;
-    private readonly string work;
-    private readonly string config;
-    private readonly string sessionId = Guid.NewGuid().ToString();
+    private protected readonly TempDirectory temp = new("fake-claude-session");
+    private protected readonly string script;
+    private protected readonly string work;
+    private protected readonly string config;
+    private protected readonly string sessionId = Guid.NewGuid().ToString();
 
-    public ClaudeSessionFakeCliTests()
+    protected ClaudeSessionFakeCliTestsBase()
     {
         script = temp.WriteFile("fake-claude.ps1", FakeClaude);
         work = temp.CreateDirectory("work");
@@ -583,7 +583,7 @@ public sealed class ClaudeSessionFakeCliTests : IDisposable
     public void Dispose() => temp.Dispose();
 
     /// <summary>對話設定：假 CLI 的情境與環境變數；CLAUDE_CONFIG_DIR 指到暫存資料夾（找逐字稿時不碰使用者的 ~/.claude）</summary>
-    private AgentSessionSettings Settings(string scenario, bool started = false, AgentPermissionMode mode = AgentPermissionMode.Ask,
+    private protected AgentSessionSettings Settings(string scenario, bool started = false, AgentPermissionMode mode = AgentPermissionMode.Ask,
         string? workingDirectory = null, IReadOnlyDictionary<string, string>? env = null)
         => new(
             sessionId,
@@ -607,10 +607,10 @@ public sealed class ClaudeSessionFakeCliTests : IDisposable
             UseLocalCustomizations: true,
             HistoryRecap: "（節錄）\n");
 
-    private static AgentTurnInput Input(string text) => new(text, Array.Empty<AgentAttachment>());
+    private protected static AgentTurnInput Input(string text) => new(text, Array.Empty<AgentAttachment>());
 
     /// <summary>會話事件的收集器（事件在程序讀取執行緒發出）</summary>
-    private sealed class EventLog : IDisposable
+    private protected sealed class EventLog : IDisposable
     {
         private readonly IAgentSession session;
         private readonly BlockingCollection<AgentEvent> queue = new();
@@ -664,7 +664,7 @@ public sealed class ClaudeSessionFakeCliTests : IDisposable
     }
 
     /// <summary>送一則訊息，核准卡依 decide 回應，跑到這一輪結束</summary>
-    private static async Task<List<AgentEvent>> TurnAsync(IAgentSession session, EventLog log, AgentSessionSettings settings,
+    private protected static async Task<List<AgentEvent>> TurnAsync(IAgentSession session, EventLog log, AgentSessionSettings settings,
         Func<AgentApprovalEvent, AgentApprovalChoice> decide, string text = "開始")
     {
         await session.SendAsync(Input(text), settings);
@@ -675,8 +675,34 @@ public sealed class ClaudeSessionFakeCliTests : IDisposable
         });
     }
 
-    private static string Text(IEnumerable<AgentEvent> events) => events.OfType<AgentTextCompletedEvent>().Single().Text;
+    private protected static string Text(IEnumerable<AgentEvent> events) => events.OfType<AgentTextCompletedEvent>().Single().Text;
 
+    // ───── Remote Control ─────
+
+    private protected static readonly AgentRemoteControlOptions Remote = new("報表整理", null);
+
+    private protected static async Task WaitForAsync(Func<bool> condition, string because, double seconds = 10)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+                throw new TimeoutException("沒有等到：" + because);
+            await Task.Delay(50);
+        }
+    }
+
+    private protected static Task<List<AgentEvent>> Turn(IAgentSession session, EventLog log, AgentSessionSettings settings)
+        => TurnAsync(session, log, settings, _ => AgentApprovalChoice.Allow);
+
+    // ───── app 更新後重開程序接回 Remote Control（設計 9.2、9.5）─────
+
+    private protected AgentSessionSettings Reattach() => Settings("rc", started: true) with { RemoteControl = new AgentRemoteControlOptions("報表整理", "cse_saved") };
+}
+
+// 測試分成幾個 class：xUnit 同一個 class 的測試依序跑，分開才能同時跑
+public sealed class ClaudeSessionFakeCliTests : ClaudeSessionFakeCliTestsBase
+{
     [Fact]
     public async Task 檔案編輯按本對話都允許_改為自動接受編輯且畫面跟著改_CLI還會詢問的寫入照樣跳卡_切回每步詢問會送出切換()
     {
@@ -957,24 +983,6 @@ public sealed class ClaudeSessionFakeCliTests : IDisposable
         log.All.OfType<AgentProcessStartedEvent>().Should().ContainSingle("送出沿用旁支提問開的程序");
     }
 
-    // ───── Remote Control ─────
-
-    private static readonly AgentRemoteControlOptions Remote = new("報表整理", null);
-
-    private static async Task WaitForAsync(Func<bool> condition, string because, double seconds = 10)
-    {
-        var deadline = DateTime.UtcNow.AddSeconds(seconds);
-        while (!condition())
-        {
-            if (DateTime.UtcNow > deadline)
-                throw new TimeoutException("沒有等到：" + because);
-            await Task.Delay(50);
-        }
-    }
-
-    private static Task<List<AgentEvent>> Turn(IAgentSession session, EventLog log, AgentSessionSettings settings)
-        => TurnAsync(session, log, settings, _ => AgentApprovalChoice.Allow);
-
     [Fact]
     public async Task RemoteControl_啟動時開啟並回報遠端工作階段_程序重開後接回同一個()
     {
@@ -1051,7 +1059,10 @@ public sealed class ClaudeSessionFakeCliTests : IDisposable
         events.OfType<AgentRemoteControlEvent>().Should().BeEmpty();
         session.HasRemoteControl.Should().BeFalse();
     }
+}
 
+public sealed class ClaudeSessionFakeCliTests2 : ClaudeSessionFakeCliTestsBase
+{
     [Fact]
     public async Task RemoteControl_沒開過時接回中樞記的工作階段_換了帳戶不接回自己記的()
     {
@@ -1189,10 +1200,6 @@ public sealed class ClaudeSessionFakeCliTests : IDisposable
         using (var log = new EventLog(on))
             Text(await Turn(on, log, Settings("rc"))).Should().Be("turn1:rc=on:報表整理:", "送出時關著、啟動期間打開：開");
     }
-
-    // ───── app 更新後重開程序接回 Remote Control（設計 9.2、9.5）─────
-
-    private AgentSessionSettings Reattach() => Settings("rc", started: true) with { RemoteControl = new AgentRemoteControlOptions("報表整理", "cse_saved") };
 
     [Fact]
     public async Task RemoteControl_重開程序接回_不送訊息不開始一輪_之後的送出沿用這個程序()
@@ -1336,7 +1343,10 @@ public sealed class ClaudeSessionFakeCliTests : IDisposable
         end.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Interrupted,
             "遠端開始的一輪也當成執行中：停止送得出去，CLI 回的失敗改成已停止");
     }
+}
 
+public sealed class ClaudeSessionFakeCliTests3 : ClaudeSessionFakeCliTestsBase
+{
     [Fact]
     public async Task 遠端訊息_那一輪還沒結束就從app送出_接手成為這一輪_遠端的result不算()
     {

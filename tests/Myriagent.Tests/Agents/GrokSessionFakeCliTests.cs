@@ -11,10 +11,10 @@ namespace Myriagent.Tests.Agents;
 /// 建立與續接對話、背景說明只在新對話的第一則、同一個程序即時切換模型／思考強度／權限模式、工具卡、核准卡與代為核准、提問卡、
 /// 計畫確認、停止、沒登入、CLI 換版的熱重開。假 grok 把收到的請求寫進記錄檔（每行前面是第幾個程序 p1、p2…），測試據此比對訊息序列。
 /// </summary>
-public sealed class GrokSessionFakeCliTests : IDisposable
+public abstract class GrokSessionFakeCliTestsBase : IDisposable
 {
-    private static readonly string PowerShell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
-    private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(30);
+    private protected static readonly string PowerShell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+    private protected static readonly TimeSpan Deadline = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// 假的 grok agent：腳本只用 ASCII（Windows PowerShell 讀沒有 BOM 的腳本用系統碼頁）。開頭由 Fake 補上 $scenario、$logPath、$counterPath、$work、$outside。
@@ -27,7 +27,7 @@ public sealed class GrokSessionFakeCliTests : IDisposable
     /// background_idle＝開一個 ping 子程序（PID 寫進 work\bg-pid.txt）、把輸出寫進 work\bg.log 並在 task_backgrounded 帶 output_file，這一輪照常結束、背景工作一直不結束。
     /// rewind/points、rewind/execute、session/fork 都有回應（rewindfail 的 execute 失敗、forkfail 的 fork 回錯誤）。未鎖定的 billing 不寫記錄
     /// </summary>
-    private const string FakeGrok = """"
+    private protected const string FakeGrok = """"
         $ErrorActionPreference = 'Stop'
         $utf8 = New-Object System.Text.UTF8Encoding $false
         $out = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), $utf8)
@@ -304,12 +304,12 @@ public sealed class GrokSessionFakeCliTests : IDisposable
         }
         """";
 
-    private readonly TempDirectory temp = new("fake-grok-session");
+    private protected readonly TempDirectory temp = new("fake-grok-session");
 
     public void Dispose() => temp.Dispose();
 
     /// <summary>一個情境的假 grok：自己的工作資料夾、記錄檔與程序計數</summary>
-    private sealed class Fake
+    private protected sealed class Fake
     {
         public Fake(TempDirectory temp, string scenario)
         {
@@ -381,9 +381,9 @@ public sealed class GrokSessionFakeCliTests : IDisposable
         }
     }
 
-    private static AgentTurnInput Input(string text) => new(text, Array.Empty<AgentAttachment>());
+    private protected static AgentTurnInput Input(string text) => new(text, Array.Empty<AgentAttachment>());
 
-    private static BlockingCollection<AgentEvent> Collect(IAgentSession session)
+    private protected static BlockingCollection<AgentEvent> Collect(IAgentSession session)
     {
         var events = new BlockingCollection<AgentEvent>();
         session.EventReceived += events.Add;
@@ -391,7 +391,7 @@ public sealed class GrokSessionFakeCliTests : IDisposable
     }
 
     /// <summary>收事件直到 until 成立（含那一個事件）；onEvent 可以回應卡片</summary>
-    private static async Task<List<AgentEvent>> TakeUntilAsync(BlockingCollection<AgentEvent> events, Func<AgentEvent, bool> until, Func<AgentEvent, Task>? onEvent = null)
+    private protected static async Task<List<AgentEvent>> TakeUntilAsync(BlockingCollection<AgentEvent> events, Func<AgentEvent, bool> until, Func<AgentEvent, Task>? onEvent = null)
     {
         var collected = new List<AgentEvent>();
         var deadline = DateTime.UtcNow + Deadline;
@@ -408,16 +408,23 @@ public sealed class GrokSessionFakeCliTests : IDisposable
         throw new TimeoutException("假的 grok 沒有在時限內送出預期的事件；收到：" + string.Join("、", collected.Select(e => e.GetType().Name)));
     }
 
-    private static async Task<List<AgentEvent>> TurnAsync(IAgentSession session, BlockingCollection<AgentEvent> events, AgentSessionSettings settings, string text,
+    private protected static async Task<List<AgentEvent>> TurnAsync(IAgentSession session, BlockingCollection<AgentEvent> events, AgentSessionSettings settings, string text,
         Func<AgentEvent, Task>? onEvent = null)
     {
         await session.SendAsync(Input(text), settings);
         return await TakeUntilAsync(events, e => e is AgentTurnCompletedEvent, onEvent);
     }
 
-    private static int IndexOf<T>(List<AgentEvent> events, Func<T, bool>? match = null) where T : AgentEvent
+    private protected static int IndexOf<T>(List<AgentEvent> events, Func<T, bool>? match = null) where T : AgentEvent
         => events.FindIndex(e => e is T t && (match == null || match(t)));
 
+    private protected static AgentRestartRequest Restart(AgentRestartMode mode, AgentSessionSettings? settings, string? continuation = null)
+        => new(AgentRestartReason.CliUpdated, mode, "1.0.52", "1.0.60", AutoContinue: true, continuation, Array.Empty<AgentInterruptedTool>(), settings);
+}
+
+// 測試分成幾個 class：xUnit 同一個 class 的測試依序跑，分開才能同時跑
+public sealed class GrokSessionFakeCliTests : GrokSessionFakeCliTestsBase
+{
     [Fact]
     public async Task 新對話_預先產生的id與權限在建立時帶上_背景說明只在第一則_同一個程序跑第二輪()
     {
@@ -635,7 +642,10 @@ public sealed class GrokSessionFakeCliTests : IDisposable
         turn.OfType<AgentToolStartedEvent>().Should().HaveCount(2);
         fake.Log().Should().ContainInOrder("p1:permission call-1-1 edit -> allow-edits-session", "p1:permission call-1-2 edit -> allow-once");
     }
+}
 
+public sealed class GrokSessionFakeCliTests2 : GrokSessionFakeCliTestsBase
+{
     [Fact]
     public async Task 自動接受編輯_工作資料夾內的編輯代為核准_資料夾外與指令仍要問()
     {
@@ -1018,7 +1028,4 @@ public sealed class GrokSessionFakeCliTests : IDisposable
         session.IsRunning.Should().BeFalse();
         session.HasLiveProcess.Should().BeTrue();
     }
-
-    private static AgentRestartRequest Restart(AgentRestartMode mode, AgentSessionSettings? settings, string? continuation = null)
-        => new(AgentRestartReason.CliUpdated, mode, "1.0.52", "1.0.60", AutoContinue: true, continuation, Array.Empty<AgentInterruptedTool>(), settings);
 }

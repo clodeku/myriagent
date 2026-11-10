@@ -39,12 +39,19 @@ internal sealed class TempDirectory : IDisposable
 
     public string Combine(params string[] parts) => Path.Combine(new[] { Root }.Concat(parts).ToArray());
 
-    /// <summary>建立檔案（含上層資料夾），回傳完整路徑</summary>
+    /// <summary>
+    /// 建立檔案（含上層資料夾），回傳完整路徑。有非 ASCII 字元的 .ps1 帶 UTF-8 的 BOM：Windows PowerShell 5.1 把沒有 BOM 的腳本當系統碼頁（Big5）讀，
+    /// 中文註解會吃掉換行，下一行被當成註解、整支腳本語法錯誤一啟動就結束（ClaudeSessionFakeCliTests 的假 claude 因此一啟動就結束、每個測試等到逾時）。
+    /// 只有 ASCII 的照舊不帶（FakeCodexAppServerScriptTests 逐位元組比對 tools/fake-device 寫的那一份）
+    /// </summary>
     public string WriteFile(string relativePath, string content = "x")
     {
         var path = Path.Combine(Root, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content);
+        if (path.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase) && content.Any(ch => ch > '~'))
+            File.WriteAllText(path, content, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        else
+            File.WriteAllText(path, content);
         return path;
     }
 
