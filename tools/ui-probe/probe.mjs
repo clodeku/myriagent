@@ -53,6 +53,7 @@ const ONLY = (() => { const i = process.argv.indexOf('--only'); return i > 0 ? p
 const HOT_ONLY = process.argv.includes('--hot');
 const SYNC_ONLY = process.argv.includes('--sync'); // 〔同步〕只跑設定頁「多電腦同步」的檢查（sync-settings.mjs）
 const MONITOR_ONLY = process.argv.includes('--monitor'); // 只跑電腦狀態面板的檢查（monitor-probe.mjs）
+const MAIN_ONLY = process.argv.includes('--main'); // 只跑主視窗流程（runMain：還原版面、背景分頁、單窗格與多窗格）
 const TOKENS_ONLY = process.argv.includes('--tokens');
 const DASH_ONLY = process.argv.includes('--dash'); // 只跑儀表板帳戶卡的欄數與 HUD 動態的檢查（runDashGrid）
 const GIT_ONLY = process.argv.includes('--git'); // 只跑對話標頭 git 晶片的檢查（runGit）
@@ -832,6 +833,23 @@ async function runMain(vp, full) {
       host.received.filter((m) => m.cmd === 'open').map((m) => m.conversationId));
     await page.click('.tab[data-key="c1"]');
     await settle(page, 200);
+  }
+
+  // 2026-11-10 實機的記錄：還原版面後關掉作用中的分頁，旁邊沒開過的背景分頁顯示出來卻沒送 open，一直「載入對話中…」到看門狗 6 秒後補送。
+  // 另開一個只有兩個分頁的視窗：關掉作用中的 c1，背景的 c2 要馬上送 open、載入完成
+  if (full) {
+    const app2 = await openApp('close-reveals-deferred-' + tag, { vp, layout: { panes: [{ id: 'p1', tabs: ['c1', 'c2'], active: 'c1' }], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' } });
+    await waitConv(app2.page, 'c1');
+    await settle(app2.page, 300);
+    const before = app2.host.received.filter((m) => m.cmd === 'open').map((m) => m.conversationId);
+    const t0 = Date.now();
+    await app2.page.hover('.tab[data-key="c1"]');
+    await app2.page.click('.tab[data-key="c1"] .tab-x');
+    const opened = await until(() => app2.host.received.some((m) => m.cmd === 'open' && m.conversationId === 'c2'), 3000);
+    const loaded = opened ? await waitConv(app2.page, 'c2').then(() => true, () => false) : false;
+    check('closeRevealsDeferredTabOpens', !before.includes('c2') && !!opened && loaded && Date.now() - t0 < 4000,
+      { before, after: app2.host.received.filter((m) => m.cmd === 'open').map((m) => m.conversationId), ms: Date.now() - t0 });
+    await closeApp(app2);
   }
 
   // 單窗格：最底（執行中、待辦面板、等待作答的卡片）
@@ -6711,6 +6729,7 @@ try {
     const launchCtx = Object.assign({ convSel, waitConv, MAIN_LAYOUT, FOUR_PANES }, searchCtx);
     if (LAUNCH_ONLY) { if (full) await runLaunch(launchCtx, vp); continue; }
     if (SENDING_ONLY) { if (full) await runSending(launchCtx, vp); continue; }
+    if (MAIN_ONLY) { if (full) await runMain(vp, true); continue; }
     // 電腦狀態面板：第一種寬度跑一次（裡面另外以 1100、700 寬檢查預設收起與抽屜）
     const outFile = (f) => { report.screenshots.push(f); return path.join(OUT, f); };
     if (full && !HOT_ONLY && !SYNC_ONLY) await runMonitor({ openApp, closeApp, check, NOW, shot, outFile }, vp);

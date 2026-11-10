@@ -584,6 +584,17 @@ function nextAfterClose(p, closedIndex) {
   return mru[0] || p.tabs[Math.min(closedIndex, p.tabs.length - 1)] || null;
 }
 
+/**
+ * 作用中的分頁離開之後（關掉、拖到別的窗格），窗格換成顯示的那個分頁：還原版面時沒送過 open 的背景分頁（deferredOpen）先送，
+ * 否則它一直停在「載入對話中…」，要等載入看門狗 6 秒後補送（2026-11-10 實機的記錄：換版重開後關掉作用中的分頁）
+ */
+function showActive(p) {
+  touchMru(p, p.active);
+  if (deferredOpen.delete(p.active)) postOpen(p.active);
+  const next = convs.get(p.active);
+  if (next && state.view === 'chat') next.show();
+}
+
 export function activateTab(paneId, id, focusInput) {
   const p = paneById(paneId);
   if (!p || !p.tabs.includes(id)) return;
@@ -716,7 +727,7 @@ export function closeTab(id, opts = {}) {
   p.mru = p.mru.filter((x) => x !== id);
   if (p.active === id) {
     p.active = nextAfterClose(p, i);
-    if (p.active) { touchMru(p, p.active); const next = convs.get(p.active); if (next && state.view === 'chat') next.show(); }
+    if (p.active) showActive(p);
   }
   if (!p.tabs.length && panes.length > 1 && state.mode !== 'popout' && !opts.keepPane) { removePane(p.id); return; }
   renderTabs(p);
@@ -744,8 +755,7 @@ export function moveTab(id, toPaneId, index) {
   from.mru = from.mru.filter((x) => x !== id);
   if (from.active === id) {
     from.active = nextAfterClose(from, old);
-    const n = from.active && convs.get(from.active);
-    if (n && state.view === 'chat') n.show();
+    if (from.active) showActive(from);
   }
   const at = index === undefined ? to.tabs.length : Math.max(0, Math.min(index, to.tabs.length));
   to.tabs.splice(at, 0, id);
@@ -1286,6 +1296,7 @@ export function setChatVisible(on) {
   for (const p of panes) {
     const cv = p.active && convs.get(p.active);
     if (!cv) continue;
+    if (on && deferredOpen.delete(p.active)) postOpen(p.active);
     if (on) cv.show(); else cv.hide();
   }
   reportVisible(false);
