@@ -18,7 +18,7 @@ import { accountSuggestions, accountMention, mentionPlain } from './accountmenti
 import { contextShown, contextPercent, contextLabel, contextSeverity, contextMark, contextSummary, contextTitle } from './contextrules.js';
 import { HISTORY_KEY, LEGACY_HISTORY_KEY, parseStore, historyOf, pushStore, moveStore, idleNav, historyMove } from './historyrules.js';
 import { tokenCounter } from './tokenfx.js';
-import { createDraftSync } from './draftsync.js';
+import { createDraftSync, noteSent } from './draftsync.js';
 import { parseTurnTokens, gaugeFx, meterCells, infoWindows, rttLabel, tokenRate, pruneRateSamples, rateLabel, compactDrop, fmtTokK, byteRate, uploadReadout, smoothRate, delegateMeta } from './fxrules.js';
 import { sessionTotals } from './remoterules.js';
 import { MATRIX_GLYPHS, fmtShort, fmtTokens } from './tokenrules.js';
@@ -1227,6 +1227,7 @@ export class Composer {
     if (this.holdForCacheWarning(() => this.send())) return;
     if (!this.dispatch(text, ups)) return;
     rememberInput(this.conv.id, text);
+    noteSent(this.conv.id, text); // 草稿同步：別處傳來剛送出的這句時不填回輸入框（draftsync.js）
     this.hist = idleNav();
     this.sendFx(text);
     this.ta.value = '';
@@ -1234,6 +1235,7 @@ export class Composer {
     this.dismissedAt = -1;
     this.autosize();
     this.updateSend();
+    this.draftSync.flush(); // 送出了：草稿的「清掉」馬上送，不等打字停下的那 0.7 秒（手機送出後可能馬上切走）
     this.closeSuggest();
     this.conv.stickToBottom();
   }
@@ -1308,6 +1310,7 @@ export class Composer {
   resend(text) {
     if (this.sendGate()) { toast('現在不能送出，原因在輸入框下方', 'error'); return false; }
     if (!this.dispatch(text, this.attachedUploads())) return false;
+    noteSent(this.conv.id, text);
     if (this.ta.value.trim() === String(text || '').trim()) {
       this.ta.value = '';
       this.autosize();

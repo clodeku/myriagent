@@ -88,3 +88,22 @@ test('提示的文字：第一行、截短；來源名稱', () => {
   assert.equal(D.draftSourceLabel(null), '這台的另一個視窗');
   assert.equal(D.draftSourceLabel(' '), '這台的另一個視窗');
 });
+
+test('最近送出的訊息：記下、比對（前後空白不算）、過期與壞掉的丟掉、同一則只留最新', () => {
+  const now = 1_000_000_000;
+  let list = D.rememberSent([], 'c1', '  你要擔任交易員  ', now);
+  assert.equal(D.wasSent(list, 'c1', '你要擔任交易員'), true);
+  assert.equal(D.wasSent(list, 'c1', '你要擔任交易員' + String.fromCharCode(10)), true);
+  assert.equal(D.wasSent(list, 'c2', '你要擔任交易員'), false, '別的對話不算');
+  assert.equal(D.wasSent(list, 'c1', ''), false);
+  list = D.rememberSent(list, 'c1', '你要擔任交易員', now + 5);
+  assert.equal(list.length, 1);
+  assert.equal(D.rememberSent(list, 'c1', '   ', now).length, 1, '空白不記');
+  const raw = JSON.stringify([...list, { id: 'c9', text: 'old', at: now - D.SENT_TTL_MS - 1 }, { bad: true }]);
+  assert.deepEqual(D.parseSent(raw, now + 10).map((e) => e.id), ['c1']);
+  assert.deepEqual(D.parseSent('{壞掉', now), []);
+  let many = [];
+  for (let i = 0; i < D.SENT_MAX + 5; i++) many = D.rememberSent(many, 'c1', 't' + i, now + i);
+  assert.equal(many.length, D.SENT_MAX);
+  assert.equal(many[0].text, 't5');
+});

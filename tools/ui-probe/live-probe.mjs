@@ -852,6 +852,34 @@ async function runComposerDraft() {
 
 // 臨時對話（瀏覽器版，quickchat.js）：對話鈕送 quickChat、伺服器回帶面板記號的臨時草稿；第一則送出後草稿換成正式對話（replacedBy），
 // 面板送 open 嵌回同一個；朗讀由瀏覽器自己念（不送 speakItem）；關掉面板送 delete（已建立的）
+// 草稿同步的回歸（2026-11-11 使用者回報：已經送出的字一直出現在瀏覽器版的輸入欄）：別處的草稿換上之後在這裡送出，
+// 清掉要馬上送；之後這個對話重新載入（conversation）、或伺服器的整份還帶著那句，都不能再填回輸入框，而且再送一次清掉
+async function runComposerDraftSent() {
+  const app = await openWithLayout('composer-draft-sent', layoutOf([[[LF.CONV.idle], LF.CONV.idle]]));
+  const { page, hub } = app;
+  await waitLoaded(app, [LF.CONV.idle]);
+  const ta = '.conv[data-conv="' + LF.CONV.idle + '"] .cinput';
+  const T = '你要擔任的是一位非常資深的交易員';
+  hub.push({ type: 'composerDrafts', full: false, drafts: [{ conversationId: LF.CONV.idle, text: T, rev: 10, at: Date.now(), from: '辦公室桌機' }] });
+  const applied = await until(() => page.$eval(ta, (t, v) => (t.value === v ? true : null), T), 3000);
+  await page.click(ta);
+  await page.keyboard.press('Enter');
+  await sleep(250);
+  const clears = () => hub.cmds('composerDraft').map((c) => c.cmd).filter((c) => c.text === '');
+  const clearedFast = clears().length;
+  const sentOk = hub.cmds('send').some((c) => c.cmd.text === T);
+  await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  hub.push(LF.conversationMessage(NOW, LF.CONV.idle, '整理用量報表', { header: { running: false } }));
+  await sleep(600);
+  const afterReload = await page.$eval(ta, (t) => t.value);
+  hub.push({ type: 'composerDrafts', full: true, drafts: [{ conversationId: LF.CONV.idle, text: T, rev: 10, at: Date.now(), from: '辦公室桌機' }] });
+  await sleep(400);
+  const afterFull = await page.$eval(ta, (t) => t.value);
+  check('hubComposerDraftSentStaysCleared', applied === true && sentOk && clearedFast >= 1 && afterReload === '' && afterFull === '' && clears().length >= 2,
+    { applied, sentOk, clearedFast, afterReload, afterFull, clears: clears().length });
+  await HP.closePage(app);
+}
+
 async function runQuickChat() {
   const app = await openWithLayout('quick-chat', layoutOf([[[LF.CONV.idle], LF.CONV.idle]]));
   const { page, hub } = app;
@@ -6165,6 +6193,7 @@ const SCENARIOS = [
   { checks: ['hubPaneZoom'], run: runPaneZoom },
   { checks: ['hubComposerDraft'], run: runComposerDraft },
   { checks: ['hubQuickChat'], run: runQuickChat },
+  { checks: ['hubComposerDraftSentStaysCleared'], run: runComposerDraftSent },
   { checks: ['hubVoiceDictationDiag', 'hubVoiceDictationDiagMode'], run: runVoiceDictationDiag },
   { checks: ['hubResyncReopens', 'hubResyncNullNoop'], run: runResync },
   { checks: ['hubClipboardWrite', 'hubClipboardDeniedFallback', 'hubClipboardUnsolicitedIgnored', 'hubClipboardExpiredIgnored'], run: runClipboard },

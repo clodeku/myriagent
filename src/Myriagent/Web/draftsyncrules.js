@@ -91,3 +91,34 @@ export function draftPreview(text, max = 48) {
 export function draftSourceLabel(from) {
   return typeof from === 'string' && from.trim() ? from.trim() : '這台的另一個視窗';
 }
+
+/** 最近送出的訊息（同一個瀏覽器的分頁共用，localStorage）：別處傳來的草稿就是剛送出的那句時不填回輸入框 */
+export const SENT_KEY = 'myriagent.draftSent.v1';
+
+/** 記多久（毫秒）與最多幾則 */
+export const SENT_TTL_MS = 30 * 60 * 1000;
+export const SENT_MAX = 30;
+
+/** 讀存下的清單（壞掉的、過期的、格式不對的丟掉） */
+export function parseSent(raw, now) {
+  let list;
+  try { list = JSON.parse(raw || '[]'); } catch { return []; }
+  if (!Array.isArray(list)) return [];
+  return list.filter((e) => e && typeof e.id === 'string' && typeof e.text === 'string' && typeof e.at === 'number' && now - e.at < SENT_TTL_MS && e.at <= now + 60000);
+}
+
+/** 記下送出的一則（同一個對話、同樣的字只留最新的；最多 SENT_MAX 則） */
+export function rememberSent(list, id, text, now) {
+  const t = isBlankDraft(text) ? '' : text.trim();
+  if (!t || typeof id !== 'string' || !id) return list;
+  const rest = list.filter((e) => !(e.id === id && e.text === t));
+  rest.push({ id, text: t, at: now });
+  return rest.slice(-SENT_MAX);
+}
+
+/** 這個對話最近送出過這些字嗎（前後空白不算） */
+export function wasSent(list, id, text) {
+  if (isBlankDraft(text)) return false;
+  const t = text.trim();
+  return list.some((e) => e.id === id && e.text === t);
+}

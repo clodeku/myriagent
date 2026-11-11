@@ -6,7 +6,7 @@ import { h, setHidden } from './util.js';
 import { icon } from './icons.js';
 import { post, isCollaborator } from './store.js';
 import { isDraftId } from './liverules.js';
-import { DRAFT_SYNC_DELAY_MS, shouldPublish, remoteDraftAction, mergeDrafts, draftPreview, draftSourceLabel, isBlankDraft } from './draftsyncrules.js';
+import { DRAFT_SYNC_DELAY_MS, shouldPublish, remoteDraftAction, mergeDrafts, draftPreview, draftSourceLabel, isBlankDraft, SENT_KEY, parseSent, rememberSent, wasSent } from './draftsyncrules.js';
 
 const drafts = new Map();
 
@@ -16,6 +16,27 @@ export function onComposerDrafts(msg, getConv) {
     const cv = getConv(c.conversationId);
     if (cv && cv.composer && cv.composer.draftSync) cv.composer.draftSync.remote(c);
   }
+}
+
+/**
+ * 這個分頁自己送出了草稿（或清掉）：記得的那份跟著換（2026-11-11 使用者回報：送出之後舊字又出現在瀏覽器版的輸入框——
+ * 伺服器不把這個分頁送的回送給它，記得的還是別處先前那份，重新載入對話〔loaded〕就填回去）。rev 照舊（伺服器之後送來的比較新）
+ */
+function noteLocal(id, text) {
+  const known = drafts.get(id);
+  if (isBlankDraft(text)) drafts.delete(id);
+  else drafts.set(id, { text, rev: known ? known.rev : 0, from: null, at: Date.now() });
+}
+
+/** 最近送出的訊息（localStorage，同一個瀏覽器的分頁共用；讀寫失敗當成沒有） */
+function sentList() {
+  try { return parseSent(localStorage.getItem(SENT_KEY), Date.now()); } catch { return []; }
+}
+
+/** 這個對話送出了這則（輸入框送出時，composer.send）：之後別處傳來同樣的字不填回輸入框 */
+export function noteSent(id, text) {
+  if (typeof id !== 'string' || !id) return;
+  try { localStorage.setItem(SENT_KEY, JSON.stringify(rememberSent(sentList(), id, text, Date.now()))); } catch { /* 存不了就算了 */ }
 }
 
 /** 這個對話記得的別處草稿（沒有是 null） */
@@ -55,6 +76,7 @@ export function createDraftSync(composer) {
     if (!shouldPublish(value, posted)) return;
     posted = isBlankDraft(value) ? '' : value;
     synced = posted;
+    noteLocal(id(), posted);
     post({ cmd: 'composerDraft', conversationId: id(), text: posted });
     if (offered && offered.text === posted) hideOffer();
   }
@@ -116,6 +138,15 @@ export function createDraftSync(composer) {
     /** 別處的草稿（宿主轉來的） */
     remote(d) {
       if (!eligible() || !editable() || !d) return;
+      // 就是這個對話剛送出的那句（伺服器那份還沒清掉、或這個分頁記得的是舊的）：不填回輸入框，再送一次清掉讓別處也清掉
+      if (wasSent(sentList(), id(), d.text)) {
+        drafts.delete(id());
+        if (isBlankDraft(composer.ta.value)) {
+          posted = synced = '';
+          post({ cmd: 'composerDraft', conversationId: id(), text: '' });
+        }
+        return;
+      }
       const now = Date.now();
       const action = remoteDraftAction({
         current: composer.ta.value, synced, remote: d.text,
