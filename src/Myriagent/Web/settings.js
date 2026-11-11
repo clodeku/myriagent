@@ -24,7 +24,7 @@ import { voiceSupported, voiceOn, setVoiceOn, voiceTuning, setVoiceTuning } from
 import { SPEED_MIN, SPEED_MAX, SPEED_STEP, PITCH_MIN, PITCH_MAX, normSpeed, normPitch, fmtSpeed, fmtPitch } from './voicerules.js';
 import { pairCountdown, countdownCells, deviceLed, rangeFill, rangeTicks } from './fxrules.js';
 import { setDecodedText } from './textfx.js';
-import { SETTING_KEYWORDS, searchSettings, searchTerms, highlightParts, snippet, tabKeyTarget, tabHitCounts, normalizeHubUrl, parseTokens, fmtTokens, parsePercent, fmtPercent, modelText } from './settingsrules.js';
+import { SETTING_KEYWORDS, searchSettings, searchTerms, highlightParts, snippet, tabKeyTarget, tabHitCounts, normalizeHubUrl, parseTokens, fmtTokens, parsePercent, fmtPercent, modelText, effortText } from './settingsrules.js';
 import { collaboratorsSection, myAccountSection, canManageCollaborators, isCollaborator } from './collab.js';
 
 let open = null; // { d, refresh, browser, refreshApp }
@@ -800,11 +800,16 @@ function updateModelRow(row, m) {
   const btn = row.querySelector('.set-effort');
   btn.disabled = efforts.length === 0;
   btn.title = efforts.length === 0 ? '這個模型不支援推理強度' : '';
-  setPick(btn, efforts.length === 0 ? '不支援' : m.effort ? EFFORT_LABEL[m.effort] || m.effort : 'CLI 預設', name + ' 的預設推理強度');
+  setPick(btn, efforts.length === 0 ? '不支援' : m.effort ? EFFORT_LABEL[m.effort] || m.effort : cliDefaultText(m), name + ' 的預設推理強度');
+}
+
+/** 「CLI 預設」後面附上這個模型不指定強度時實際用的強度（宿主量到的 defaultEffort；不知道就不附） */
+function cliDefaultText(m) {
+  return 'CLI ' + effortText('default', m.defaultEffort, EFFORT_LABEL);
 }
 
 function openEffortMenu(provider, m, btn) {
-  const items = [{ label: 'CLI 預設', desc: '由 CLI 依模型與帳戶決定', checked: !m.effort, onSelect: () => setDefault(provider, 'effort', 'default', m.value) }];
+  const items = [{ label: cliDefaultText(m), desc: '由 CLI 依模型與帳戶決定', checked: !m.effort, onSelect: () => setDefault(provider, 'effort', 'default', m.value) }];
   for (const e of m.efforts || []) items.push({ label: EFFORT_LABEL[e] || e, desc: EFFORT_DESC[e], hint: e, checked: m.effort === e, onSelect: () => setDefault(provider, 'effort', e, m.value) });
   openMenu(btn, items, { placement: 'bottom-end', minWidth: 180 });
 }

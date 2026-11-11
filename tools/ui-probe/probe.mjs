@@ -301,7 +301,7 @@ class FakeHost {
         const acc = this.accounts.find((a) => a.id === m.accountId) || this.accounts[0];
         const qid = 'q' + (++this.seq);
         this.data[qid] = {
-          header: F.baseHeader(qid, acc.id, '臨時對話', { isDraft: true, ephemeral: true, customFolder: false, workingDirectory: 'C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\' + qid + '\\workspace' }),
+          header: F.baseHeader(qid, acc.id, '臨時對話', { isDraft: true, ephemeral: true, defaultEffort: 'medium', customFolder: false, workingDirectory: 'C:\\Users\\Lin\\AppData\\Local\\Myriagent\\conversations\\' + qid + '\\workspace' }),
           items: [], hasMore: false, composer: { attachments: [], busy: false, busyText: null, queue: [] },
         };
         this.sendConversation(qid, m.paneId);
@@ -2126,6 +2126,9 @@ async function runQuickChat(vp) {
   const req = sent('quickChat');
   check('quickChatOpens', s1.shown && s1.quick && s1.empty && s1.pressed === 'true' && req.length === 1 && req[0].paneId === 'quick:dock', { s1, req });
   check('quickChatPlacement', s1.top >= s1.barBottom && s1.right <= s1.vw && s1.h >= 300, { s1 });
+  // 強度選「預設」時顯示實際的強度（標頭的 defaultEffort，2026-11-12）
+  const effortLabel = await page.evaluate(() => { const b = document.querySelector('.qc .cbar .pick-pre'); const btn = b && b.closest('.pick'); return btn ? btn.querySelector('.pick-label').textContent : null; });
+  check('effortDefaultShowsActual', effortLabel === '預設（中）', { effortLabel });
   const qid = await page.evaluate(() => { const c = document.querySelector('.qc .conv'); return c ? c.dataset.conv : null; });
   await page.click('.qc .cinput');
   await page.keyboard.type('今天適合穿什麼');

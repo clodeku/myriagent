@@ -591,13 +591,42 @@ internal sealed partial class AgentHub
                 ["description"] = m.Description,
                 ["efforts"] = new JArray(m.Efforts),
             };
+            // 不指定強度時這個模型用的強度（不知道就不帶）
+            if (m.DefaultEffort != null)
+                row["defaultEffort"] = m.DefaultEffort;
             if (string.Equals(m.Value, "default", StringComparison.OrdinalIgnoreCase))
                 row["resolved"] = resolvedDefault;
             return row;
         }));
 
     /// <summary>Codex 帳戶 config.toml 的 model（路徑 → 讀的時間、值）：渲染標頭很頻繁，30 秒內不重讀</summary>
-    private readonly Dictionary<string, (DateTime ReadAt, string? Model)> codexConfiguredModels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (DateTime ReadAt, string? Model, string? Effort)> codexConfiguredModels = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Codex 帳戶 config.toml 的 model 與 model_reasoning_effort（30 秒內不重讀）</summary>
+    private (string? Model, string? Effort) CodexConfigured(AgentAccount account)
+    {
+        var home = CodexConfigRules.ResolveHome(account.IsSystemDefault ? null : account.ConfigDirectory);
+        var now = DateTime.UtcNow;
+        if (!codexConfiguredModels.TryGetValue(home, out var cached) || now - cached.ReadAt > TimeSpan.FromSeconds(30))
+        {
+            var toml = CodexConfigRules.ReadConfig(home);
+            cached = (now, DefaultModelRules.ParseCodexConfiguredModel(toml), DefaultModelRules.ParseCodexConfiguredEffort(toml));
+            codexConfiguredModels[home] = cached;
+        }
+        return (cached.Model, cached.Effort);
+    }
+
+    /// <summary>
+    /// 這個對話選「預設」強度時實際用的強度（ConversationDefaultsRules.EffectiveDefaultEffort）：Codex 的 config.toml 指定了 model_reasoning_effort 就是它
+    /// （其他電腦的對話看不到那台的設定檔，照模型的預設）；不知道回 null
+    /// </summary>
+    private string? DefaultEffortFor(ConversationState c, IReadOnlyList<AgentModelOption> models)
+    {
+        string? resolved = null, configured = null;
+        if (c.Meta.Provider == AgentProvider.Codex && !c.IsReplica && accounts.Find(c.Meta.AccountId) is { } account)
+            (resolved, configured) = CodexConfigured(account);
+        return ConversationDefaultsRules.EffectiveDefaultEffort(c.Meta.Model, models, resolved, configured);
+    }
 
     /// <summary>「預設」實際是哪個模型（DefaultModelRules）。其他電腦的對話（replica）看不到那台的 Codex 設定檔，Codex 不顯示</summary>
     private string? DefaultModelLabel(AgentProvider provider, IReadOnlyList<AgentModelOption> models, AgentAccount? account, bool replica)
@@ -607,14 +636,7 @@ internal sealed partial class AgentHub
         string? configured = null;
         if (provider == AgentProvider.Codex)
         {
-            var home = CodexConfigRules.ResolveHome(account!.IsSystemDefault ? null : account.ConfigDirectory);
-            var now = DateTime.UtcNow;
-            if (!codexConfiguredModels.TryGetValue(home, out var cached) || now - cached.ReadAt > TimeSpan.FromSeconds(30))
-            {
-                cached = (now, DefaultModelRules.ParseCodexConfiguredModel(CodexConfigRules.ReadConfig(home)));
-                codexConfiguredModels[home] = cached;
-            }
-            configured = cached.Model;
+            configured = CodexConfigured(account!).Model;
         }
         return DefaultModelRules.ResolvedLabel(provider, models, configured);
     }
@@ -867,6 +889,8 @@ internal sealed partial class AgentHub
             ["title"] = c.IsDraft && !QuickChatRules.IsEphemeral(c.Meta) ? "新對話" : c.Meta.Title,
             ["model"] = c.Meta.Model ?? "default",
             ["effort"] = c.Meta.Effort ?? "default",
+            // 強度選「預設」時實際用的強度（2026-11-12 使用者要求：網頁顯示「預設（中）」；不知道是 null）
+            ["defaultEffort"] = DefaultEffortFor(c, models),
             ["permission"] = AgentPermissionModes.Normalize(c.Meta.Provider, c.Meta.PermissionMode).ToString(),
             ["permissionModes"] = RenderPermissionModes(c.Meta.Provider),
             ["models"] = RenderModelList(EnsureDefaultModel(models).ToList(), DefaultModelLabel(c.Meta.Provider, models,
@@ -1004,7 +1028,7 @@ internal sealed partial class AgentHub
     private static IEnumerable<AgentModelOption> EnsureDefaultModel(IReadOnlyList<AgentModelOption> models)
     {
         if (!models.Any(m => m.Value.Equals("default", StringComparison.OrdinalIgnoreCase)))
-            yield return new AgentModelOption("default", "預設", "帳戶預設模型", models.FirstOrDefault()?.Efforts ?? Array.Empty<string>());
+            yield return new AgentModelOption("default", "預設", "帳戶預設模型", models.FirstOrDefault()?.Efforts ?? Array.Empty<string>(), models.FirstOrDefault()?.DefaultEffort);
         foreach (var m in models)
             yield return m;
     }

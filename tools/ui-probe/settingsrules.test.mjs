@@ -153,3 +153,13 @@ test('modelText：「預設」有 resolved 時寫成「預設（模型）」，�
   assert.equal(R.modelText({ value: 'gpt-6-astra' }), 'gpt-6-astra');
   assert.equal(R.modelText(null), '');
 });
+
+test('effortText：「預設」知道實際強度時寫成「預設（中）」，不知道是「預設」；其他照名稱、不支援加註', () => {
+  const L = { low: '低', medium: '中', high: '高', xhigh: '超高' };
+  assert.equal(R.effortText('default', 'medium', L), '預設（中）');
+  assert.equal(R.effortText('default', null, L), '預設');
+  assert.equal(R.effortText(undefined, 'xhigh', L), '預設（超高）');
+  assert.equal(R.effortText('default', 'turbo', L), '預設（turbo）', '不認得的照原值');
+  assert.equal(R.effortText('high', 'medium', L), '高');
+  assert.equal(R.effortText('xhigh', null, L, false), '超高（不支援）');
+});

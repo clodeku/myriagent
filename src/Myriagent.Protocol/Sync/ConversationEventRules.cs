@@ -297,6 +297,9 @@ internal static class ConversationEventRules
                 return false;
             if (!Optional(m, "efforts", e => e is JArray efforts && efforts.Count <= MaxModelEfforts && efforts.All(IsShortText)))
                 return false;
+            // 不指定強度時這個模型用的強度（2026-11-12；選用）
+            if (!Optional(m, "defaultEffort", IsShortText))
+                return false;
         }
 
         return true;

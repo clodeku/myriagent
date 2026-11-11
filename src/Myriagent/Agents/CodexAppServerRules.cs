@@ -834,7 +834,9 @@ internal static partial class CodexAppServerRules
                 .Where(e => !string.IsNullOrWhiteSpace(e))
                 .Select(e => e!)
                 .ToList();
-            models.Add((new AgentModelOption(id, model.Value<string>("displayName") ?? id, model.Value<string>("description"), efforts),
+            // 不指定強度時用的強度（2026-11-12 實測 model/list 每個模型都有 defaultReasoningEffort）
+            var defaultEffort = model["defaultReasoningEffort"] is JValue { Type: JTokenType.String, Value: string d } && d.Length > 0 ? d : null;
+            models.Add((new AgentModelOption(id, model.Value<string>("displayName") ?? id, model.Value<string>("description"), efforts, defaultEffort),
                 model.Value<bool?>("isDefault") ?? false));
         }
 

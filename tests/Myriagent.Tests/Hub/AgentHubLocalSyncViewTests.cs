@@ -30,7 +30,7 @@ public sealed class AgentHubLocalSyncViewTests
     /// </summary>
     private static readonly string[] HeaderKeys =
     [
-        "id", "accountId", "provider", "title", "model", "effort", "permission", "permissionModes", "models", "commands", "workingDirectory",
+        "id", "accountId", "provider", "title", "model", "effort", "defaultEffort", "permission", "permissionModes", "models", "commands", "workingDirectory",
         "customFolder", "recentFolders", "isDraft", "running", "steer", "status", "titling", "startedAt", "background", "programs", "lastTurn", "turnLive", "context", "accountMissing",
         "accountDelegation", "pendingAccount", "restart", "lastPrompt",
     ];

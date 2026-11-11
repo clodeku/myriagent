@@ -1005,6 +1005,10 @@ internal static partial class ClaudeStreamRules
     public static string BuildGetSettingsRequest(string requestId)
         => BuildControlRequest(requestId, new JObject { ["subtype"] = "get_settings" });
 
+    /// <summary>get_settings 回應的 applied.effort（這個程序目前實際用的推理強度；沒有、回應失敗是 null）</summary>
+    public static string? ParseAppliedEffort(JObject? getSettingsResponse)
+        => getSettingsResponse?["applied"] is JObject applied && applied["effort"] is JValue { Type: JTokenType.String, Value: string effort } && effort.Length > 0 ? effort : null;
+
     /// <summary>get_settings 回應的 applied.ultracodeAvailable（舊版沒有這個欄位、回應失敗都算不能用）</summary>
     public static bool ParseUltracodeAvailable(JObject? getSettingsResponse)
         => getSettingsResponse?["applied"] is JObject applied && applied["ultracodeAvailable"] is JValue { Type: JTokenType.Boolean } available && (bool)available;

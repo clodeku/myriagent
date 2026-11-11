@@ -80,6 +80,16 @@ export function modelText(m) {
   return m.label || m.value;
 }
 
+/**
+ * 推理強度鈕的文字（2026-11-12 使用者要求：選「預設」時也顯示實際是哪個強度）：預設而且知道它是哪個強度時「預設（中）」，
+ * 不知道時「預設」；其他照名稱，目前的模型不支援時加「（不支援）」。labels 是強度的中文名稱（store.EFFORT_LABEL）
+ */
+export function effortText(value, defaultEffort, labels, supported = true) {
+  const name = (v) => (labels && labels[v]) || v;
+  if (!value || value === 'default') return typeof defaultEffort === 'string' && defaultEffort ? '預設（' + name(defaultEffort) + '）' : '預設';
+  return name(value) + (supported ? '' : '（不支援）');
+}
+
 /** token 數的短寫：400000 → 400k、1500000 → 1.5M、367500 → 367.5k、999 → 999；null 是空字串 */
 export function fmtTokens(n) {
   if (n == null || !Number.isFinite(n)) return '';

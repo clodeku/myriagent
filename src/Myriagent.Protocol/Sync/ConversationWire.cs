@@ -79,8 +79,10 @@ internal static class ConversationWire
                 .Distinct(StringComparer.Ordinal)
                 .Take(ConversationEventRules.MaxModelEfforts)
                 .ToList();
+            // 預設強度（2026-11-12）：短字串而且沒有疑似權杖才帶，省略＝不知道（前一版忽略）
+            var defaultEffort = m.DefaultEffort is { Length: > 0 and <= ConversationEventRules.MaxShortTextLength } d && CredentialLeakRules.Mask(d) == d ? d : null;
             result.Add(new ConversationModelOption(value, Short(CredentialLeakRules.Mask(m.Label)) ?? value, string.IsNullOrEmpty(description) ? null : description,
-                efforts.Count > 0 ? efforts : null));
+                efforts.Count > 0 ? efforts : null, defaultEffort));
         }
 
         return result.Count > 0 ? result : null;

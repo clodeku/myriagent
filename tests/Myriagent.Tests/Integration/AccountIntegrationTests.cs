@@ -101,6 +101,27 @@ public sealed class AccountIntegrationTests : IDisposable
         windows.Should().OnlyContain(w => w.Percent >= 0 && w.Percent <= 100);
     }
 
+    /// <summary>能力探查順便以 set_model＋get_settings 問出每個模型的預設強度（2026-11-12；不送訊息、不耗額度）</summary>
+    [EnvFact("MYRIAGENT_IT", Reason)]
+    public async Task Claude預設帳戶_能力探查帶各模型的預設強度()
+    {
+        using var paths = new AppPathsScope(temp.CreateDirectory("data"));
+        var account = new AgentAccount { Provider = AgentProvider.Claude, Label = "本機" };
+
+        var caps = await CapabilityProbe.ProbeClaudeAsync(Launcher(AgentProvider.Claude), account, CancellationToken.None);
+
+        if (caps == null)
+        {
+            output.WriteLine("權杖快到期或存在認證管理員：守門不跑短命的 claude，視為可接受的結果");
+            return;
+        }
+        foreach (var m in caps.Models)
+            output.WriteLine($"{m.Value}｜強度 {string.Join(",", m.Efforts)}｜預設 {m.DefaultEffort ?? "（無）"}");
+        var withEfforts = caps.Models.Where(m => m.Efforts.Count > 0).ToList();
+        withEfforts.Should().NotBeEmpty();
+        withEfforts.Should().OnlyContain(m => m.DefaultEffort != null && m.Efforts.Contains(m.DefaultEffort), "每個有強度可選的模型都問得到預設強度，而且在可選的強度裡");
+    }
+
     [EnvFact("MYRIAGENT_IT", Reason)]
     public async Task Codex預設帳戶_RateLimitsRead成功且解析出時間窗()
     {

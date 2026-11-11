@@ -1078,9 +1078,10 @@ TokenCount：`{ "input": 1226418, "cached": 1018772, "output": 57913 }`——`in
   "title": "修正登入流程",
   "model": "default",                   // "default"＝帳戶預設
   "effort": "default",                  // "default"＝帳戶預設；不在目前模型的 efforts 內時，網頁如實標示「不支援」並提供改回預設
+  "defaultEffort": "medium" | null,     // 2026-11-12：強度選「預設」時實際用的強度（ConversationDefaultsRules.EffectiveDefaultEffort：Codex 帳戶 config.toml 的 model_reasoning_effort 優先，否則目前模型的；瀏覽器版照擁有者發布的模型清單），網頁顯示成「預設（中）」（settingsrules.effortText）；不知道是 null
   "permission": "Ask",
   "permissionModes": [ { "value": "Ask", "label": "每步詢問", "description": "執行指令、修改檔案前先問你" } ],  // 這個代理可用的權限模式（Claude 5 種、Codex 3 種）
-  "models": [ { "value": "default", "label": "預設（建議）", "description": "帳戶預設模型", "resolved": "Opus 5.5" | null, "efforts": ["low","medium","high","xhigh","max","ultracode"] } ],   // resolved 只有 "default" 那一項有：「預設」實際是哪個模型（Hub/DefaultModelRules：Claude 取 CLI 的說明、Grok 取 currentModelId、Codex 取帳戶 config.toml 的 model 否則 isDefault；Antigravity 與其他電腦的 Codex 對話是 null），網頁顯示成「預設（Opus 5.5）」（settingsrules.modelText）。Claude 的 efforts 最後可能有 "ultracode"（xhigh＋動態工作流程；帳戶能用、模型支援 xhigh 時才有，protocol-notes「ultracode」），網頁標成 Ultracode 並附說明
+  "models": [ { "value": "default", "label": "預設（建議）", "description": "帳戶預設模型", "resolved": "Opus 5.5" | null, "efforts": ["low","medium","high","xhigh","max","ultracode"], "defaultEffort": "medium" } ],   // resolved 只有 "default" 那一項有：「預設」實際是哪個模型（Hub/DefaultModelRules：Claude 取 CLI 的說明、Grok 取 currentModelId、Codex 取帳戶 config.toml 的 model 否則 isDefault；Antigravity 與其他電腦的 Codex 對話是 null），網頁顯示成「預設（Opus 5.5）」（settingsrules.modelText）。Claude 的 efforts 最後可能有 "ultracode"（xhigh＋動態工作流程；帳戶能用、模型支援 xhigh 時才有，protocol-notes「ultracode」），網頁標成 Ultracode 並附說明。每一項選用的 `defaultEffort`（2026-11-12）是不指定強度時這個模型用的強度：Codex 取 model/list 的 `defaultReasoningEffort`，Claude 由能力探查以 set_model＋get_settings 的 `applied.effort` 量（protocol-notes「預設推理強度」）；不知道就不帶
   "commands": [ { "name": "compact", "description": "壓縮對話", "argumentHint": "" } ],   // 「/」指令選單（Claude initialize 回報；Codex 為空）；沒有 clear 時宿主補在最後（/clear 一律由宿主接住，見 send）
   "workingDirectory": "C:\\repo\\proj",
   "customFolder": true,                 // false＝對話自己的預設 workspace（刪除對話會連同裡面的檔案一起刪除）

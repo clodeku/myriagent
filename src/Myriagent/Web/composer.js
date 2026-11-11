@@ -3,7 +3,7 @@
 import { h, iconButton, debounce, highlight, reconcile, extOf, fmtBytes, fmtReset, replayClass, setHidden, setAcc } from './util.js';
 import { icon, FILE_ICON } from './icons.js';
 import { post, postWithFiles, state, accountOf, EFFORT_LABEL, EFFORT_DESC, permissionTone, nextRequestId, isHub, isCollaborator, newId, peerId } from './store.js';
-import { modelText } from './settingsrules.js';
+import { modelText, effortText } from './settingsrules.js';
 import { openMenu, openDialog, confirmDialog, toast, spinner, hasLayer } from './ui.js';
 import { codexShown } from './codexrules.js';
 import { openCodexMenu, refreshCodexPanel } from './codexcontrols.js';
@@ -894,7 +894,7 @@ export class Composer {
     this.modelBtn.hidden = !models.length;
 
     const ef = this.currentEffort();
-    const label = ef.value === 'default' ? '預設' : (EFFORT_LABEL[ef.value] || ef.value) + (ef.supported ? '' : '（不支援）');
+    const label = effortText(ef.value, ef.defaultEffort, EFFORT_LABEL, ef.supported);
     this.effortBtn.querySelector('.pick-label').textContent = label;
     this.effortBtn.classList.toggle('ultra', ef.value === 'ultracode'); // Ultracode：按鈕也標成帳戶色（fx.css 的 .pick.ultra）
     this.effortBtn.title = '推理強度：' + label + (ef.supported ? '' : '，目前的模型不支援這個強度，可改回預設');
@@ -979,7 +979,9 @@ export class Composer {
     const cm = this.currentModel();
     const efforts = (cm && cm.efforts) || [];
     const value = hd && hd.effort && hd.effort !== 'default' ? hd.effort : 'default';
-    return { value, efforts, supported: value === 'default' || efforts.includes(value) };
+    // 選「預設」時實際用的強度：宿主算好的（含 Codex 設定檔指定的）優先，剛換模型、宿主的標頭還沒到時先用那個模型的
+    const defaultEffort = (hd && typeof hd.defaultEffort === 'string' && hd.defaultEffort) || (cm && typeof cm.defaultEffort === 'string' ? cm.defaultEffort : null);
+    return { value, efforts, defaultEffort, supported: value === 'default' || efforts.includes(value) };
   }
 
   setOption(key, value) {
@@ -989,6 +991,7 @@ export class Composer {
     const before = { [key]: hd[key], effort: hd.effort };
     hd[key] = value; // 先樂觀更新，宿主的 header 為準
     // 宿主換模型時會把新模型不支援的推理強度改回預設（AgentHub.SetOption）：畫面先照做，不會閃一下「不支援」
+    if (key === 'model') hd.defaultEffort = null; // 換了模型：宿主的標頭到之前，「預設（…）」照新模型的預設強度
     if (key === 'model' && !this.currentEffort().supported) hd.effort = 'default';
     const after = { [key]: hd[key], effort: hd.effort };
     this.renderToolbar();
@@ -1086,7 +1089,7 @@ export class Composer {
     if (isCollaborator()) return; // 多人協作：模型、強度、權限模式、代理與風格只有擁有者能改
     if (!this.header) return; // 對話還在載入
     const ef = this.currentEffort();
-    const items = [{ label: '預設', desc: '依模型與帳戶的預設', checked: ef.value === 'default', onSelect: () => this.setOption('effort', 'default') }];
+    const items = [{ label: effortText('default', ef.defaultEffort, EFFORT_LABEL), desc: '依模型與帳戶的預設', checked: ef.value === 'default', onSelect: () => this.setOption('effort', 'default') }];
     // Ultracode（xhigh 加上動態工作流程，可以同時派多個代理）和一般強度不同：選單裡標成帳戶色的描邊與記號（fx.css 的 .mi-ultra）
     for (const e of ef.efforts) items.push({ label: EFFORT_LABEL[e] || e, desc: EFFORT_DESC[e], hint: e, checked: ef.value === e, cls: e === 'ultracode' ? 'mi-ultra' : null, onSelect: () => this.setOption('effort', e) });
     if (!ef.supported) items.push({ label: EFFORT_LABEL[ef.value] || ef.value, desc: '目前使用中，這個模型不支援', hint: ef.value, checked: true, onSelect: () => {} });

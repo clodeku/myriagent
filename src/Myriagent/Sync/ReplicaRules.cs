@@ -70,7 +70,8 @@ internal static class ReplicaRules
             if (m?.Value is not { Length: > 0 } value || !seen.Add(value))
                 continue;
             var efforts = (m.Efforts ?? Array.Empty<string>()).Where(e => !string.IsNullOrEmpty(e)).ToList();
-            result.Add(new AgentModelOption(value, string.IsNullOrEmpty(m.Label) ? value : m.Label, string.IsNullOrEmpty(m.Description) ? null : m.Description, efforts));
+            result.Add(new AgentModelOption(value, string.IsNullOrEmpty(m.Label) ? value : m.Label, string.IsNullOrEmpty(m.Description) ? null : m.Description, efforts,
+                string.IsNullOrEmpty(m.DefaultEffort) ? null : m.DefaultEffort));
         }
 
         return result.Count > 0 ? result : null;

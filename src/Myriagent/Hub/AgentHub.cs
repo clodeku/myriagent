@@ -239,7 +239,9 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         accounts.LoginProgress += OnLoginProgress;
         accounts.UsageObserved += OnUsageObserved;
         accounts.NeedsCapabilities = accountId => !settings.Models.TryGetValue(accountId, out var known) || known.Count == 0
-            || (accounts.Find(accountId)?.Provider == AgentProvider.Antigravity && !settings.Commands.ContainsKey(accountId));
+            || (accounts.Find(accountId)?.Provider == AgentProvider.Antigravity && !settings.Commands.ContainsKey(accountId))
+            // 還不知道各模型預設強度的 Claude 帳戶（2026-11-12 以前探查的清單沒有）：每次執行 app 只多探一次
+            || (accounts.Find(accountId)?.Provider == AgentProvider.Claude && ConversationDefaultsRules.MissingDefaultEfforts(known) && defaultEffortProbed.TryAdd(accountId, 0));
         accounts.CapabilitiesDiscovered += OnCapabilitiesDiscovered;
         cli.Changed += () => host.BeginInvoke(OnCliStateChanged);
         cli.VersionChanged += change => host.BeginInvoke(() => OnCliVersionChanged(change));
@@ -249,6 +251,9 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         validRecentFolders = settings.RecentFolders.ToList();
         _ = RefreshRecentFoldersAsync();
     }
+
+    /// <summary>這次執行 app 已經為了預設強度多探查過的 Claude 帳戶（NeedsCapabilities；探不到也不重複探）</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> defaultEffortProbed = new(StringComparer.Ordinal);
 
     /// <summary>正在執行的對話數（關閉前確認、系統匣）</summary>
     public int RunningCount => conversations.Values.Count(c => c.Running);
@@ -2858,6 +2863,8 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
     /// </summary>
     private bool UpdateModels(string accountId, IReadOnlyList<AgentModelOption> models)
     {
+        // Claude 的會話回報的清單不量預設強度：沿用能力探查量到的
+        models = ConversationDefaultsRules.CarryDefaultEfforts(settings.Models.GetValueOrDefault(accountId), models);
         if (settings.Models.TryGetValue(accountId, out var stored) && ConversationDefaultsRules.SameModels(stored, models))
             return false;
         var provider = accounts.Find(accountId)?.Provider;

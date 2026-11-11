@@ -80,6 +80,37 @@ internal static class ConversationDefaultsRules
     public static bool SameModels(IReadOnlyList<AgentModelOption>? a, IReadOnlyList<AgentModelOption>? b)
         => (a ?? Array.Empty<AgentModelOption>()).SequenceEqual(b ?? Array.Empty<AgentModelOption>(), ModelComparer.Instance);
 
+    /// <summary>
+    /// 回報的模型清單沒有預設強度（Claude 的會話每次啟動回報的清單不量強度）時，沿用記下的那份裡同一個模型的值；回報的有就用回報的
+    /// </summary>
+    public static IReadOnlyList<AgentModelOption> CarryDefaultEfforts(IReadOnlyList<AgentModelOption>? stored, IReadOnlyList<AgentModelOption> reported)
+    {
+        if (stored is not { Count: > 0 } || reported.All(m => m.DefaultEffort != null))
+            return reported;
+        var known = stored.Where(m => m.DefaultEffort != null).GroupBy(m => m.Value, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().DefaultEffort, StringComparer.Ordinal);
+        return reported.Select(m => m.DefaultEffort == null && known.TryGetValue(m.Value, out var e) ? m with { DefaultEffort = e } : m).ToList();
+    }
+
+    /// <summary>有推理強度可選、卻還不知道預設強度的模型（Claude 的帳戶要不要再探查一次）</summary>
+    public static bool MissingDefaultEfforts(IReadOnlyList<AgentModelOption>? models)
+        => models is { Count: > 0 } && models.Any(m => m.Efforts.Count > 0 && m.DefaultEffort == null);
+
+    /// <summary>
+    /// 這個對話選「預設」強度時實際用的強度：設定檔指定的（Codex 的 config.toml model_reasoning_effort）優先，否則目前模型的預設強度；
+    /// 模型是「預設」時用「預設」那一項的、沒有就用實際是哪個模型（<paramref name="resolvedModel"/>）的、再沒有就用清單第一個的。不知道回 null
+    /// </summary>
+    public static string? EffectiveDefaultEffort(string? model, IReadOnlyList<AgentModelOption> models, string? resolvedModel, string? configured)
+    {
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured.Trim();
+        static bool IsDefault(string? v) => string.IsNullOrEmpty(v) || v.Equals("default", StringComparison.OrdinalIgnoreCase);
+        if (!IsDefault(model))
+            return models.FirstOrDefault(m => string.Equals(m.Value, model, StringComparison.Ordinal))?.DefaultEffort;
+        return models.FirstOrDefault(m => IsDefault(m.Value))?.DefaultEffort
+               ?? (resolvedModel != null ? models.FirstOrDefault(m => string.Equals(m.Value, resolvedModel, StringComparison.Ordinal))?.DefaultEffort : null)
+               ?? models.FirstOrDefault(m => !IsDefault(m.Value))?.DefaultEffort;
+    }
+
     /// <summary>兩份「/」指令清單的內容與順序相同（CLI 每次啟動都回報一次，相同時不必存檔、不重送標頭）；沒記過的（null）一律算不同</summary>
     public static bool SameCommands(IReadOnlyList<AgentSlashCommand>? stored, IReadOnlyList<AgentSlashCommand> reported)
         => stored != null && stored.SequenceEqual(reported);
@@ -130,7 +161,8 @@ internal static class ConversationDefaultsRules
         public static readonly ModelComparer Instance = new();
 
         public bool Equals(AgentModelOption? x, AgentModelOption? y)
-            => x != null && y != null && x.Value == y.Value && x.Label == y.Label && x.Description == y.Description && x.Efforts.SequenceEqual(y.Efforts);
+            => x != null && y != null && x.Value == y.Value && x.Label == y.Label && x.Description == y.Description && x.Efforts.SequenceEqual(y.Efforts)
+               && x.DefaultEffort == y.DefaultEffort;
 
         public int GetHashCode(AgentModelOption obj) => obj.Value.GetHashCode(StringComparison.Ordinal);
     }

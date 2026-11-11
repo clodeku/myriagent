@@ -759,7 +759,11 @@ internal enum AgentPlanChoice
 }
 
 /// <summary>模型選單的一個選項</summary>
-internal sealed record AgentModelOption(string Value, string Label, string? Description, IReadOnlyList<string> Efforts);
+/// <param name="DefaultEffort">
+/// 不指定推理強度時這個模型實際用的強度（2026-11-12 使用者要求：選「預設」時也顯示是哪個強度）：Codex 取 model/list 的 defaultReasoningEffort，
+/// Claude 由能力探查以 set_model＋get_settings 的 applied.effort 量；不知道是 null（settings.json 裡沒有這個欄位，前一版忽略）
+/// </param>
+internal sealed record AgentModelOption(string Value, string Label, string? Description, IReadOnlyList<string> Efforts, string? DefaultEffort = null);
 
 /// <summary>「/」指令選單的一個項目（Claude initialize 回報的 commands）</summary>
 internal sealed record AgentSlashCommand(string Name, string? Description, string? ArgumentHint);

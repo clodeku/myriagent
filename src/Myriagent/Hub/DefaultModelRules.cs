@@ -70,6 +70,26 @@ internal static partial class DefaultModelRules
         return null;
     }
 
+    /// <summary>config.toml 最上層（第一個表格之前）的 model_reasoning_effort = "…"；沒有回 null（不指定強度時 Codex 用它，不用模型的預設）</summary>
+    public static string? ParseCodexConfiguredEffort(string? configToml)
+    {
+        if (string.IsNullOrEmpty(configToml))
+            return null;
+        foreach (var raw in configToml.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.StartsWith('['))
+                return null;
+            var match = TopLevelEffort().Match(line);
+            if (match.Success)
+                return match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
+        }
+        return null;
+    }
+
+    [GeneratedRegex("""^model_reasoning_effort\s*=\s*(?:"([^"]+)"|'([^']+)')\s*(?:#.*)?$""")]
+    private static partial Regex TopLevelEffort();
+
     private static bool IsDefault(string? value) => string.Equals(value, "default", StringComparison.OrdinalIgnoreCase);
 
     [GeneratedRegex("""^model\s*=\s*(?:"([^"]+)"|'([^']+)')\s*(?:#.*)?$""")]

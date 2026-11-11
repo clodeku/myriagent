@@ -161,7 +161,7 @@ public sealed class ConversationViewRulesTests
     {
         var header = ConversationViewRules.Header(HeaderRow(), Online, rebuilding: false);
         header.Properties().Select(p => p.Name).Should().Equal(
-            "id", "accountId", "provider", "title", "model", "effort", "permission", "permissionModes", "models", "commands", "workingDirectory",
+            "id", "accountId", "provider", "title", "model", "effort", "permission", "permissionModes", "models", "defaultEffort", "commands", "workingDirectory",
             "customFolder", "recentFolders", "isDraft", "running", "steer", "status", "startedAt", "lastTurn", "accountMissing", "restart",
             "deviceId", "deviceName", "deviceOnline");
         header["steer"]!.Value<bool>().Should().BeTrue("Claude 執行中送出直接插進這一輪");
@@ -478,4 +478,24 @@ public sealed class ConversationViewRulesTests
 
     private static DeviceInfo Info(bool revoked) =>
         new(Owner, "配對名稱", "MACHINE", null, "1.0.0", "software", "spki", "fp", 1, revoked ? 2 : null, revoked ? "retired" : null);
+
+    [Fact]
+    public void 預設強度_照擁有者發布的模型清單()
+    {
+        IReadOnlyList<Myriagent.Sync.ConversationModelOption> published =
+        [
+            new("default", "預設", null, ["low", "medium"], "medium"),
+            new("claude-opus-4-7", "Opus 4.7", null, ["low", "xhigh"], "xhigh"),
+            new("haiku", "Haiku", null, null),
+        ];
+        ConversationViewRules.DefaultEffort(null, published).Should().Be("medium");
+        ConversationViewRules.DefaultEffort("default", published).Should().Be("medium");
+        ConversationViewRules.DefaultEffort("claude-opus-4-7", published).Should().Be("xhigh");
+        ConversationViewRules.DefaultEffort("haiku", published).Should().BeNull();
+        ConversationViewRules.DefaultEffort(null, null).Should().BeNull("舊版電腦沒發布清單");
+        var models = ConversationViewRules.Models(null, null, published);
+        models.Cast<Newtonsoft.Json.Linq.JObject>().Select(m => m.Value<string>("defaultEffort")).Should().Equal("medium", "xhigh", null);
+        var parsed = ConversationViewRules.PublishedModels(Newtonsoft.Json.Linq.JArray.Parse("""[{"value":"a","label":"A","defaultEffort":"high"},{"value":"b","defaultEffort":5}]"""));
+        parsed!.Select(m => m.DefaultEffort).Should().Equal("high", null);
+    }
 }

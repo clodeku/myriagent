@@ -47,10 +47,14 @@ internal static class CapabilityProbe
         var completion = new TaskCompletionSource<JObject?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var settingsCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var parser = new ClaudeStreamParser();
+        // 預設強度的探查（set_model、get_settings 一來一回；請求 id 是 eff-…）
+        var pending = new System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<(bool Success, JObject? Response)>>(StringComparer.Ordinal);
         process.LineReceived += (_, line) =>
         {
             var result = parser.Parse(line);
-            if (result.ControlResponse is { RequestId: "init-probe" } response)
+            if (result.ControlResponse is { } any && any.RequestId is { } rid && pending.TryRemove(rid, out var waiter))
+                waiter.TrySetResult((any.Success, any.Response));
+            else if (result.ControlResponse is { RequestId: "init-probe" } response)
                 completion.TrySetResult(response.Success ? response.Response : null);
             // get_settings：帳戶能不能用 ultracode（舊版不認得時回 error，當成不能用）
             else if (result.ControlResponse is { RequestId: "caps-probe" } settings)
@@ -60,6 +64,8 @@ internal static class CapabilityProbe
         {
             completion.TrySetResult(null);
             settingsCompletion.TrySetResult(false);
+            foreach (var w in pending.Values)
+                w.TrySetResult((false, null));
         };
         process.BeginReading();
         await process.WriteLineAsync(ClaudeStreamRules.BuildInitializeRequest("init-probe"));
@@ -88,11 +94,57 @@ internal static class CapabilityProbe
                 // initialize 已回應、get_settings 沒有：模型清單照樣用，只是不列 ultracode
             }
         }
+        var parsed = init == null ? new List<AgentModelOption>() : ClaudeStreamRules.ParseModels(init);
+        if (parsed.Count > 0)
+            parsed = await ProbeDefaultEffortsAsync(process, parsed, pending, cts.Token);
         await process.CloseAsync(TimeSpan.FromSeconds(3));
         if (init == null)
             return null;
-        var models = ClaudeStreamRules.WithUltracode(ClaudeStreamRules.ParseModels(init), ultracodeAvailable);
+        var models = ClaudeStreamRules.WithUltracode(parsed, ultracodeAvailable);
         return models.Count == 0 ? null : new AccountCapabilities(models, ClaudeStreamRules.ParseCommands(init));
+    }
+
+    /// <summary>
+    /// 每個有推理強度的模型不指定強度時實際用的強度（2026-11-12 使用者要求：選「預設」時也顯示是哪個強度；實測 tools/probes/default_effort_probe.py：
+    /// initialize 的模型清單沒有這個資訊、各模型不同，例如 Fable 5.2 是 medium、Opus 4.7 是 xhigh）：依序 set_model 再 get_settings 讀 applied.effort。
+    /// 不送訊息、不用額度；一個模型等不到就停下，其餘照舊沒有預設強度
+    /// </summary>
+    private static async Task<List<AgentModelOption>> ProbeDefaultEffortsAsync(AgentProcess process, List<AgentModelOption> models,
+        System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<(bool Success, JObject? Response)>> pending, CancellationToken ct)
+    {
+        var result = new List<AgentModelOption>(models.Count);
+        var seq = 0;
+        var stopped = false;
+        async Task<(bool Success, JObject? Response)> Ask(Func<string, string> build)
+        {
+            var id = "eff-" + (++seq);
+            var waiter = new TaskCompletionSource<(bool, JObject?)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            pending[id] = waiter;
+            await process.WriteLineAsync(build(id));
+            return await waiter.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+        }
+        foreach (var m in models)
+        {
+            if (stopped || m.Efforts.Count == 0)
+            {
+                result.Add(m);
+                continue;
+            }
+            try
+            {
+                var model = m.Value.Equals("default", StringComparison.OrdinalIgnoreCase) ? null : m.Value;
+                var set = await Ask(id => ClaudeStreamRules.BuildSetModelRequest(id, model));
+                var settings = set.Success ? await Ask(ClaudeStreamRules.BuildGetSettingsRequest) : default;
+                var effort = settings.Success ? ClaudeStreamRules.ParseAppliedEffort(settings.Response) : null;
+                result.Add(effort != null ? m with { DefaultEffort = effort } : m);
+            }
+            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException or IOException)
+            {
+                stopped = true;
+                result.Add(m);
+            }
+        }
+        return result;
     }
 
     /// <summary>讀 Claude 憑證檔（ReadWrite｜Delete 共用模式，不擋 CLI 寫入；只用來判斷權杖期限）；讀不到回 "{"（讀不懂＝不跑）、不存在回 null</summary>

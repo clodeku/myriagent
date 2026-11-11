@@ -142,6 +142,7 @@ internal static class ConversationViewRules
             ["permission"] = Permission(row.Provider, row.PermissionMode).ToString(),
             ["permissionModes"] = PermissionModes(row.Provider),
             ["models"] = Models(row.Model, row.Effort, row.Models),
+            ["defaultEffort"] = S(DefaultEffort(row.Model, row.Models)),
             ["commands"] = new JArray(),
             ["workingDirectory"] = S(row.WorkingDirectory),
             ["customFolder"] = row.CustomFolder,
@@ -218,9 +219,9 @@ internal static class ConversationViewRules
 
         var models = new JArray();
         if (!published.Any(m => string.Equals(m.Value, DefaultValue, StringComparison.OrdinalIgnoreCase)))
-            models.Add(ModelOption(DefaultValue, "預設", "帳戶預設模型", new JArray(published[0].Efforts ?? [])));
+            models.Add(ModelOption(DefaultValue, "預設", "帳戶預設模型", new JArray(published[0].Efforts ?? []), published[0].DefaultEffort));
         foreach (var m in published)
-            models.Add(ModelOption(m.Value, m.Label, m.Description, new JArray(m.Efforts ?? [])));
+            models.Add(ModelOption(m.Value, m.Label, m.Description, new JArray(m.Efforts ?? []), m.DefaultEffort));
         if (IsSet(model) && !published.Any(m => string.Equals(m.Value, model, StringComparison.Ordinal)))
             models.Add(ModelOption(model!, model!, "目前使用中", efforts));
         return models;
@@ -245,7 +246,7 @@ internal static class ConversationViewRules
                 continue;
             var efforts = m["efforts"] is JArray e ? e.Select(Text).OfType<string>().Where(x => x.Length > 0).ToList() : [];
             result.Add(new ConversationModelOption(value, Text(m["label"]) is { Length: > 0 } label ? label : value, Text(m["description"]),
-                efforts.Count > 0 ? efforts : null));
+                efforts.Count > 0 ? efforts : null, Text(m["defaultEffort"]) is { Length: > 0 and <= ConversationEventRules.MaxShortTextLength } d ? d : null));
         }
 
         return result.Count > 0 ? result : null;
@@ -330,13 +331,33 @@ internal static class ConversationViewRules
         return new ConversationDeviceInfo(ownerDeviceId, name, online && info is { Revoked: false });
     }
 
-    private static JObject ModelOption(string value, string label, string? description, JArray efforts) => new()
+    private static JObject ModelOption(string value, string label, string? description, JArray efforts, string? defaultEffort = null)
     {
-        ["value"] = value,
-        ["label"] = label,
-        ["description"] = S(description),
-        ["efforts"] = efforts.DeepClone(),
-    };
+        var option = new JObject
+        {
+            ["value"] = value,
+            ["label"] = label,
+            ["description"] = S(description),
+            ["efforts"] = efforts.DeepClone(),
+        };
+        // 不指定強度時這個模型用的強度（擁有者電腦發布的；不知道就不帶，同桌面）
+        if (defaultEffort is not null)
+            option["defaultEffort"] = defaultEffort;
+        return option;
+    }
+
+    /// <summary>
+    /// 強度選「預設」時實際用的強度（標頭的 defaultEffort，2026-11-12）：照擁有者發布的模型清單——目前的模型的、模型是「預設」時用「預設」那一項的、
+    /// 再沒有就清單第一個的（看不到那台 Codex 的 config.toml）；不知道回 null
+    /// </summary>
+    public static string? DefaultEffort(string? model, IReadOnlyList<ConversationModelOption>? published)
+    {
+        if (published is not { Count: > 0 })
+            return null;
+        if (IsSet(model))
+            return published.FirstOrDefault(m => string.Equals(m.Value, model, StringComparison.Ordinal))?.DefaultEffort;
+        return published.FirstOrDefault(m => string.Equals(m.Value, DefaultValue, StringComparison.OrdinalIgnoreCase))?.DefaultEffort ?? published[0].DefaultEffort;
+    }
 
     private static bool IsSet(string? value) => !string.IsNullOrEmpty(value) && !string.Equals(value, DefaultValue, StringComparison.Ordinal);
 

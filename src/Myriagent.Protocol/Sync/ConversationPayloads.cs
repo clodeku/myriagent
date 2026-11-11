@@ -61,7 +61,7 @@ internal sealed record ConversationMetaPayload(
 /// <see cref="ConversationMetaPayload.Models"/> 的一項（同桌面 <see cref="AgentModelOption"/>）：<paramref name="Value"/> 是 setOption 的值，
 /// <paramref name="Efforts"/> 是這個模型支援的推理強度（沒有時省略）
 /// </summary>
-internal sealed record ConversationModelOption(string Value, string Label, string? Description, IReadOnlyList<string>? Efforts);
+internal sealed record ConversationModelOption(string Value, string Label, string? Description, IReadOnlyList<string>? Efforts, string? DefaultEffort = null);
 
 /// <summary><c>conv.turn</c> 的 phase</summary>
 internal static class ConversationTurnPhases
