@@ -182,7 +182,7 @@
 .lp-files .ic { width: 12px; height: 12px; }
 /* 「捲到這則訊息」後短暫標示那則 */
 .it-user.lp-flash .u-box { animation: lp-flash 1.6s var(--ease-out); }
-@keyframes lp-flash { 0%, 30% { box-shadow: 0 0 0 2px var(--acc); } 100% { box-shadow: 0 0 0 2px transparent; } }
+@keyframes lp-flash { 0%, 30% { box-shadow: var(--edge-hi), 0 0 0 2px var(--acc); } 100% { box-shadow: var(--edge-hi), 0 0 0 2px transparent; } }
 
 /* ───── 項目通用 ───── */
 .items { display: flex; flex-direction: column; }
@@ -213,7 +213,7 @@
 .it-tool[data-status="Declined"] .step-dot, .it-tool[data-status="Cancelled"] .step-dot { background: var(--text-3); }
 
 /* ───── 使用者訊息：帶帳戶色左邊線的框 ───── */
-.u-box { position: relative; overflow: hidden; padding: 10px 14px 10px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-raised); }
+.u-box { position: relative; overflow: hidden; padding: 10px 14px 10px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-raised); box-shadow: var(--edge-hi); }
 .u-box::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--acc); }
 .u-text { color: var(--text-hi); }
 /* 訊息後方的時間：使用者訊息在框的右下方（和來源同一行），代理回覆在文字下方 */
@@ -261,6 +261,13 @@
 .sending-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 
 /* ───── Markdown ───── */
+/* 中英文、中文與數字之間自動留一點間隙（text-autospace，2026-11-12；實測每個交界多 1/8 個字寬，原本就有空白的不變、複製出來的字不變、
+   跨行內元素也算）：只在排版時算一次。只開在給人讀的文字與自由輸入的標題（回覆、你的訊息、思考、卡片、通知、對話標題）；
+   介面上的標籤不開（字是自己寫的，該留的空白已經留了，寬度也不必跟著變）。程式碼、等寬的區塊、輸入框、圖表一律不留：
+   欄位要對齊、內容是原樣的字；Chrome 的預設樣式不會替 pre、code 關掉，要自己寫 */
+.md, .card-title, .card-note, .q-text, .opt-label, .opt-desc, .ans-q, .plan-title, .ps-text, .think-sum, .sending-text, .lp-text,
+.ch-title-text, .tab-title, .crow-title, .cc-conv-title, .toast-text { text-autospace: normal; }
+.md :is(pre, code, kbd, samp, svg, textarea, input) { text-autospace: no-autospace; }
 .md { line-height: 1.68; color: var(--text); overflow-wrap: anywhere; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
@@ -485,8 +492,8 @@
 .dl.more { padding: 4px 10px; font-family: var(--font); color: var(--text-3); white-space: normal; }
 
 /* ───── 卡片：問卷、核准、計畫確認 ───── */
-.it-card { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-2); background: var(--bg-raised); }
-.it-card.waiting { border-color: color-mix(in srgb, var(--acc) 55%, var(--border-2)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 11%, transparent); }
+.it-card { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-2); background: var(--bg-raised); box-shadow: var(--edge-hi); }
+.it-card.waiting { border-color: color-mix(in srgb, var(--acc) 55%, var(--border-2)); box-shadow: var(--edge-hi), 0 0 0 3px color-mix(in srgb, var(--acc) 11%, transparent); }
 /* 等待作答的卡片是數字鍵的作用對象：聚焦時加 2px 外框，同時有兩張等待卡也分得出是哪一張 */
 .it-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-color: var(--acc); }
 .it-card.sending { opacity: .65; }
@@ -664,7 +671,7 @@
 .atts.in-composer .att-badge { display: none; }
 .chip-x {
   position: absolute; top: -7px; right: -7px; width: 18px; height: 18px; border-radius: 50%;
-  background: var(--bg-elev); border: 1px solid var(--border-2); color: var(--text-2); box-shadow: var(--shadow-pop); opacity: 0;
+  background: var(--bg-elev); border: 1px solid var(--border-2); color: var(--text-2); box-shadow: var(--shadow-1); opacity: 0;
 }
 .chip-x .ic { width: 10px; height: 10px; }
 .chip-att:hover .chip-x, .chip-x:focus-visible { opacity: 1; }
@@ -732,7 +739,7 @@
 .jump {
   position: absolute; left: 50%; bottom: calc(100% + 10px); z-index: 6; transform: translateX(-50%);
   display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 10px; border-radius: 999px;
-  background: var(--bg-elev); box-shadow: var(--shadow-pop); color: var(--text-hi); font-size: 12px;
+  background: var(--bg-elev); box-shadow: var(--shadow-2); color: var(--text-hi); font-size: 12px;
   transition: transform 160ms var(--ease-out), opacity 160ms var(--ease-out);
 }
 @starting-style { .jump { opacity: 0; transform: translateX(-50%) translateY(4px); } }
@@ -824,8 +831,8 @@
 .todo-chev { width: 12px; height: 12px; }
 .todo-list { max-height: 220px; overflow: auto; padding: 0 12px 8px; }
 
-.cbox { position: relative; border-radius: 10px; border: 1px solid var(--border-2); background: var(--bg-raised); transition: border-color 120ms, box-shadow 120ms; }
-.cbox:focus-within { border-color: color-mix(in srgb, var(--acc) 62%, var(--border-2)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 13%, transparent); }
+.cbox { position: relative; border-radius: 10px; border: 1px solid var(--border-2); background: var(--bg-raised); box-shadow: var(--edge-hi), var(--shadow-1), 0 0 0 3px transparent; transition: border-color 120ms, box-shadow 120ms; }
+.cbox:focus-within { border-color: color-mix(in srgb, var(--acc) 62%, var(--border-2)); box-shadow: var(--edge-hi), var(--shadow-1), 0 0 0 3px color-mix(in srgb, var(--acc) 13%, transparent); }
 .cbox.disabled { opacity: .75; }
 .cinput {
   display: block; width: 100%; min-height: 46px; max-height: 40vh; resize: none; overflow-y: hidden; border: 0; outline: 0;

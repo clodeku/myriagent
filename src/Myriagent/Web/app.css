@@ -53,8 +53,17 @@
   --diff-del: rgba(248, 81, 73, .11);
   --diff-hunk: rgba(56, 139, 253, .08);
   --scrim: rgba(0, 0, 0, .52);
-  --shadow-pop: 0 10px 32px rgba(0, 0, 0, .48), 0 0 0 1px rgba(255, 255, 255, .07);
-  --shadow-dlg: 0 28px 72px rgba(0, 0, 0, .58), 0 0 0 1px rgba(255, 255, 255, .08);
+  /* 層次（2026-11-12）：都是靜態的陰影，畫一次就好，不做動畫。
+     --edge-hi＝浮起的表面（卡片、按鈕、輸入框）上緣內側 1px 的高光（光從上面來；不帶模糊）；
+     陰影四級，近的銳利＋遠的柔和：-1 貼著底的表面、-2 浮起一點的小東西（提示、「↓ 最新」）、-pop 選單與通知、-dlg 對話框。
+     有模糊的陰影不要加在串流時會一直重畫的元素上（每次重畫都要重算）：對話欄裡的項目只用 --edge-hi。
+     box-shadow 是整個換掉的：狀態樣式（聚焦的光圈、懸停的光暈）要自己把 var(--edge-hi) 與基本的陰影寫在前面 */
+  --edge-hi: inset 0 1px 0 rgba(255, 255, 255, .055);
+  --edge-hi-solid: inset 0 1px 0 rgba(255, 255, 255, .2); /* 實心色塊的按鈕（主要、帳戶色、危險） */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 16px -4px rgba(0, 0, 0, .46), 0 0 0 1px rgba(255, 255, 255, .07);
+  --shadow-pop: 0 2px 6px rgba(0, 0, 0, .3), 0 12px 32px rgba(0, 0, 0, .46), 0 0 0 1px rgba(255, 255, 255, .07), inset 0 1px 0 rgba(255, 255, 255, .05);
+  --shadow-dlg: 0 4px 12px rgba(0, 0, 0, .32), 0 28px 72px rgba(0, 0, 0, .56), 0 0 0 1px rgba(255, 255, 255, .08), inset 0 1px 0 rgba(255, 255, 255, .06);
 
   --acc: #D97757;
   --acc-ink: #141414; /* 與 util.js inkOn(--acc) 相同：珊瑚色上深色字的對比較高 */
@@ -120,8 +129,11 @@
   --diff-del: rgba(220, 50, 40, .1);
   --diff-hunk: rgba(10, 100, 220, .07);
   --scrim: rgba(20, 20, 20, .3);
-  --shadow-pop: 0 10px 30px rgba(0, 0, 0, .13), 0 0 0 1px rgba(0, 0, 0, .07);
-  --shadow-dlg: 0 28px 70px rgba(0, 0, 0, .2), 0 0 0 1px rgba(0, 0, 0, .07);
+  --edge-hi: inset 0 1px 0 rgba(255, 255, 255, .85); /* 淺色的浮起表面是 #f9f9f9：高光是白 */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .06);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, .07), 0 6px 16px -4px rgba(0, 0, 0, .14), 0 0 0 1px rgba(0, 0, 0, .07);
+  --shadow-pop: 0 2px 6px rgba(0, 0, 0, .07), 0 12px 30px rgba(0, 0, 0, .12), 0 0 0 1px rgba(0, 0, 0, .07);
+  --shadow-dlg: 0 4px 12px rgba(0, 0, 0, .08), 0 28px 70px rgba(0, 0, 0, .18), 0 0 0 1px rgba(0, 0, 0, .07);
   --acc-text-mix: #000 45%;
   --tk: #0a5fc2;
   --tk-hi: #042a5c;
@@ -222,6 +234,7 @@ kbd { font-family: var(--mono); }
   height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none;
   padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--bg-raised);
   color: var(--text-hi); font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  box-shadow: var(--edge-hi), var(--shadow-1);
   transition: transform 120ms var(--ease-out), background-color 100ms, border-color 100ms;
 }
 .btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-3); }
@@ -229,13 +242,13 @@ kbd { font-family: var(--mono); }
 .btn .ic { width: 14px; height: 14px; }
 .btn .spin { width: 12px; height: 12px; }
 .btn.sm { height: 26px; padding: 0 10px; font-size: 12px; }
-.btn.primary { background: var(--btn-pri-bg); color: var(--btn-pri-fg); border-color: transparent; }
+.btn.primary { background: var(--btn-pri-bg); color: var(--btn-pri-fg); border-color: transparent; --edge-hi: var(--edge-hi-solid); }
 .btn.primary:hover:not(:disabled) { background: var(--btn-pri-bg); filter: brightness(.92); border-color: transparent; }
-.btn.acc { background: var(--acc); color: var(--acc-ink); border-color: transparent; }
+.btn.acc { background: var(--acc); color: var(--acc-ink); border-color: transparent; --edge-hi: var(--edge-hi-solid); }
 .btn.acc:hover:not(:disabled) { background: var(--acc); filter: brightness(1.08); border-color: transparent; }
-.btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); box-shadow: none; }
 .btn.ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-hi); border-color: transparent; }
-.btn.danger-solid { background: var(--red); color: #fff; border-color: transparent; }
+.btn.danger-solid { background: var(--red); color: #fff; border-color: transparent; --edge-hi: var(--edge-hi-solid); }
 .btn.danger-solid:hover:not(:disabled) { background: var(--red); filter: brightness(1.08); }
 
 .input {
@@ -777,7 +790,7 @@ body.side-resizing { cursor: col-resize; user-select: none; }
 
 .tip {
   position: fixed; z-index: 1200; pointer-events: none; padding: 4px 8px; border-radius: 5px; white-space: nowrap;
-  background: var(--bg-elev); box-shadow: var(--shadow-pop); font-size: 11.5px; color: var(--text-hi); font-variant-numeric: tabular-nums;
+  background: var(--bg-elev); box-shadow: var(--shadow-2); font-size: 11.5px; color: var(--text-hi); font-variant-numeric: tabular-nums;
 }
 
 /* 要你回來看的對話（完成、失敗、提問、核准、計畫：宿主的 flash、瀏覽器版的 speak；attnflash.js 加上 attn-flash，點了那個對話才拿掉）：

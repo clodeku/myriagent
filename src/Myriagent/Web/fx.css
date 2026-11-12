@@ -127,8 +127,8 @@
   height: 5px;
   clip-path: polygon(0 0, 100% 0, 100% 2px, calc(50% + 48px) 2px, calc(50% + 44px) 100%, calc(50% - 44px) 100%, calc(50% - 48px) 2px, 0 2px);
 }
-.acard:hover { border-color: color-mix(in srgb, var(--acc) 38%, var(--border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 12%, transparent), 0 12px 34px -18px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
-.acard:has(.sess.run) { border-color: color-mix(in srgb, var(--acc) 32%, var(--border)); box-shadow: 0 0 28px -12px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+.acard:hover { border-color: color-mix(in srgb, var(--acc) 38%, var(--border)); box-shadow: var(--shadow-1), 0 0 0 1px color-mix(in srgb, var(--acc) 12%, transparent), 0 12px 34px -18px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+.acard:has(.sess.run) { border-color: color-mix(in srgb, var(--acc) 32%, var(--border)); box-shadow: var(--shadow-1), 0 0 28px -12px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
 .acard.remote-only:hover { border-color: var(--border-2); box-shadow: none; }
 /* 背景層由上往下：帳戶色的光暈、把網格往下蓋掉的底色、細網格（16px）；remoteOnly 的卡是透明底，不畫 */
 .acard-fx {
@@ -464,6 +464,8 @@
 :is(.ibtn, .lbtn, .chip, .btn, .cbtn, .tab, .crow, .t-row, .att, .code-copy, .lbar-out, .jump):focus-visible {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--focus) 22%, transparent);
 }
+/* 按鈕原本的上緣高光與陰影留著（box-shadow 是整個換掉的） */
+.btn:not(.ghost):focus-visible { box-shadow: var(--edge-hi), var(--shadow-1), 0 0 0 4px color-mix(in srgb, var(--focus) 22%, transparent); }
 /* 錯誤項目：左緣一條紅色的斜紋警示條 */
 .it-error {
   background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--red) 65%, transparent) 0 3px, transparent 3px 6px);
@@ -482,7 +484,7 @@
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 55%, transparent), 0 0 14px color-mix(in srgb, var(--acc) var(--fx-glow), transparent);
 }
 .btn { transition: transform 120ms var(--ease-out), background-color 100ms, border-color 100ms, box-shadow 160ms ease; }
-.btn.acc:hover:not(:disabled) { box-shadow: 0 0 12px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
+.btn.acc:hover:not(:disabled) { box-shadow: var(--edge-hi), var(--shadow-1), 0 0 12px color-mix(in srgb, var(--acc) var(--fx-glow), transparent); }
 
 /* ───── 執行中的靜態加強：工具圖示、執行列轉圈發光、串流游標改成終端機式的小方塊 ───── */
 .it-tool[data-status="Running"] .t-icwrap { color: var(--acc); }

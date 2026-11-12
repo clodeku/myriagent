@@ -523,6 +523,22 @@ export async function runFx(ctx, vp) {
   const ring = await page.evaluate((s) => { const b = document.querySelector(s + ' .md .code .code-copy'); b.focus(); return { visible: b.matches(':focus-visible'), shadow: getComputedStyle(b).boxShadow }; }, SEL);
   check('fxFocusRing', ring.visible && ring.shadow !== 'none', ring);
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  // 中英文之間自動留間隙只開在給人讀的文字；程式碼與輸入框不留（欄位要對齊、內容是原樣的字）
+  const autospace = await page.evaluate((s) => {
+    const q = (x) => { const e = document.querySelector(x); return e ? getComputedStyle(e).textAutospace : null; };
+    return { supported: CSS.supports('text-autospace', 'normal'), md: q(s + ' .it-assistant .md'), user: q(s + ' .u-text'), pre: q(s + ' .md .code pre'),
+      copy: q(s + ' .md .code .code-copy'), input: q(s + ' .cbox textarea'), tab: q('.tab-title'), chip: q(s + ' .cinfo') };
+  }, SEL);
+  check('fxAutospaceProseOnly', !autospace.supported || (autospace.md === 'normal' && autospace.user === 'normal' && autospace.tab === 'normal'
+    && autospace.pre === 'no-autospace' && autospace.input === 'no-autospace' && autospace.chip === 'no-autospace'), autospace);
+  // 層次：浮起的表面上緣有一條不帶模糊的內側高光；輸入框另有貼著底的陰影；沒有底色的按鈕不加
+  const depth = await page.evaluate((s) => {
+    const sh = (x) => { const e = document.querySelector(x); return e ? getComputedStyle(e).boxShadow : null; };
+    const ghost = document.querySelector('.btn.ghost');
+    return { user: sh(s + ' .u-box'), cbox: sh(s + ' .cbox'), ghost: ghost ? getComputedStyle(ghost).boxShadow : 'none' };
+  }, SEL);
+  const edgeHi = /rgba?\([^)]*\) 0px 1px 0px 0px inset/;
+  check('fxEdgeHighlight', edgeHi.test(depth.user) && edgeHi.test(depth.cbox) && /0px 1px 2px 0px(?! inset)/.test(depth.cbox) && depth.ghost === 'none', depth);
 
   // 執行列：建置中帳戶色與光帶、開始執行閃綠、暫停閃琥珀、停下的餘暉（角框 1.2 秒淡回）、建置失敗閃紅
   const launchMsg = (phase, last) => ({ type: 'launchStatus', conversationId: C, launch: { folder: 'C:/repo/fx-app', selected: 't1',
@@ -773,7 +789,8 @@ export async function runFx(ctx, vp) {
     && cpuSmooth.maxBack <= 0.3 && cpuSmooth.travel <= -18 && cpuSmooth.travel >= -24, cpuSmooth);
 
   // 平移交給合成器：一直有新的一格、波形一直在移的 1.5 秒裡，Chrome 的樣式重算次數只多出每一格的那幾次（換數字與顏色、重開一段平移；
-  // 實測每格約 7 次），不是每個影格一次（60 fps 的 1.5 秒約 90 次）
+  // 實測每格約 7 次），不是每個影格一次（60 fps 的 1.5 秒約 90 次）。門檻是每格 12 次：2026-11-12 同一份網頁連跑幾次是 52～61
+  // （每格 9～10 次；閒置那 1.5 秒自己就有 10～16 次的起伏），原本的每格 9 次剛好在邊緣、時過時不過
   const cpuCdp = await page.context().newCDPSession(page);
   await cpuCdp.send('Performance.enable');
   const perfOf = async () => Object.fromEntries((await cpuCdp.send('Performance.getMetrics')).metrics.map((x) => [x.name, x.value]));
@@ -794,7 +811,7 @@ export async function runFx(ctx, vp) {
   const cpuPerf = { recalcIdle: cpuP1.RecalcStyleCount - cpuP0.RecalcStyleCount, recalcWave: cpuP3.RecalcStyleCount - cpuP2.RecalcStyleCount,
     layoutIdle: cpuP1.LayoutCount - cpuP0.LayoutCount, layoutWave: cpuP3.LayoutCount - cpuP2.LayoutCount,
     scriptMsWave: Math.round((cpuP3.ScriptDuration - cpuP2.ScriptDuration) * 10000) / 10 };
-  check('fxCpuWaveCompositor', cpuPerf.recalcWave - cpuPerf.recalcIdle <= 6 * 9, cpuPerf);
+  check('fxCpuWaveCompositor', cpuPerf.recalcWave - cpuPerf.recalcIdle <= 6 * 12, cpuPerf);
 
   // 視窗沒有焦點：距上次畫不到 1 秒的不畫（資料照記），滿 1 秒的下一格才畫，而且不平移（直接停在推進來的位置）
   await page.evaluate(() => { document.documentElement.dataset.window = 'inactive'; });

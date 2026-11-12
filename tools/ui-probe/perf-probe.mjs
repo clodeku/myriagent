@@ -617,9 +617,10 @@ async function startStream(page) {
     window.__perfStream = setInterval(() => {
       i++;
       // 比較像真的回覆：每 4 次多一個完成的段落（每 10 段一個程式碼區塊），最後一段一直在長
+      // 中文與英數緊鄰（沒有空白）：回覆的中英間隙（text-autospace，chat.css）在串流時每次重排都要算，量得到它的成本
       const blocks = [];
-      for (let k = 0; k < Math.floor(i / 4); k++) blocks.push(k % 10 === 9 ? '<pre><code>const x' + k + ' = await load(' + k + ');' + String.fromCharCode(10) + 'console.log(x' + k + ');</code></pre>' : '<p>第 ' + k + ' 段：這一段已經寫完，內容是串流中的回覆文字，帶一點 <code>code</code> 與 <strong>粗體</strong>。</p>');
-      const html = blocks.join('') + '<p>' + '正在寫的這一段，'.repeat(1 + (i % 4) * 3) + '</p>';
+      for (let k = 0; k < Math.floor(i / 4); k++) blocks.push(k % 10 === 9 ? '<pre><code>const x' + k + ' = await load(' + k + ');' + String.fromCharCode(10) + 'console.log(x' + k + ');</code></pre>' : '<p>第 ' + k + ' 段：這一段已經寫完，內容是串流中的回覆文字，中英混排像真的回覆（用WebView2跑了3次dotnet build），帶一點 <code>code</code> 與 <strong>粗體</strong>。</p>');
+      const html = blocks.join('') + '<p>' + '正在寫的這一段跑了3次build，'.repeat(1 + (i % 4) * 3) + '</p>';
       window.__host({ type: 'item', conversationId: 'c1', item: { id: 'perf-s1', seq: 9000, kind: 'Assistant', status: 'Running', time: Date.now(), html } });
     }, 50);
   });

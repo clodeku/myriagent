@@ -31,7 +31,7 @@
 .acct-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, max(400px, calc((100% - 28px) / 3 - 1px))), 1fr)); gap: 14px; }
 .acard {
   position: relative; display: flex; flex-direction: column; gap: 14px; padding: 16px 16px 12px; overflow: hidden; isolation: isolate;
-  border-radius: 10px; border: 1px solid var(--border); background: var(--bg-raised);
+  border-radius: 10px; border: 1px solid var(--border); background: var(--bg-raised); box-shadow: var(--shadow-1);
   container: acard / inline-size; /* 窄的卡片（一排三張）用下方的 @container 縮小圓環與按鈕列 */
 }
 .acard::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--acc); }
@@ -165,7 +165,7 @@
 
 /* ───── CLI 卡 ───── */
 .cli-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 14px; }
-.ccard { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-raised); }
+.ccard { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-raised); box-shadow: var(--edge-hi), var(--shadow-1); }
 .ccard.has-update { border-color: color-mix(in srgb, var(--amber) 42%, var(--border)); }
 .ccard-head { display: flex; align-items: center; gap: 12px; }
 .ccard-head .pmark { width: 30px; height: 30px; }
@@ -505,7 +505,7 @@ button.cc-conv:hover { background: color-mix(in srgb, var(--tone-auto) 12%, tran
 /* 各電腦 CLI：每台一張卡、每種 CLI 一列 */
 .dcli-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; }
 .dcli-grid > .mx-empty { grid-column: 1 / -1; border: 1px dashed var(--border-2); border-radius: 10px; }
-.dcli { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-raised); }
+.dcli { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-raised); box-shadow: var(--edge-hi), var(--shadow-1); }
 .dcli-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .dcli-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--text-hi); }
 .dcli-head .tag { margin-left: 2px; }
@@ -555,8 +555,8 @@ button.cc-conv:hover { background: color-mix(in srgb, var(--tone-auto) 12%, tran
 
 /* ───── 電腦（改名、撤銷）、近期驗證的密碼框（WP3.5 步驟 10）───── */
 .dev-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; }
-.dev { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-raised); }
-.dev.is-revoked { opacity: .7; border-style: dashed; }
+.dev { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-raised); box-shadow: var(--edge-hi), var(--shadow-1); }
+.dev.is-revoked { opacity: .7; border-style: dashed; box-shadow: none; }
 .dev-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .dev-name { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; color: var(--text-hi); }
 .dev-head .tag { margin-left: 2px; }
@@ -595,7 +595,7 @@ button.cc-conv:hover { background: color-mix(in srgb, var(--tone-auto) 12%, tran
 .macct.remote-only .macct-bar { background: var(--text-3); }
 .macct.remote-only .macct-name { color: var(--text-2); font-weight: 500; }
 .macct.remote-only .macct-dot { box-sizing: border-box; background: transparent; border: 1px dashed var(--text-3); }
-.acard.remote-only { background: transparent; border-style: dashed; }
+.acard.remote-only { background: transparent; border-style: dashed; box-shadow: none; }
 .acard.remote-only::before { background: var(--text-3); }
 .acard.remote-only .acard-mark .pmark { filter: grayscale(1) opacity(.55); box-shadow: none; }
 .acard.remote-only .acard-name { color: var(--text-2); }
