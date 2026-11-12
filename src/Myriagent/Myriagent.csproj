@@ -61,6 +61,8 @@
     <InternalsVisibleTo Include="Myriagent.Tests" />
     <!-- 無頭的假裝置（tools/fake-device）：直接使用桌面的同步引擎 -->
     <InternalsVisibleTo Include="FakeDevice" />
+    <!-- 遠端桌面的擷取探針（tools/desk-probe）：只呼叫 RemoteDesk/DeskDiagnostics -->
+    <InternalsVisibleTo Include="desk-probe" />
   </ItemGroup>
 
   <ItemGroup>

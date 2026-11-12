@@ -13,6 +13,20 @@ export const MAX_TEXT = 1000;
 /** 多久沒有新的影格就要求整個畫面重送（影格在路上掉了、伺服器重連） */
 export const STALL_MS = 6000;
 
+/** 那台接下之後多久沒有畫面也沒有說明，就不再只顯示「連線到…」 */
+export const FIRST_FRAME_MS = 8000;
+
+/**
+ * 等第一張畫面時顯示的文字：一開始是「連線到…」；那台接下之後（waitedMs 從那時算）過了 FIRST_FRAME_MS 還沒有畫面也沒有說明，
+ * 改成可能的原因（2026-11-12 使用者回報：那台鎖定中，舊版什麼都不送，手機一直停在「連線到…」。新版的電腦會自己送說明，
+ * 這裡是那台還沒更新、或擷取卡住時的保險）
+ */
+export function waitingText(name, waitedMs) {
+  if (!(waitedMs >= FIRST_FRAME_MS)) return '連線到「' + name + '」…';
+  return '「' + name + '」接受了連線，但一直沒有送畫面過來。那台可能鎖定中或螢幕關著（鎖定畫面遠端看不到也操作不了，要在那台解除鎖定），'
+    + '也可能那台的版本還沒更新。畫面來了這裡會自動顯示';
+}
+
 /** 畫質的選項 */
 export const QUALITIES = [
   { id: 'auto', label: '自動' },

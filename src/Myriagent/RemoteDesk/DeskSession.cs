@@ -9,7 +9,9 @@ namespace Myriagent.RemoteDesk;
 /// 被看的電腦上的一個遠端桌面工作階段（docs/sync-protocol.md 14.16）：專用的擷取執行緒照 <see cref="DeskRules"/> 的流量控制送影格
 /// （未確認的影格與位元組有上限、依往返時間調每秒格數與畫質、沒變化時每 <see cref="DeskRules.Heartbeat"/> 送一個空影格），
 /// 看的一方的封包（輸入、確認、設定、結束）由 <see cref="OnPacket"/> 交進來。<see cref="DeskRules.AckTimeout"/> 沒有確認、看的一方結束、
-/// <see cref="Stop"/> 都會停下，停下時放開還按著的鍵並呼叫 <c>ended</c>（只一次，擷取執行緒或呼叫 Stop 的執行緒）
+/// <see cref="Stop"/> 都會停下，停下時放開還按著的鍵並呼叫 <c>ended</c>（只一次，擷取執行緒或呼叫 Stop 的執行緒）。
+/// 擷取不到（鎖定、安全桌面、一直要重來）時送 <c>status</c> 說明原因，不讓看的一方對著「連線到…」空等；鎖定與安全桌面期間不注入輸入。
+/// 畫面（<see cref="IDeskScreen"/>）由 <see cref="ReleaseScreen"/> 釋放：擷取執行緒還在用的時候等它結束才釋放
 /// </summary>
 internal sealed class DeskSession : IDisposable
 {
@@ -30,6 +32,12 @@ internal sealed class DeskSession : IDisposable
     private bool keyRequested = true;
     private bool stopped;
     private string? endReason;
+    private bool loopEnded;
+    private bool releaseRequested;
+    private bool screenReleased;
+
+    /// <summary>鎖定或安全桌面：輸入送不進去（鎖定時還會白白叫醒那台的螢幕），先不注入</summary>
+    private volatile bool inputBlocked;
 
     public DeskSession(string sessionId, string viewerLabel, IDeskScreen screen, Action<DeskPacket> send, Action<DeskSession, string> ended, TimeProvider? time = null)
     {
@@ -154,6 +162,40 @@ internal sealed class DeskSession : IDisposable
 
     public void Dispose() => Stop("disposed", "遠端桌面已經結束", notifyViewer: true);
 
+    /// <summary>
+    /// 釋放畫面（停下之後呼叫，任何執行緒）：擷取執行緒可能還在擷取的途中（讀回顯示卡的材質），這時釋放會讓它讀到已經釋放的記憶體——
+    /// 還在跑就記下來，由擷取執行緒結束時釋放
+    /// </summary>
+    public void ReleaseScreen()
+    {
+        lock (gate)
+        {
+            if (screenReleased)
+                return;
+            if (thread is not null && !loopEnded)
+            {
+                releaseRequested = true;
+                return;
+            }
+
+            screenReleased = true;
+        }
+
+        DisposeScreen();
+    }
+
+    private void DisposeScreen()
+    {
+        try
+        {
+            screen.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"遠端桌面 {SessionId} 的畫面釋放失敗：{ex.Message}");
+        }
+    }
+
     private void Ack(long ackSeq)
     {
         lock (gate)
@@ -170,6 +212,8 @@ internal sealed class DeskSession : IDisposable
 
     private void InjectSafely(IReadOnlyList<DeskInputEvent> events)
     {
+        if (inputBlocked)
+            return;
         try
         {
             var screens = screen.Screens();
@@ -201,6 +245,7 @@ internal sealed class DeskSession : IDisposable
         var lastScreen = -1;
         var lastSentMs = 0L;
         string? statusShown = null;
+        var statusSentMs = 0L;
         var needKey = false;
         DeskCursorState? lastCursor = null;
         var retries = 0;
@@ -268,30 +313,38 @@ internal sealed class DeskSession : IDisposable
 
                 current ??= new byte[w * h * 4];
                 var captured = screen.Capture(bounds, w, h, current, force: key);
-                if (captured == DeskCapture.Retry)
+                if (captured is DeskCapture.Retry or DeskCapture.Failed or DeskCapture.Locked)
                 {
-                    // 擷取的方式換了（大小可能不同）：馬上重來，連續太多次就等一下
+                    // 擷取不到。Retry 是擷取的方式換了（大小可能不同）：馬上重來，連續太多次就等一下、也告訴看的一方；
+                    // 鎖定、安全桌面：說明原因，每秒再看一次
+                    retries = captured == DeskCapture.Retry ? retries + 1 : 0;
+                    inputBlocked = captured != DeskCapture.Retry;
+                    // 同一個原因每隔一陣子重送：這段期間兩邊都沒有別的封包，伺服器太久沒有封包會忘掉工作階段（等別人解除鎖定可能很久）
+                    if (DeskScreenRules.StatusText(captured, retries) is { } text
+                        && (text != statusShown || NowMs() - statusSentMs >= DeskScreenRules.StatusRepeatMs))
+                    {
+                        statusShown = text;
+                        statusSentMs = NowMs();
+                        SendSafely(new DeskPacket(SessionId, DeskRules.Status, 0, new JObject { ["text"] = text }));
+                    }
+
                     needKey = true;
-                    lastSize = (0, 0);
-                    if (++retries > 3)
-                        Wait(500);
+                    if (captured == DeskCapture.Retry)
+                    {
+                        lastSize = (0, 0);
+                        if (retries > 3)
+                            Wait(500);
+                    }
+                    else
+                    {
+                        Wait(1000);
+                    }
+
                     continue;
                 }
 
                 retries = 0;
-                if (captured == DeskCapture.Failed)
-                {
-                    if (statusShown is null)
-                    {
-                        statusShown = "這台目前是鎖定畫面或系統管理員的確認畫面，遠端看不到也操作不了；那台的人解除之後就會恢復";
-                        SendSafely(new DeskPacket(SessionId, DeskRules.Status, 0, new JObject { ["text"] = statusShown }));
-                    }
-
-                    needKey = true;
-                    Wait(1000);
-                    continue;
-                }
-
+                inputBlocked = false;
                 if (statusShown is not null)
                 {
                     statusShown = null;
@@ -324,6 +377,28 @@ internal sealed class DeskSession : IDisposable
         {
             Log.Error($"遠端桌面 {SessionId} 的擷取停了", ex);
             Stop("error", "那台擷取畫面時發生錯誤，遠端桌面已經結束", notifyViewer: true);
+        }
+        finally
+        {
+            try
+            {
+                screen.CaptureEnded();
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"遠端桌面 {SessionId} 的擷取收尾失敗：{ex.Message}");
+            }
+
+            bool release;
+            lock (gate)
+            {
+                loopEnded = true;
+                release = releaseRequested && !screenReleased;
+                screenReleased |= release;
+            }
+
+            if (release)
+                DisposeScreen();
         }
     }
 

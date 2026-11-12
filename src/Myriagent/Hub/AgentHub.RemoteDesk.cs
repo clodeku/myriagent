@@ -224,6 +224,7 @@ internal sealed partial class AgentHub
     {
         deskPolicyTimer?.Dispose();
         deskPolicyTimer = null;
+        var ended = deskSession;
         deskSession = null;
         deskSessionShared = null;
         RemoteDeskActiveChanged?.Invoke();
@@ -237,7 +238,11 @@ internal sealed partial class AgentHub
         }
 
         deskIndicator = null;
-        deskScreen?.Dispose();
+        // 畫面由工作階段釋放：擷取執行緒可能還在擷取的途中，等它結束才能釋放（DeskSession.ReleaseScreen）
+        if (ended is not null)
+            ended.ReleaseScreen();
+        else
+            deskScreen?.Dispose();
         deskScreen = null;
     }
 

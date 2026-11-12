@@ -38,7 +38,7 @@ internal static class ScreenPresenceRules
 
     /// <summary>
     /// 沒有人看得到：鎖定、沒接在螢幕上，或螢幕關閉。螢幕關閉但這台正被 app 的遠端桌面看著（<paramref name="beingViewed"/>）時算看得到
-    /// （對方看到的是擷取的畫面，和實體螢幕開不開無關）；鎖定時對方看到的也是鎖定畫面，不必畫
+    /// （對方看到的是擷取的畫面，和實體螢幕開不開無關）；鎖定時遠端桌面擷取不到畫面（只送「鎖定中」的說明），不必畫
     /// </summary>
     public static bool Unseen(ScreenPresenceState state, bool beingViewed)
         => state.Locked || state.Detached || (state.DisplayOff && !beingViewed);

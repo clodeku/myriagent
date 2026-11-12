@@ -27,13 +27,13 @@ export function openRemoteDesk(deviceId, name) {
     assembler: R.createAssembler(), batch: R.createBatch(), sendTimer: 0, lastSendAt: 0,
     drawing: Promise.resolve(), lastFrameAt: 0, frameTimes: [], bytes: 0,
     w: 0, h: 0, screens: [], screen: 0, quality: 'auto', cursorImg: null, cursorHot: { x: 0, y: 0 }, cursorScale: 1, cursor: null,
-    keysDown: new Set(), touch: null, closed: false, opened: false, statusText: null,
+    keysDown: new Set(), touch: null, closed: false, opened: false, openedAt: 0, statusText: null, statusLocal: false,
     // 放大縮小（2026-11-10）：view 是 transform 的倍數與位置；fit 是符合框的大小；sentMaxWidth 是要求那台傳的寬度（那台預設 1920）
     view: { zoom: 1, left: 0, top: 0 }, fit: { width: 0, height: 0 }, box: { w: 0, h: 0 }, sentMaxWidth: 1920, sharpTimer: 0,
     pointers: new Map(), edge: null, edgeRaf: 0, lastMouse: null,
   };
   build(s);
-  setStatus('連線到「' + s.name + '」…');
+  setStatus(R.waitingText(s.name, 0), true);
   const cid = post({ cmd: 'deskOpen', deviceId, requestId: id });
   if (cid === null) { end('沒有送出：目前沒有連上伺服器'); return; }
   const mine = s;
@@ -42,6 +42,7 @@ export function openRemoteDesk(deviceId, name) {
       if (s !== mine) return;
       if (state !== 'done') { end(openFailText(code)); return; }
       mine.opened = true;
+      mine.openedAt = performance.now();
       // 手機：要求小一點的傳送寬度（省頻寬、畫面更快）；放大之後再要求清楚一點的
       requestSharpness(mine);
     },
@@ -127,9 +128,11 @@ function toolBtn(iconName, label, onClick) {
   return b;
 }
 
-function setStatus(text) {
+/** local：這一頁自己的等待文字（第一張畫面來了就收掉）；那台送來的說明由那台自己清掉 */
+function setStatus(text, local = false) {
   if (!s) return;
   s.statusText = text;
+  s.statusLocal = !!text && local;
   s.statusEl.textContent = text || '';
   setHidden(s.statusEl, !text);
 }
@@ -219,7 +222,7 @@ function queueFrame(s, frame) {
       setHidden(s.screenBtn, s.screens.length < 2);
     }
     if (frame.cur) applyCursor(s, frame.cur);
-    if (s.statusText && s.statusText.startsWith('連線到')) setStatus(null);
+    if (s.statusLocal) setStatus(null);
     const now = performance.now();
     s.lastFrameAt = now;
     s.frameTimes.push(now);
@@ -252,6 +255,11 @@ function b64(text) {
 function checkStall(mine) {
   if (s !== mine || !mine.opened || mine.closed) return;
   const now = performance.now();
+  // 那台接下了卻一直沒有畫面也沒有說明：不要一直停在「連線到…」
+  if (!mine.lastFrameAt && mine.statusLocal) {
+    const waiting = R.waitingText(mine.name, now - mine.openedAt);
+    if (waiting !== mine.statusText) setStatus(waiting, true);
+  }
   if (mine.lastFrameAt && now - mine.lastFrameAt > R.STALL_MS) {
     mine.lastFrameAt = now;
     sendPacket('config', { key: true });

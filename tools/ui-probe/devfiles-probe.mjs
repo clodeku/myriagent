@@ -312,6 +312,25 @@ export async function runDeviceFiles(ctx, vp, m) {
   await page.click('.menu.df-menu .menu-item:nth-of-type(3)');
   const open = await until(() => host.last('deskOpen'), 2000);
   check('deskOpenSent', !!open && open.deviceId === m.LAB && /^[0-9A-Z]{26}$/.test(open.requestId || '') && /^[0-9A-Z]{26}$/.test(open.commandId || ''), open);
+  // 那台接下了卻一直沒有畫面（鎖定中、螢幕關著、版本還不會說明）：不能一直停在「連線到…」；那台送來的說明照顯示、由那台清掉
+  const statusText = () => page.evaluate(() => {
+    const el = document.querySelector('.rd-status');
+    return el && !el.hidden ? el.textContent : '';
+  });
+  const connecting = await statusText();
+  const hint = await until(async () => { const t = await statusText(); return t && !t.startsWith('連線到') ? t : null; }, 12000);
+  check('deskNoFrameHint', connecting === '連線到「LAB-WORKSTATION」…' && !!hint && hint.includes('LAB-WORKSTATION') && hint.includes('鎖定'), { connecting, hint });
+  await shot(page, 'remotedesk-noframe-dark');
+  const lockedText = '那台電腦目前鎖定中：鎖定畫面遠端看不到也操作不了。要有人在那台電腦前解除鎖定，解除之後這裡會自動恢復';
+  host.send({ type: 'desk', sessionId: open.requestId, kind: 'status', seq: 0, body: { text: lockedText } });
+  const locked = await until(async () => ((await statusText()) === lockedText ? true : null), 2000);
+  await new Promise((r) => setTimeout(r, 1300));
+  const stillLocked = await statusText();
+  check('deskLockedStatus', !!locked && stillLocked === lockedText, { locked, stillLocked });
+  await shot(page, 'remotedesk-locked-dark');
+  host.send({ type: 'desk', sessionId: open.requestId, kind: 'status', seq: 0, body: { text: null } });
+  const cleared = await until(async () => ((await statusText()) === '' ? true : null), 2000);
+  check('deskStatusCleared', !!cleared, cleared);
   const jpeg = await page.evaluate(() => {
     const c = document.createElement('canvas');
     c.width = 64; c.height = 64;

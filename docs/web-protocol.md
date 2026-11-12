@@ -640,7 +640,7 @@ app 更新排空完成、要換版之前，宿主向每個視窗要輸入框裡�
 - 網頁（WP4.6）：只處理 30 秒內自己送過 `copyItem` 的同一個對話與項目，其他的（沒有要、過期）一律略過：不寫剪貼簿、不開框。按下「複製」之後按鈕是「複製中…」，寫入成功才標「已複製」；寫不進去時開 `copyFallback` 同一個文字框。
 
 ### `desk`〔電腦狀態〕
-遠端桌面（docs/sync-protocol.md 14.16）的封包，只送給開這個工作階段的視窗或連線：`{type:"desk", sessionId, kind, seq, body}`。`kind`：`frame`（影格：`w`、`h`、`key`〔整個畫面重送〕、`part`／`parts`〔太大拆成幾包，同一個 `seq`〕、`tiles:[{x, y, w, h, d}]`〔`d` 是 JPEG 的 base64〕、`screen`、第一包的 `screens:[{i, name, w, h, primary}]`、最後一包的 `cur {x, y, v, img?, hx?, hy?, sw?}`〔游標：位置是比例、形狀變了才帶 PNG〕）、`status`（`text` 是給人看的說明，null＝恢復）、`end`（`reason`、`text`）。
+遠端桌面（docs/sync-protocol.md 14.16）的封包，只送給開這個工作階段的視窗或連線：`{type:"desk", sessionId, kind, seq, body}`。`kind`：`frame`（影格：`w`、`h`、`key`〔整個畫面重送〕、`part`／`parts`〔太大拆成幾包，同一個 `seq`〕、`tiles:[{x, y, w, h, d}]`〔`d` 是 JPEG 的 base64〕、`screen`、第一包的 `screens:[{i, name, w, h, primary}]`、最後一包的 `cur {x, y, v, img?, hx?, hy?, sw?}`〔游標：位置是比例、形狀變了才帶 PNG〕）、`status`（`text` 是給人看的說明，null＝恢復；那台鎖定中、系統管理員的確認畫面、暫時擷取不到時送，同一句可能每分鐘重送一次）、`end`（`reason`、`text`）。網頁自己的等待文字（`remotedeskrules.waitingText`）：開啟後先是「連線到…」，那台接下之後 8 秒還沒有畫面也沒有 `status`，改成說明可能的原因（鎖定中、螢幕關著、那台的版本還沒更新），第一張畫面來了就收掉；那台送的 `status` 蓋過它、由那台清掉。
 - 網頁（`remotedesk.js`，規則 `remotedeskrules.js`）：放大縮小（2026-11-10）只在這裡做、不送給那台——工具列的縮小／倍數（按了回到符合視窗）／放大、Ctrl＋滾輪（觸控板捏合）、手機兩指捏合；放大時兩指一起移是平移（沒放大時是捲動那台的畫面），滑鼠貼著邊緣會往那邊捲；以 canvas 的 transform 做（合成器），倍數停下 0.5 秒後送 `config {maxWidth}` 請那台傳夠清楚的畫面（`wantedMaxWidth`）。同一個 `seq` 的包都到了才畫（區塊以 `createImageBitmap` 在背景解碼、依序畫），畫完以下一包 `desk input` 的 `ack` 確認；6 秒沒有新的影格送 `config {key:true}`。
 
 ### `fileTree`〔電腦狀態〕

@@ -116,6 +116,8 @@ public sealed class AgentHubRemoteDeskTests
         await rig.H.WaitUntilAsync(() => rig.Indicator!.Disposed, "提示列關掉");
         rig.H.OnUi(() => rig.H.Hub.RemoteDeskActive).Should().BeFalse();
         rig.Screen.Released.Should().Be(1);
+        await rig.H.WaitUntilAsync(() => rig.Screen.Lifecycle.Count == 2, "畫面釋放");
+        rig.Screen.Lifecycle.All.Should().Equal(["captureEnded", "dispose"], "擷取執行緒收尾之後才釋放畫面");
         (await rig.OpenAsync("01JDESKHUBTEST00000000000C")).State.Should().Be(RemoteResultStates.Done, "結束之後可以再開");
     }
 

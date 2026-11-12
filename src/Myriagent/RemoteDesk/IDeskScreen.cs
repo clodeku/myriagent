@@ -14,8 +14,14 @@ internal enum DeskCapture
     /// <summary>畫面和上一次一樣（DXGI 告訴我們沒有變化；緩衝沒動）</summary>
     Unchanged,
 
-    /// <summary>擷取不到（鎖定畫面、UAC 的安全桌面、顯示卡重設中）</summary>
+    /// <summary>擷取不到（UAC 等系統管理員確認畫面的安全桌面、顯示卡重設中）</summary>
     Failed,
+
+    /// <summary>
+    /// 這台鎖定中（<see cref="DeskSystem"/>）：鎖定畫面以一般權限看不到也操作不了。和 <see cref="Failed"/> 分開是因為判斷的來源不同——
+    /// 鎖定時輸入桌面的名稱不一定會變（2026-11-12 實測 Windows 11 26300：照樣是 Default，DXGI 一張都不給、GDI 給全黑或鎖定前的畫面）
+    /// </summary>
+    Locked,
 
     /// <summary>擷取的方式換了（DXGI 改成 GDI、重建桌面複製）：重新問 <see cref="IDeskScreen.OutputSize"/> 再擷取一次</summary>
     Retry,
@@ -60,6 +66,9 @@ internal interface IDeskScreen : IDisposable
 
     /// <summary>放開還按著的按鍵與滑鼠鍵（工作階段結束時）</summary>
     void ReleaseAll();
+
+    /// <summary>擷取執行緒要結束了（在擷取執行緒呼叫）：放開擷取期間「螢幕不要關」的要求</summary>
+    void CaptureEnded();
 }
 
 /// <summary>被看的電腦上的提示列（「〈發起者〉正在遠端操控這台電腦」與「中斷」）；UI 執行緒建立與關閉</summary>

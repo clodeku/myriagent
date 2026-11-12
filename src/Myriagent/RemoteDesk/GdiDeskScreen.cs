@@ -6,8 +6,8 @@ namespace Myriagent.RemoteDesk;
 
 /// <summary>
 /// 遠端桌面真的畫面與輸入（docs/sync-protocol.md 14.16）：GDI 的 StretchBlt 擷取（含滑鼠游標，HALFTONE 縮放），<c>SendInput</c> 注入。
-/// 一律以 app 的一般權限：輸入桌面不是使用者的桌面（鎖定畫面、UAC 的安全桌面）時不擷取（回 false），以系統管理員執行的視窗 Windows 本來就不讓一般權限的輸入進去——
-/// 這是刻意的邊界，不嘗試繞過
+/// 一律以 app 的一般權限：這台鎖定中（<see cref="DeskSystem.Locked"/>）、輸入桌面不是使用者的桌面（UAC 的安全桌面）時不擷取（<see cref="Blocked"/>），
+/// 以系統管理員執行的視窗 Windows 本來就不讓一般權限的輸入進去——這是刻意的邊界，不嘗試繞過
 /// </summary>
 internal sealed class GdiDeskScreen : IDeskScreen
 {
@@ -20,6 +20,10 @@ internal sealed class GdiDeskScreen : IDeskScreen
     private IntPtr bits;
     private int dibWidth;
     private int dibHeight;
+    private long lockCheckedTick;
+    private bool lockChecked;
+    private bool locked;
+    private bool displayHeld;
 
     public IReadOnlyList<DeskScreenInfo> Screens()
         => System.Windows.Forms.Screen.AllScreens
@@ -40,8 +44,57 @@ internal sealed class GdiDeskScreen : IDeskScreen
 
     /// <summary>GDI 每次都整張讀回（約 50 ms；DXGI 不能用時的備援）</summary>
     public DeskCapture Capture(DeskRect bounds, int width, int height, byte[] bgra, bool force)
+        => Blocked() ?? CaptureCore(bounds, width, height, bgra);
+
+    /// <summary>
+    /// 擷取之前（只在擷取執行緒呼叫）：這台現在不能擷取的原因，可以擷取回 null。鎖定每 <see cref="DeskSystem.RecheckMs"/> 問一次系統；
+    /// 順便照結果要求或放開「螢幕不要關」——鎖定時放開（沒有人在看畫面，讓那台的螢幕照常關閉）
+    /// </summary>
+    internal DeskCapture? Blocked()
     {
-        if (bgra.Length < width * height * 4 || !InputDesktopIsDefault())
+        var now = Environment.TickCount64;
+        if (!lockChecked || now - lockCheckedTick >= DeskSystem.RecheckMs)
+        {
+            lockChecked = true;
+            lockCheckedTick = now;
+            locked = DeskSystem.Locked();
+        }
+
+        DeskCapture? blocked = locked ? DeskCapture.Locked : InputDesktopIsDefault() ? null : DeskCapture.Failed;
+        HoldDisplay(blocked != DeskCapture.Locked);
+        return blocked;
+    }
+
+    /// <summary>擷取執行緒要結束了：放開「螢幕不要關」</summary>
+    public void CaptureEnded() => HoldDisplay(false);
+
+    private void HoldDisplay(bool hold)
+    {
+        if (hold == displayHeld)
+            return;
+        displayHeld = hold;
+        DeskSystem.KeepDisplayOn(hold);
+    }
+
+    /// <summary>
+    /// 叫醒關著的螢幕：送一個來回 1 像素的滑鼠移動（輸入會叫醒螢幕，游標回到原位）。螢幕關閉時 DWM 不出畫面，DXGI 等不到第一張
+    /// </summary>
+    internal static void WakeDisplay()
+    {
+        try
+        {
+            Send([Mouse(1, 0, 0, MouseMove), Mouse(-1, 0, 0, MouseMove)]);
+        }
+        catch (Win32Exception)
+        {
+            // 送不進去（安全桌面）：下一次擷取照擷取不到處理
+        }
+    }
+
+    /// <summary>不看能不能擷取、直接讀（<see cref="Blocked"/> 問過之後）</summary>
+    internal DeskCapture CaptureCore(DeskRect bounds, int width, int height, byte[] bgra)
+    {
+        if (bgra.Length < width * height * 4)
             return DeskCapture.Failed;
         var screenDc = GetDC(IntPtr.Zero);
         if (screenDc == IntPtr.Zero)
@@ -225,7 +278,10 @@ internal sealed class GdiDeskScreen : IDeskScreen
         dibHeight = height;
     }
 
-    /// <summary>輸入桌面是使用者的桌面（名稱是 Default）；鎖定畫面與 UAC 的安全桌面（Winlogon）以一般權限開不了或名稱不同</summary>
+    /// <summary>
+    /// 輸入桌面是使用者的桌面（名稱是 Default）；UAC 的安全桌面（Winlogon）以一般權限開不了或名稱不同。
+    /// 不能拿來判斷鎖定：鎖定時輸入桌面可能照樣是 Default（鎖定看 <see cref="DeskSystem.Locked"/>）
+    /// </summary>
     internal static bool InputDesktopIsDefault()
     {
         var desk = OpenInputDesktop(0, false, DesktopReadObjects);

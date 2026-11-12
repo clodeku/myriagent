@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   vkOf, comboEvents, normPoint, buttonOf, wheelUnits, createBatch, textEvents, createAssembler, fit, preferredMaxWidth,
-  touchKind, twoFingerWheel, endText, fpsOf, cursorScale,
+  touchKind, twoFingerWheel, endText, fpsOf, cursorScale, waitingText, FIRST_FRAME_MS,
   clampZoom, fitView, clampView, zoomAt, panBy, edgePan, twoFingerStep, twoFingerKind, zoomLabel, wantedMaxWidth, ZOOM_MAX, SPECIAL_KEYS, MAX_EVENTS, TAP_SLOP_PX, LONG_PRESS_MS, SEND_GAP_MS,
 } from '../../src/Myriagent/Web/remotedeskrules.js';
 
@@ -174,3 +174,13 @@ test('倍數文字與要求的傳送寬度', () => {
   assert.equal(wantedMaxWidth(1440, 1, 1.2, false), 1920);
   assert.equal(wantedMaxWidth(4000, 2, 8, false), 3840, '最多 3840');
 });
+
+test('等第一張畫面的文字：先是連線到，那台接下之後太久沒有畫面就說明可能的原因', () => {
+  assert.equal(waitingText('書房', 0), '連線到「書房」…');
+  assert.equal(waitingText('書房', FIRST_FRAME_MS - 1), '連線到「書房」…');
+  assert.equal(waitingText('書房', NaN), '連線到「書房」…', '還沒接下（沒有開始時間）不算等太久');
+  const late = waitingText('書房', FIRST_FRAME_MS);
+  assert.ok(late.includes('「書房」') && late.includes('鎖定') && late.includes('螢幕關著') && late.includes('還沒更新'), late);
+  assert.ok(!late.startsWith('連線到'));
+});
+

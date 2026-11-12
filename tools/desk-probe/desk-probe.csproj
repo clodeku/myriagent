@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    遠端桌面的擷取探針（docs/sync-protocol.md 14.16）：回報這台現在擷取得到什麼——鎖定、輸入桌面、螢幕開關，
+    GDI 直接讀、DXGI（不叫醒螢幕）、DXGI（叫醒螢幕，wake 才做）各多久拿到第一張、走哪一種、畫面是不是全黑。
+    只呼叫桌面組件的 RemoteDesk/DeskDiagnostics（桌面對 desk-probe 開了 InternalsVisibleTo），所以建置輸出帶著整份桌面的組件，
+    整個資料夾複製到別台就能執行（要 .NET 10 桌面執行階段，裝了 app 的電腦都有）。
+    不進 Myriagent.slnx：dotnet build tools/desk-probe -c Release；用法見 README.md。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>MyriagentTools.DeskProbe</RootNamespace>
+    <AssemblyName>desk-probe</AssemblyName>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <IsPackable>false</IsPackable>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Myriagent\Myriagent.csproj" />
+  </ItemGroup>
+
+</Project>
