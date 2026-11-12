@@ -13,7 +13,7 @@ import {
 } from './liverules.js';
 import { track } from './cmdtrack.js';
 import { deviceChoices, requestCopy, fetchFile, takeReloadDraft } from './liveview.js';
-import { createItem, updateItem, applyCardGate, markItemCopied, refreshTimes, settleRetryNotes, playStepPeek, stopStepPeek, tickToolElapsed, tickThinkTimes, tickCardAges, paintAgentUsage, chipMentions, paintDelegation } from './items.js';
+import { createItem, updateItem, fillsInPlace, applyCardGate, markItemCopied, refreshTimes, settleRetryNotes, playStepPeek, stopStepPeek, tickToolElapsed, tickThinkTimes, tickCardAges, paintAgentUsage, chipMentions, paintDelegation } from './items.js';
 import { mentionPlain } from './accountmentions.js';
 import { Composer } from './composer.js';
 import { FileDrawer } from './files.js';
@@ -552,7 +552,8 @@ export class ConvView {
     // 沒有捲動錨定的瀏覽器（iOS Safari 26 以前）：上方的項目變高（延遲載入的圖片、圖表）時自己補，看著的內容不跳（scrollanchor.js）
     this.anchor = new ScrollAnchor(this.scroller, this.itemsEl, () => !this.stick && this.visible);
     // 內容長高（串流、圖片載入、展開、執行列的輸出打開）或窗格變矮（分割、抽屜）時，貼底的對話維持在最底。
-    // 串流的每一批也靠它貼底（applyBatch 不再自己捲）：ResizeObserver 在瀏覽器排完版之後才呼叫，這時讀 scrollHeight 不必再排一次版
+    // ResizeObserver 在瀏覽器排完版之後才呼叫，這時讀 scrollHeight 不必再排一次版。串流的更新另由 app.js 提早套用後先貼好
+    // （pinTarget／pinTo：在影格之前捲，捲動事件才不用多等一格），到這裡已經在最底、什麼都不做；影格先到的那幾次照舊靠它
     this.resizeObs = new ResizeObserver(() => { if (this.stick && this.visible) this.scrollToBottom(); this.minimap.onLayout(); });
     this.resizeObs.observe(this.thread);
     this.resizeObs.observe(this.scroller);
@@ -959,8 +960,9 @@ export class ConvView {
     if (this.clearDirty) { this.clearDirty = false; this.applyClear(); }
     if (b.composer) { this.composer.setComposer(b.composer); this.settleQueued(b.composer); }
     this.afterChange(planTouched || !!b.header);
-    // 貼底交給 ResizeObserver（內容長高時、排完版之後）：以前這裡改完 DOM 馬上讀 scrollHeight，每一批都逼瀏覽器同步排一次版，
-    // 好幾個窗格同時串流時一個影格排好幾次（2026-10-23 剖析：串流時主執行緒的 JS 時間幾乎都在這裡）
+    // 貼底不在這裡做：以前這裡改完 DOM 馬上讀 scrollHeight，每一批都逼瀏覽器同步排一次版，
+    // 好幾個窗格同時串流時一個影格排好幾次（2026-10-23 剖析：串流時主執行緒的 JS 時間幾乎都在這裡）。
+    // 現在由 app.js 在整批都套用完之後一起做（提早套用：pinTarget 全部讀完再 pinTo，整批只排一次版），其餘靠 ResizeObserver
     if (added) this.maybeFocusCard();
   }
 
@@ -1631,6 +1633,29 @@ export class ConvView {
     if (sc.scrollHeight - sc.clientHeight - sc.scrollTop < 1) return;
     this.autoScrolled = true;
     sc.scrollTop = sc.scrollHeight;
+  }
+
+  /**
+   * 這則項目的更新是不是就地修補已經在畫面上的節點（app.js 的提早套用只收這種）：新項目、要整個重建的（卡片、換了種類）不算——
+   * 新建的 .it 有 content-visibility: auto，第一格畫面決定它看得到之前內容不算樣式、高度是估計的
+   */
+  patchesInPlace(itemId, item) {
+    const prev = this.items.get(itemId);
+    return !!item && !!prev && this.nodes.has(itemId) && fillsInPlace(prev.kind, item.kind);
+  }
+
+  /** 貼底要捲到哪（讀版面）：沒跟著最底、看不到、已經在最底的回 null（app.js 提早套用之後，整批讀完再一起 pinTo） */
+  pinTarget() {
+    if (!this.stick || !this.visible) return null;
+    const sc = this.scroller;
+    const h = sc.scrollHeight;
+    return h - sc.clientHeight - sc.scrollTop < 1 ? null : h;
+  }
+
+  /** 捲到 pinTarget 給的位置（同 scrollToBottom：記下是自己捲的，那一次捲動事件不必再讀位置） */
+  pinTo(h) {
+    this.autoScrolled = true;
+    this.scroller.scrollTop = h;
   }
 
   stickToBottom() {

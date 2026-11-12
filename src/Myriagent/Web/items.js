@@ -41,6 +41,11 @@ export function createItem(item, ctx) {
   return node;
 }
 
+/** 這種更新是不是就地修補原本的節點（updateItem 不會回傳新的節點）：種類沒變、那個種類有 fill */
+export function fillsInPlace(prevKind, kind) {
+  return prevKind === kind && !!(RENDER[kind] || RENDER.Notice).fill;
+}
+
 /** 就地更新；必要時回傳新的節點（呼叫端負責替換） */
 export function updateItem(node, item, prev, ctx) {
   const r = RENDER[item.kind] || RENDER.Notice;

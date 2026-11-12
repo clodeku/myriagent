@@ -1341,6 +1341,20 @@ export function touchUnsticks(startY, y) {
 }
 
 /**
+ * 項目的更新要不要不等影格、先在訊息的工作裡套用並貼底（app.js 的提早套用，2026-11-12）：
+ * 跟著最底的對話每長一次就要捲到最底，以前在影格裡（ResizeObserver）捲——瀏覽器的捲動事件要等下一格才送得出去，
+ * 每次串流更新之後就多畫一格什麼都沒變的畫面；在影格之前捲，事件就排進同一格。
+ * 只在真的會捲的時候提早：頁面看得到、沒有在拖分頁（拖曳期間更新先排著）、對話已載入、看得到、跟著最底。
+ * 排著的更新裡有會建新節點的（fresh：新項目、要整個重建的卡片、移除）就整批照舊在影格裡套用：新建的 .it 是
+ * content-visibility: auto，第一格畫面決定它看得到之前內容不算樣式、高度是估計的——提早貼底也省不到那一格，
+ * 而且影格之前讀頁面的程式（探針）會看到還沒有樣式的內容。
+ * s＝{ hidden, dragging, fresh, loaded, visible, stick }
+ */
+export function earlyFlushWanted(s) {
+  return !!s && s.hidden !== true && s.dragging !== true && s.fresh !== true && s.loaded === true && s.visible === true && s.stick === true;
+}
+
+/**
  * 使用者正在以觸控捲動：手指按著，或放開後 MOMENTUM_MAX_MS 內最近一次捲動事件不到 SCROLL_IDLE_MS（慣性還在動）。
  * 這段期間不把較早的項目插進最前面（分批渲染、載入較早的訊息）：插進去要改 scrollTop 才停得住原本看的位置，
  * iOS Safari 在捲動中改 scrollTop 會讓畫面跳一下、慣性中斷（使用者回報：手機往上滑一直閃）。

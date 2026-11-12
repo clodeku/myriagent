@@ -35,7 +35,7 @@ import { icon, brandMark } from './icons.js';
 import { post, onHostMessage, state, setAccounts, setConversations, setProviders, providerKeys, on, emit, hasBridge, isHub } from './store.js';
 import { retryNow } from './transport.js';
 import { remoteFromInit, applySync, applyDevices, trackDeviceLinks, nextLinkChange, reconnectGraceOf, connectionBanner, syncDot } from './remoterules.js';
-import { layoutDeviceFilter, applyItemPatch, patchReopenDue, mergeQueuedHeaders } from './liverules.js';
+import { layoutDeviceFilter, applyItemPatch, patchReopenDue, mergeQueuedHeaders, earlyFlushWanted } from './liverules.js';
 import { failureOf } from './sendrules.js';
 import { isAppleTouch, isHandheld } from './voicemsgrules.js';
 import { pageTitle } from './titlerules.js';
@@ -406,13 +406,37 @@ function scheduleFlush() {
   else rafId = requestAnimationFrame(flush);
 }
 
-function flush(frameTime) {
+// ───── 提早套用（2026-11-12）─────
+// 跟著最底的對話每長一次就要捲到最底。以前更新在影格裡套用、排完版後由 ResizeObserver 捲：捲動事件要等「下一格」才送得出去
+// （瀏覽器在每一格的開頭送事件，這一格的已經送完了），每次串流更新之後就多畫一格什麼都沒變的畫面。
+// 看得到、跟著最底的對話有項目更新時（liverules.earlyFlushWanted），改成不等影格：下一個工作就套用排著的更新、馬上貼底，
+// 捲動事件排進同一格。畫出來的是同一格（訊息到的時候離下一格還有時間），內容沒有比較晚；
+// 來不及（影格先到）就照舊在影格裡套用。MessageChannel 不像 setTimeout 有巢狀 4 ms 的下限，也不會被背景節流。
+// 只收「就地修補已經在畫面上的項目」（串流的回覆、工具的輸出）：排著的更新裡有會建新節點的（pendingFresh）整批照舊等影格
+const earlyChannel = typeof MessageChannel === 'function' ? new MessageChannel() : null;
+let earlyPosted = false;
+let pendingFresh = false; // 排著的更新裡有新項目、要整個重建的卡片或移除（ConvView.patchesInPlace 說不是就地修補的）
+if (earlyChannel) earlyChannel.port1.onmessage = () => { earlyPosted = false; if (pending.size && !pendingFresh && !document.hidden) flush(undefined, true); };
+
+/** 這個對話排進了一則項目的更新（item 是 null＝移除）：它現在看得到、跟著最底就提早套用（已經排了、頁面看不到、拖分頁中不排） */
+function flushEarlyIfPinned(id, itemId, item) {
+  const cv = ws.getConv(id);
+  if (!pendingFresh && !(cv && cv.patchesInPlace(itemId, item))) pendingFresh = true;
+  if (earlyPosted || !earlyChannel) return;
+  if (!earlyFlushWanted({ hidden: document.hidden, dragging: ws.tabDragActive(), fresh: pendingFresh, loaded: !!cv && cv.loaded, visible: !!cv && cv.visible, stick: !!cv && cv.stick })) return;
+  earlyPosted = true;
+  earlyChannel.port2.postMessage(0);
+}
+
+/** early：提早套用（訊息的工作裡、影格之前），套用完馬上貼底 */
+function flush(frameTime, early) {
   if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = 0; }
   // 拖曳分頁期間先排著（workspace.js 的 tabDragActive）：同一則項目只留最新的一版，拖完（tab-drag）一次補上
   if (ws.tabDragActive()) return;
   const batches = Array.from(pending.entries());
   pending.clear();
+  pendingFresh = false;
   for (const [id, b] of batches) {
     const cv = ws.getConv(id);
     if (!cv || !cv.loaded) continue;
@@ -420,8 +444,19 @@ function flush(frameTime) {
     if (b.header) ws.refreshTab(id);
   }
   // 這一格本來就要畫：快到點（或剛到點、正在等宿主這一格）的數字與標題解碼也在這一格換字（fxclock.js 的搭便車，
-  // 不另外要一格只為了換字的影格）。只在影格裡的 flush 搭：在訊息的工作裡換字，後面讀版面的程式會被逼著多算一次樣式
+  // 不另外要一格只為了換字的影格）。只在這裡搭（影格裡的、提早的都一樣），不在每則訊息的工作裡搭：
+  // 換字之後讀版面的程式會被逼著多算一次樣式——提早套用時下面的貼底本來就要排一次版，換的字一起算
   if (batches.length) ride(typeof frameTime === 'number' ? frameTime : undefined);
+  if (early === true) {
+    // 先全部讀（第一個讀的排一次版：這一格本來就要排的），再一起寫——寫 scrollTop 不會弄髒版面，但讀寫交錯沒有好處
+    const pins = [];
+    for (const [id] of batches) {
+      const cv = ws.getConv(id);
+      const to = cv && cv.loaded ? cv.pinTarget() : null;
+      if (to !== null) pins.push([cv, to]);
+    }
+    for (const [cv, to] of pins) cv.pinTo(to);
+  }
 }
 
 // 〔遠端〕即時更新的版本（itemPatch，patch1）：每個對話 id → 項目 id → 最後收到的即時版本 rv（item 帶 rv 時記下，持久的 item、removeItem、
@@ -452,6 +487,7 @@ function onItemPatch(m) {
   if (next) {
     queue(id).ops.set(m.id, next);
     noteRv(id, m.id, m.rv);
+    flushEarlyIfPinned(id, m.id, next);
     return;
   }
   noteRv(id, m.id, undefined);
@@ -531,9 +567,9 @@ function handle(m) {
       // （liverules.mergeQueuedHeaders；以前在這裡補空陣列，同一批兩份省略清單的標頭就把模型與指令清單清空，2026-11-08）
       if (ws.getConv(id) && m.header) { const q = queue(id); q.header = q.header ? mergeQueuedHeaders(q.header, m.header) : m.header; }
       break;
-    case 'item': if (ws.getConv(id) && m.item && m.item.id) { queue(id).ops.set(m.item.id, m.item); noteRv(id, m.item.id, m.rv); } break;
+    case 'item': if (ws.getConv(id) && m.item && m.item.id) { queue(id).ops.set(m.item.id, m.item); noteRv(id, m.item.id, m.rv); flushEarlyIfPinned(id, m.item.id, m.item); } break;
     case 'itemPatch': onItemPatch(m); break;
-    case 'removeItem': if (ws.getConv(id) && m.id) { queue(id).ops.set(m.id, null); noteRv(id, m.id, undefined); } break;
+    case 'removeItem': if (ws.getConv(id) && m.id) { queue(id).ops.set(m.id, null); noteRv(id, m.id, undefined); flushEarlyIfPinned(id, m.id, null); } break;
     case 'composer': if (ws.getConv(id)) queue(id).composer = m.composer || {}; break;
     case 'conversationClosed': pending.delete(id); liveRv.delete(id); forgetFlash(id); ws.handleClosed(id, m.replacedBy); markActive(); break; // 〔遠端〕replacedBy：草稿換成正式對話（D17）
     case 'focusConversation': ws.focusConversation(id); break;
@@ -689,6 +725,7 @@ function onInit(m) {
   state.appUpdate = m.appUpdate || null;
   renderAppBanner();
   pending.clear();
+  pendingFresh = false;
   cmdtrack.abandonAll(); // 〔遠端〕新的 init：還在等結果的指令都當成結果不明（D5；卡片解鎖並說明，不自動重送）
   if (isHub) live.onInit(m, !state.ready); // 〔遠端〕比對 app.build：伺服器換版時重新載入或顯示橫幅（D13）
   updateVersion(); // 瀏覽器版要在 live.onInit 記下第一則的 build 之後

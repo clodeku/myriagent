@@ -186,6 +186,12 @@ function markAnyRunning() {
 
 const BADGE_FX_MS = 520; // 徽章出現時彈出一下（fx.css 的 .fx-badge-in）
 
+// 帳戶卡每次 accounts、tokens 訊息都整張更新：值沒變不寫。卡片有 `.macct:has(.macct-run:not([hidden]))` 的規則，
+// 以 textContent 換掉文字節點（值一樣也換）、重寫 title 與 draggable 都會讓 Chrome 重新判斷 :has() 並重算卡片裡的元素，
+// 用量圓環正在跑的動畫還會在合成器上被重開一次、重開之後又多畫一格
+const setTitle = (el, v) => { if (el.title !== v) el.title = v; };
+const setText = (el, v) => { if (el.textContent !== v) el.textContent = v; };
+
 // ───── 帳戶名稱的跑馬燈（同標題列的 fitHeader）─────
 // 名稱的框變寬變窄（滑過時出現＋、執行中與等你回應的膠囊、背景程式的徽章、登入到期的標示、側欄拉寬、手機版展開）時 ResizeObserver 通知，
 // 名稱改了由 updateMiniCard 通知；都在下一影格一起量（ResizeObserver 回呼裡改 class 可能觸發 ResizeObserver loop 錯誤）
@@ -293,7 +299,7 @@ function updateMiniCard(card, a) {
   const remoteOnly = isRemoteOnly(a);
   setAcc(card, a.color, a.provider);
   card.classList.toggle('remote-only', remoteOnly);
-  card.draggable = !remoteOnly;
+  if (card.draggable !== !remoteOnly) card.draggable = !remoteOnly;
   // remoteOnly 沒有＋按鈕（不能用它開對話）：從 DOM 拿掉，不只是藏起來
   if (remoteOnly && e.newBtn.isConnected) e.newBtn.remove();
   else if (!remoteOnly && !e.newBtn.isConnected) e.top.append(e.newBtn);
@@ -310,27 +316,27 @@ function updateMiniCard(card, a) {
   card._badgesShown = true;
   showBadge(e.run, !!s.running, first);
   e.runN.set(s.running);
-  e.run.title = sessionTitle(s.running, s.otherRunning, '執行中');
+  setTitle(e.run, sessionTitle(s.running, s.otherRunning, '執行中'));
   showBadge(e.agents, !!s.subagents, first);
   e.agentsN.set(s.subagents);
-  e.agents.title = subagentsTooltip(a);
+  setTitle(e.agents, subagentsTooltip(a));
   showBadge(e.bg, !!s.background, first);
   e.bgN.set(s.background);
-  e.bg.title = sessionTitle(s.background, s.otherBackground, '等背景工作回報');
+  setTitle(e.bg, sessionTitle(s.background, s.otherBackground, '等背景工作回報'));
   showBadge(e.wait, !!s.waiting, first, e.wait.firstElementChild);
-  e.wait.title = sessionTitle(s.waiting, s.otherWaiting, '等待你回應');
+  setTitle(e.wait, sessionTitle(s.waiting, s.otherWaiting, '等待你回應'));
   showBadge(e.prog, !!s.programs, first);
   e.progN.set(s.programs);
-  e.prog.title = programsTitle(a);
-  card.dataset.status = a.status || 'checking';
+  setTitle(e.prog, programsTitle(a));
+  if (card.dataset.status !== (a.status || 'checking')) card.dataset.status = a.status || 'checking';
   const statusText = remoteOnly ? '這台未登入' : a.status === 'ready' ? (a.plan || a.provider) : (a.statusText || STATUS_LABEL[a.status] || '');
-  e.subText.textContent = statusText;
+  setText(e.subText, statusText);
   // email 不佔卡片的位置（儀表板的帳戶大卡才顯示），只放在滑過的提示；登入到期（Claude）也寫在這裡
   const lx = updateLogin(card, a, Date.now());
-  card.title = remoteOnly
+  setTitle(card, remoteOnly
     ? remoteOnlyTitle(a)
     : a.label + '（' + a.provider + (a.plan ? '・' + a.plan : '') + '）\n' + (a.email ? a.email + '\n' : '') + (a.statusText || '')
-      + (lx ? '\n' + loginExpiryText(lx, fmtDateTime(lx.at)) : '') + '\n點一下只顯示這個帳戶的對話';
+      + (lx ? '\n' + loginExpiryText(lx, fmtDateTime(lx.at)) : '') + '\n點一下只顯示這個帳戶的對話');
   card.classList.toggle('filtered', !remoteOnly && state.filterAccount === a.id);
   updateTokens(card, a);
   // 〔同步〕裝置小點：內容沒變不重畫
@@ -403,7 +409,7 @@ function updateLogin(card, a, now) {
 /** 今日 token 計數：顯示時取代狀態那一行的方案名稱；數字變了就解碼成新值（tokenfx.js） */
 function updateTokens(card, a) {
   const e = card._els;
-  if (isRemoteOnly(a)) card.title = remoteOnlyTitle(a);
+  if (isRemoteOnly(a)) setTitle(card, remoteOnlyTitle(a));
   const show = showTokens(a, state.tokens);
   setHidden(e.tok, !show);
   setHidden(e.subText, show);
@@ -413,7 +419,7 @@ function updateTokens(card, a) {
     const today = tokenSplit(t && t.today);
     e.tokIn.set(today.input);
     e.tokOut.set(today.output);
-    e.tok.title = tokensTitle(t, state.tokens.scope, a.provider);
+    setTitle(e.tok, tokensTitle(t, state.tokens.scope, a.provider));
   }
 }
 

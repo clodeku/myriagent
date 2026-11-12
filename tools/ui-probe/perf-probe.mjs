@@ -769,9 +769,24 @@ export async function runPerf(ctx) {
       }
       return out;
     });
+    // 這 1 秒內新建立的動畫（名稱 目標 → 個數）：每次更新都重建元素、動畫跟著從頭開始的（串流游標就是這樣被找到的）會一直出現在這裡
+    const animChurn = await app.page.evaluate(() => new Promise((resolve) => {
+      const seen = new WeakSet(document.getAnimations());
+      setTimeout(() => {
+        const out = {};
+        for (const a of document.getAnimations()) {
+          if (seen.has(a) || !a.effect || !a.effect.target) continue;
+          const t = a.effect.target;
+          const cls = typeof t.className === 'string' ? t.className : (t.className && t.className.baseVal) || t.tagName;
+          const k = (a instanceof CSSAnimation ? a.animationName : a instanceof CSSTransition ? 'trans:' + a.transitionProperty : 'waapi') + ' ' + String(cls).trim().split(/\s+/).slice(0, 2).join('.') + (a.effect.pseudoElement || '');
+          out[k] = (out[k] || 0) + 1;
+        }
+        resolve(out);
+      }, 1000);
+    }));
     const tally = {};
     for (const l of loops) tally[l.name + ' ' + l.target] = (tally[l.name + ' ' + l.target] || 0) + 1;
-    results[name] = Object.assign(m, { loops: loops.length, loopNames: [...new Set(loops.map((l) => l.name))].sort(), loopTally: tally, offscreenLoops: offscreen, transitions, mainThreadLoops: mainThread.length,
+    results[name] = Object.assign(m, { loops: loops.length, loopNames: [...new Set(loops.map((l) => l.name))].sort(), loopTally: tally, offscreenLoops: offscreen, animChurn, transitions, mainThreadLoops: mainThread.length,
       mainThreadLoopList: [...new Set(mainThread.map((l) => l.name + ' ' + l.target + ' [' + l.props.join(',') + ']'))], steadyTransitions: steady },
       events ? Object.assign(events, { vframes }) : {});
     if (o.blur) {

@@ -2156,6 +2156,58 @@ export async function runFx(ctx, vp) {
     && !!caretAgain && caretAgain.typing && caretAgain.anims.length === 0 && caretAgain.opacity === 1 && !caretDone.typing && !caretDone.running,
   { flow: caretFlow.slice(-2), rest: caretRest, caretAgain, caretDone });
 
+  // 提早貼底（2026-11-12，app.js 的提早套用）：跟著最底的對話收到項目的更新時不等影格，下一個工作就套用、貼底——
+  // 下一格的 rAF 回呼執行時（事件在每一格的開頭送，比 rAF 早）內容已經長高、已經在最底、那一次捲動事件也送過了，之後不再有捲動事件
+  // （以前在影格裡套用、排完版才捲：這個 rAF 時內容還沒變，捲動事件要到再下一格才送，多畫一格）。
+  // 影格剛好搶在前面的那幾次照舊在影格裡套用，五次裡至少四次要是提早的；往上捲著（不跟著最底）時不提早
+  await page.evaluate((sel) => { const sc = document.querySelector(sel + ' .scroller'); sc.scrollTop = sc.scrollHeight; }, SEL);
+  await sleep(200);
+  const pinRun = (count, keepUp) => page.evaluate(({ sel, id, count, keepUp }) => new Promise((resolve) => {
+    const sc = document.querySelector(sel + ' .scroller');
+    const out = [];
+    let n = 0;
+    const one = () => {
+      let scrolls = 0;
+      const onScroll = () => { scrolls++; };
+      sc.addEventListener('scroll', onScroll, { passive: true });
+      const h0 = sc.scrollHeight;
+      requestAnimationFrame(() => {
+        const first = { grew: Math.round(sc.scrollHeight - h0), dist: Math.round(sc.scrollHeight - sc.clientHeight - sc.scrollTop), scrolls };
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          sc.removeEventListener('scroll', onScroll);
+          out.push(Object.assign(first, { scrollsAfter: scrolls }));
+          if (++n < count) setTimeout(one, 70); else resolve(out);
+        }));
+      });
+      let html = '';
+      for (let i = 0; i <= n; i++) html += '<p>第 ' + i + ' 段：' + '提早貼底的字，'.repeat(40) + '</p>';
+      window.__host({ type: 'item', conversationId: id, item: { id: keepUp ? 'fxpin-up' : 'fxpin', kind: 'Assistant', status: 'Running', time: Date.now(), html } });
+    };
+    one();
+  }), { sel: SEL, id: C, count, keepUp });
+  // 先放好那一則再量：新項目的進場（補輪次的間隔等）會在後面的影格再長一次，不是要量的東西
+  await host.pushItem(C, item('fxpin', { status: 'Running', html: '<p>提早貼底</p>' }));
+  await sleep(400);
+  const pinned = await pinRun(5, false);
+  const earlyOnes = pinned.filter((x) => x.grew > 0 && x.dist < 1 && x.scrolls === 1 && x.scrollsAfter === 1);
+  await host.pushItem(C, item('fxpin', { status: 'Done', html: '<p>提早貼底</p>' }));
+  await sleep(300);
+  // 往上捲著在看舊訊息：照舊在影格裡套用（rAF 回呼時內容還沒變），也不捲。
+  // 用真的滾輪往上（wheel 的處理當下就不跟了）；以程式改 scrollTop 要等捲動事件才不跟，會和上面收尾那則的提早套用搶先後
+  const pinBox = await page.locator(`${SEL} .scroller`).boundingBox();
+  await page.mouse.move(pinBox.x + pinBox.width / 2, pinBox.y + pinBox.height / 2);
+  await page.mouse.wheel(0, -1200);
+  await sleep(600);
+  await host.pushItem(C, item('fxpin-up', { status: 'Running', html: '<p>往上捲著</p>' }));
+  await sleep(400);
+  const unpinned = await pinRun(2, true);
+  await host.pushItem(C, item('fxpin-up', { status: 'Done', html: '<p>往上捲著</p>' }));
+  await sleep(200);
+  await page.evaluate((sel) => { const sc = document.querySelector(sel + ' .scroller'); sc.scrollTop = sc.scrollHeight; }, SEL);
+  await sleep(300);
+  check('fxEarlyPin', pinned.length === 5 && earlyOnes.length >= 4 && pinned.every((x) => x.scrollsAfter <= 1)
+    && unpinned.length === 2 && unpinned.every((x) => x.grew === 0 && x.dist > 200 && x.scrolls === 0 && x.scrollsAfter === 0), { pinned, unpinned });
+
   // 第十一批：分享給協作人的標記——側欄列是小人像＋人數、分頁是小人像，滑過列出名稱；不分享了就拿掉
   const collab11 = { list: [{ id: 'u1', userName: 'ming', displayName: '小明' }, { id: 'u2', userName: 'hua', displayName: '小華' }], shares: { [C]: ['u1', 'u2'] } };
   await sendNow(page, [{ type: 'collaborators', collaborators: collab11 }]);

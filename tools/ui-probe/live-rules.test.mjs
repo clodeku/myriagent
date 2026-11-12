@@ -1710,6 +1710,42 @@ test('touchUnsticks_手指往下拖超過6px才算_往上拖與不是數字的�
   assert.equal(L.touchUnsticks(300, undefined), false);
 });
 
+test('earlyFlushWanted_看得到又跟著最底的對話才提早套用', () => {
+  const pinned = { hidden: false, dragging: false, fresh: false, loaded: true, visible: true, stick: true };
+  assert.equal(L.earlyFlushWanted(pinned), true);
+  assert.equal(L.earlyFlushWanted({ ...pinned, fresh: true }), false, '排著的更新裡有會建新節點的：整批照舊在影格裡套用');
+  assert.equal(L.earlyFlushWanted({ ...pinned, hidden: true }), false, '頁面看不到：沒有影格，照舊由計時器套用');
+  assert.equal(L.earlyFlushWanted({ ...pinned, dragging: true }), false, '拖分頁期間更新先排著');
+  assert.equal(L.earlyFlushWanted({ ...pinned, loaded: false }), false, '還沒載入的對話');
+  assert.equal(L.earlyFlushWanted({ ...pinned, visible: false }), false, '背景分頁：不會捲，照舊在影格裡套用');
+  assert.equal(L.earlyFlushWanted({ ...pinned, stick: false }), false, '往上捲著在看舊訊息：不會捲');
+  assert.equal(L.earlyFlushWanted(null), false);
+  assert.equal(L.earlyFlushWanted({}), false, '缺欄位一律不提早');
+});
+
+test('app.js_項目的更新才提早套用_提早套用之後整批讀完再一起貼底', () => {
+  const app = readFileSync(path.join(webDir, 'app.js'), 'utf8');
+  // 三種項目的更新都會排提早套用；標頭與輸入區的更新不排（不會讓對話欄長高）
+  for (const kind of ["case 'item':", "case 'removeItem':"]) {
+    const line = app.split('\n').find((l) => l.includes(kind));
+    assert.ok(line && line.includes('flushEarlyIfPinned(id, '), kind + ' 要排提早套用');
+  }
+  assert.match(app, /queue\(id\)\.ops\.set\(m\.id, next\);\s*noteRv\(id, m\.id, m\.rv\);\s*flushEarlyIfPinned\(id, m\.id, next\);/, 'itemPatch 要排提早套用');
+  // 移除一律當成不是就地修補的（傳 null）；清空佇列的兩處都要把 pendingFresh 放回去，不然之後永遠不提早、或帶著新項目提早
+  assert.match(app, /flushEarlyIfPinned\(id, m\.id, null\)/, 'removeItem 傳 null');
+  assert.equal(app.split('pending.clear();').length - 1, app.split(/pending\.clear\(\);\s*pendingFresh = false;/).length - 1, '清空佇列就放回 pendingFresh');
+  assert.match(app, /if \(pending\.size && !pendingFresh && !document\.hidden\) flush\(undefined, true\)/, '提早套用的那一刻再看一次 pendingFresh');
+  for (const kind of ["case 'header':", "case 'composer':"]) {
+    const at = app.indexOf(kind);
+    assert.ok(at > 0 && !app.slice(at, app.indexOf('break;', at)).includes('flushEarlyIfPinned'), kind + ' 不排提早套用');
+  }
+  // 先讀（pinTarget）完再寫（pinTo）：讀寫交錯會在一個工作裡排好幾次版
+  const early = app.slice(app.indexOf('if (early === true)'));
+  assert.ok(early.indexOf('pinTarget()') > 0 && early.indexOf('pinTarget()') < early.indexOf('pinTo(to)'), '先 pinTarget 再 pinTo');
+  // 不用 setTimeout 排（巢狀的計時器有 4 ms 的下限，會輸給影格）
+  assert.match(app, /earlyChannel\.port2\.postMessage\(0\)/);
+});
+
 test('touchScrolling_手指按著_放開後慣性還在動才算_沒摸過的捲動事件不算', () => {
   assert.equal(L.touchScrolling({ touching: true, touchEndAt: null, lastScrollAt: null }, 0), true);
   assert.equal(L.touchScrolling(null, 0), false);
