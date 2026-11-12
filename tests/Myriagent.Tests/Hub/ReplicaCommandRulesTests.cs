@@ -42,8 +42,9 @@ public sealed class ReplicaCommandRulesTests
     public void Writes與WP4點3的白名單沒有交集_寫入一定被擋下才提示()
     {
         // 攔不攔由 WP4.3 的白名單決定（fail-closed）；要提示「唯讀」的寫入不能出現在白名單裡，否則它會被執行（WP4.4 計畫步 11）
-        AgentHub.ReplicaCommands.Should().BeEquivalentTo(new[] { "open", "close", "loadOlder", "copyItem", "popout", "tabDrag", "tabDragEnd", "tabMoveIn", "moveToNewWindow" },
-            "前提：WP4.3 的白名單，加上多視窗的分頁搬移（只換這台的哪個視窗顯示）");
+        AgentHub.ReplicaCommands.Should().BeEquivalentTo(
+            new[] { "open", "close", "loadOlder", "copyItem", "popout", "tabDrag", "tabDragEnd", "tabMoveIn", "moveToNewWindow", "composerDraft", "promptHistory" },
+            "前提：WP4.3 的白名單，加上多視窗的分頁搬移（只換這台的哪個視窗顯示）、輸入框的草稿（不碰對話本身，只轉給其他視窗與同步）與歷史指令（只讀）");
         ReplicaCommandRules.Writes.Intersect(AgentHub.ReplicaCommands).Should().BeEmpty();
         foreach (var name in AgentHub.ReplicaCommands)
             ReplicaCommandRules.Blocks(name).Should().BeFalse($"{name} 是只看的指令，不提示");

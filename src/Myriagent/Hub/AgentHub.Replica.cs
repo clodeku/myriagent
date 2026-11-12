@@ -44,12 +44,16 @@ internal sealed partial class AgentHub
     /// <summary>
     /// 網頁指令裡複本可以用的（只看、不改）；其他的一律不處理（唯讀。遠端指令另由閘門 5c 拒絕）。
     /// 多視窗的分頁搬移（tabDrag、tabDragEnd、tabMoveIn、moveToNewWindow）只是換一個這台的視窗顯示，不碰對話本身
-    /// （2026-10-25 以前擋著：其他電腦的對話拖到別的視窗放開後沒搬過去）
+    /// （2026-10-25 以前擋著：其他電腦的對話拖到別的視窗放開後沒搬過去）。
+    /// 輸入框的草稿（composerDraft）也不碰對話本身：只轉給這台的其他視窗，那台同步了內容的再送上伺服器（AgentHub.ComposerDrafts.cs
+    /// 的 CanSyncComposerDraft；2026-11-12 以前擋著：在這台對其他電腦的對話打到一半的字，別台與瀏覽器版都看不到，記錄每次打字多一行）。
+    /// 「最近的指令」的歷史指令（promptHistory）只讀這台已經有的副本項目（同日以前擋著：網頁等不到回覆，空等 1.5 秒才用已載入的項目開清單）
     /// </summary>
     internal static IReadOnlySet<string> ReplicaCommands { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         "open", "close", "loadOlder", "copyItem", "popout",
         "tabDrag", "tabDragEnd", "tabMoveIn", "moveToNewWindow",
+        "composerDraft", "promptHistory",
     };
 
     private bool showReplicas;

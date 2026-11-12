@@ -90,6 +90,48 @@ public sealed class AgentHubComposerDraftsTests
     }
 
     [Fact]
+    public async Task 其他電腦的對話_那台同步了內容的照樣轉給其他視窗並送給同步_沒同步內容的不送()
+    {
+        // 2026-11-12：副本的指令白名單漏了 composerDraft，在這台對其他電腦的對話打的字一律被「唯讀」擋下、沒有同步出去
+        using var h = new HubHarness();
+        var bridge = new DraftBridge();
+        var synced = new string('b', 32);
+        var metaOnly = new string('c', 32);
+        var owner = "d_" + new string('B', 26);
+        h.Ui.Invoke(() =>
+        {
+            h.Hub.AttachSync(bridge);
+            h.Hub.ShowReplicas = true;
+            h.Hub.ApplyReplicaDelta(new ReplicaDelta(
+            [
+                new ReplicaMeta(synced, owner, new AgentConversation { Id = synced, Provider = AgentProvider.Claude, Title = "別台的對話", AccountId = string.Empty },
+                    Running: false, Waiting: false, ItemsAvailable: true),
+                new ReplicaMeta(metaOnly, owner, new AgentConversation { Id = metaOnly, Provider = AgentProvider.Claude, Title = "只有清單", AccountId = string.Empty },
+                    Running: false, Waiting: false, ItemsAvailable: false),
+            ], [], []));
+        });
+        await h.Ui.DrainAsync();
+        h.OnUi(() => h.Hub.IsReplicaConversation(synced)).Should().BeTrue("前提：是其他電腦的對話");
+        var other = h.AddView("other");
+        var mark = other.Mark();
+        var mainMark = h.Main.Mark();
+
+        h.Command(h.Main, "composerDraft", new { conversationId = synced, text = "在這台打給別台的字" });
+
+        var d = Single(await other.WaitForAsync("composerDrafts", since: mark));
+        d.Value<string>("conversationId").Should().Be(synced, "其他電腦的對話用線上 id");
+        d.Value<string>("text").Should().Be("在這台打給別台的字");
+        bridge.Published.Should().Equal((synced, "在這台打給別台的字"));
+        h.Main.Messages("toast", mainMark).Should().BeEmpty("不是寫入，不提示唯讀");
+
+        h.Command(h.Main, "composerDraft", new { conversationId = metaOnly, text = "內容沒上線的對話" });
+        h.Command(h.Main, "composerDraft", new { conversationId = synced, text = "" });
+        await h.Ui.DrainAsync();
+        bridge.Published.Should().Equal([(synced, "在這台打給別台的字"), (synced, "")], "那台沒同步內容的不送；送出後清掉的照送");
+        other.Messages("composerDrafts", mark).Should().HaveCount(3, "這台的其他視窗三則都收到");
+    }
+
+    [Fact]
     public async Task 不在這台的對話與太長的字_略過()
     {
         using var h = new HubHarness();

@@ -1743,6 +1743,38 @@ public sealed class AgentHubTests
     }
 
     [Fact]
+    public async Task PromptHistory_其他電腦的對話_照這台有的副本項目回()
+    {
+        // 2026-11-12：副本的指令白名單漏了 promptHistory，網頁等不到回覆、空等 1.5 秒才用已載入的項目開清單
+        using var h = new HubHarness();
+        var replica = new string('b', 32);
+        h.Ui.Invoke(() =>
+        {
+            h.Hub.ShowReplicas = true;
+            h.Hub.ApplyReplicaDelta(new ReplicaDelta(
+                [new ReplicaMeta(replica, "d_" + new string('B', 26), new AgentConversation { Id = replica, Provider = AgentProvider.Claude, Title = "別台的對話", AccountId = string.Empty },
+                    Running: false, Waiting: false, ItemsAvailable: true)],
+                [],
+                [new ReplicaItems(replica, Reset: true,
+                    [
+                        new AgentChatItem { Kind = AgentItemKind.User, Text = "別台送的第一則" },
+                        new AgentChatItem { Kind = AgentItemKind.Assistant, Text = "回覆" },
+                        new AgentChatItem { Kind = AgentItemKind.User, Text = "別台送的第二則" },
+                    ], [])]));
+        });
+        await h.Ui.DrainAsync();
+        h.OnUi(() => h.Hub.IsReplicaConversation(replica)).Should().BeTrue("前提：是其他電腦的對話");
+        var mark = h.Main.Mark();
+
+        h.Command(h.Main, "promptHistory", new { conversationId = replica, requestId = "ph-r" });
+
+        var reply = h.Main.Messages("promptHistory", mark, replica).Should().ContainSingle().Subject;
+        reply.Value<string>("requestId").Should().Be("ph-r");
+        ((JArray)reply["prompts"]!).Select(p => p.Value<string>("text")).Should().Equal("別台送的第二則", "別台送的第一則");
+        h.Main.Messages("toast", mark).Should().BeEmpty("只讀，不提示唯讀");
+    }
+
+    [Fact]
     public async Task 項目帶建立順序_系統時間往回調後新項目仍排在最後()
     {
         // 網頁只載入最後 80 筆時，靠 seq 分辨「新項目」與「還沒載入的較早項目」。
