@@ -343,14 +343,15 @@ async function startBgStream(page, host, headerMs, opts = {}) {
   const shownIds = opts.shown || BG_SHOWN, hiddenIds = opts.hidden || BG_HIDDEN;
   const ids = [...shownIds, ...hiddenIds];
   const headers = Object.fromEntries(ids.map((id) => [id, host.conv(id).header]));
-  await page.evaluate(({ shown, hidden, headers, accounts, tokens, headerMs, noHidden, noShown, noAccounts }) => {
+  await page.evaluate(({ shown, hidden, headers, accounts, tokens, headerMs, noHidden, noShown, noAccounts, grow }) => {
     let tick = 0;
     const copy = (x) => JSON.parse(JSON.stringify(x));
     const reply = (id, t) => {
       const cyc = t % 60;
       let html = '';
-      for (let p = 0; p <= cyc / 4; p++) html += '<p>' + '這是串流中的回覆文字，'.repeat(8) + p + '</p>';
-      if (cyc > 20) html += '<pre><code class="language-js">const a = ' + cyc + ';' + String.fromCharCode(10) + 'console.log(a);</code></pre>';
+      // grow：最後一段每一拍都多幾個字（真的串流是這樣：最後一段一直在長、每次更新都被換掉），不加程式碼框
+      for (let p = 0; p <= cyc / 4; p++) html += '<p>' + '這是串流中的回覆文字，'.repeat(8) + p + (grow && p === Math.floor(cyc / 4) ? '再多幾個字，'.repeat(cyc % 4) : '') + '</p>';
+      if (cyc > 20 && !grow) html += '<pre><code class="language-js">const a = ' + cyc + ';' + String.fromCharCode(10) + 'console.log(a);</code></pre>';
       window.__host({ type: 'item', conversationId: id, item: { id: id + '-live-a' + Math.floor(t / 60), seq: 100000 + t, kind: 'Assistant', status: 'Running', time: Date.now(), html } });
     };
     window.__perfStream = setInterval(() => {
@@ -371,7 +372,7 @@ async function startBgStream(page, host, headerMs, opts = {}) {
       }
     }, 50);
   }, { shown: shownIds, hidden: hiddenIds, headers, accounts: host.accounts, tokens: opts.noTokens ? null : host.tokens || null, headerMs,
-    noHidden: !!opts.noHidden, noShown: !!opts.noShown, noAccounts: !!opts.noAccounts });
+    noHidden: !!opts.noHidden, noShown: !!opts.noShown, noAccounts: !!opts.noAccounts, grow: !!opts.grow });
 }
 
 // ───── 窗格與分頁很多的版面（2026-11-08）：9 個窗格、分頁全部放左側、101 個分頁、7 個執行中（3 個看得見在串流、4 個在背景分頁），電腦狀態面板開著 ─────
@@ -512,8 +513,14 @@ const GEOMETRY = ['width', 'height', 'inline-size', 'block-size', 'top', 'left',
  * 頁面內：所有動畫歸零暫停後，每個元素（含有內容的 ::before、::after）的計算樣式（屬性依名稱排序；自訂屬性列舉的順序每次載入不同）
  * 取 53 位元雜湊；動畫與轉場另列（路徑、偽元素、名稱、狀態）；最後恢復播放
  */
-function styleSnapshot(skip) {
+/** MYRIAGENT_PERF_STYLES_DUMP=<路徑的一段>：快照另外存這些元素完整的計算樣式（style-diff 說不同時，看是哪個屬性） */
+const STYLE_DUMP = process.env.MYRIAGENT_PERF_STYLES_DUMP || null;
+
+function styleSnapshot(arg) {
+  const skip = Array.isArray(arg) ? arg : arg.skip;
+  const dumpNeedle = Array.isArray(arg) ? null : arg.dump;
   const skipSet = new Set(skip);
+  const dump = {};
   const hash = (str) => {
     let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
     for (let i = 0; i < str.length; i++) { const ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
@@ -533,22 +540,25 @@ function styleSnapshot(skip) {
     anims.push(pathOf(t) + (a.effect.pseudoElement || '') + ' ' + (a instanceof CSSAnimation ? 'anim:' + a.animationName : a instanceof CSSTransition ? 'trans:' + a.transitionProperty : 'other') + ' ' + a.playState);
   }
   for (const a of document.getAnimations()) { try { a.pause(); a.currentTime = 0; } catch { /* 忽略 */ } }
-  const digest = (cs) => {
+  // dumpNeedle（MYRIAGENT_PERF_STYLES_DUMP）：路徑含這段字的元素另外存完整的計算樣式（兩版不同時看是哪個屬性）
+  const digest = (cs, path) => {
     const o = [];
     for (let i = 0; i < cs.length; i++) { const k = cs[i]; if (!skipSet.has(k)) o.push(k + ':' + cs.getPropertyValue(k)); }
-    return hash(o.sort().join(';'));
+    const text = o.sort().join(';');
+    if (dumpNeedle && path.includes(dumpNeedle)) dump[path] = text;
+    return hash(text);
   };
   const styles = {};
   for (const el of document.querySelectorAll('*')) {
     const p = pathOf(el);
-    styles[p] = digest(getComputedStyle(el));
+    styles[p] = digest(getComputedStyle(el), p);
     for (const pe of ['::before', '::after']) {
       const cs = getComputedStyle(el, pe);
-      if (cs.content !== 'none' && cs.content !== 'normal') styles[p + pe] = digest(cs);
+      if (cs.content !== 'none' && cs.content !== 'normal') styles[p + pe] = digest(cs, p + pe);
     }
   }
   for (const a of document.getAnimations()) { try { a.play(); } catch { /* 忽略 */ } }
-  return { anims: anims.sort(), styles };
+  return dumpNeedle ? { anims: anims.sort(), styles, dump } : { anims: anims.sort(), styles };
 }
 
 /** 各種狀態的計算樣式快照：帳戶執行中、全部停、只有一個、收起側欄、儀表板、彈出視窗、關掉動態效果、減少動態、淺色主題 */
@@ -558,7 +568,7 @@ async function runStyles(ctx, file) {
   const remote = { mode: 'desktop', deviceId: SELF, devices: devices(NOW), sync: syncStatus(NOW, 'online') };
   const layout = Object.assign({}, FOUR_PANES, { monitor: 'open' });
   const result = {};
-  const take = async (name, page) => { await sleep(700); result[name] = await page.evaluate(styleSnapshot, GEOMETRY); };
+  const take = async (name, page) => { await sleep(700); result[name] = await page.evaluate(styleSnapshot, STYLE_DUMP ? { skip: GEOMETRY, dump: STYLE_DUMP } : GEOMETRY); };
   const setRunning = (page, host, fn) => {
     for (const a of host.accounts) a.sessions = Object.assign({}, a.sessions, fn(a));
     return page.evaluate((acc) => window.__host({ type: 'accounts', accounts: acc }), JSON.parse(JSON.stringify(host.accounts)));
@@ -875,7 +885,8 @@ export async function runPerf(ctx) {
   // 只跑窗格與分頁很多的版面（MYRIAGENT_PERF_MANY=1）：9 窗格側排、101 個分頁、3 個看得見的在串流、4 個在背景分頁執行
   if (process.env.MYRIAGENT_PERF_MANY) {
     const opts = Object.fromEntries(String(process.env.MYRIAGENT_PERF_BG_OFF || '').split(',').filter(Boolean).map((k) => [k, true]));
-    await scenario('many', { vp: { w: 2480, h: 1400 }, layout: MANY_PANES, hostSetup: manySetup([...MANY_SHOWN, ...MANY_HIDDEN]), keys: true, settle: 2000 },
+    // MYRIAGENT_PERF_CSS：多疊一段 CSS（A/B 用）；MYRIAGENT_PERF_BG_OFF 的 grow：最後一段每一拍都在長（真的串流）
+    await scenario('many', { vp: { w: 2480, h: 1400 }, layout: MANY_PANES, hostSetup: manySetup([...MANY_SHOWN, ...MANY_HIDDEN]), keys: true, settle: 2000, css: process.env.MYRIAGENT_PERF_CSS || undefined },
       (page, host) => startBgStream(page, host, 250, Object.assign({ shown: MANY_SHOWN, hidden: MANY_HIDDEN }, opts)));
     check('perfMany', true, results.many);
     const v = results.many;

@@ -10,6 +10,53 @@ internal static class NativeMethods
     private const int DWMWA_CAPTION_COLOR = 35;
     private const int DWMWA_TEXT_COLOR = 36;
     private const int ASFW_ANY = -1;
+    private const int WM_POWERBROADCAST = 0x0218;
+    private const int PBT_POWERSETTINGCHANGE = 0x8013;
+
+    /// <summary>GUID_SESSION_DISPLAY_STATUS：這個工作階段的螢幕開關（0 關閉、1 開啟、2 變暗）。遠端桌面連進來時是遠端那邊的螢幕</summary>
+    private static readonly Guid SessionDisplayStatus = new("2B84C20E-AD23-4ddf-93DB-05FFBD7EFCA5");
+
+    /// <summary>登記這個工作階段的螢幕開關通知（WM_POWERBROADCAST；登記時系統先送一次目前的狀態）。失敗回 Zero（不通知，當成一直開著）</summary>
+    public static IntPtr RegisterDisplayStatus(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+            return IntPtr.Zero;
+        try
+        {
+            var setting = SessionDisplayStatus;
+            return RegisterPowerSettingNotification(hwnd, ref setting, 0);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return IntPtr.Zero;
+        }
+    }
+
+    public static void UnregisterDisplayStatus(IntPtr registration)
+    {
+        if (registration != IntPtr.Zero)
+            UnregisterPowerSettingNotification(registration);
+    }
+
+    /// <summary>
+    /// 這則視窗訊息是不是螢幕開關的通知：是就回它的值（0 關閉、1 開啟、2 變暗），不是回 null。
+    /// lParam 是 POWERBROADCAST_SETTING：{ GUID PowerSetting; DWORD DataLength; BYTE Data[] }
+    /// </summary>
+    public static int? DisplayStatusOf(Message m)
+    {
+        if (m.Msg != WM_POWERBROADCAST || (long)m.WParam != PBT_POWERSETTINGCHANGE || m.LParam == IntPtr.Zero)
+            return null;
+        if (Marshal.PtrToStructure<Guid>(m.LParam) != SessionDisplayStatus || Marshal.ReadInt32(m.LParam, 16) < sizeof(int))
+            return null;
+        return Marshal.ReadInt32(m.LParam, 20);
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr RegisterPowerSettingNotification(IntPtr recipient, ref Guid setting, int flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnregisterPowerSettingNotification(IntPtr registration);
     private const int SW_RESTORE = 9;
 
     /// <summary>

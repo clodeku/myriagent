@@ -233,6 +233,18 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         syncEventsAttached = true;
         // Windows 切換深淺色時，主題「跟隨系統」的標題列與底色跟著換（網頁自己以 prefers-color-scheme 切換）
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        // 沒有人看得到畫面時（鎖定、螢幕關閉）網頁不畫（ScreenPresenceRules）。探針模式不接：探針要截圖，跑探針時電腦常是鎖著的
+        // （MYRIAGENT_AGENT_PROBE_PRESENCE=1 時照接：在真的 WebView2 裡驗證鎖定時停畫、頁面照樣載入）
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("MYRIAGENT_AGENT_PROBE"))
+            || Environment.GetEnvironmentVariable("MYRIAGENT_AGENT_PROBE_PRESENCE") == "1")
+        {
+            screenPresence = new ScreenPresence(mainForm, () => Hub.RemoteDeskActive);
+            screenPresence.Changed += AgentWebView.SetScreenUnseen;
+            Hub.RemoteDeskActiveChanged = screenPresence.Refresh;
+            if (lastDisplayState is { } display)
+                screenPresence.OnDisplayState(display);
+            AgentWebView.SetScreenUnseen(screenPresence.Unseen);
+        }
         // Start() 同步送出一次狀態（網頁狀態的 blocker 讀 AnyWindowForeground）：主視窗要先建立
         updateCoordinator.Start();
         // WebView2 環境已在最前面預熱；介面初始化排到訊息迴圈開始後才執行：缺少執行階段時環境工作會同步失敗，
@@ -430,6 +442,23 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
             timer.Dispose();
         }
         syncStartTimers.Clear();
+    }
+
+    private ScreenPresence? screenPresence;
+    private int? lastDisplayState;
+
+    private void DisposeScreenPresence()
+    {
+        Hub.RemoteDeskActiveChanged = null;
+        screenPresence?.Dispose();
+        screenPresence = null;
+    }
+
+    /// <summary>主視窗收到螢幕開關的通知（MainForm.WndProc；ScreenPresence 還沒建立時先記著）</summary>
+    internal void OnDisplayState(int state)
+    {
+        lastDisplayState = state;
+        screenPresence?.OnDisplayState(state);
     }
 
     private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
@@ -1146,6 +1175,7 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         Cli.Dispose();
         Thumbnails.Dispose();
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        DisposeScreenPresence();
         tray.Visible = false;
         tray.Dispose();
         taskbar.Dispose();
@@ -1180,6 +1210,7 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         if (disposing)
         {
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+            DisposeScreenPresence();
             DetachSyncEvents();
             StopSyncStartTimers();
             tray.Dispose();

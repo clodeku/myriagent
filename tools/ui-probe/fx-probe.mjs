@@ -2103,6 +2103,42 @@ export async function runFx(ctx, vp) {
   await host.pushItem(C, item('fx10r', { status: 'Done', html: '<p>串流中的段落照一般的換行</p>' }));
   check('fxTextWrap', !!wrap10 && /balance/.test(wrap10.h2) && /pretty/.test(wrap10.done) && !/pretty|balance/.test(wrap10.running), wrap10);
 
+  // 串流游標（2026-11-12，items.js 的 caretTyping）：字還在來的時候項目帶 fx-typing、游標不掛動畫（樣子是亮的），
+  // 停下來約 250 ms 後才開始閃，而且亮暗的時刻從最後一次更新起算（和以前每次重建就從頭閃一樣：0～500 ms 亮、500～1000 ms 暗）；
+  // 又有新的字就回到不掛動畫，結束時記號拿掉
+  const caretSel = `${SEL} .it[data-id="fxcaret"]`;
+  const caretState = () => page.evaluate((sel) => {
+    const it = document.querySelector(sel);
+    const last = it && it.querySelector('.md > :last-child');
+    if (!last) return null;
+    const anims = last.getAnimations({ subtree: true }).filter((a) => a.effect && a.effect.pseudoElement === '::after');
+    const since = performance.now() - it._typedAt;
+    return { typing: it.classList.contains('fx-typing'), anims: anims.map((a) => a.animationName), since: Math.round(since),
+      drift: anims.length ? Math.round(anims[0].currentTime - since) : null, opacity: Number(getComputedStyle(last, '::after').opacity) };
+  }, caretSel);
+  const caretFlow = [];
+  for (let i = 0; i < 8; i++) {
+    await host.pushItem(C, item('fxcaret', { status: 'Running', html: '<p>串流中的字' + '再多一點'.repeat(i) + '</p>' }));
+    await sleep(50);
+    caretFlow.push(await caretState());
+  }
+  // 停下來之後每 130 ms 看一次（約 2 秒）：開始閃了、動畫的時間等於「最後一次更新到現在」、亮暗照 1 秒一輪（離交界 80 ms 內的不看）
+  const caretRest = [];
+  for (let i = 0; i < 15; i++) { await sleep(130); caretRest.push(await caretState()); }
+  const blinking = caretRest.filter((c) => c && !c.typing && c.anims.join() === 'fx-blink');
+  const phaseOk = blinking.every((c) => { const ph = c.since % 1000; return Math.abs(ph - 500) < 80 || ph < 80 || ph > 920 || (ph < 500 ? c.opacity > 0.9 : c.opacity < 0.5); });
+  await host.pushItem(C, item('fxcaret', { status: 'Running', html: '<p>又來了新的字</p>' }));
+  await sleep(80);
+  const caretAgain = await caretState();
+  await host.pushItem(C, item('fxcaret', { status: 'Done', html: '<p>又來了新的字</p>' }));
+  await sleep(80);
+  const caretDone = await page.evaluate((sel) => { const it = document.querySelector(sel); return { typing: it.classList.contains('fx-typing'), running: it.classList.contains('running') }; }, caretSel);
+  check('fxStreamCaret', caretFlow.every((c) => c && c.typing && c.anims.length === 0 && c.opacity === 1)
+    && blinking.length >= 10 && caretRest.filter((c) => c && c.typing).every((c) => c.since < 420)
+    && blinking.every((c) => Math.abs(c.drift) < 120) && phaseOk && blinking.some((c) => c.opacity < 0.5) && blinking.some((c) => c.opacity > 0.9)
+    && !!caretAgain && caretAgain.typing && caretAgain.anims.length === 0 && caretAgain.opacity === 1 && !caretDone.typing && !caretDone.running,
+  { flow: caretFlow.slice(-2), rest: caretRest, caretAgain, caretDone });
+
   // 第十一批：分享給協作人的標記——側欄列是小人像＋人數、分頁是小人像，滑過列出名稱；不分享了就拿掉
   const collab11 = { list: [{ id: 'u1', userName: 'ming', displayName: '小明' }, { id: 'u2', userName: 'hua', displayName: '小華' }], shares: { [C]: ['u1', 'u2'] } };
   await sendNow(page, [{ type: 'collaborators', collaborators: collab11 }]);

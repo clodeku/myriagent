@@ -126,7 +126,19 @@ internal sealed class MainForm : Form
     {
         base.OnHandleCreated(e);
         NativeMethods.ApplyTitleBarTheme(Handle, app.IsDark);
+        // 這個工作階段的螢幕開關（只有主視窗登記；登記時系統先送一次目前的狀態）：螢幕關著時網頁不畫（ScreenPresence）
+        if (IsPrimary)
+            displayNotification = NativeMethods.RegisterDisplayStatus(Handle);
     }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        NativeMethods.UnregisterDisplayStatus(displayNotification);
+        displayNotification = IntPtr.Zero;
+        base.OnHandleDestroyed(e);
+    }
+
+    private IntPtr displayNotification;
 
     /// <summary>
     /// 啟動時不顯示主視窗（設計 9.3：無人值守的換版前主視窗藏著）。Application.Run 會在訊息迴圈開始前同步顯示 ApplicationContext.MainForm，
@@ -172,6 +184,8 @@ internal sealed class MainForm : Form
         base.WndProc(ref m);
         if (WmTaskbarButtonCreated != 0 && m.Msg == WmTaskbarButtonCreated)
             app.ReapplyTaskbar();
+        else if (NativeMethods.DisplayStatusOf(m) is { } display)
+            app.OnDisplayState(display);
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]

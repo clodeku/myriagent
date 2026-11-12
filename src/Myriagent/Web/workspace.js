@@ -436,14 +436,21 @@ function renderTabs(p) {
  */
 function placeSideMark(p, scrolling) {
   const on = sideTabs(p) && !!p.active;
-  if (!on) { if (p.sideMark) setHidden(p.sideMark, true); return; }
+  if (!on) { if (p.sideMark) setHidden(p.sideMark, true); p.sideMarkKey = null; return; }
   if (!p.sideMark) { p.sideMark = h('span', { class: 'side-mark', 'aria-hidden': 'true', hidden: true }); p.strip.append(p.sideMark); }
-  const el = Array.from(p.tabsEl.children).find((t) => t.dataset.key === p.active);
+  const idx = p.tabs.indexOf(p.active);
+  const at = p.tabsEl.children[idx];
+  const el = at && at.dataset.key === p.active ? at : Array.from(p.tabsEl.children).find((t) => t.dataset.key === p.active);
+  // 亮線的位置只看作用中的是第幾個分頁（側排的分頁與上面的按鈕列高度固定）與分頁欄捲到哪（捲動時 scrolling 會再叫一次）：
+  // 都沒變就不讀版面——renderTabs 每次對話清單、帳戶更新都會到這裡，前面剛改過 DOM，一讀 offsetTop 就強迫整頁重算樣式與版面
+  const key = el ? p.active + '|' + idx + '|' + el.style.getPropertyValue('--acc') : null;
+  if (!scrolling && key !== null && p.sideMarkKey === key && !p.sideMark.hidden) return;
+  p.sideMarkKey = null;
   if (!el || !el.offsetHeight) { setHidden(p.sideMark, true); return; }
   // 分頁的 offsetParent 是分頁欄（.strip 有定位）：offsetTop 已經含上面按鈕列的高度，只扣分頁清單捲動的量
   const y = el.offsetTop - p.tabsEl.scrollTop;
   const sig = y + '|' + el.offsetHeight + '|' + el.style.getPropertyValue('--acc');
-  if (!p.sideMark.hidden && p.sideMark._sig === sig) return; // 位置與顏色沒變：不寫樣式
+  if (!p.sideMark.hidden && p.sideMark._sig === sig) { p.sideMarkKey = key; return; } // 位置與顏色沒變：不寫樣式
   p.sideMark._sig = sig;
   const first = p.sideMark.hidden;
   p.sideMark.classList.toggle('instant', !!scrolling || first);
@@ -451,6 +458,7 @@ function placeSideMark(p, scrolling) {
   p.sideMark.style.height = el.offsetHeight + 'px';
   p.sideMark.style.setProperty('--acc', el.style.getPropertyValue('--acc'));
   setHidden(p.sideMark, false);
+  p.sideMarkKey = key;
 }
 
 /** 作用中的分頁換了就捲進分頁列的可視範圍（只在換分頁時捲，不跟使用者自己的捲動搶） */

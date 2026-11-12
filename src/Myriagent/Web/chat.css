@@ -352,6 +352,9 @@
   content: ""; display: inline-block; width: .48em; height: .48em; margin-left: .35em; border-radius: 50%;
   background: var(--acc); vertical-align: .05em; animation: pulse 1.1s ease-in-out infinite;
 }
+/* 字還在來的時候不掛動畫（items.js 的 caretTyping；fx.css 另有一條蓋過它自己的閃爍） */
+.it-assistant.running.fx-typing .md > :is(p, h1, h2, h3, h4, h5, blockquote):last-child::after,
+.it-assistant.running.fx-typing .md > :is(ul, ol):last-child > li:last-child::after { animation: none; }
 /* 代理回覆：滑過時右上角出現「複製」（整則的 Markdown 原文，由宿主寫入剪貼簿）；沒顯示時不擋住底下的連結 */
 .it-acts { position: absolute; top: 0; right: 0; z-index: 2; opacity: 0; pointer-events: none; transition: opacity 120ms; }
 .it-acts .code-copy { background: var(--bg-raised); box-shadow: 0 0 0 1px var(--border-2); }

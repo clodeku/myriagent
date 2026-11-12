@@ -87,6 +87,8 @@ export function patchHtml(container, html, ctx, streaming = false) {
   if (!old) { container.textContent = ''; old = []; }
   let keep = 0;
   while (keep < old.length && keep < next.length && old[keep].raw === rawHtmlOf(next[keep])) keep++;
+  // 有沒有換掉區塊（換掉的一定包含最後一塊，或讓前一塊變成最後一塊）：串流游標跟著重建（caretTyping 看它）
+  const changed = keep < old.length || keep < next.length;
   for (let i = keep; i < old.length; i++) for (const node of old[i].nodes) node.remove();
   const blocks = old.slice(0, keep);
   for (let i = keep; i < next.length; i++) {
@@ -99,6 +101,39 @@ export function patchHtml(container, html, ctx, streaming = false) {
     blocks.push({ raw, nodes });
   }
   container._blocks = blocks;
+  return changed;
+}
+
+// ───── 串流游標：字還在來的時候不閃 ─────
+/** 多久沒有新的字，游標才開始閃（要比閃爍的半個週期 500 ms 短：開始閃的時候還在亮的那一半） */
+const CARET_REST_MS = 250;
+
+/**
+ * 串流游標是最後一段的 ::after（chat.css、fx.css：1 秒一輪，前半亮、後半暗）。串流每 50 ms 換掉最後一段，游標跟著重建、閃爍從頭開始——
+ * 字一直來的時候看到的一直是亮的那一半，但每重建一次就是一個新的合成動畫：合成器要替它建圖層、開始時回報主執行緒，下一格又多畫一格。
+ * 所以字還在來的時候在項目上加 fx-typing（fx.css：游標不掛動畫，樣子就是亮的那一半），CARET_REST_MS 沒有新的字才拿掉、讓它開始閃，
+ * 並把動畫的時間調到「從最後一次更新起算」——亮暗的時刻和以前每次重建就從頭閃完全一樣。
+ */
+function caretTyping(n) {
+  n._typedAt = performance.now();
+  if (!n.classList.contains('fx-typing')) n.classList.add('fx-typing');
+  if (n._caretTimer) return;
+  const rest = () => {
+    n._caretTimer = 0;
+    if (!n.isConnected || !n.classList.contains('running')) { n.classList.remove('fx-typing'); return; }
+    const idle = performance.now() - n._typedAt;
+    if (idle < CARET_REST_MS) { n._caretTimer = setTimeout(rest, CARET_REST_MS - idle); return; }
+    n.classList.remove('fx-typing');
+    // 游標的動畫這時才建立（getAnimations 會先算好樣式）：時間從最後一次更新起算。減少動態、關掉動態效果時沒有動畫，什麼都不做
+    const md = n._md;
+    for (const a of md.getAnimations({ subtree: true })) {
+      if (!(a instanceof CSSAnimation) || !a.effect || a.effect.pseudoElement !== '::after') continue;
+      const t = a.effect.target;
+      const last = md.lastElementChild;
+      if (t === last || (last && t.parentElement === last && t === last.lastElementChild)) a.currentTime = performance.now() - n._typedAt;
+    }
+  };
+  n._caretTimer = setTimeout(rest, CARET_REST_MS);
 }
 
 function rawHtmlOf(node) {
@@ -291,7 +326,10 @@ function createAssistant(item, ctx) {
 function fillAssistant(n, item, prev, ctx) {
   const running = item.status === 'Running';
   n.classList.toggle('running', running);
-  if (!prev || prev.html !== item.html) patchHtml(n._md, item.html, ctx, running);
+  const patched = (!prev || prev.html !== item.html) && patchHtml(n._md, item.html, ctx, running);
+  // 串流中換掉了區塊：游標先不閃（caretTyping）；不在執行中就拿掉記號
+  if (running && patched) caretTyping(n);
+  else if (!running) n.classList.remove('fx-typing');
   if (prev && prev.status === 'Running' && !running) flushMermaid(n._md);
   setHidden(n._acts, running || !item.html); // 串流中還不完整，完成後才給複製
   if (!prev || !sameJson(prev.media, item.media)) {

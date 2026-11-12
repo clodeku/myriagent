@@ -50,6 +50,10 @@ internal class AgentWebView : IAgentView
         this.hub = hub;
         this.thumbnails = thumbnails;
         IsPopout = isPopout;
+        // 沒有人看得到畫面（鎖定、螢幕關閉；SetScreenUnseen）：每個視窗的網頁一起停畫，視窗關掉就不再聽
+        ScreenUnseenChanged += ApplyHidden;
+        owner.Disposed += (_, _) => ScreenUnseenChanged -= ApplyHidden;
+        ApplyHidden();
     }
 
     public string Id { get; } = Guid.NewGuid().ToString("N");
@@ -94,21 +98,48 @@ internal class AgentWebView : IAgentView
         }
     }
 
-    private bool focusedBeforeMinimize;
+    private bool focusedBeforeHide;
+    private bool minimized;
+
+    /// <summary>這個檢視把控制項藏起來了（最小化，或沒有人看得到畫面）</summary>
+    private bool hiddenByState;
+
+    /// <summary>沒有人看得到這個工作階段的畫面（鎖定、螢幕關閉；ScreenPresence 判斷，AppController 轉進來）。UI 執行緒</summary>
+    internal static bool ScreenUnseen { get; private set; }
+
+    private static event Action? ScreenUnseenChanged;
+
+    /// <summary>畫面看不看得到變了：每個視窗的網頁跟著停畫或恢復（UI 執行緒）</summary>
+    internal static void SetScreenUnseen(bool unseen)
+    {
+        if (ScreenUnseen == unseen)
+            return;
+        ScreenUnseen = unseen;
+        ScreenUnseenChanged?.Invoke();
+    }
 
     /// <summary>
     /// 視窗最小化時讓網頁知道看不到：WebView2 是子視窗，收不到最小化，頁面的 document.hidden 一直是 false，
     /// 持續的動畫、電腦狀態面板的每秒取樣照跑（2026-10-23 實測：最小化的視窗渲染程序照樣吃掉約一顆核心）。
-    /// WinForms 的 WebView2 控制項把 Visible 傳給 CoreWebView2Controller.IsVisible；還原時設回看得見，焦點原本在網頁裡的交回網頁
+    /// WinForms 的 WebView2 控制項把 Visible 傳給 CoreWebView2Controller.IsVisible；還原時設回看得見，焦點原本在網頁裡的交回網頁。
+    /// 電腦鎖定、螢幕關閉時（ScreenUnseen，2026-11-12）走同一條路：沒有人看得到，網頁照樣不畫
     /// </summary>
     public void SetMinimized(bool minimized)
     {
-        if (webView.Visible != minimized)
+        this.minimized = minimized;
+        ApplyHidden();
+    }
+
+    private void ApplyHidden()
+    {
+        var hide = minimized || ScreenUnseen;
+        if (hide == hiddenByState || webView.IsDisposed)
             return;
-        if (minimized)
-            focusedBeforeMinimize = webView.ContainsFocus;
-        webView.Visible = !minimized;
-        if (!minimized && focusedBeforeMinimize)
+        hiddenByState = hide;
+        if (hide)
+            focusedBeforeHide = webView.ContainsFocus;
+        webView.Visible = !hide;
+        if (!hide && focusedBeforeHide)
             webView.Focus();
     }
 

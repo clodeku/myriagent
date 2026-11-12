@@ -580,6 +580,9 @@
   /* 串流游標：方塊一亮一暗（像終端機） */
   .it-assistant.running .md > :is(p, h1, h2, h3, h4, h5, blockquote):last-child::after,
   .it-assistant.running .md > :is(ul, ol):last-child > li:last-child::after { animation: fx-blink 1s steps(1) infinite; }
+  /* 字還在來的時候不掛動畫（items.js 的 caretTyping）：每 50 ms 重建一次的游標本來就一直停在亮的那一半，樣子一樣、少一個每次重開的合成動畫 */
+  .it-assistant.running.fx-typing .md > :is(p, h1, h2, h3, h4, h5, blockquote):last-child::after,
+  .it-assistant.running.fx-typing .md > :is(ul, ol):last-child > li:last-child::after { animation: none; }
 
   /* 等你作答的卡片：角框連同四角的燈一起呼吸，像鎖定目標 */
   .it-card.waiting { --fx-led: var(--acc); }

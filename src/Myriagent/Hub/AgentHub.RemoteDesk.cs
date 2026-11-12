@@ -55,6 +55,9 @@ internal sealed partial class AgentHub
     /// <summary>這台正在被遠端操控（app 自我更新不在這時自動重啟；UI 執行緒讀）</summary>
     internal bool RemoteDeskActive => deskSession is { Stopped: false };
 
+    /// <summary>開始或結束被遠端操控（UI 執行緒）：螢幕關著時網頁本來不畫，被看的期間要照常畫（ScreenPresence）</summary>
+    internal Action? RemoteDeskActiveChanged { get; set; }
+
     /// <summary>這台看的工作階段數（測試用）</summary>
     internal int DeskViewerCount => deskViewers.Count;
 
@@ -185,6 +188,7 @@ internal sealed partial class AgentHub
         deskSession = session;
         deskAllowedShared = true;
         deskSessionShared = session;
+        RemoteDeskActiveChanged?.Invoke();
         var who = string.IsNullOrWhiteSpace(viewerLabel) ? "其他電腦" : viewerLabel;
         try
         {
@@ -222,6 +226,7 @@ internal sealed partial class AgentHub
         deskPolicyTimer = null;
         deskSession = null;
         deskSessionShared = null;
+        RemoteDeskActiveChanged?.Invoke();
         try
         {
             deskIndicator?.Dispose();
