@@ -202,6 +202,93 @@ public sealed class AgentHubInterruptedTurnTests
         h.IsRunning(id).Should().BeTrue();
     }
 
+    /// <summary>中斷超過 1 小時、重新啟動後沒有自動接續（標頭給了「繼續」）的對話</summary>
+    private static async Task<string> NotContinuedAsync(HubHarness h)
+    {
+        var (id, _) = h.StartConversation(h.Main, h.Claude, "很久以前");
+        await h.RestartAsync(crash: true);
+        var old = new DateTimeOffset(DateTime.Now - TimeSpan.FromHours(2)).ToUnixTimeMilliseconds();
+        EditMarker(h, id, r =>
+        {
+            r.StartedAt = old;
+            r.SeenAt = old;
+        });
+        await h.RestartAsync(crash: true);
+        (await ReadyAsync(h)).Should().Be((0, 1));
+        return id;
+    }
+
+    private static string OfferPath(HubHarness h, string id) => ContinueOfferStore.PathFor(h.Store.GetConversationDirectory(id));
+
+    [Fact]
+    public async Task 沒有自動接續的繼續_app再重新啟動後還在_不再加提示_按了照樣送並拿掉記錄()
+    {
+        // 2026-11-12 實機：斷電後重新開機，兩個對話給了「繼續」，74 秒後 app 閒置中套用等著的新版——按鈕只在記憶體、就沒了，
+        // 對話裡的提示卻還寫著「請按繼續」
+        using var h = new HubHarness();
+        var id = await NotContinuedAsync(h);
+        File.Exists(OfferPath(h, id)).Should().BeTrue("給了「繼續」就記下來");
+        var items = h.Items(id).Count;
+        var sent = SentTexts(h).Count;
+
+        await h.RestartAsync();   // app 更新、使用者重開、Windows 重新開機
+        h.Command(h.Main, "ready");
+        await h.Ui.DrainAsync();
+
+        var header = (JObject)HeaderRestart(h, id);
+        header.Value<string>("state").Should().Be("notContinued");
+        header.Value<bool>("canContinue").Should().BeTrue("重新啟動後「繼續」還在");
+        header.Value<string>("detail").Should().Contain("沒有自動接續：中斷已超過 1 小時");
+        h.Items(id).Should().HaveCount(items, "提示只加一次");
+        SentTexts(h).Should().HaveCount(sent, "還原按鈕不送任何東西");
+        File.Exists(OfferPath(h, id)).Should().BeTrue();
+
+        h.Command(h.Main, "cliContinue", new { conversationId = id });
+
+        var text = SentTexts(h).Last();
+        text.Should().StartWith("（系統通知：Clode Myriagent 上次沒有正常結束");
+        text.Should().Contain("使用者看過狀況後按了「繼續」");
+        h.Items(id).Last().Text.Should().Be(InterruptedTurnRules.ManualContinueNotice);
+        h.IsRunning(id).Should().BeTrue();
+        File.Exists(OfferPath(h, id)).Should().BeFalse("按了就拿掉，下次啟動不再給");
+    }
+
+    [Fact]
+    public async Task 沒有自動接續的繼續_使用者自己送出新訊息_拿掉記錄_重新啟動後不再給()
+    {
+        using var h = new HubHarness();
+        var id = await NotContinuedAsync(h);
+        await h.RestartAsync();
+        h.Command(h.Main, "ready");
+        await h.Ui.DrainAsync();
+        ((JObject)HeaderRestart(h, id)).Value<bool>("canContinue").Should().BeTrue("前提：還原了「繼續」");
+
+        h.Send(h.Main, id, "不用了，改做別的");
+
+        File.Exists(OfferPath(h, id)).Should().BeFalse("送出新訊息＝使用者已經處理");
+        h.CompleteTurn(h.Sessions.Last());
+        await h.RestartAsync();
+        h.Command(h.Main, "ready");
+        await h.Ui.DrainAsync();
+        HeaderRestart(h, id).Type.Should().Be(JTokenType.Null, "下次啟動不再給「繼續」");
+    }
+
+    [Fact]
+    public async Task 繼續的記錄壞掉或沒有說明_當成沒有_不影響啟動()
+    {
+        using var h = new HubHarness();
+        var id = await NotContinuedAsync(h);
+        File.WriteAllText(OfferPath(h, id), "{\"Schema\":1,\"Detail\":\"  \"}");
+
+        await h.RestartAsync();
+        h.Command(h.Main, "ready");
+        await h.Ui.DrainAsync();
+
+        HeaderRestart(h, id).Type.Should().Be(JTokenType.Null, "沒有說明的記錄不還原");
+        h.Send(h.Main, id, "照常可以送");
+        h.IsRunning(id).Should().BeTrue();
+    }
+
     [Fact]
     public async Task 開始高風險操作立刻記下_這時當掉不自動接續_操作結束後再當掉照常接續()
     {
@@ -528,6 +615,143 @@ public sealed class AgentHubInterruptedTurnTests
         h.Items(id).Last().Text.Should().Be("Clode Myriagent 為了套用更新停掉了這個對話還在跑的背景工作（這次更新已放棄），已請代理確認背景工作做到哪裡、接著做");
         h.IsRunning(id).Should().BeTrue();
         Marker(h, id)!.WaitingBackground.Should().BeFalse("接續的一輪在執行");
+    }
+
+    /// <summary>CLI 程序自己結束（Windows 登出關機時先被結束、或自己當掉）：會話回報這一輪失敗</summary>
+    private static void ProcessDied(HubHarness h, FakeSession s)
+    {
+        s.LiveProcess = false;
+        h.Raise(s, new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, "Claude 程序意外結束（結束碼 -1073741510）", null) { ProcessExited = true });
+        h.Raise(s, new AgentProcessExitedEvent(-1073741510, null, Expected: false));
+    }
+
+    /// <summary>Windows 確定登出關機：app 立即結束（Dispose，沒經過 ShutdownAsync），之後重新開啟</summary>
+    private static async Task WindowsEndsSessionAsync(HubHarness h)
+    {
+        h.Ui.Invoke(() => h.Hub.SaveRunningConversations());   // WM_QUERYENDSESSION
+        h.Ui.Invoke(() => h.Hub.Dispose());                    // WM_ENDSESSION：ExitImmediately
+        await h.RestartAsync(crash: true);                     // 舊的中樞已經收掉，只換新的
+    }
+
+    [Fact]
+    public async Task Windows關機時CLI先被結束_這一輪記成失敗_標記留著_重新開機後照常接續()
+    {
+        // 2026-11-12 實機：Windows 更新重新開機，CLI（結束碼 0xC000013A）比 app 早 20 毫秒被結束，這一輪被當成失敗、
+        // running.json 被刪，重新開機後沒有接續，只留下一則「程序意外結束」
+        using var h = new HubHarness();
+        var (id, s) = h.StartConversation(h.Main, h.Claude, "長時間的工作");
+        h.Raise(s, new AgentTextDeltaEvent("b1", "做到一半"));
+
+        ProcessDied(h, s);
+
+        h.IsRunning(id).Should().BeFalse();
+        h.Items(id).Last().Kind.Should().Be(AgentItemKind.Error);
+        File.Exists(MarkerPath(h, id)).Should().BeTrue("CLI 自己結束：可能是 Windows 正在關機，標記先留著");
+
+        await WindowsEndsSessionAsync(h);
+        (await ReadyAsync(h)).Should().Be((1, 0));
+
+        h.IsRunning(id).Should().BeTrue();
+        SentTexts(h).Last().Should().StartWith("（系統通知：Clode Myriagent 上次沒有正常結束（當掉、被強制結束或斷電），中斷了 Claude Code 這一輪的工作");
+        h.Items(id).Last().Text.Should().Be("Clode Myriagent 上次沒有正常結束（當掉、被強制結束或斷電），這個對話被中斷，重新開啟後已請代理從中斷處繼續");
+    }
+
+    [Fact]
+    public void CLI自己當掉_app還在_留著的標記到期後刪掉_期間開始新的一輪照常()
+    {
+        using var h = new HubHarness();
+        var (id, s) = h.StartConversation(h.Main, h.Claude, "會當掉的一輪");
+        ProcessDied(h, s);
+        var now = DateTime.Now;
+
+        h.Ui.Invoke(() => h.Hub.RunMaintenance(now + TimeSpan.FromSeconds(60)));
+        File.Exists(MarkerPath(h, id)).Should().BeTrue("還沒到期");
+        h.Ui.Invoke(() => h.Hub.RunMaintenance(now + AgentHub.RunMarkerHold + TimeSpan.FromSeconds(5)));
+        File.Exists(MarkerPath(h, id)).Should().BeFalse("app 還在：是 CLI 自己當掉，真的失敗");
+
+        // 留著的期間使用者送出新的一輪：標記是新的這一輪的，結束後照常刪
+        var (id2, s2) = h.StartConversation(h.Main, h.Claude, "另一個");
+        ProcessDied(h, s2);
+        h.Send(h.Main, id2, "再試一次");
+        Marker(h, id2)!.AutoResumes.Should().Be(0);
+        h.Ui.Invoke(() => h.Hub.RunMaintenance(DateTime.Now + AgentHub.RunMarkerHold + TimeSpan.FromSeconds(5)));
+        File.Exists(MarkerPath(h, id2)).Should().BeTrue("新的一輪在執行，不照舊的期限刪");
+        h.CompleteTurn(h.Sessions.Last());
+        File.Exists(MarkerPath(h, id2)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CLI自己當掉後正常結束app_不留標記_重新開啟不接續失敗的那一輪()
+    {
+        using var h = new HubHarness();
+        var (id, s) = h.StartConversation(h.Main, h.Claude, "會當掉的一輪");
+        ProcessDied(h, s);
+        var sent = SentTexts(h).Count;
+
+        await h.RestartAsync();   // 使用者結束 app、app 更新交棒（ShutdownAsync）
+
+        File.Exists(MarkerPath(h, id)).Should().BeFalse("使用者看過這則錯誤了，不當成被 app 結束中斷的");
+        h.Command(h.Main, "ready");
+        await h.Ui.DrainAsync();
+        SentTexts(h).Should().HaveCount(sent);
+        h.IsRunning(id).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 使用者按了停止之後程序結束_或一般的失敗_照舊刪標記()
+    {
+        using var h = new HubHarness();
+        var (id, s) = h.StartConversation(h.Main, h.Claude, "一般的失敗");
+        h.Raise(s, new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, "API 錯誤", null));
+        File.Exists(MarkerPath(h, id)).Should().BeFalse("不是程序結束造成的失敗");
+
+        var (id2, s2) = h.StartConversation(h.Main, h.Claude, "按了停止");
+        h.Command(h.Main, "stop", new { conversationId = id2 });
+        s2.LiveProcess = false;
+        h.Raise(s2, new AgentTurnCompletedEvent(AgentTurnOutcome.Interrupted, null, null));
+        File.Exists(MarkerPath(h, id2)).Should().BeFalse("使用者按了停止");
+        await h.Ui.DrainAsync();
+    }
+
+    [Fact]
+    public async Task 等背景工作時CLI被Windows結束_背景工作跟著沒了_標記留著_重新開機後請代理確認()
+    {
+        using var h = new HubHarness();
+        var (id, s) = h.StartConversation(h.Main, h.Claude, "開開發伺服器");
+        Background(h, s, DevServer);
+        h.CompleteTurn(s);
+        Marker(h, id)!.WaitingBackground.Should().BeTrue("前提：在等背景工作");
+
+        // CLI 程序被結束：會話的背景工作清單跟著清空（沒有執行中的一輪，不回報失敗）
+        s.LiveProcess = false;
+        Background(h, s);
+        h.Raise(s, new AgentProcessExitedEvent(-1073741510, null, Expected: true));
+
+        File.Exists(MarkerPath(h, id)).Should().BeTrue("背景工作是跟著程序一起沒的，不是自己跑完");
+
+        await WindowsEndsSessionAsync(h);
+        (await ReadyAsync(h)).Should().Be((1, 0));
+
+        var text = h.Sessions[^1].Sent.All.Should().ContainSingle().Subject.Input.Text;
+        text.Should().Contain("正在等背景工作〈執行指令：npm run dev〉回報");
+        text.Should().Contain("不會再有完成通知");
+    }
+
+    [Fact]
+    public void 等背景工作時CLI自己當掉_app還在_到期後刪掉標記()
+    {
+        using var h = new HubHarness();
+        var (id, s) = h.StartConversation(h.Main, h.Claude, "開開發伺服器");
+        Background(h, s, DevServer);
+        h.CompleteTurn(s);
+        s.LiveProcess = false;
+        Background(h, s);
+        var now = DateTime.Now;
+
+        h.Ui.Invoke(() => h.Hub.RunMaintenance(now + TimeSpan.FromSeconds(30)));
+        File.Exists(MarkerPath(h, id)).Should().BeTrue();
+        h.Ui.Invoke(() => h.Hub.RunMaintenance(now + AgentHub.RunMarkerHold + TimeSpan.FromSeconds(5)));
+        File.Exists(MarkerPath(h, id)).Should().BeFalse();
     }
 
     [Fact]

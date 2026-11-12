@@ -49,6 +49,15 @@ internal sealed partial class AgentHub
         /// 留給新版接續；放棄這次更新時就地接續（AbortAppUpdate）
         /// </summary>
         public bool RunMarkerStoppedByApp;
+
+        /// <summary>這一輪因為 CLI 程序自己結束而失敗（CompleteTurn 照 AgentTurnCompletedEvent.ProcessExited 設，OnRunMarkerTurnCompleted 取用後清掉）</summary>
+        public bool TurnEndedByProcessExit;
+
+        /// <summary>
+        /// CLI 程序自己結束了（這一輪因此失敗、或等著的背景工作跟著沒了），running.json 先留著的起算時間：RunMarkerHold 之後 app 還在才刪。
+        /// Windows 登出、關機時先結束主控台程序（CLI），接著才問、才結束 app：那段空檔裡把標記刪掉，重新開機後就不會接續
+        /// </summary>
+        public DateTime? RunMarkerHeldAt;
     }
 
     /// <summary>
@@ -56,6 +65,13 @@ internal sealed partial class AgentHub
     /// 換來執行中不每 30 秒寫一次檔
     /// </summary>
     internal static readonly TimeSpan RunMarkerRefresh = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// CLI 程序自己結束之後 running.json 多留多久（2026-11-12 實機：Windows 更新重新開機，CLI 先被結束〔結束碼 0xC000013A〕，這一輪被當成失敗、
+    /// 標記在 app 結束前 20 毫秒被刪掉，重新開機後沒有接續）。這段時間內 app 被 Windows 結束、當掉或斷電，標記留在磁碟上、下次啟動照常接續；
+    /// app 還在（CLI 自己當掉、使用者取消了關機）就由維護刪掉，正常結束 app（ShutdownAsync：使用者結束、app 更新）也刪——那是真的失敗，使用者看過了
+    /// </summary>
+    internal static readonly TimeSpan RunMarkerHold = TimeSpan.FromMinutes(2);
 
     /// <summary>啟動後的接續已處理（第一次主視窗就緒時執行一次）</summary>
     private bool interruptedResumeDone;
@@ -86,6 +102,7 @@ internal sealed partial class AgentHub
         c.PendingAutoResumes = 0;
         c.RunMarkerWaitingBackground = false;
         c.RunMarkerStoppedByApp = false;
+        c.RunMarkerHeldAt = null;
         WriteRunMarker(c, closedByApp: false);
     }
 
@@ -95,14 +112,48 @@ internal sealed partial class AgentHub
     /// </summary>
     private void OnRunMarkerTurnCompleted(ConversationState c, AgentTurnOutcome outcome)
     {
+        bool processExited = c.TurnEndedByProcessExit;
+        c.TurnEndedByProcessExit = false;
         if (disposed)
             return;
         c.RunMarkerWaitingBackground = outcome == AgentTurnOutcome.Completed && !c.StopRequested && BackgroundOf(c) != null;
         c.RunMarkerStoppedByApp = false;
         if (WantsRunMarker(c))
+        {
+            c.RunMarkerHeldAt = null;
             WriteRunMarker(c, closedByApp: false);
+        }
+        else if (processExited && outcome == AgentTurnOutcome.Failed && !c.StopRequested)
+            HoldRunMarker(c);   // CLI 程序自己結束：可能是 Windows 正在登出、關機，標記先留著（RunMarkerHold）
         else
             DeleteRunMarker(c);
+    }
+
+    /// <summary>
+    /// CLI 程序自己結束之後：running.json（最後一次的快照）先留著，RunMarkerHold 之後 app 還在才由維護刪掉。
+    /// 磁碟上沒有、其他電腦的對話、已從中樞移除的沒有可留的
+    /// </summary>
+    private void HoldRunMarker(ConversationState c)
+    {
+        if (!c.RunMarkerOnDisk || c.IsReplica || !IsLive(c))
+        {
+            DeleteRunMarker(c);
+            return;
+        }
+        if (c.RunMarkerHeldAt != null)
+            return;
+        c.RunMarkerHeldAt = DateTime.Now;
+        Log.Info($"對話 {c.Meta.Id} 的 CLI 程序自己結束：running.json 先留 {RunMarkerHold.TotalMinutes:0} 分鐘（這段時間 app 被 Windows 結束或當掉，下次啟動照常接續）");
+    }
+
+    /// <summary>
+    /// 正常結束 app（ShutdownAsync：使用者結束、app 更新交棒）：留著的標記刪掉——CLI 自己當掉的那一輪是真的失敗、使用者看得到錯誤，
+    /// 不當成被 app 結束中斷的。Windows 確定登出關機（Dispose 沒經過 ShutdownAsync）、當掉、斷電時留著，下次啟動接續
+    /// </summary>
+    private void DropHeldRunMarkers()
+    {
+        foreach (var c in conversations.Values.Where(c => c.RunMarkerHeldAt != null && !c.Running).ToList())
+            DeleteRunMarkerFile(c);
     }
 
     /// <summary>
@@ -110,16 +161,27 @@ internal sealed partial class AgentHub
     /// 等背景工作而背景工作都沒了的刪掉——自己跑完的 CLI 會接著自己開一輪（HookTurnStarted 再寫），換了會話的是使用者的操作；
     /// app 更新停掉的留著給新版接續
     /// </summary>
-    private void RefreshRunMarker(ConversationState c)
+    private void RefreshRunMarker(ConversationState c, DateTime? now = null)
     {
         if (disposed)
             return;
+        // CLI 程序自己結束後留著的標記：期限到了 app 還在，才當成真的失敗、刪掉
+        if (c.RunMarkerHeldAt is { } held && !c.Running)
+        {
+            if ((now ?? DateTime.Now) - held >= RunMarkerHold)
+                DeleteRunMarker(c);
+            return;
+        }
         if (!c.Running && c.RunMarkerWaitingBackground && BackgroundOf(c) == null)
         {
             if (c.RunMarkerStoppedByApp)
                 return;
             c.RunMarkerWaitingBackground = false;
-            DeleteRunMarker(c);
+            // 背景工作是跟著 CLI 程序一起沒的（程序自己結束：當掉、Windows 登出關機時被結束），不是自己跑完的：標記先留著
+            if (c.Session is not { HasLiveProcess: true })
+                HoldRunMarker(c);
+            else
+                DeleteRunMarker(c);
             return;
         }
         WriteRunMarker(c, closedByApp: false, onlyIfChanged: true);
@@ -210,6 +272,7 @@ internal sealed partial class AgentHub
             c.RunMarkerOnDisk = false;
             c.RunMarkerRisky = false;
             c.RunMarkerFingerprint = null;
+            c.RunMarkerHeldAt = null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -239,6 +302,8 @@ internal sealed partial class AgentHub
     {
         // 背景活動日誌：結束會停掉的執行中的一輪、背景工作、背景程式、子代理（AgentHub.Journal.cs）
         JournalAppExit(closedByApp);
+        // 標頭的「繼續」動過、還沒對到 continue.json 的補上（AgentHub.ContinueOffers.cs）
+        SyncContinueOffersOnExit();
         foreach (var c in conversations.Values.Where(c => c.Running || c.RunMarkerWaitingBackground).ToList())
         {
             if (c.Running && c.StopRequested)
@@ -400,7 +465,7 @@ internal sealed partial class AgentHub
 
     /// <summary>
     /// 沒有自動接續的對話：加提示（Markdown）、標頭給「繼續」（純文字的說明；按鈕的資料是這次從 running.json 重建的接續內容）、
-    /// 刪掉 running.json（決定好了，下次啟動不再處理）。沒有顯示在任何畫面上就標未讀
+    /// 刪掉 running.json（決定好了，下次啟動不再處理；可以按的「繼續」另存成 continue.json，app 再重新啟動時照樣在）。沒有顯示在任何畫面上就標未讀
     /// </summary>
     private void MarkInterruptedNotContinued(ConversationState c, string notice, string detail, bool canContinue, ContinuationContext context)
     {

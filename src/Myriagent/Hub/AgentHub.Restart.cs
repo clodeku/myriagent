@@ -37,8 +37,24 @@ internal sealed partial class AgentHub
         /// <summary>排定的換版（沒有要處理的為 null）</summary>
         public RestartPlan? Plan;
 
-        /// <summary>換版處理完後留在標頭的結果（continued／notContinued／failed）；下一次送出時清掉</summary>
-        public RestartResultView? Result;
+        /// <summary>
+        /// 換版處理完後留在標頭的結果（continued／notContinued／failed）；下一次送出時清掉。可以按「繼續」的沒有接續另外存成
+        /// continue.json（app 再重新啟動時還原，AgentHub.ContinueOffers.cs）：每次指派都記成動過，MarkHeaderDirty 與 app 結束時對到檔案
+        /// </summary>
+        public RestartResultView? Result
+        {
+            get => result;
+            set
+            {
+                result = value;
+                ResultTouched = true;
+            }
+        }
+
+        private RestartResultView? result;
+
+        /// <summary>Result 指派過、還沒對到 continue.json</summary>
+        public bool ResultTouched;
 
         /// <summary>CLI 更新期間或這個對話換版進行中被延後、之後要先送的訊息（在佇列裡）</summary>
         public QueuedMessage? DeferredSend;
@@ -2194,7 +2210,7 @@ internal sealed partial class AgentHub
     /// <summary>
     /// 對話被刪除、換帳戶、帳戶被移除後：關掉了會話的那些對話（released：換了帳戶的、屬於被移除帳戶的）清掉換版狀態，屏障與這一波重新檢查。
     /// 只清這些，不清所有沒有會話的對話：app 更新後沒有接續的對話不開程序，標頭的「繼續」就靠它的 Restart.Result
-    /// （resume.json 已刪、無法重建），刪掉別的對話不能讓它默默失效
+    /// （resume.json 已刪；清掉時 continue.json 也跟著刪，AgentHub.ContinueOffers.cs），刪掉別的對話不能讓它默默失效
     /// </summary>
     private void RefreshRestarts(IEnumerable<ConversationState> released)
     {

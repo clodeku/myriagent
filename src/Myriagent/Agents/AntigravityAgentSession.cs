@@ -874,7 +874,7 @@ internal sealed class AntigravityAgentSession : IAgentSession
             Raise(needsSignIn ? new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, AntigravityStreamRules.NotSignedInMessage, null)
                 : wasInterrupted ? new AgentTurnCompletedEvent(AgentTurnOutcome.Interrupted, null, null)
                 : new AgentTurnCompletedEvent(AgentTurnOutcome.Failed,
-                    $"agy 程序意外結束（結束碼 {exitCode?.ToString() ?? "不明"}）{(string.IsNullOrWhiteSpace(tail) ? string.Empty : "：" + tail)}", null));
+                    $"agy 程序意外結束（結束碼 {exitCode?.ToString() ?? "不明"}）{(string.IsNullOrWhiteSpace(tail) ? string.Empty : "：" + tail)}", null) { ProcessExited = true });
         }
         Raise(new AgentProcessExitedEvent(exitCode, tail, Expected: ownedByRestart || !wasRunning || wasInterrupted, source.InstanceId));
         PublishSafePoint();

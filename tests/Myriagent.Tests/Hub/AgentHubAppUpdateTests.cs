@@ -598,6 +598,43 @@ public sealed class AgentHubAppUpdateTests
     }
 
     [Fact]
+    public async Task app更新後沒有接續_還沒按繼續app又重新啟動_繼續按鈕還在_按了說明是app更新()
+    {
+        // 2026-11-12：標頭的「繼續」以前只在記憶體（resume.json 用過就刪、無法重建），再套用一版或重新開機就沒了
+        using var h = await NewHarnessAsync();
+        var (id, s) = StartRunning(h, h.Claude, "a1");
+        s.SafePoint = true;
+        s.SucceedRestarts("a");
+        (await Prepare(h).WaitAsync(TimeSpan.FromSeconds(5))).Ready.Should().BeTrue();
+        var file = h.OnUi(() => h.Hub.BuildAppResume("tok-old", "0.2.1-aaaaaa1", "0.2.2-bbbbbb2"));
+        await h.RestartAsync();
+        h.Ui.Invoke(() => h.Hub.ScheduleAppResume(new PendingAppResume(file, ResumeIntentRules.Validate(file, token: null, DateTime.UtcNow), "0.2.1", RolledBack: false)));
+        h.Command(h.Main, "ready");
+        await h.Ui.DrainAsync();
+        ((JObject)HeaderRestart(h, id)).Value<bool>("canContinue").Should().BeTrue("前提：給了「繼續」");
+        var items = h.Items(id).Count;
+        var sessions = h.Sessions.Count;
+
+        await h.RestartAsync();   // 這次沒有 resume.json
+        h.Command(h.Main, "ready");
+        await h.Ui.DrainAsync();
+
+        var header = (JObject)HeaderRestart(h, id);
+        header.Value<string>("state").Should().Be("notContinued");
+        header.Value<bool>("canContinue").Should().BeTrue();
+        h.Items(id).Should().HaveCount(items, "提示只加一次");
+        h.Sessions.Count.Should().Be(sessions, "還原按鈕不送任何東西");
+
+        h.Command(h.Main, "cliContinue", new { conversationId = id });
+
+        var text = h.Sessions[^1].Sent.All.Should().ContainSingle().Subject.Input.Text;
+        text.Should().StartWith("（系統通知：Clode Myriagent 為了套用自身的更新而停下了 Claude Code，現在重新啟動了它");
+        text.Should().Contain("使用者看過狀況後按了「繼續」");
+        h.Items(id).Last().Text.Should().Be(ResumeIntentRules.ManualContinueNotice);
+        File.Exists(ContinueOfferStore.PathFor(h.Store.GetConversationDirectory(id))).Should().BeFalse("按了就拿掉記錄");
+    }
+
+    [Fact]
     public async Task app更新後沒有接續_刪掉別的對話_別的對話換帳戶_移除別的帳戶_繼續按鈕仍在_只清受影響的()
     {
         using var h = await NewHarnessAsync();

@@ -109,6 +109,12 @@ internal sealed record AgentTurnCompletedEvent(AgentTurnOutcome Outcome, string?
     public bool ContinuesOnItsOwn { get; init; }
 
     /// <summary>
+    /// 這一輪是因為 CLI 程序自己結束（不是會話關的）而失敗：中樞把 running.json 多留一陣子（AgentHub.InterruptedTurns.cs 的 RunMarkerHold）——
+    /// Windows 登出、關機時先結束主控台程序，app 接著才被結束，這一輪其實是被關機中斷，重新開機後要照常接續
+    /// </summary>
+    public bool ProcessExited { get; init; }
+
+    /// <summary>
     /// 失敗的原因是 API 伺服器暫時無法服務或網路連線瞬斷（Claude 的 529 Overloaded、Antigravity 的 503 UNAVAILABLE 與 API 網路連線中斷）：
     /// 中樞等一下自動重試（OverloadRetryRules）。只有 Outcome 是 Failed 時才不是 None
     /// </summary>

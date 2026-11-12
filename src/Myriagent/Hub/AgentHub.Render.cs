@@ -124,6 +124,9 @@ internal sealed partial class AgentHub
 
     private void MarkHeaderDirty(ConversationState c)
     {
+        // 標頭的「繼續」動過（給了、按了、送出後清掉）：對到 continue.json（AgentHub.ContinueOffers.cs）。app 結束途中不動，結束前已經對過一次
+        if (c.Restart.ResultTouched && !disposed)
+            SyncContinueOffer(c);
         HookHeaderChanged(c);
         if (c.ViewIds.Count > 0)
         {

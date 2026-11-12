@@ -1593,7 +1593,7 @@ internal sealed class GrokAgentSession : IAgentSession
         {
             Raise(wasInterrupted
                 ? new AgentTurnCompletedEvent(AgentTurnOutcome.Interrupted, null, null)
-                : new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, $"Grok 程序意外結束（結束碼 {exitCode?.ToString() ?? "不明"}）{(string.IsNullOrWhiteSpace(tail) ? string.Empty : "：" + tail)}", null));
+                : new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, $"Grok 程序意外結束（結束碼 {exitCode?.ToString() ?? "不明"}）{(string.IsNullOrWhiteSpace(tail) ? string.Empty : "：" + tail)}", null) { ProcessExited = true });
         }
 
         // 中樞把這個實例的待回應卡片作廢

@@ -230,6 +230,8 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             RestoreQueue(state);
             // 上次結束時還在執行的一輪（running.json）：第一次主視窗就緒時接續（AgentHub.InterruptedTurns.cs）
             LoadRunMarker(state);
+            // 沒有自動接續、還沒按的「繼續」（continue.json）：還原標頭的按鈕（AgentHub.ContinueOffers.cs）
+            LoadContinueOffer(state);
         }
 
         // 第 4 階段的授權者與處理者（D48；ConversationStore 不載入其他電腦的副本，D40，所以這裡沒有副本要略過）
@@ -3036,7 +3038,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             if (c.SaveCache is { } cache && ItemsSaveCache.ShouldDrop(c.Running, cache.LastUsed, now))
                 c.SaveCache = null;
             // 執行中與等背景工作的：更新 running.json 的快照（背景工作已經沒了的刪掉）
-            RefreshRunMarker(c);
+            RefreshRunMarker(c, now);
             // 有存活的背景工作（Claude run_in_background）不回收：背景工作撐不過程序重開；開著 Remote Control 的也不回收（隨時能從手機接手）
             if (c.Session != null && c.Session.HasLiveProcess && !c.Session.HasLiveBackgroundWork
                 && AgentHubRules.ShouldRecycle(c.Running, c.WaitingCount > 0, c.Session.HasRemoteControl, c.LastActivity, now))
@@ -3152,6 +3154,8 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         itemsWriter?.Drain(TimeSpan.FromSeconds(10));
         foreach (var c in conversations.Values.Where(c => c.Running).ToList())
             SaveConversation(c, saveItems: true);
+        // CLI 自己當掉後暫時留著的標記：正常結束 app 時不留（AgentHub.InterruptedTurns.cs 的 RunMarkerHold）
+        DropHeldRunMarkers();
         // 關程序之前：快照要看得到正在執行的工具與背景工作
         WriteRunMarkersOnExit(closedByApp: true);
         tokenTally.Flush();

@@ -606,6 +606,8 @@ internal sealed partial class AgentHub
         CloseTurnTokens(c);
         c.Running = false;
         c.StatusText = string.Empty;
+        // CLI 程序自己結束造成的失敗：running.json 先留著（Windows 登出關機時 CLI 比 app 先被結束，AgentHub.InterruptedTurns.cs）
+        c.TurnEndedByProcessExit = turn.ProcessExited && turn.Outcome == AgentTurnOutcome.Failed && !switching && overloadRetry == null;
         // 掛鉤在 Running 改回 false 之後（接收者看到的是已結束），接著送的下一輪之前
         HookTurnCompleted(c, outcome, turn.Usage, continues: switching || overloadRetry != null);
         c.BlockItems.Clear();

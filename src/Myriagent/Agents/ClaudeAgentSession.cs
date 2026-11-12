@@ -2244,7 +2244,7 @@ internal sealed class ClaudeAgentSession : IAgentSession
         {
             Raise(wasInterrupted
                 ? new AgentTurnCompletedEvent(AgentTurnOutcome.Interrupted, null, null)
-                : new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, $"Claude 程序意外結束（結束碼 {exitCode?.ToString() ?? "不明"}）{(string.IsNullOrWhiteSpace(tail) ? string.Empty : "：" + tail)}", null));
+                : new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, $"Claude 程序意外結束（結束碼 {exitCode?.ToString() ?? "不明"}）{(string.IsNullOrWhiteSpace(tail) ? string.Empty : "：" + tail)}", null) { ProcessExited = true });
         }
 
         Raise(new AgentProcessExitedEvent(exitCode, tail, Expected: !wasRunning && !autoTurnExited, source.InstanceId));

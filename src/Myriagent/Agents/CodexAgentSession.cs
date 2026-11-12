@@ -1608,7 +1608,7 @@ internal sealed partial class CodexAgentSession : IAgentSession
         {
             Raise(wasInterrupted
                 ? new AgentTurnCompletedEvent(AgentTurnOutcome.Interrupted, null, null)
-                : new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, $"Codex 程序意外結束（結束碼 {exitCode?.ToString() ?? "不明"}）{(string.IsNullOrWhiteSpace(tail) ? string.Empty : "：" + tail)}", null));
+                : new AgentTurnCompletedEvent(AgentTurnOutcome.Failed, $"Codex 程序意外結束（結束碼 {exitCode?.ToString() ?? "不明"}）{(string.IsNullOrWhiteSpace(tail) ? string.Empty : "：" + tail)}", null) { ProcessExited = true });
         }
 
         // 中樞把這個實例的待回應卡片作廢：直接結束程序時 Codex 不會撤回待核准的請求（E-16）
