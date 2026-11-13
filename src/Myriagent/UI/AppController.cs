@@ -173,6 +173,10 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         // 遠端桌面（docs/sync-protocol.md 14.16）：被看時以 GDI 擷取、SendInput 注入，主螢幕上方顯示提示列（不出現在傳出去的畫面）
         Hub.AttachRemoteDesk(Sync, () => new Myriagent.RemoteDesk.DxgiDeskScreen(), (text, disconnect) => RemoteDeskBanner.ShowFor(text, disconnect));
         Sync.AttachDesk(Hub.DeskEndpoint);
+        // 遠端桌面的鎖定畫面支援（docs/web-protocol.md 的 deskService）：系統服務的安裝與狀態。功能還在開發：設定頁的那一區只給設了
+        // MYRIAGENT_DESK_SERVICE=1 的與已經裝了服務的電腦看到（DeskServiceHubRules.Message 的 offered）
+        Hub.AttachDeskService(new Myriagent.RemoteDesk.DeskServiceManager(AppContext.BaseDirectory),
+            preview: Environment.GetEnvironmentVariable("MYRIAGENT_DESK_SERVICE") == "1");
         Accounts.UsagePollPolicy = Sync;
         Sync.StatusChanged += OnSyncStatusChanged;
         // 升級後第一次啟動：補上 Antigravity、Grok 的本機預設帳戶（各只補一次；帳戶清單這次唯讀時下次再補）

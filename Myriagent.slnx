@@ -5,6 +5,7 @@
     <Project Path="src/MyriagentHub/MyriagentHub.csproj" />
     <Project Path="src/MyriagentRemote/MyriagentRemote.csproj" />
     <Project Path="src/MyriagentSchedule/MyriagentSchedule.csproj" />
+    <Project Path="src/MyriagentDeskService/MyriagentDeskService.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Myriagent.Tests/Myriagent.Tests.csproj" />

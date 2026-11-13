@@ -22,7 +22,8 @@
   <ItemGroup>
     <!-- 型別都是 internal：只開放給桌面、伺服器、兩者的測試、無頭的假裝置（tools/fake-device）、
          模擬被攻破的伺服器（tools/fake-server，WP4.4）、app 自我更新的端到端（tools/update-e2e）
-         與桌面版的發佈工具（tools/release-tool 的 myriagent-release）；後兩者與 app 用同一份 manifest、簽章與版本規則 -->
+         與桌面版的發佈工具（tools/release-tool 的 myriagent-release）；後兩者與 app 用同一份 manifest、簽章與版本規則；
+         遠端桌面的鎖定畫面支援（src/MyriagentDeskService 的 MyriagentDesk）用管道協定、安裝規則與發佈簽章的驗證 -->
     <InternalsVisibleTo Include="Myriagent" />
     <InternalsVisibleTo Include="Myriagent.Tests" />
     <InternalsVisibleTo Include="MyriagentHub" />
@@ -31,6 +32,7 @@
     <InternalsVisibleTo Include="FakeServer" />
     <InternalsVisibleTo Include="update-e2e" />
     <InternalsVisibleTo Include="myriagent-release" />
+    <InternalsVisibleTo Include="MyriagentDesk" />
   </ItemGroup>
 
 </Project>

@@ -31,6 +31,7 @@ dotnet test Myriagent.slnx -c Release           # 桌面與 MyriagentHub 的單�
 | `$env:MYRIAGENT_SYNC_IT=1; dotnet test tests/Myriagent.Tests -c Release --filter "FullyQualifiedName~Sync.LongRun."` | 同步的長情境（對 MyriagentHub 子程序，約 6 分鐘） |
 | `$env:MYRIAGENT_LAUNCH_IT=1; … --filter "FullyQualifiedName~LaunchDotNetIntegration"` | 執行列的端到端（真的 dotnet build／run） |
 | `$env:MYRIAGENT_SCHED_IT=1; … --filter "FullyQualifiedName~TaskSchedulerReaderTests"` | 排程頁的讀取器對真的工作排程器（建立暫時的停用排程，結束一定刪掉） |
+| `$env:MYRIAGENT_DESKSVC_IT=1; … --filter "FullyQualifiedName~DeskServiceSystemIntegrationTests"` | 遠端桌面的鎖定畫面支援（開發中）真的以 LocalSystem 執行：要在「以系統管理員身分執行」的終端機裡跑；裝暫時的 `MyriagentDeskTest-…` 服務、連管道、看輸入桌面，結束一定移除 |
 | `$env:MYRIAGENT_VOICE_IT=1; … --filter "FullyQualifiedName~WhisperVoiceTranscriberIntegrationTests"` | 語音訊息的本機辨識 |
 
 ### 網頁介面

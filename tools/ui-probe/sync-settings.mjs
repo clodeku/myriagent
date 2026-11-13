@@ -501,6 +501,77 @@ export async function runSyncSettings(ctx, vp) {
     await closeWithCsp(ctx, app, csp);
   }
 
+  // syncDeskService：遠端桌面的鎖定畫面支援（宿主的 deskService）。第一次畫的時候問一次；宿主沒回（沒接）或 offered 不是 true 時整區不顯示；
+  // 未安裝 → 按「安裝…」先確認（說明是系統權限的服務、要按 UAC），確認了才送 install；進行中沒有按鈕；裝好顯示版本、服務看到的輸入桌面與「移除…」
+  {
+    const svc = (o) => Object.assign({
+      type: 'deskService', offered: true, known: true, installed: false, running: false, version: null, build: null,
+      bundled: { version: '0.2.950', build: 'abc1234' }, canInstall: true, update: false, system: null, busy: null, error: null,
+    }, o);
+    let mode = 'silent';
+    const onCmd = (m, host) => {
+      if (m.cmd !== 'deskService' || mode === 'silent') return;
+      if (m.action === 'check') host.send(svc(mode === 'hidden' ? { offered: false } : {}));
+      if (m.action === 'install') host.send(svc({ busy: 'install' }));
+    };
+    const app = await openSync(ctx, T('desk-service'), vp, remoteOf(NOW, 'online', syncDevices(NOW)), { onCmd });
+    const { page, host } = app;
+    const G = '.dlg-settings .sync [data-group="deskService"]';
+    const sent = (action) => host.received.filter((m) => m.cmd === 'deskService' && (!action || m.action === action));
+    const pill = () => textOf(page, G + ' [data-field="deskServiceState"]');
+    const buttons = () => page.$$eval(G + ' [data-field="deskServiceActions"] button', (bs) => bs.filter((b) => b.offsetParent).map((b) => b.textContent)).catch(() => []);
+    // 宿主沒回：不顯示，而且只問了一次
+    await sleep(200);
+    const silent = { shown: await shown(page, G), asked: sent('check').length };
+    // 功能還沒開放給這台
+    await host.send(svc({ offered: false }));
+    await sleep(150);
+    const notOffered = await shown(page, G);
+    // 未安裝
+    await host.send(svc({}));
+    await until(() => shown(page, G));
+    await scrollTo(page, 'deskService');
+    const idle = { pill: await pill(), buttons: await buttons(), text: await textOf(page, G) };
+    await ctx.shot(page, T('desk-service'));
+    // 安裝：先確認
+    await page.click(G + ' [data-act="deskService-install"]');
+    await page.waitForSelector('.dlg-confirm .btn.danger-solid');
+    const confirmText = await textOf(page, '.dlg-confirm');
+    const beforeConfirm = sent('install').length;
+    mode = 'live';
+    await page.click('.dlg-confirm .btn.danger-solid');
+    await until(() => sent('install').length === 1);
+    const busyPill = await until(async () => ((await pill()) === '安裝中…' ? '安裝中…' : null));
+    const busy = { pill: busyPill, buttons: await buttons(), detail: await textOf(page, G + ' [data-field="deskServiceDetail"]') };
+    // 裝好了
+    await host.send(svc({ installed: true, running: true, system: true, version: '0.2.950', build: 'abc1234',
+      probe: { desktop: 'Winlogon', secure: true, error: 0, desktops: ['Default', 'Winlogon'] } }));
+    const donePill = await until(async () => ((await pill()) === '執行中' ? '執行中' : null));
+    const done = { pill: donePill, buttons: await buttons(), detail: await textOf(page, G + ' [data-field="deskServiceDetail"]'), probe: await textOf(page, G + ' [data-field="deskServiceProbe"]') };
+    await ctx.shot(page, T('desk-service-installed'));
+    // 失敗的說明
+    await host.send(svc({ error: '沒有安裝：Windows 的系統管理員確認（UAC）沒有按「是」' }));
+    await until(() => shown(page, G + ' [data-field="deskServiceError"]'));
+    const error = await textOf(page, G + ' [data-field="deskServiceError"]');
+    // 移除：確認框取消不送
+    await host.send(svc({ installed: true, running: true, system: true, version: '0.2.950', build: 'abc1234' }));
+    await until(async () => (await buttons()).includes('移除…'));
+    await page.click(G + ' [data-act="deskService-uninstall"]');
+    await page.waitForSelector('.dlg-confirm .btn.danger-solid');
+    const removeText = await textOf(page, '.dlg-confirm');
+    await page.click('.dlg-confirm .btn:not(.danger-solid)');
+    await sleep(250);
+    check('syncDeskService', !silent.shown && silent.asked === 1 && !notOffered
+      && idle.pill === '未安裝' && idle.buttons.join() === '安裝…' && !!idle.text && idle.text.includes('開發中')
+      && beforeConfirm === 0 && !!confirmText && confirmText.includes('系統權限') && confirmText.includes('UAC')
+      && busy.pill === '安裝中…' && busy.buttons.length === 0 && !!busy.detail && busy.detail.includes('按「是」')
+      && done.pill === '執行中' && done.buttons.join() === '移除…' && !!done.detail && done.detail.includes('0.2.950（abc1234）')
+      && !!done.probe && done.probe.includes('Winlogon') && done.probe.includes('鎖定')
+      && !!error && error.includes('UAC') && !!removeText && removeText.includes('移除') && sent('uninstall').length === 0 && sent('check').length === 1,
+    { silent, notOffered, idle, beforeConfirm, confirmText, busy, done, error, removeText, uninstallSent: sent('uninstall').length, checks: sent('check').length });
+    await closeWithCsp(ctx, app, csp);
+  }
+
   // syncPolicyControlCancel：從「不接受」改成「可以操作」，確認框按取消——一筆都不送、分段選擇回到「不接受」
   {
     const app = await openSync(ctx, T('policy-control-cancel'), vp, remoteOf(NOW, 'online', syncDevices(NOW)), { onCmd: policyHost(syncStatus(NOW, 'online')) });

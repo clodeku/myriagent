@@ -26,6 +26,7 @@ import { pairCountdown, countdownCells, deviceLed, rangeFill, rangeTicks } from 
 import { setDecodedText } from './textfx.js';
 import { SETTING_KEYWORDS, searchSettings, searchTerms, highlightParts, snippet, tabKeyTarget, tabHitCounts, normalizeHubUrl, parseTokens, fmtTokens, parsePercent, fmtPercent, modelText, effortText } from './settingsrules.js';
 import { collaboratorsSection, myAccountSection, canManageCollaborators, isCollaborator } from './collab.js';
+import { deskServiceShown, deskServiceSummary, deskServiceProbeText, deskServiceConfirm } from './deskservicerules.js';
 
 let open = null; // { d, refresh, browser, refreshApp }
 let lastTab = 'general';  // 再開設定時回到上次看的分頁（只記在這次執行）
@@ -922,6 +923,16 @@ onHostMessage((msg) => {
   setTimeout(() => { refreshQueued = false; refreshSettings(); }, 0);
 });
 
+// 遠端桌面的鎖定畫面支援（宿主的 deskService；沒接的宿主不送，一直是 null）：收到就照同步區的做法排一次重畫
+let deskSvc = null;
+onHostMessage((msg) => {
+  if (!msg || msg.type !== 'deskService') return;
+  deskSvc = msg;
+  if (refreshQueued) return;
+  refreshQueued = true;
+  setTimeout(() => { refreshQueued = false; refreshSettings(); }, 0);
+});
+
 /**
  * Remote（WPR）收到一則宿主訊息之後的值：init → msg.remote（沒有就是 null）；sync 是 null → null（回到未配對）；
  * remote 是 null 而 sync 不是 → 自己建 { mode: 'desktop', deviceId: sync.deviceId, devices: [], sync }；sync → 換掉 sync；
@@ -1210,6 +1221,7 @@ function pairedView(withConfirm) {
     h('div', { class: 'set-ctl' }, pill));
   const confirm = withConfirm ? confirmBox() : null;
   const policy = policyBlock();
+  const desk = deskServiceBlock();
   const rename = renameBlock();
   const devices = devicesBlock();
   // 〔遠端〕回補的進度（SyncStatus.backfill；暫停只在系統匣顯示）、遠端操作紀錄與回收區的入口（WP4.6 D28）
@@ -1232,6 +1244,7 @@ function pairedView(withConfirm) {
       row('伺服器身分指紋', '和 Hub 主機上 MyriagentHub.exe admin status 顯示的相同。', hubFp)),
     actions(pause, retry, unpair),
     policy.node,
+    desk.node,
     logs,
     rename.node,
     devices.node);
@@ -1261,6 +1274,7 @@ function pairedView(withConfirm) {
       backfill.textContent = bt || '';
       if (confirm) confirm.update(s);
       policy.update(s.local, s);
+      desk.update();
       rename.update(remote);
       devices.update(remote);
     },
@@ -1428,6 +1442,61 @@ function policyBlock() {
       notifyRow.hidden = typeof local.notifyRemoteActions !== 'boolean';
       notify.input.checked = local.notifyRemoteActions !== false;
       unsupported.hidden = !!(s && s.remoteSupported === true);
+    },
+  };
+}
+
+/**
+ * 遠端桌面的鎖定畫面支援（宿主的 deskService）：以系統權限執行的服務的狀態與安裝、更新、移除。
+ * 這一區第一次畫的時候問宿主一次（deskService check）；宿主沒接、或功能還沒開放給這台（offered 不是 true）時整區不顯示。
+ * 按鈕先跳確認框，確認了才送——宿主接著以 UAC 啟動安裝器，要有人在這台按「是」
+ */
+function deskServiceBlock() {
+  const pill = h('span', { class: 'pill', dataset: { field: 'deskServiceState' } });
+  const detail = h('div', { class: 'set-desc', dataset: { field: 'deskServiceDetail' } });
+  const probe = h('div', { class: 'set-desc', dataset: { field: 'deskServiceProbe' } });
+  const err = h('div', { class: 'note err', hidden: true, dataset: { field: 'deskServiceError' } }, icon('error'), h('span'));
+  const buttons = actions();
+  buttons.dataset.field = 'deskServiceActions';
+  let asked = false;
+  let shownActions = '';
+  const run = async (act) => {
+    const r = await confirmDialog(Object.assign({ danger: true }, deskServiceConfirm(act, deskSvc)));
+    if (r.ok) post({ cmd: 'deskService', action: act });
+  };
+  const node = h('div', { class: 'sync-group', hidden: true, dataset: { group: 'deskService' } },
+    groupHead('遠端桌面的鎖定畫面支援'),
+    h('p', { class: 'set-desc', text: '這台鎖定、或出現系統管理員確認畫面（UAC）時，遠端桌面要靠一個以系統權限執行的服務才看得到、才能操作。安裝、更新、移除都要有人在這台按 Windows 的確認。' }),
+    h('div', { class: 'note warn' }, icon('warning'), h('span', { text: '開發中：目前只能安裝服務與檢查狀態，還不能看到或操作鎖定畫面。' })),
+    err,
+    card(h('div', { class: 'set-row' },
+      h('div', { class: 'set-text' }, h('div', { class: 'set-label', text: '狀態' }), detail, probe),
+      h('div', { class: 'set-ctl' }, pill))),
+    buttons);
+  return {
+    node,
+    update() {
+      if (!asked) { asked = true; post({ cmd: 'deskService', action: 'check' }); }
+      const s = deskSvc;
+      node.hidden = !deskServiceShown(s);
+      if (node.hidden) return;
+      const v = deskServiceSummary(s);
+      pill.className = 'pill ' + v.tone;
+      pill.textContent = v.label;
+      detail.textContent = v.detail;
+      detail.hidden = !v.detail;
+      const pt = deskServiceProbeText(s);
+      probe.textContent = pt || '';
+      probe.hidden = !pt;
+      err.hidden = !s.error;
+      err.lastElementChild.textContent = s.error || '';
+      // 按鈕只在組成變了才重建（開著的確認框不受影響；焦點不會被搶走）
+      const key = v.actions.map((a) => a.act + ':' + a.label).join('|');
+      if (key !== shownActions) {
+        shownActions = key;
+        buttons.replaceChildren(...v.actions.map((a) => syncButton(a.label, 'deskService-' + a.act, () => { run(a.act); })));
+      }
+      buttons.hidden = v.actions.length === 0;
     },
   };
 }

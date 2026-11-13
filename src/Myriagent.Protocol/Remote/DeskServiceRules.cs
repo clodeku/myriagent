@@ -1,0 +1,370 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography;
+using System.Text;
+using Myriagent.Update;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
+namespace Myriagent.Remote;
+
+/// <summary>連到服務的用戶端（服務以管道的用戶端資訊查出來的，不是用戶端自己說的）</summary>
+/// <param name="SessionId">用戶端程序所在的 Windows 工作階段</param>
+/// <param name="UserSid">用戶端的使用者（查不到是 null）</param>
+/// <param name="SessionUserSid">那個工作階段登入的使用者（沒有人登入、查不到是 null）</param>
+internal sealed record DeskServiceClientInfo(int SessionId, string? UserSid, string? SessionUserSid);
+
+/// <summary>服務對 <c>hello</c> 的回覆</summary>
+/// <param name="System">服務以 LocalSystem 執行（開發用的前景模式是 false：碰不到安全桌面）</param>
+internal sealed record DeskServiceHello(int Proto, string Version, string Build, bool System, int Session, IReadOnlyList<string> Features);
+
+/// <summary>服務對 <c>probe</c> 的回覆：那個工作階段目前的輸入桌面</summary>
+/// <param name="Desktop">輸入桌面的名稱（Default、Winlogon、Screen-saver）；開不了是 null</param>
+/// <param name="Secure">是安全桌面（鎖定畫面、UAC 的確認畫面、登入畫面）</param>
+/// <param name="Error">開不了時的 Win32 錯誤碼（開得了是 0）</param>
+/// <param name="Desktops">那個工作階段的視窗站裡有哪些桌面（列不出來是空的；診斷用）</param>
+internal sealed record DeskServiceProbe(int Session, string? Desktop, bool Secure, int Error, IReadOnlyList<string> Desktops);
+
+/// <summary>服務回的錯誤</summary>
+internal sealed record DeskServiceError(string Code, string Message);
+
+/// <summary>裝在這台的服務（<c>install.json</c>，裝的時候寫、只有系統管理員能改）</summary>
+/// <param name="Payload">服務檔的指紋（<see cref="DeskServiceRules.PayloadHash"/>）</param>
+/// <param name="SignedBy">驗過的發佈簽章金鑰（開發版的服務檔沒有簽章是 null）</param>
+internal sealed record DeskServiceInstall(string Service, string Version, string Build, string Payload, string Folder, string? SignedBy, string InstalledAt);
+
+/// <summary>安裝器（<c>MyriagentDesk.exe install／uninstall</c>）的結束碼</summary>
+internal enum DeskServiceExit
+{
+    Ok = 0,
+    Usage = 2,
+    NotElevated = 10,
+    PayloadMissing = 11,
+    PayloadInvalid = 12,
+    SignatureInvalid = 13,
+    CopyFailed = 14,
+    ServiceFailed = 15,
+    StartFailed = 16,
+    Busy = 17,
+    Unexpected = 19,
+}
+
+/// <summary>
+/// 遠端桌面的鎖定畫面支援（docs/web-protocol.md 的 deskService）：以 LocalSystem 執行的服務
+/// <c>MyriagentDesk</c> 與 app 之間的本機協定、安裝的規則（純函式；桌面、服務與安裝器共用）。
+/// 協定：具名管道上一行一個 JSON 物件（UTF-8、<c>\n</c>），要求 <c>{op, …}</c>、回覆 <c>{ok:true, …}</c> 或 <c>{ok:false, code, message}</c>。
+/// 服務不連網、不碰同步與帳戶，只替「同一個工作階段登入的那個使用者」的程序做事
+/// </summary>
+internal static class DeskServiceRules
+{
+    public const string ServiceName = "MyriagentDesk";
+
+    /// <summary>手動整合測試用的暫時服務名稱的開頭（後面接 4～16 個十六進位字）：絕不碰真的服務</summary>
+    public const string TestServicePrefix = "MyriagentDeskTest-";
+
+    public const string DisplayName = "Myriagent 遠端桌面的鎖定畫面支援";
+
+    public const string Description = "讓 Clode Myriagent 的遠端桌面看得到並操作這台電腦的鎖定畫面與系統管理員確認畫面（UAC）。停用或移除後遠端桌面照常可用，只是鎖定時不能操作。";
+
+    public const string ExeName = "MyriagentDesk.exe";
+
+    /// <summary>目前的協定版本（<c>hello</c> 兩邊各報自己的；功能以 <see cref="DeskServiceHello.Features"/> 判斷，不比版本）</summary>
+    public const int ProtocolVersion = 1;
+
+    /// <summary>一行的上限（要求與回覆都一樣；超過就斷線）</summary>
+    public const int MaxLineChars = 64 * 1024;
+
+    public const string OpHello = "hello";
+
+    public const string OpProbe = "probe";
+
+    public const string FeatureProbe = "probe";
+
+    public const string CodeInvalid = "invalid";
+
+    public const string CodeUnsupported = "unsupported";
+
+    public const string CodeDenied = "denied";
+
+    public const string CodeFailed = "failed";
+
+    /// <summary>服務在 <c>%ProgramFiles%</c> 底下的資料夾（只有系統管理員能寫：LocalSystem 執行的檔絕不能放使用者寫得到的地方）</summary>
+    public const string InstallFolder = @"Myriagent\DeskService";
+
+    public const string InstallFile = "install.json";
+
+    /// <summary>單一服務檔的上限（實際都在幾百 KB 上下；擋掉被換成巨大檔案的來源）</summary>
+    public const long MaxPayloadFileBytes = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// 服務要帶走的檔（和 app 同一個資料夾，都在發佈 manifest 的清單裡）。服務參考 Myriagent.Protocol，所以連它的相依一起：
+    /// 少一個，裝好的服務就起不來（.NET 的宿主照 deps.json 找檔）。<c>DeskServicePayloadTests</c> 拿建置輸出的 deps.json 比對這份清單
+    /// </summary>
+    public static readonly IReadOnlyList<string> PayloadFiles =
+    [
+        "MyriagentDesk.exe",
+        "MyriagentDesk.dll",
+        "MyriagentDesk.runtimeconfig.json",
+        "MyriagentDesk.deps.json",
+        "Myriagent.Protocol.dll",
+        "Newtonsoft.Json.dll",
+        "Markdig.dll",
+    ];
+
+    /// <summary>管道的名稱（<c>\\.\pipe\</c> 之後的部分）；測試的暫時服務各用各的</summary>
+    public static string PipeNameOf(string serviceName) => serviceName;
+
+    /// <summary>合法的服務名稱：真的那一個，或測試用的暫時名稱</summary>
+    public static bool IsServiceName([NotNullWhen(true)] string? name)
+    {
+        if (name == ServiceName)
+            return true;
+        if (name is null || !name.StartsWith(TestServicePrefix, StringComparison.Ordinal))
+            return false;
+        var tail = name[TestServicePrefix.Length..];
+        return tail.Length is >= 4 and <= 16 && tail.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+    }
+
+    /// <summary>這個服務裝在哪裡：真的在 <c>Myriagent\DeskService</c>，測試的暫時服務在它旁邊以服務名稱命名的資料夾</summary>
+    public static string InstallRoot(string programFiles, string serviceName)
+        => serviceName == ServiceName
+            ? Path.Combine(programFiles, InstallFolder)
+            : Path.Combine(programFiles, "Myriagent", serviceName);
+
+    /// <summary>服務檔的指紋：每個檔「名稱:SHA-256」照 <see cref="PayloadFiles"/> 的順序、各接一個換行，整段 UTF-8 的 SHA-256（小寫十六進位）</summary>
+    public static string PayloadHash(IReadOnlyDictionary<string, string> sha256ByName)
+    {
+        var text = new StringBuilder();
+        foreach (var name in PayloadFiles)
+        {
+            if (!sha256ByName.TryGetValue(name, out var sha) || !IsSha256(sha))
+                throw new ArgumentException($"少了服務檔的雜湊：{name}", nameof(sha256ByName));
+            text.Append(name).Append(':').Append(sha).Append('\n');
+        }
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString()))).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// 每一份服務檔裝在自己的子資料夾（名稱取指紋的前 16 個字）：更新是「放進新的資料夾、把服務指過去、重新啟動」，
+    /// 不必覆寫執行中的檔，舊的留到新的啟動成功才刪
+    /// </summary>
+    public static string PayloadFolder(string payloadHash) => "p-" + payloadHash[..16];
+
+    public static bool IsPayloadFolder(string name)
+        => name.Length == 18 && name.StartsWith("p-", StringComparison.Ordinal) && name.AsSpan(2).ToString().All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    /// <summary>服務的啟動指令：路徑一律加引號（沒有引號、路徑帶空白的服務會被 Windows 當成好幾個候選路徑）</summary>
+    public static string BinPath(string exePath) => "\"" + exePath + "\" service";
+
+    /// <summary>
+    /// 服務檔和簽章過的發佈清單對不對得上：每個檔都要在清單裡、雜湊相同。對得上回 null，否則回原因。
+    /// 這是完整性檢查（服務檔是那一版發佈的、沒有損毀或被換過）；發佈清單本身的簽章由呼叫端先驗
+    /// </summary>
+    public static string? CheckPayload(ReleaseManifest manifest, IReadOnlyDictionary<string, string> sha256ByName)
+    {
+        foreach (var name in PayloadFiles)
+        {
+            if (manifest.Files.FirstOrDefault(f => f.Path == name) is not { } listed)
+                return $"發佈清單裡沒有 {name}";
+            if (!sha256ByName.TryGetValue(name, out var sha) || !string.Equals(sha, listed.Sha256, StringComparison.Ordinal))
+                return $"{name} 和發佈清單不符";
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 服務收不收這個用戶端。以 LocalSystem 執行時：只收使用者工作階段（不是 0）裡、而且就是那個工作階段登入的使用者的程序——
+    /// 服務只替「坐在那個工作階段的人」看與操作他自己的安全桌面，別的使用者（runas、另一個登入的人）不行。
+    /// 前景模式（開發用，沒有系統權限）：只收執行它的那個使用者。收回 null，不收回原因
+    /// </summary>
+    public static string? Admit(DeskServiceClientInfo client, bool serviceIsSystem)
+    {
+        if (string.IsNullOrEmpty(client.UserSid))
+            return "查不到用戶端的使用者";
+        if (serviceIsSystem && client.SessionId <= 0)
+            return "服務的工作階段裡的程序不能使用";
+        if (string.IsNullOrEmpty(client.SessionUserSid))
+            return "那個工作階段沒有使用者登入";
+        return string.Equals(client.UserSid, client.SessionUserSid, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : "不是那個工作階段登入的使用者";
+    }
+
+    /// <summary>輸入桌面是不是安全桌面：使用者的桌面叫 Default，其他（Winlogon、Screen-saver）都算；名稱拿不到的不算（另外回錯誤碼）</summary>
+    public static bool IsSecureDesktop(string? desktopName)
+        => !string.IsNullOrEmpty(desktopName) && !string.Equals(desktopName, "Default", StringComparison.OrdinalIgnoreCase);
+
+    // ---- 協定 ----
+
+    public static string HelloRequest() => Line(new JObject { ["op"] = OpHello, ["proto"] = ProtocolVersion });
+
+    public static string ProbeRequest() => Line(new JObject { ["op"] = OpProbe });
+
+    /// <summary>解析一行要求：不是 JSON 物件、沒有 op 回 false</summary>
+    public static bool TryParseRequest(string? line, [NotNullWhen(true)] out string? op, [NotNullWhen(true)] out JObject? request)
+    {
+        op = null;
+        request = TryObject(line);
+        if (request is null || request["op"] is not JValue { Type: JTokenType.String, Value: string name } || name.Length is 0 or > 32)
+        {
+            request = null;
+            return false;
+        }
+        op = name;
+        return true;
+    }
+
+    public static string HelloReply(DeskServiceHello hello) => Line(new JObject
+    {
+        ["ok"] = true,
+        ["proto"] = hello.Proto,
+        ["version"] = hello.Version,
+        ["build"] = hello.Build,
+        ["system"] = hello.System,
+        ["session"] = hello.Session,
+        ["features"] = new JArray(hello.Features),
+    });
+
+    public static string ProbeReply(DeskServiceProbe probe) => Line(new JObject
+    {
+        ["ok"] = true,
+        ["session"] = probe.Session,
+        ["desktop"] = probe.Desktop,
+        ["secure"] = probe.Secure,
+        ["error"] = probe.Error,
+        ["desktops"] = new JArray(probe.Desktops),
+    });
+
+    public static string ErrorReply(string code, string message) => Line(new JObject { ["ok"] = false, ["code"] = code, ["message"] = message });
+
+    /// <summary>回覆是錯誤（<c>ok</c> 不是 true）時取出來；格式不對也算錯誤</summary>
+    public static DeskServiceError? ErrorOf(string? line)
+    {
+        if (TryObject(line) is not { } o)
+            return new DeskServiceError(CodeInvalid, "服務的回覆不是 JSON 物件");
+        if (o["ok"] is JValue { Type: JTokenType.Boolean, Value: true })
+            return null;
+        return new DeskServiceError(Text(o, "code") ?? CodeFailed, Text(o, "message") ?? "服務沒有說明原因");
+    }
+
+    public static DeskServiceHello? ParseHello(string? line)
+    {
+        if (ErrorOf(line) is not null || TryObject(line) is not { } o || Int(o, "proto") is not { } proto || Text(o, "version") is not { } version)
+            return null;
+        var features = o["features"] is JArray list
+            ? list.OfType<JValue>().Where(v => v.Type == JTokenType.String).Select(v => (string)v.Value!).Take(64).ToList()
+            : [];
+        return new DeskServiceHello(proto, version, Text(o, "build") ?? ReleaseIdentity.DevBuild,
+            o["system"] is JValue { Type: JTokenType.Boolean, Value: true }, Int(o, "session") ?? -1, features);
+    }
+
+    public static DeskServiceProbe? ParseProbe(string? line)
+    {
+        if (ErrorOf(line) is not null || TryObject(line) is not { } o || Int(o, "session") is not { } session)
+            return null;
+        return new DeskServiceProbe(session, Text(o, "desktop"), o["secure"] is JValue { Type: JTokenType.Boolean, Value: true }, Int(o, "error") ?? 0, Names(o, "desktops"));
+    }
+
+    /// <summary>工作階段裡的幫手（<c>MyriagentDesk.exe session-probe</c>）印出的一行 → 探測結果；格式不對回 null</summary>
+    public static DeskServiceProbe? ParseHelperProbe(string? line, int session)
+    {
+        if (TryObject(line) is not { } o)
+            return null;
+        var desktop = Text(o, "desktop");
+        var error = Int(o, "error") ?? 0;
+        if (desktop is null && error == 0)
+            return null;
+        return new DeskServiceProbe(session, desktop, IsSecureDesktop(desktop), error, Names(o, "desktops"));
+    }
+
+    public static string HelperProbeLine(string? desktop, int error, IReadOnlyList<string> desktops)
+        => Line(new JObject { ["desktop"] = desktop, ["error"] = error, ["desktops"] = new JArray(desktops) });
+
+    // ---- 安裝紀錄 ----
+
+    public static string SerializeInstall(DeskServiceInstall install) => new JObject
+    {
+        ["schema"] = 1,
+        ["service"] = install.Service,
+        ["version"] = install.Version,
+        ["build"] = install.Build,
+        ["payload"] = install.Payload,
+        ["folder"] = install.Folder,
+        ["signedBy"] = install.SignedBy,
+        ["installedAt"] = install.InstalledAt,
+    }.ToString(Formatting.Indented);
+
+    public static DeskServiceInstall? ParseInstall(string? json)
+    {
+        if (TryObject(json) is not { } o || Text(o, "service") is not { } service || !IsServiceName(service))
+            return null;
+        if (Text(o, "version") is not { } version || Text(o, "payload") is not { } payload || !IsSha256(payload)
+            || Text(o, "folder") is not { } folder || !IsPayloadFolder(folder))
+            return null;
+        return new DeskServiceInstall(service, version, Text(o, "build") ?? ReleaseIdentity.DevBuild, payload, folder, Text(o, "signedBy"), Text(o, "installedAt") ?? string.Empty);
+    }
+
+    /// <summary>
+    /// app 帶的服務檔要不要拿去更新裝好的：指紋一樣就不用；兩邊都是發佈版時只往新的更新（app 回滾到舊版時不把服務降回去），
+    /// 有一邊是開發版就只看指紋不同
+    /// </summary>
+    public static bool NeedsUpdate(DeskServiceInstall installed, string bundledVersion, string bundledBuild, string bundledPayload)
+    {
+        if (string.Equals(installed.Payload, bundledPayload, StringComparison.Ordinal))
+            return false;
+        if (installed.Build == ReleaseIdentity.DevBuild || bundledBuild == ReleaseIdentity.DevBuild)
+            return true;
+        if (!ReleaseVersion.TryParse(installed.Version, out var have) || !ReleaseVersion.TryParse(bundledVersion, out var bundled))
+            return true;
+        return bundled > have;
+    }
+
+    /// <summary>安裝器的結束碼給人看的說明（app 顯示在設定頁）；成功回 null</summary>
+    public static string? Describe(DeskServiceExit exit) => exit switch
+    {
+        DeskServiceExit.Ok => null,
+        DeskServiceExit.Usage => "安裝程式的參數不對",
+        DeskServiceExit.NotElevated => "沒有取得系統管理員權限",
+        DeskServiceExit.PayloadMissing => "找不到服務的檔案（app 的資料夾不完整）",
+        DeskServiceExit.PayloadInvalid => "服務的檔案不正常（是捷徑、連結或大小不合理）",
+        DeskServiceExit.SignatureInvalid => "服務的檔案和這一版的發佈簽章不符，沒有安裝",
+        DeskServiceExit.CopyFailed => "複製服務的檔案失敗",
+        DeskServiceExit.ServiceFailed => "向 Windows 登記服務失敗",
+        DeskServiceExit.StartFailed => "服務裝好了但啟動不了",
+        DeskServiceExit.Busy => "另一個安裝正在進行",
+        _ => "安裝程式發生未預期的錯誤",
+    };
+
+    /// <summary>程序的結束碼 → <see cref="DeskServiceExit"/>（不認得的一律 <see cref="DeskServiceExit.Unexpected"/>）</summary>
+    public static DeskServiceExit ExitOf(int code)
+        => Enum.IsDefined(typeof(DeskServiceExit), code) ? (DeskServiceExit)code : DeskServiceExit.Unexpected;
+
+    private static bool IsSha256([NotNullWhen(true)] string? text)
+        => text is { Length: 64 } && text.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static string Line(JObject o) => o.ToString(Formatting.None);
+
+    private static JObject? TryObject(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Length > MaxLineChars)
+            return null;
+        try
+        {
+            using var reader = new JsonTextReader(new StringReader(text)) { DateParseHandling = DateParseHandling.None, MaxDepth = 8 };
+            return JToken.ReadFrom(reader) as JObject;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>名稱的清單（桌面名稱都很短）：只留字串、最多 32 個、每個最多 64 字</summary>
+    private static IReadOnlyList<string> Names(JObject o, string name)
+        => o[name] is JArray list
+            ? list.OfType<JValue>().Where(v => v.Type == JTokenType.String).Select(v => (string)v.Value!).Where(s => s.Length is > 0 and <= 64).Take(32).ToList()
+            : [];
+
+    private static string? Text(JObject o, string name) => o[name] is JValue { Type: JTokenType.String, Value: string s } ? s : null;
+
+    private static int? Int(JObject o, string name) => o[name] is JValue { Type: JTokenType.Integer, Value: long n } && n is >= int.MinValue and <= int.MaxValue ? (int)n : null;
+}

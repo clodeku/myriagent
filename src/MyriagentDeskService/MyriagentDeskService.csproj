@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    MyriagentDesk：遠端桌面的鎖定畫面支援（docs/web-protocol.md 的 deskService）。
+    以 LocalSystem 執行的 Windows 服務：一般權限的 app 看不到也操作不了安全桌面（鎖定畫面、UAC），只有系統權限的程序可以。
+    同一個 exe 有幾種模式（Program.cs）：service（服務控制管理員啟動）、install／uninstall（要系統管理員，app 以 UAC 啟動）、
+    session-probe（服務在使用者的工作階段裡開的幫手）、run（開發用的前景模式，沒有系統權限）。
+    桌面專案以專案參考把它帶進建置與發佈的輸出（和 Myriagent.exe 同一個資料夾）；安裝時把 DeskServiceRules.PayloadFiles 那幾個檔
+    複製到 %ProgramFiles%\Myriagent\DeskService\（只有系統管理員能寫）。不連網、不碰同步與帳戶，只參考 BCL 與 Myriagent.Protocol：
+    新增相依會讓裝好的服務少檔起不來（DeskServicePayloadTests 把關）
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>MyriagentDesk</RootNamespace>
+    <AssemblyName>MyriagentDesk</AssemblyName>
+    <Product>Clode Myriagent</Product>
+    <!-- 和桌面同一個「主.次」（發佈時由 -p:Version 一起蓋掉）：設定頁拿它和裝好的服務比新舊 -->
+    <Version>0.2.0</Version>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Myriagent.Protocol\Myriagent.Protocol.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Myriagent.Tests" />
+  </ItemGroup>
+
+</Project>

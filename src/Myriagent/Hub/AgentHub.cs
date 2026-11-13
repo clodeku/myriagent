@@ -699,6 +699,10 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                     // 遠端桌面看的一方的封包（AgentHub.RemoteDesk.cs）
                     HandleDeskCommand(view, command);
                     break;
+                case "deskService":
+                    // 遠端桌面的鎖定畫面支援：查狀態、安裝、移除（AgentHub.DeskService.cs）
+                    HandleDeskServiceCommand(Str("action"));
+                    break;
                 case "monitor":
                     // 電腦狀態面板（AgentHub.Monitor.cs）
                     SetMonitor(view, command.Value<bool?>("on") == true);

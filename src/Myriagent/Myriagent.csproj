@@ -48,6 +48,9 @@
     <ProjectReference Include="..\MyriagentRemote\MyriagentRemote.csproj" />
     <!-- myriagent-schedule.exe（對話裡的代理建立 Myriagent 的定時訊息，排程頁的 S4）：同上，跟著進建置與發佈的輸出 -->
     <ProjectReference Include="..\MyriagentSchedule\MyriagentSchedule.csproj" />
+    <!-- MyriagentDesk.exe（遠端桌面的鎖定畫面支援：以 LocalSystem 執行的服務與它的安裝器，docs/web-protocol.md 的 deskService）：同上，跟著進建置與發佈的輸出；
+         安裝時由它自己把 DeskServiceRules.PayloadFiles 那幾個檔複製到 Program Files -->
+    <ProjectReference Include="..\MyriagentDeskService\MyriagentDeskService.csproj" />
   </ItemGroup>
 
   <ItemGroup>

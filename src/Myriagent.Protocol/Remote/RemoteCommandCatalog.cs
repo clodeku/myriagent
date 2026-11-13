@@ -199,7 +199,9 @@ internal static class RemoteCommandCatalog
         // 桌面遠端操作（docs/sync-protocol.md 14.7）：宿主代傳的附件與檔案下載、桌面草稿改開在其他電腦
         "peerUpload", "peerUploadCancel", "peerFileSave", "draftSetDevice",
         // 電腦狀態面板的檔案傳輸（2026-11-09）：把其他電腦的檔下載進這台的資料夾、取消、挑這台的資料夾；暫停與接著下載（2026-11-10）
-        "peerXferSave", "peerXferCancel", "peerXferPause", "peerXferResume", "peerXferReveal", "xferPickFolder");
+        "peerXferSave", "peerXferCancel", "peerXferPause", "peerXferResume", "peerXferReveal", "xferPickFolder",
+        // 遠端桌面的鎖定畫面支援（2026-11-13）：在這台安裝、移除系統服務，要這台的人按 UAC（遠端不能在這台裝服務）
+        "deskService");
 
     private static readonly string[] ToastOnly = ["toast"];
 
