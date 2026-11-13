@@ -90,11 +90,22 @@ internal static class DeskRules
     /// <c>status</c> 的內容：<paramref name="text"/> 是擷取不到的說明（蓋在畫面中間；null＝收掉），<paramref name="note"/> 是有畫面時的附註
     /// （例：安全桌面目前只能看；放在工具列旁，不擋畫面。沒有就不帶這個鍵——舊的網頁本來就不認得它）
     /// </summary>
-    public static JObject StatusBody(string? text, string? note)
+    public static JObject StatusBody(string? text, string? note) => StatusBody(text, note, secure: false, servicePublic: null);
+
+    /// <summary>
+    /// 同上，另帶安全桌面的狀態（鎖定畫面支援）：<paramref name="secure"/>＝現在的畫面是安全桌面（鎖定畫面、UAC）、
+    /// 由服務的幫手擷取；<paramref name="servicePublic"/>＝服務這個工作階段的公鑰（<c>svc {v, pub}</c>）——有它，看的一方在安全桌面時
+    /// 把輸入以服務的金鑰加密（<see cref="DeskSealRules.SecureInfo"/>），由服務解開、注入；沒有就只能看。兩個都是有才帶
+    /// </summary>
+    public static JObject StatusBody(string? text, string? note, bool secure, string? servicePublic)
     {
         var body = new JObject { ["text"] = text is null ? JValue.CreateNull() : text };
         if (!string.IsNullOrEmpty(note))
             body["note"] = note;
+        if (secure)
+            body["secure"] = true;
+        if (!string.IsNullOrEmpty(servicePublic))
+            body["svc"] = DeskSealRules.KeyExchange(servicePublic);
         return body;
     }
 

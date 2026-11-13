@@ -173,6 +173,9 @@ internal sealed partial class SyncEngine : ISyncEngineCommands
         var body = verdict.Body!;
         var cid = body.Cid;
         var digest = verdict.ContentSha256!;
+        // 遠端桌面：伺服器簽的 deskOpen 原樣留一份給鎖定畫面支援的服務當憑據（SyncEngine.Desk.cs）；順便更新給安裝器看的信任資料
+        NoteDeskEnvelope(delivery.Envelope, body);
+        RefreshDeskTrust();
         CommandBegin begin;
         try
         {

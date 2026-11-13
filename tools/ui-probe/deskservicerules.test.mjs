@@ -62,6 +62,36 @@ test('已安裝、執行中：綠色、只有移除', () => {
   assert.deepEqual(acts(v), ['uninstall:移除…']);
 });
 
+test('安全桌面能不能輸入：服務記下的伺服器要是現在配對的這一台，不是就只能看、請重新安裝', () => {
+  const base = { installed: true, running: true, system: true, version: '0.2.950', build: 'abc1234' };
+  const ready = deskServiceSummary(s({ ...base, secureInput: 'ready' }));
+  assert.equal(ready.label, '執行中');
+  assert.match(ready.detail, /可以遠端操作/);
+  assert.deepEqual(acts(ready), ['uninstall:移除…']);
+
+  const again = deskServiceSummary(s({ ...base, secureInput: 'reinstall' }));
+  assert.equal(again.tone, 'st-notLoggedIn');
+  assert.equal(again.label, '只能看');
+  assert.match(again.detail, /重新安裝/);
+  assert.deepEqual(acts(again), ['install:重新安裝…', 'uninstall:移除…']);
+  assert.deepEqual(acts(deskServiceSummary(s({ ...base, secureInput: 'reinstall', canInstall: false }))), ['uninstall:移除…']);
+
+  // 沒配對、舊的宿主（沒有這個欄位）：照原本的
+  for (const v of ['unpaired', null, undefined]) {
+    const plain = deskServiceSummary(s({ ...base, secureInput: v }));
+    assert.equal(plain.label, '執行中');
+    assert.doesNotMatch(plain.detail, /可以遠端操作/);
+  }
+  // 有更新、沒在執行、不是系統權限優先（更新本來就會重新記下伺服器）
+  assert.equal(deskServiceSummary(s({ ...base, update: true, secureInput: 'reinstall' })).label, '有更新');
+  assert.equal(deskServiceSummary(s({ ...base, running: false, secureInput: 'reinstall' })).label, '沒有在執行');
+  assert.equal(deskServiceSummary(s({ ...base, system: false, secureInput: 'reinstall' })).label, '不是系統權限');
+});
+
+test('確認框：安裝時說明會記下配對的伺服器', () => {
+  assert.match(deskServiceConfirm('install', s({})).message, /記下這台配對的伺服器/);
+});
+
 test('已安裝但沒有回應：紅色、可以重新安裝或移除', () => {
   const v = deskServiceSummary(s({ installed: true, running: false, version: '0.2.950', build: 'abc1234' }));
   assert.equal(v.tone, 'st-error');

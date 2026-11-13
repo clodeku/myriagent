@@ -8,6 +8,9 @@
 // 公鑰經伺服器轉送、沒有另外簽章：擋的是伺服器看到或留下輸入的內容，不擋主動把公鑰換掉的伺服器（伺服器是擁有者自己的主機）
 
 const INFO = 'myriagent-desk-input-v1';
+// 安全桌面的輸入（鎖定畫面、UAC）用的第二把金鑰：那台那一端是鎖定畫面支援的服務（系統權限）而不是 app。
+// 服務的公鑰在 status 的 svc.pub；用這把金鑰加密的那一包多帶 k: 'svc'，那台的 app 解不開、原樣轉給服務
+const SECURE_INFO = 'myriagent-desk-secure-input-v1';
 const PUBLIC_KEY_BYTES = 65;
 const encoder = new TextEncoder();
 
@@ -38,8 +41,9 @@ export function sealSupported() {
 }
 
 /**
- * 產生這個工作階段的金鑰。回 { publicKey, accept }：publicKey 放進 deskOpen 的 viewerKey；
- * accept(sessionId, targetPublic) 在收到被看的那台的公鑰之後呼叫，回加密器 { seal(events) → {n, ct} }，對方的公鑰不合格回 null。
+ * 產生這個工作階段的金鑰。回 { publicKey, accept, acceptSecure }：publicKey 放進 deskOpen 的 viewerKey；
+ * accept(sessionId, targetPublic) 在收到被看的那台的公鑰之後呼叫，回加密器 { seal(events) → {n, ct} }，對方的公鑰不合格回 null；
+ * acceptSecure(sessionId, servicePublic) 同樣的做法、對象是那台的系統服務（安全桌面的輸入），加密出來的多帶 k: 'svc'。
  * seal 一次一包、照呼叫的順序編號：呼叫的人要等上一包好了再叫下一包（送出去的順序才和編號一致）。
  * keyPair 只給測試（固定的金鑰）
  */
@@ -47,9 +51,7 @@ export async function createViewerSeal(keyPair) {
   const subtle = globalThis.crypto.subtle;
   const pair = keyPair || await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
   const viewerRaw = new Uint8Array(await subtle.exportKey('raw', pair.publicKey));
-  return {
-    publicKey: toBase64Url(viewerRaw),
-    async accept(sessionId, targetPublic) {
+  const derive = async (sessionId, targetPublic, label) => {
       const targetRaw = fromBase64Url(targetPublic);
       if (!targetRaw || targetRaw.length !== PUBLIC_KEY_BYTES || targetRaw[0] !== 4) return null;
       let key;
@@ -57,7 +59,7 @@ export async function createViewerSeal(keyPair) {
         const peer = await subtle.importKey('raw', targetRaw, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
         const shared = await subtle.deriveBits({ name: 'ECDH', public: peer }, pair.privateKey, 256);
         const material = await subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
-        const prefix = encoder.encode(INFO);
+        const prefix = encoder.encode(label);
         const info = new Uint8Array(prefix.length + 1 + PUBLIC_KEY_BYTES * 2);
         info.set(prefix, 0);
         info.set(viewerRaw, prefix.length + 1);
@@ -75,11 +77,17 @@ export async function createViewerSeal(keyPair) {
           const iv = new Uint8Array(12);
           new DataView(iv.buffer).setBigUint64(4, BigInt(mine));
           const sealed = await subtle.encrypt(
-            { name: 'AES-GCM', iv, additionalData: encoder.encode(INFO + '|' + sessionId + '|' + mine), tagLength: 128 },
+            { name: 'AES-GCM', iv, additionalData: encoder.encode(label + '|' + sessionId + '|' + mine), tagLength: 128 },
             key, encoder.encode(JSON.stringify({ events })));
-          return { n: mine, ct: toBase64Url(new Uint8Array(sealed)) };
+          const out = { n: mine, ct: toBase64Url(new Uint8Array(sealed)) };
+          if (label === SECURE_INFO) out.k = 'svc';
+          return out;
         },
       };
-    },
+  };
+  return {
+    publicKey: toBase64Url(viewerRaw),
+    accept: (sessionId, targetPublic) => derive(sessionId, targetPublic, INFO),
+    acceptSecure: (sessionId, servicePublic) => derive(sessionId, servicePublic, SECURE_INFO),
   };
 }

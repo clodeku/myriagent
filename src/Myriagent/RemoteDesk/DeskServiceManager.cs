@@ -18,7 +18,10 @@ internal sealed record DeskServiceBundle(string Version, string Build, string Pa
 /// <param name="Bundled">app 帶的（服務檔不完整是 null：不能安裝）</param>
 /// <param name="Hello">服務的回覆（連不上是 null：沒裝、沒在執行）</param>
 /// <param name="Probe">服務看到的輸入桌面（沒問、問不到是 null）</param>
-internal sealed record DeskServiceStatus(DeskServiceInstall? Installed, DeskServiceBundle? Bundled, DeskServiceHello? Hello, DeskServiceProbe? Probe);
+/// <param name="InstalledTrust">服務安裝時記下的信任的伺服器（沒記、沒裝是 null）</param>
+/// <param name="CurrentTrust">這台現在配對的伺服器（沒配對是 null）</param>
+internal sealed record DeskServiceStatus(DeskServiceInstall? Installed, DeskServiceBundle? Bundled, DeskServiceHello? Hello, DeskServiceProbe? Probe,
+    DeskServiceTrust? InstalledTrust = null, DeskServiceTrust? CurrentTrust = null);
 
 /// <summary>
 /// 遠端桌面的鎖定畫面支援（服務 <c>MyriagentDesk</c>）在 app 這一端的管理：查狀態、以 UAC 啟動安裝器。
@@ -35,7 +38,8 @@ internal interface IDeskServiceManager
     int RunElevated(string verb);
 }
 
-internal sealed class DeskServiceManager(string appDirectory) : IDeskServiceManager
+/// <param name="currentTrust">這台現在信任的伺服器（同步的快照，任何執行緒；沒配對回 null）：安裝時交給安裝器記下</param>
+internal sealed class DeskServiceManager(string appDirectory, Func<DeskServiceTrust?>? currentTrust = null) : IDeskServiceManager
 {
     /// <summary>使用者沒有同意 UAC（或啟動不了安裝器）</summary>
     public const int Declined = -1;
@@ -70,7 +74,27 @@ internal sealed class DeskServiceManager(string appDirectory) : IDeskServiceMana
                 Log.Info("鎖定畫面支援的服務連不上：" + ex.Message);
             }
         }
-        return new DeskServiceStatus(installed, bundled, hello, seen);
+        return new DeskServiceStatus(installed, bundled, hello, seen, installed is null ? null : ReadInstalledTrust(), currentTrust?.Invoke());
+    }
+
+    /// <summary>安裝器的參數：這台配對了就帶信任的伺服器（值是公鑰、來源、裝置 id，都驗過格式，沒有空白與引號）</summary>
+    internal static string InstallerArguments(string verb, DeskServiceTrust? trust)
+        => verb == "install" && DeskServiceRules.IsTrust(trust)
+            ? $"install --hub-key {trust.HubSpki} --aud {trust.Aud} --device {trust.DeviceId}"
+            : verb;
+
+    private static DeskServiceTrust? ReadInstalledTrust()
+    {
+        try
+        {
+            var path = Path.Combine(Path.GetDirectoryName(InstallFilePath())!, DeskServiceRules.TrustFile);
+            var info = new FileInfo(path);
+            return info.Exists && info.Length <= 16 * 1024 ? DeskServiceRules.ParseTrust(File.ReadAllText(path, Encoding.UTF8)) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     public int RunElevated(string verb)
@@ -81,7 +105,7 @@ internal sealed class DeskServiceManager(string appDirectory) : IDeskServiceMana
         try
         {
             // runas＝要求系統管理員（UAC）；已經是系統管理員時直接執行。主控台視窗藏起來
-            using var process = Process.Start(new ProcessStartInfo(exe, verb)
+            using var process = Process.Start(new ProcessStartInfo(exe, InstallerArguments(verb, currentTrust?.Invoke()))
             {
                 UseShellExecute = true,
                 Verb = "runas",
@@ -217,6 +241,23 @@ internal sealed class DeskServiceClient : IDisposable
     {
         var reply = Call(DeskServiceRules.OpenRequest());
         return DeskServiceRules.ParseOpen(reply) ?? throw Failure(reply);
+    }
+
+    /// <summary>
+    /// 請幫手建立安全桌面輸入的金鑰：把伺服器簽的 deskOpen 信封交給它驗，回它這個工作階段的公鑰。
+    /// 幫手不收（沒有信任的伺服器、信封驗不過）丟 <see cref="InvalidOperationException"/>
+    /// </summary>
+    public string SecureOpen(Security.CommandEnvelope envelope, string session)
+    {
+        var reply = Call(DeskServiceRules.SecureOpenRequest(envelope));
+        return DeskServiceRules.ParseSecureOpen(reply, session) ?? throw Failure(reply);
+    }
+
+    /// <summary>把一包以服務的金鑰加密的輸入轉給幫手（這裡解不開，只是轉送）；回注入了幾個事件</summary>
+    public int SecureInput(string session, long n, string ct)
+    {
+        var reply = Call(DeskServiceRules.SecureInputRequest(session, n, ct));
+        return DeskServiceRules.ParseSecureInput(reply) ?? throw Failure(reply);
     }
 
     /// <summary>

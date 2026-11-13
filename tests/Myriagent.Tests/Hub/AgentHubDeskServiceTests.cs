@@ -110,6 +110,28 @@ public sealed class AgentHubDeskServiceTests
     }
 
     [Fact]
+    public async Task 狀態_安全桌面能不能輸入_服務記下的伺服器要是現在配對的這一台()
+    {
+        var (h, manager) = Create();
+        using var dispose = h;
+        using var hub = new Myriagent.Tests.RemoteDesk.DeskOpenSamples();
+        using var otherHub = new Myriagent.Tests.RemoteDesk.DeskOpenSamples();
+        async Task<string?> StateAsync(DeskServiceStatus status)
+        {
+            manager.Status = status;
+            var mark = h.Main.Mark();
+            h.Command(h.Main, "deskService", new { action = "check" });
+            return (await WaitIdleAsync(h.Main, mark)).Value<string>("secureInput");
+        }
+
+        (await StateAsync(new DeskServiceStatus(null, Bundle, null, null, null, hub.Trust))).Should().BeNull("沒裝：不談");
+        (await StateAsync(new DeskServiceStatus(Installed, Bundle, Hello, null, hub.Trust, hub.Trust))).Should().Be("ready");
+        (await StateAsync(new DeskServiceStatus(Installed, Bundle, Hello, null, null, hub.Trust))).Should().Be("reinstall", "安裝時還沒配對");
+        (await StateAsync(new DeskServiceStatus(Installed, Bundle, Hello, null, otherHub.Trust, hub.Trust))).Should().Be("reinstall", "之後換了伺服器");
+        (await StateAsync(new DeskServiceStatus(Installed, Bundle, Hello, null, hub.Trust, null))).Should().Be("unpaired");
+    }
+
+    [Fact]
     public async Task install_啟動安裝器_做完重查_帶服務看到的輸入桌面()
     {
         var (h, manager) = Create();

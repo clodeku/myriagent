@@ -33,7 +33,8 @@ export function openRemoteDesk(deviceId, name) {
     view: { zoom: 1, left: 0, top: 0 }, fit: { width: 0, height: 0 }, box: { w: 0, h: 0 }, sentMaxWidth: 1920, sharpTimer: 0,
     pointers: new Map(), edge: null, edgeRaf: 0, lastMouse: null,
     // 輸入的端對端加密（deskseal.js）：state 見 remotedeskrules.sealAction；chain 讓加密後的封包照順序送
-    seal: { state: 'off', viewer: null, sealer: null, chain: Promise.resolve() },
+    // secure／svcPub／svcSealer：那台在安全桌面（鎖定畫面、UAC）時，事件改以那台系統服務的金鑰加密（remotedeskrules.secureAction）
+    seal: { state: 'off', viewer: null, sealer: null, chain: Promise.resolve(), secure: false, svcPub: null, svcSealer: null },
   };
   build(s);
   setStatus(R.waitingText(s.name, 0), true);
@@ -67,6 +68,25 @@ export function openRemoteDesk(deviceId, name) {
  * 那台的第一個封包決定這次的輸入要不要加密：是帶 kx 的 status 就算金鑰、之後的事件都加密；不是（舊版的那台）就照舊送明文。
  * 決定之前按的鍵留在批次裡（remotedeskrules.sealAction 的 hold），決定之後才送
  */
+/**
+ * 每則 status 帶的安全桌面狀態：那台在安全桌面時事件改以服務的金鑰加密。服務的公鑰換了（那台的幫手重開過）就重新算一把；
+ * 沒有公鑰＝只能看，事件不送
+ */
+function settleSecure(mine, st) {
+  const seal = mine.seal;
+  seal.secure = st.secure;
+  if (st.svc === seal.svcPub) return;
+  seal.svcPub = st.svc;
+  seal.svcSealer = null;
+  if (!st.svc || !seal.viewer) return;
+  const pub = st.svc;
+  seal.viewer.acceptSecure(mine.id, pub).then((sealer) => sealer, () => null).then((sealer) => {
+    if (s !== mine || mine.closed || seal.svcPub !== pub) return;
+    seal.svcSealer = sealer;
+    scheduleSend(mine);
+  });
+}
+
 function settleSeal(mine, m) {
   const seal = mine.seal;
   if (seal.state !== 'wait') return;
@@ -108,6 +128,7 @@ export function onDesk(m) {
       if (R.kxPublic(m.kind, m.body)) break;
       setStatus(m.body && typeof m.body.text === 'string' ? m.body.text : null);
       setNote(R.statusNote(m.body));
+      settleSecure(s, R.statusSecure(m.body));
       break;
     case 'end':
       end(R.endText(m.body), false);
@@ -440,6 +461,27 @@ function scheduleSend(s) {
 function flush(s) {
   if (s.closed) return;
   const seal = s.seal;
+  // 安全桌面：事件只走服務的金鑰；沒有（只能看）就丟掉，確認照送
+  const secure = R.secureAction(seal.secure, !!seal.svcSealer);
+  if (secure) {
+    const body = s.batch.take();
+    if (!body) return;
+    s.lastSendAt = performance.now();
+    if (secure === 'secure' && body.events) {
+      const mine = s;
+      const sealer = seal.svcSealer;
+      seal.chain = seal.chain.then(() => sealer.seal(body.events)).then((e2e) => {
+        if (s !== mine || mine.closed) return;
+        const sealedBody = { e2e };
+        if (body.ack !== undefined) sealedBody.ack = body.ack;
+        sendPacket('input', sealedBody);
+      }, () => { /* 加密失敗：這一包不送 */ });
+    } else if (body.ack !== undefined) {
+      sendPacket('input', { ack: body.ack });
+    }
+    if (s.batch.size) scheduleSend(s);
+    return;
+  }
   const action = R.sealAction(seal.state, s.batch.size > 0);
   if (action === 'hold') {
     // 還沒決定要不要加密：事件先留著（確認照送），決定之後 settleSeal 會再排一次

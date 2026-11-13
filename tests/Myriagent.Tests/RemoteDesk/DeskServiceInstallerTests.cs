@@ -114,6 +114,27 @@ public sealed class DeskServiceInstallerTests : IDisposable
     }
 
     [Fact]
+    public void 信任的伺服器_安裝時給的記在安裝資料夾_重裝沒給就拿掉_不留上一次配對的()
+    {
+        using var hub = new DeskOpenSamples();
+        var installer = new DeskServiceInstaller(control);
+        var trustPath = Path.Combine(Root(), DeskServiceRules.TrustFile);
+
+        installer.Install(Options() with { Trust = hub.Trust }).Should().Be(DeskServiceExit.Ok);
+        DeskServiceRules.ParseTrust(File.ReadAllText(trustPath)).Should().Be(hub.Trust);
+
+        // 換了伺服器再裝：以這一次的為準
+        using var other = new DeskOpenSamples();
+        installer.Install(Options() with { Trust = other.Trust }).Should().Be(DeskServiceExit.Ok);
+        DeskServiceRules.ParseTrust(File.ReadAllText(trustPath)).Should().Be(other.Trust);
+
+        // 沒配對時重裝：拿掉（裝了只能看）
+        installer.Install(Options()).Should().Be(DeskServiceExit.Ok);
+        File.Exists(trustPath).Should().BeFalse();
+        File.Exists(Path.Combine(Root(), DeskServiceRules.InstallFile)).Should().BeTrue();
+    }
+
+    [Fact]
     public void 安裝_開發版沒有發佈清單_服務檔進自己的子資料夾_登記並啟動_寫安裝紀錄()
     {
         new DeskServiceInstaller(control).Install(Options(build: ReleaseIdentity.DevBuild)).Should().Be(DeskServiceExit.Ok);

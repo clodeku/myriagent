@@ -433,6 +433,7 @@ internal sealed partial class SyncEngine : ISyncEngine, IConversationEngine
         {
             device = new DeviceState(args.Paths, d);
             trust = new TrustStore(device, store);
+            RefreshDeskTrust();
             // 已完成的對話列直接載成骨架（不讀 payload，WP4.3 計畫 D31）；第 3 階段的列照原樣
             outbox = store.LoadOutboxSlim(ShareOutboxString).ToList();
             outboxDoneHint = 0;
@@ -613,6 +614,8 @@ internal sealed partial class SyncEngine : ISyncEngine, IConversationEngine
             Log.Warn("改釘新的伺服器身分失敗（device.json 存檔失敗）：維持待確認");
             return;
         }
+
+        RefreshDeskTrust();
 
         Log.Info($"使用者在本機確認了新的伺服器身分：{confirmFingerprint}");
         candidateSpki = null;

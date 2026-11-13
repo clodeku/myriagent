@@ -105,8 +105,14 @@ internal sealed class DeskSession : IDisposable
                     Ack(inputAck);
                 if (Stopped)
                     break;
-                if (DeskSealRules.SealedOf(packet.Body, out _) is { } sealedInput)
+                if (DeskSealRules.SealedOf(packet.Body, out _, out var forService) is { } sealedInput && forService)
                 {
+                    // 以服務的金鑰加密的（安全桌面的輸入）：這裡解不開，原樣轉給鎖定畫面支援的幫手，由它驗、解、注入
+                    (screen as IDeskSecureInput)?.SubmitSecureInput(sealedInput.N, sealedInput.Ct);
+                }
+                else if (DeskSealRules.SealedOf(packet.Body, out _) is { } appSealed)
+                {
+                    sealedInput = appSealed;
                     // 加密的輸入：只有這個工作階段的金鑰解得開；解不開（沒有金鑰、被動過、重送）就丟掉
                     if (cipher?.Open(sealedInput.N, sealedInput.Ct) is { } opened)
                     {
@@ -282,6 +288,8 @@ internal sealed class DeskSession : IDisposable
         var lastSentMs = 0L;
         string? statusShown = null;
         string? noteShown = null;
+        var secureShown = false;
+        string? serviceKeyShown = null;
         var statusSentMs = 0L;
         var needKey = false;
         DeskCursorState? lastCursor = null;
@@ -362,6 +370,7 @@ internal sealed class DeskSession : IDisposable
                     {
                         statusShown = text;
                         noteShown = null;
+                        secureShown = false;
                         statusSentMs = NowMs();
                         SendSafely(new DeskPacket(SessionId, DeskRules.Status, 0, new JObject { ["text"] = text }));
                     }
@@ -382,14 +391,20 @@ internal sealed class DeskSession : IDisposable
                 }
 
                 retries = 0;
-                // 有畫面但只能看（安全桌面的畫面是鎖定畫面支援的幫手給的，SecureDeskScreen）：不注入輸入，說明放在 note（畫面照常顯示）
+                // 安全桌面（畫面是鎖定畫面支援的幫手給的，SecureDeskScreen）：app 不注入輸入。服務驗過信封、回了公鑰時告訴看的一方（svc），
+                // 它把輸入以服務的金鑰加密、這裡原樣轉給服務；沒有公鑰就只能看，說明放在 note（畫面照常顯示）
                 var note = (screen as IDeskViewOnly)?.ViewOnlyNote;
-                inputBlocked = note is not null;
-                if (statusShown is not null || note != noteShown)
+                var secureInput = screen as IDeskSecureInput;
+                var secure = secureInput?.SecureActive == true;
+                var serviceKey = secureInput?.ServicePublicKey;
+                inputBlocked = secure || note is not null;
+                if (statusShown is not null || note != noteShown || secure != secureShown || serviceKey != serviceKeyShown)
                 {
                     statusShown = null;
                     noteShown = note;
-                    SendSafely(new DeskPacket(SessionId, DeskRules.Status, 0, DeskRules.StatusBody(null, note)));
+                    secureShown = secure;
+                    serviceKeyShown = serviceKey;
+                    SendSafely(new DeskPacket(SessionId, DeskRules.Status, 0, DeskRules.StatusBody(null, note, secure, serviceKey)));
                 }
 
                 IReadOnlyList<DeskTile> tiles = captured == DeskCapture.Unchanged

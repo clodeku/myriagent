@@ -180,7 +180,8 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         Sync.AttachDesk(Hub.DeskEndpoint);
         // 遠端桌面的鎖定畫面支援（docs/web-protocol.md 的 deskService）：系統服務的安裝與狀態。功能還在開發：設定頁的那一區只給設了
         // MYRIAGENT_DESK_SERVICE=1 的與已經裝了服務的電腦看到（DeskServiceHubRules.Message 的 offered）
-        Hub.AttachDeskService(new Myriagent.RemoteDesk.DeskServiceManager(AppContext.BaseDirectory),
+        var deskTrustSource = Sync;
+        Hub.AttachDeskService(new Myriagent.RemoteDesk.DeskServiceManager(AppContext.BaseDirectory, () => deskTrustSource.DeskTrust),
             preview: Environment.GetEnvironmentVariable("MYRIAGENT_DESK_SERVICE") == "1");
         Accounts.UsagePollPolicy = Sync;
         Sync.StatusChanged += OnSyncStatusChanged;

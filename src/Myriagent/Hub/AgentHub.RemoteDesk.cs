@@ -186,6 +186,8 @@ internal sealed partial class AgentHub
     {
         var transport = deskTransport!;
         deskScreen = deskScreenFactory!();
+        // 安全桌面的輸入（鎖定畫面支援）：伺服器簽的 deskOpen 信封交給畫面的包裝，由它轉給服務的幫手當憑據
+        (deskScreen as IDeskSecureInput)?.OfferEnvelope(sessionId, transport.TakeDeskEnvelope(sessionId));
         // 輸入的端對端加密（DeskSealRules）：看的一方給了公鑰就用；沒給（舊的網頁）照舊收明文
         deskCipher = DeskInputCipher.TryCreate(sessionId, viewerKey);
         var session = new DeskSession(sessionId, viewerLabel, deskScreen, transport.SendDeskUp,

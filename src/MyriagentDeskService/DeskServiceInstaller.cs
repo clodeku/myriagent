@@ -13,8 +13,9 @@ namespace MyriagentDesk;
 /// <param name="ProgramFiles">裝到哪個 Program Files（只有系統管理員能寫）</param>
 /// <param name="Identity">這一份服務檔是哪一版（安裝器和服務是同一個 exe）</param>
 /// <param name="TrustedKeys">信任的發佈簽章金鑰（空的＝這個組建沒有內建金鑰，不驗）</param>
+/// <param name="Trust">信任的伺服器（安全桌面的輸入要它；這台還沒配對是 null：裝了只能看）</param>
 internal sealed record DeskInstallOptions(string ServiceName, string SourceDirectory, string ProgramFiles, ReleaseIdentity Identity,
-    IReadOnlyList<ReleaseKey> TrustedKeys, DateTimeOffset Now);
+    IReadOnlyList<ReleaseKey> TrustedKeys, DateTimeOffset Now, DeskServiceTrust? Trust = null);
 
 /// <summary>
 /// 安裝、更新、移除服務（<c>MyriagentDesk.exe install／uninstall</c>，以系統管理員執行）。
@@ -108,6 +109,13 @@ internal sealed class DeskServiceInstaller(IServiceControl control)
             var install = new DeskServiceInstall(options.ServiceName, options.Identity.Version.ToString(), options.Identity.Build, payloadHash, folderName, signedBy,
                 options.Now.UtcDateTime.ToString("yyyy'-'MM'-'dd'T'HH':'mm':'ss'Z'", CultureInfo.InvariantCulture));
             File.WriteAllText(Path.Combine(root, DeskServiceRules.InstallFile), DeskServiceRules.SerializeInstall(install), new UTF8Encoding(false));
+            // 信任的伺服器：這一次安裝給的為準（同意 UAC 的那一下定下來，之後只有系統管理員改得了）；沒給就拿掉舊的——
+            // 不留著上一次配對的伺服器
+            var trustPath = Path.Combine(root, DeskServiceRules.TrustFile);
+            if (options.Trust is { } anchor)
+                File.WriteAllText(trustPath, DeskServiceRules.SerializeTrust(anchor), new UTF8Encoding(false));
+            else
+                File.Delete(trustPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

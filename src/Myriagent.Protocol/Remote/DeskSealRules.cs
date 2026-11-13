@@ -28,6 +28,16 @@ internal static class DeskSealRules
 
     public const string Info = "myriagent-desk-input-v1";
 
+    /// <summary>
+    /// 安全桌面的輸入（鎖定畫面、UAC）用的第二把金鑰的標籤：被看的那台那一端是鎖定畫面支援的服務（系統權限）而不是 app，
+    /// 和 <see cref="Info"/> 的金鑰分開（同一個工作階段、同一把看的一方的金鑰，兩邊各自的公鑰不同、標籤也不同）。
+    /// 服務的公鑰在 <c>status</c> 的 <c>svc.pub</c>；這把金鑰加密的那一包在 <c>e2e</c> 多帶 <c>k: "svc"</c>
+    /// </summary>
+    public const string SecureInfo = "myriagent-desk-secure-input-v1";
+
+    /// <summary><c>e2e.k</c> 的值：這一包是以服務的金鑰加密的</summary>
+    public const string ServiceKeyTag = "svc";
+
     /// <summary>未壓縮的 P-256 點：0x04＋X（32）＋Y（32）</summary>
     public const int PublicKeyBytes = 65;
 
@@ -65,7 +75,7 @@ internal static class DeskSealRules
     /// 以自己的金鑰與對方的公鑰算出這個工作階段的 AES 金鑰；對方的公鑰格式不對、不在曲線上回 null。
     /// <paramref name="viewerPublic"/>、<paramref name="targetPublic"/> 是兩邊線上的公鑰（都放進 info：兩邊算的一定是同一組）
     /// </summary>
-    public static byte[]? DeriveKey(ECDiffieHellman own, string? peerPublic, string sessionId, string viewerPublic, string targetPublic)
+    public static byte[]? DeriveKey(ECDiffieHellman own, string? peerPublic, string sessionId, string viewerPublic, string targetPublic, string label = Info)
     {
         if (!IsPublicKey(peerPublic) || !IsPublicKey(viewerPublic) || !IsPublicKey(targetPublic))
             return null;
@@ -82,7 +92,7 @@ internal static class DeskSealRules
             {
                 Base64UrlRules.TryDecode(viewerPublic, out var viewer, PublicKeyBytes);
                 Base64UrlRules.TryDecode(targetPublic, out var target, PublicKeyBytes);
-                var prefix = Encoding.UTF8.GetBytes(Info);
+                var prefix = Encoding.UTF8.GetBytes(label);
                 var info = new byte[prefix.Length + 1 + PublicKeyBytes * 2];
                 prefix.CopyTo(info, 0);
                 viewer.CopyTo(info, prefix.Length + 1);
@@ -108,20 +118,20 @@ internal static class DeskSealRules
         return nonce;
     }
 
-    public static byte[] AssociatedData(string sessionId, long n)
-        => Encoding.UTF8.GetBytes(Info + "|" + sessionId + "|" + n.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    public static byte[] AssociatedData(string sessionId, long n, string label = Info)
+        => Encoding.UTF8.GetBytes(label + "|" + sessionId + "|" + n.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
     /// <summary>加密一包（桌面不當看的一方；給測試與之後的用途）：回 <c>ct</c></summary>
-    public static string Seal(byte[] key, string sessionId, long n, ReadOnlySpan<byte> plaintext)
+    public static string Seal(byte[] key, string sessionId, long n, ReadOnlySpan<byte> plaintext, string label = Info)
     {
         var sealedBytes = new byte[plaintext.Length + TagBytes];
         using var aes = new AesGcm(key, TagBytes);
-        aes.Encrypt(Nonce(n), plaintext, sealedBytes.AsSpan(0, plaintext.Length), sealedBytes.AsSpan(plaintext.Length), AssociatedData(sessionId, n));
+        aes.Encrypt(Nonce(n), plaintext, sealedBytes.AsSpan(0, plaintext.Length), sealedBytes.AsSpan(plaintext.Length), AssociatedData(sessionId, n, label));
         return Base64UrlRules.Encode(sealedBytes);
     }
 
     /// <summary>解開一包；驗證碼不對（金鑰、工作階段、n 任何一個對不上，或內容被動過）、格式不對回 null</summary>
-    public static byte[]? Open(byte[] key, string sessionId, long n, string? ct)
+    public static byte[]? Open(byte[] key, string sessionId, long n, string? ct, string label = Info)
     {
         if (n < 1 || !Base64UrlRules.TryDecode(ct, out var sealedBytes, MaxSealedBytes) || sealedBytes.Length < TagBytes)
             return null;
@@ -129,7 +139,7 @@ internal static class DeskSealRules
         try
         {
             using var aes = new AesGcm(key, TagBytes);
-            aes.Decrypt(Nonce(n), sealedBytes.AsSpan(0, plaintext.Length), sealedBytes.AsSpan(plaintext.Length), plaintext, AssociatedData(sessionId, n));
+            aes.Decrypt(Nonce(n), sealedBytes.AsSpan(0, plaintext.Length), sealedBytes.AsSpan(plaintext.Length), plaintext, AssociatedData(sessionId, n, label));
             return plaintext;
         }
         catch (CryptographicException)
@@ -155,16 +165,37 @@ internal static class DeskSealRules
     /// <c>input</c> 的內容裡加密的那一包（<c>e2e {n, ct}</c>）。沒有 <c>e2e</c> 回 null、<paramref name="malformed"/> 是 false；
     /// 有但格式不對（n 不是正整數、ct 不是 base64url 或太大）回 null、<paramref name="malformed"/> 是 true
     /// </summary>
-    public static (long N, string Ct)? SealedOf(JObject? inputBody, out bool malformed)
+    public static (long N, string Ct)? SealedOf(JObject? inputBody, out bool malformed) => SealedOf(inputBody, out malformed, out _);
+
+    /// <summary>同上；<paramref name="service"/>：這一包是以服務的金鑰加密的（<c>e2e.k</c> 是 <see cref="ServiceKeyTag"/>；<c>k</c> 是別的值算格式不對）</summary>
+    public static (long N, string Ct)? SealedOf(JObject? inputBody, out bool malformed, out bool service)
     {
         malformed = false;
+        service = false;
         if (inputBody?["e2e"] is null or { Type: JTokenType.Null })
             return null;
         if (inputBody["e2e"] is JObject e
             && e["n"] is JValue { Type: JTokenType.Integer, Value: long n } && n >= 1
             && e["ct"] is JValue { Type: JTokenType.String, Value: string ct } && ct.Length >= 22 && Base64UrlRules.IsCanonical(ct, MaxSealedBytes))
-            return (n, ct);
+        {
+            if (e["k"] is null or { Type: JTokenType.Null })
+                return (n, ct);
+            if (e["k"] is JValue { Type: JTokenType.String, Value: ServiceKeyTag })
+            {
+                service = true;
+                return (n, ct);
+            }
+        }
+
         malformed = true;
         return null;
     }
+
+    /// <summary><c>status</c> 的內容裡服務的公鑰（<c>svc {v, pub}</c>）；沒有、版本不認得、格式不對回 null</summary>
+    public static string? ServicePublic(JObject? statusBody)
+        => statusBody?["svc"] is JObject svc
+           && svc["v"] is JValue { Type: JTokenType.Integer, Value: long v } && v == Version
+           && svc["pub"] is JValue { Type: JTokenType.String, Value: string pub } && IsPublicKey(pub)
+            ? pub
+            : null;
 }

@@ -77,6 +77,9 @@ internal sealed record CommandEnvelopeBody(
     CommandIssuer Issuer,
     CommandAuth Auth);
 
+/// <summary>驗過的 <c>deskOpen</c> 信封裡服務要的東西（<see cref="CommandEnvelope.VerifyDeskOpen"/>）</summary>
+internal sealed record DeskOpenProof(string SessionId, string ViewerKey, string IssuerKind, string IssuerLabel);
+
 /// <summary>
 /// 裝置驗信封時的「自己」：釘選的伺服器身分公鑰（SPKI）、配對的伺服器來源、自己的 deviceId、收到信封的這條連線的 conn
 /// （<paramref name="ConnectionId"/>：這條連線 Hello 回應的 nonceS，桌面的 <c>SyncConnection.EnvelopeConn</c>）。
@@ -307,6 +310,49 @@ internal sealed record CommandEnvelope(string V, string Body, string Sig)
     /// 型錄的路由與形狀不在這裡判斷（閘門 5a、5b）：這裡只看信封本身與 <c>cmd</c> 和 <c>conv</c>、<c>dev</c> 的一致
     /// </summary>
     public static CommandEnvelopeVerdict Verify(CommandEnvelope? envelope, string? commandId, CommandEnvelopeTarget target, ServerTimeBounds? bounds)
+        => VerifyCore(envelope, commandId, target, bounds);
+
+    /// <summary>
+    /// 鎖定畫面支援的服務（系統權限）驗 <c>deskOpen</c> 的信封（sync-protocol 14.16「安全桌面的輸入」）：服務要確定「這把看的一方的公鑰是伺服器簽發的
+    /// 遠端桌面指令帶來的」，才收那把金鑰加密的輸入、注入安全桌面——不然同一個使用者的任何程式連上服務的管道就能按 UAC。
+    /// 驗：版本、大小、簽章（<paramref name="hubSpki"/> 是安裝時記下的伺服器身分金鑰，不是 app 當下說的）、只有一種解讀、
+    /// <c>aud</c> 與 <c>dev</c> 是安裝時記下的那一組、指令是 <c>deskOpen</c>、帶合格的工作階段 id 與看的一方的公鑰。
+    /// 不驗連線與時間：服務不知道 app 的連線、也沒有伺服器時鐘；信封被重放也沒有用——它帶的是看的一方的公鑰，
+    /// 沒有那把私鑰造不出服務解得開的輸入。伺服器不簽「看自己」的 deskOpen，所以這台自己的身分發不出目標是這台的信封。
+    /// 通過回工作階段與公鑰，否則回 null 與原因
+    /// </summary>
+    public static DeskOpenProof? VerifyDeskOpen(CommandEnvelope? envelope, string hubSpki, string aud, string deviceId, out string problem)
+    {
+        problem = string.Empty;
+        if (envelope is null || !string.Equals(envelope.V, Version, StringComparison.Ordinal))
+            return Problem("版本不是 " + Version, out problem);
+        if (!TrySizedData(envelope.Body, out var data))
+            return Problem("內容太大", out problem);
+        if (!P256KeyRules.Verify(hubSpki, data, envelope.Sig))
+            return Problem("不是安裝時記下的那台伺服器簽的", out problem);
+        if (!TryParseBody(envelope.Body, out var body, out var parseProblem))
+            return Problem(parseProblem, out problem);
+        if (!string.Equals(body.Aud, aud, StringComparison.Ordinal) || !string.Equals(body.Dev, deviceId, StringComparison.Ordinal))
+            return Problem("不是給這台電腦的", out problem);
+        if (!string.Equals(body.Cmd.Value<string>("cmd"), RemoteCommandCatalog.DeskOpen, StringComparison.Ordinal))
+            return Problem("不是遠端桌面的指令", out problem);
+        // 只收擁有者的瀏覽器或另一台已配對的電腦發起的：協作人不能用遠端桌面（伺服器與 app 的閘門本來就擋，這裡再擋一次），不認得的種類也不收
+        if (body.Issuer.Kind is not (CommandIssuerKinds.Browser or CommandIssuerKinds.Device))
+            return Problem("發起的不是擁有者的瀏覽器或已配對的電腦", out problem);
+        if (body.Cmd["requestId"] is not JValue { Type: JTokenType.String, Value: string session } || !DeskRules.IsSessionId(session))
+            return Problem("沒有合格的工作階段 id", out problem);
+        if (body.Cmd[DeskSealRules.ViewerKeyField] is not JValue { Type: JTokenType.String, Value: string viewerKey } || !DeskSealRules.IsPublicKey(viewerKey))
+            return Problem("沒有看的一方的公鑰", out problem);
+        return new DeskOpenProof(session, viewerKey, body.Issuer.Kind, body.Issuer.Label);
+
+        static DeskOpenProof? Problem(string text, out string problem)
+        {
+            problem = text;
+            return null;
+        }
+    }
+
+    private static CommandEnvelopeVerdict VerifyCore(CommandEnvelope? envelope, string? commandId, CommandEnvelopeTarget target, ServerTimeBounds? bounds)
     {
         ArgumentNullException.ThrowIfNull(target);
 

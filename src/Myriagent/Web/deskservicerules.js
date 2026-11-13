@@ -1,6 +1,8 @@
 // 遠端桌面的鎖定畫面支援（設定頁同步區的一塊；web-protocol 的 deskService）：宿主的狀態 → 畫面上的文字與按鈕（純規則）。
 // 那是一個以系統權限執行的 Windows 服務：一般權限的 app 看不到也操作不了鎖定畫面與系統管理員確認畫面（UAC），
-// 裝了它，遠端桌面在那些畫面上才看得到、才能輸入。安裝、更新、移除都要有人在這台按 UAC
+// 裝了它，遠端桌面在那些畫面上才看得到、才能輸入。安裝、更新、移除都要有人在這台按 UAC。
+// 在那些畫面上輸入另要服務「安裝時記下的伺服器」就是這台現在配對的那一台（secureInput：ready／reinstall／unpaired）：
+// 服務只收那台伺服器簽發的遠端桌面工作階段的輸入，記的時候要系統管理員權限，所以沒記或換了伺服器要重新安裝
 
 /** 設定頁要不要顯示這一區（宿主沒接、功能還沒開放給這台時不顯示） */
 export function deskServiceShown(s) {
@@ -44,7 +46,20 @@ export function deskServiceSummary(s) {
     const next = s.bundled ? deskServiceVersion(s.bundled.version, s.bundled.build) : '';
     return { tone: 'st-notLoggedIn', label: '有更新', detail: '已安裝 ' + have + '，這一版的 app 帶的是 ' + next + '。', actions: [{ act: 'install', label: '更新…' }, remove] };
   }
-  return { tone: 'st-ready', label: '執行中', detail: '已安裝 ' + have + '。', actions: [remove] };
+  if (s.secureInput === 'reinstall') {
+    return {
+      tone: 'st-notLoggedIn',
+      label: '只能看',
+      detail: '已安裝 ' + have + '。鎖定畫面看得到，但還不能操作：服務沒有記下這台現在配對的伺服器（安裝時還沒配對，或之後換了伺服器），重新安裝一次就可以。',
+      actions: [...reinstall, remove],
+    };
+  }
+  return {
+    tone: 'st-ready',
+    label: '執行中',
+    detail: '已安裝 ' + have + (s.secureInput === 'ready' ? '。鎖定畫面與系統管理員確認畫面可以遠端操作。' : '。'),
+    actions: [remove],
+  };
 }
 
 function busy(label, detail) {
@@ -74,7 +89,7 @@ export function deskServiceConfirm(act, s) {
   const installed = !!(s && s.installed);
   return {
     title: installed ? '更新鎖定畫面支援' : '安裝鎖定畫面支援',
-    message: '會在這台安裝一個以系統權限執行的 Windows 服務「MyriagentDesk」（放在 Program Files，開機自動啟動）。它只接受這台登入的使用者的 Clode Myriagent 連線，不連網路。',
+    message: '會在這台安裝一個以系統權限執行的 Windows 服務「MyriagentDesk」（放在 Program Files，開機自動啟動）。它只接受這台登入的使用者的 Clode Myriagent 連線，不連網路；安裝時記下這台配對的伺服器，之後只有那台伺服器簽發的遠端桌面工作階段能在鎖定畫面輸入。',
     detail: 'Windows 會跳出系統管理員確認（UAC），要在這台按「是」。之後可以在這裡移除。',
     confirmLabel: installed ? '更新' : '安裝',
   };

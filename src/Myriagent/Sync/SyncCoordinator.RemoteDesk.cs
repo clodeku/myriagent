@@ -15,6 +15,9 @@ internal interface IDeskTransport
 {
     /// <summary>送一個封包（任何執行緒）；沒有引擎、連線不能搬時由引擎回報斷了</summary>
     void SendDeskUp(DeskPacket packet);
+
+    /// <summary>取走這個工作階段的 deskOpen 信封（鎖定畫面支援的服務要的憑據；ISyncEngineDesk）。沒有回 null（測試的假傳輸不必實作）</summary>
+    Security.CommandEnvelope? TakeDeskEnvelope(string sessionId) => null;
 }
 
 // 協調者的遠端桌面（docs/sync-protocol.md 14.16）：中樞經 IDeskTransport 交來要送的封包，交給這一代的引擎（沒有引擎時直接回報斷了）；
@@ -25,6 +28,12 @@ internal sealed partial class SyncCoordinator : IDeskTransport
 
     /// <summary>接上遠端桌面（AppController 在 Start 之前呼叫）：之後啟動的引擎才宣告 desk1</summary>
     internal void AttachDesk(IDeskEndpoint endpoint) => desk = endpoint ?? throw new ArgumentNullException(nameof(endpoint));
+
+    Security.CommandEnvelope? IDeskTransport.TakeDeskEnvelope(string sessionId)
+        => Volatile.Read(ref engine) is ISyncEngineDesk engineDesk ? engineDesk.TakeDeskEnvelope(sessionId) : null;
+
+    /// <summary>這台目前信任的伺服器（任何執行緒；沒配對、引擎還沒起來是 null）：安裝鎖定畫面支援時交給安裝器記下</summary>
+    internal Remote.DeskServiceTrust? DeskTrust => Volatile.Read(ref engine) is ISyncEngineDesk engineDesk ? engineDesk.DeskTrust : null;
 
     void IDeskTransport.SendDeskUp(DeskPacket packet)
     {

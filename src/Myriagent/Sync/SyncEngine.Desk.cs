@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using Myriagent.Core;
 using Myriagent.Remote;
+using Myriagent.Security;
 
 namespace Myriagent.Sync;
 
@@ -8,6 +10,15 @@ internal interface ISyncEngineDesk
 {
     /// <summary>送一個封包（任何執行緒；依呼叫的順序送）：被看的一方的影格與狀態、看的一方的輸入與確認</summary>
     void SubmitDeskUp(DeskPacket packet);
+
+    /// <summary>
+    /// 取走這個工作階段的 <c>deskOpen</c> 信封（伺服器簽的原樣；任何執行緒，只拿得到一次）：鎖定畫面支援的服務要它當憑據——
+    /// 服務自己以安裝時記下的伺服器身分金鑰驗，才收看的一方加密的輸入。沒有回 null
+    /// </summary>
+    CommandEnvelope? TakeDeskEnvelope(string sessionId);
+
+    /// <summary>這台目前信任的伺服器（釘選的身分公鑰、配對的來源、這台的裝置 id；任何執行緒）：安裝鎖定畫面支援時交給安裝器記下</summary>
+    DeskServiceTrust? DeskTrust { get; }
 }
 
 /// <summary>引擎 → 協調者的遠端桌面（協調者的 EnginePort 實作；沒有就不宣告 desk1）。任何執行緒呼叫</summary>
@@ -43,6 +54,38 @@ internal sealed partial class SyncEngine : ISyncEngineDesk
     private readonly HashSet<string> deskSessions = new(StringComparer.Ordinal);
 
     private SyncConnection? deskSendingOn;
+
+    /// <summary>驗過的 deskOpen 信封（工作階段 id → 信封）：中樞開始被看時取走；最多留幾個（沒被取走的在下一個進來時清掉）</summary>
+    private readonly ConcurrentDictionary<string, CommandEnvelope> deskEnvelopes = new(StringComparer.Ordinal);
+
+    private volatile DeskServiceTrust? deskTrust;
+
+    public CommandEnvelope? TakeDeskEnvelope(string sessionId) => deskEnvelopes.TryRemove(sessionId, out var envelope) ? envelope : null;
+
+    public DeskServiceTrust? DeskTrust => deskTrust;
+
+    /// <summary>引擎執行緒：信封驗過之後、交給中樞之前記下 deskOpen 的那一個</summary>
+    private void NoteDeskEnvelope(CommandEnvelope envelope, CommandEnvelopeBody body)
+    {
+        if (body.Cmd.Value<string>("cmd") != RemoteCommandCatalog.DeskOpen || body.Cmd.Value<string>("requestId") is not { } session || !DeskRules.IsSessionId(session))
+            return;
+        if (deskEnvelopes.Count >= 4)
+            deskEnvelopes.Clear();
+        deskEnvelopes[session] = envelope;
+    }
+
+    /// <summary>引擎執行緒：載入信任資料、改釘伺服器身分、收到指令時更新給別的執行緒看的那一份</summary>
+    private void RefreshDeskTrust()
+    {
+        if (trust is null || device is null || SyncCommandRules.Audience(device.Current.ServerUrl) is not { } aud)
+        {
+            deskTrust = null;
+            return;
+        }
+
+        var candidate = new DeskServiceTrust(trust.PinnedHubSpki, aud, device.Current.DeviceId);
+        deskTrust = DeskServiceRules.IsTrust(candidate) ? candidate : null;
+    }
 
     public void SubmitDeskUp(DeskPacket packet)
     {

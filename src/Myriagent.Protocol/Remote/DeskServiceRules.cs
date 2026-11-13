@@ -43,6 +43,13 @@ internal sealed record DeskServiceCaptureHeader(string Result, int Bytes, string
 /// <param name="SignedBy">驗過的發佈簽章金鑰（開發版的服務檔沒有簽章是 null）</param>
 internal sealed record DeskServiceInstall(string Service, string Version, string Build, string Payload, string Folder, string? SignedBy, string InstalledAt);
 
+/// <summary>
+/// 服務信任的伺服器（<c>trust.json</c>，安裝時由安裝器寫、只有系統管理員能改）：伺服器的身分公鑰、配對的來源、這台的裝置 id。
+/// 幫手只收這台伺服器簽發、目標是這台的 <c>deskOpen</c> 帶來的金鑰加密的輸入（<see cref="Security.CommandEnvelope.VerifyDeskOpen"/>）。
+/// app 當下說的不算：app 以使用者的權限執行，同一個使用者的程式改得了它
+/// </summary>
+internal sealed record DeskServiceTrust(string HubSpki, string Aud, string DeviceId);
+
 /// <summary>安裝器（<c>MyriagentDesk.exe install／uninstall</c>）的結束碼</summary>
 internal enum DeskServiceExit
 {
@@ -98,6 +105,20 @@ internal static class DeskServiceRules
 
     /// <summary>服務認得 <see cref="OpOpen"/>、幫手認得 <see cref="OpCapture"/></summary>
     public const string FeatureCapture = "capture";
+
+    /// <summary>幫手：驗 <c>deskOpen</c> 的信封、建立安全桌面輸入的金鑰，回自己的公鑰</summary>
+    public const string OpSecureOpen = "secureOpen";
+
+    /// <summary>幫手：解開一包以那把金鑰加密的輸入，注入目前的安全桌面</summary>
+    public const string OpSecureInput = "secureInput";
+
+    /// <summary>幫手認得 <see cref="OpSecureOpen"/>、<see cref="OpSecureInput"/></summary>
+    public const string FeatureSecureInput = "secureInput";
+
+    /// <summary>服務沒有信任的伺服器（安裝時這台還沒配對，或裝的是舊版的服務）：安全桌面只能看</summary>
+    public const string CodeNoTrust = "noTrust";
+
+    public const string TrustFile = "trust.json";
 
     public const string CaptureOk = "ok";
 
@@ -407,6 +428,85 @@ internal static class DeskServiceRules
             return null;
         return new DeskServiceCaptureHeader(result, bytes, Text(o, "desktop"), o["secure"] is JValue { Type: JTokenType.Boolean, Value: true }, Int(o, "error") ?? 0);
     }
+
+    // ---- 安全桌面的輸入 ----
+
+    /// <summary>信任的伺服器合不合格：P-256 的公鑰、https 的來源（不帶路徑）、這台的裝置 id</summary>
+    public static bool IsTrust([NotNullWhen(true)] DeskServiceTrust? trust)
+        => trust is not null && Security.P256KeyRules.IsValidSpki(trust.HubSpki) && IsOrigin(trust.Aud) && Sync.SyncIds.IsDeviceId(trust.DeviceId);
+
+    private static bool IsOrigin(string? aud)
+        => aud is { Length: > 8 and <= 256 } && Uri.TryCreate(aud, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
+           && string.Equals(uri.GetLeftPart(UriPartial.Authority), aud, StringComparison.Ordinal);
+
+    public static string SerializeTrust(DeskServiceTrust trust) => new JObject
+    {
+        ["schema"] = 1,
+        ["hubSpki"] = trust.HubSpki,
+        ["aud"] = trust.Aud,
+        ["deviceId"] = trust.DeviceId,
+    }.ToString(Formatting.Indented);
+
+    public static DeskServiceTrust? ParseTrust(string? json)
+    {
+        if (TryObject(json) is not { } o || Text(o, "hubSpki") is not { } spki || Text(o, "aud") is not { } aud || Text(o, "deviceId") is not { } device)
+            return null;
+        var trust = new DeskServiceTrust(spki, aud, device);
+        return IsTrust(trust) ? trust : null;
+    }
+
+    /// <summary>
+    /// 安裝器的信任參數（<c>--hub-key</c>、<c>--aud</c>、<c>--device</c>）：三個都給而且合格才算；都沒給＝這台還沒配對，裝了只能看。
+    /// 只給一部分或不合格回 false（安裝器當成用法錯誤，不裝）
+    /// </summary>
+    public static bool TryTrustArgs(string? hubKey, string? aud, string? device, out DeskServiceTrust? trust)
+    {
+        trust = null;
+        if (hubKey is null && aud is null && device is null)
+            return true;
+        if (hubKey is null || aud is null || device is null)
+            return false;
+        var candidate = new DeskServiceTrust(hubKey, aud, device);
+        if (!IsTrust(candidate))
+            return false;
+        trust = candidate;
+        return true;
+    }
+
+    public static string SecureOpenRequest(Security.CommandEnvelope envelope) => Line(new JObject
+    {
+        ["op"] = OpSecureOpen,
+        ["envelope"] = new JObject { ["v"] = envelope.V, ["body"] = envelope.Body, ["sig"] = envelope.Sig },
+    });
+
+    /// <summary>要求裡的信封；沒有、格式不對回 null</summary>
+    public static Security.CommandEnvelope? EnvelopeOf(JObject request)
+        => request["envelope"] is JObject e && Text(e, "v") is { } v && Text(e, "body") is { } body && Text(e, "sig") is { } sig
+            ? new Security.CommandEnvelope(v, body, sig)
+            : null;
+
+    public static string SecureOpenReply(string session, string servicePublic) => Line(new JObject { ["ok"] = true, ["session"] = session, ["pub"] = servicePublic });
+
+    /// <summary>幫手對 <c>secureOpen</c> 的回覆 → 服務這個工作階段的公鑰；錯誤、格式不對回 null</summary>
+    public static string? ParseSecureOpen(string? line, string session)
+        => ErrorOf(line) is null && TryObject(line) is { } o && Text(o, "session") == session && Text(o, "pub") is { } pub && DeskSealRules.IsPublicKey(pub) ? pub : null;
+
+    public static string SecureInputRequest(string session, long n, string ct) => Line(new JObject { ["op"] = OpSecureInput, ["session"] = session, ["n"] = n, ["ct"] = ct });
+
+    /// <summary>解析 <c>secureInput</c> 的要求；不合格回 null</summary>
+    public static (string Session, long N, string Ct)? ParseSecureInput(JObject request)
+        => Text(request, "session") is { } session && DeskRules.IsSessionId(session)
+           && request["n"] is JValue { Type: JTokenType.Integer, Value: long n } && n >= 1
+           && Text(request, "ct") is { Length: >= 22 } ct && ct.Length <= DeskSealRules.MaxSealedBytes * 2
+            ? (session, n, ct)
+            : null;
+
+    /// <summary>幫手對 <c>secureInput</c> 的回覆：<paramref name="injected"/> 是注入的事件數（0＝解開了但現在不是安全桌面，沒有注入）</summary>
+    public static string SecureInputReply(int injected) => Line(new JObject { ["ok"] = true, ["injected"] = injected });
+
+    /// <summary>回覆裡注入的事件數；錯誤、格式不對回 null</summary>
+    public static int? ParseSecureInput(string? line)
+        => ErrorOf(line) is null && TryObject(line) is { } o ? Int(o, "injected") : null;
 
     // ---- 安裝紀錄 ----
 

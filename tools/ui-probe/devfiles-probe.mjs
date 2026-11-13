@@ -460,6 +460,7 @@ export async function runDeviceFiles(ctx, vp, m) {
   const open2 = await until(() => { const o = host.last('deskOpen'); return o && o.requestId !== open.requestId ? o : null; }, 3000);
   const target = open2 && typeof open2.viewerKey === 'string' ? await sealTarget(open2.requestId, open2.viewerKey) : null;
   let sealedChecks = { open: !!open2, viewerKey: open2 && open2.viewerKey };
+  let secureChecks = {};
   if (target) {
     host.send({ type: 'desk', sessionId: open2.requestId, kind: 'status', seq: 0, body: { text: null, kx: { v: 1, pub: target.publicKey } } });
     host.send({ type: 'desk', sessionId: open2.requestId, kind: 'frame', seq: 1, body: { w: 480, h: 270, key: true, screen: 0, q: 'auto',
@@ -486,6 +487,49 @@ export async function runDeviceFiles(ctx, vp, m) {
       badge, packets: packets.length, plainEvents: packets.filter((c) => c.body.events).length, failed, numbers,
       opened, json: JSON.stringify(packets).includes('"k":66'),
     };
+
+    // 安全桌面的輸入（鎖定畫面支援）：那台說現在是安全桌面（status 的 secure）。沒有服務的公鑰＝只能看，事件不送；
+    // 有（svc）＝事件改以服務的金鑰加密、多帶 k: 'svc'（那台的 app 解不開，只有服務解得開）；離開安全桌面後回到給 app 的那一把、編號接著算
+    const eventPackets = () => mine().filter((c) => c.body.events || c.body.e2e);
+    const before = eventPackets().length;
+    host.send({ type: 'desk', sessionId: open2.requestId, kind: 'status', seq: 0, body: { text: null, secure: true, note: '只能看' } });
+    await until(() => page.evaluate(() => { const el = document.querySelector('.rd-note'); return !!el && !el.hidden; }), 2000);
+    await page.keyboard.press('KeyC');
+    await sleep(500);
+    const dropped = eventPackets().length - before;
+
+    const service = await sealTarget(open2.requestId, open2.viewerKey, 'myriagent-desk-secure-input-v1');
+    host.send({ type: 'desk', sessionId: open2.requestId, kind: 'status', seq: 0, body: { text: null, secure: true, svc: { v: 1, pub: service.publicKey } } });
+    await until(() => page.evaluate(() => { const el = document.querySelector('.rd-note'); return !!el && el.hidden; }), 2000);
+    await sleep(150);
+    await page.keyboard.press('KeyD');
+    await until(() => eventPackets().slice(before).some((c) => c.body.e2e && c.body.e2e.k === 'svc'), 3000);
+    await sleep(300);
+    const forService = eventPackets().slice(before);
+    const serviceOpened = [];
+    let appCouldOpen = 0;
+    for (const c of forService.filter((x) => x.body.e2e)) {
+      try { serviceOpened.push(...(await service.open(c.body.e2e.n, c.body.e2e.ct)).events); } catch { /* 解不開：下面的檢查會看到 */ }
+      try { await target.open(c.body.e2e.n, c.body.e2e.ct); appCouldOpen++; } catch { /* 應該解不開 */ }
+    }
+    const afterSecure = eventPackets().length;
+    host.send({ type: 'desk', sessionId: open2.requestId, kind: 'status', seq: 0, body: { text: null } });
+    await sleep(200);
+    await page.keyboard.press('KeyE');
+    await until(() => eventPackets().length > afterSecure, 3000);
+    await sleep(300);
+    const back = eventPackets().slice(afterSecure);
+    const backOpened = [];
+    for (const c of back.filter((x) => x.body.e2e)) {
+      try { backOpened.push(...(await target.open(c.body.e2e.n, c.body.e2e.ct)).events); } catch { /* 下面的檢查會看到 */ }
+    }
+    secureChecks = {
+      dropped,
+      forService: forService.map((c) => (c.body.e2e ? { n: c.body.e2e.n, k: c.body.e2e.k || null } : 'plain')),
+      serviceOpened, appCouldOpen,
+      back: back.map((c) => (c.body.e2e ? { n: c.body.e2e.n, k: c.body.e2e.k || null } : 'plain')), backOpened,
+      lastAppN: numbers[numbers.length - 1],
+    };
     host.send({ type: 'desk', sessionId: open2.requestId, kind: 'end', seq: 0, body: { reason: 'targetClosed', text: '那台的人中斷了遠端桌面' } });
     await until(() => page.evaluate(() => !document.querySelector('.rd-wrap')), 2000);
   }
@@ -494,6 +538,12 @@ export async function runDeviceFiles(ctx, vp, m) {
     && sealedChecks.numbers.length > 0 && sealedChecks.numbers.every((n, i) => n === i + 1)
     && sealedChecks.opened.some((e) => e.t === 'md' && e.b === 0) && sealedChecks.opened.some((e) => e.t === 'kd' && e.k === 0x42)
     && sealedChecks.opened.some((e) => e.t === 'ku' && e.k === 0x42), sealedChecks);
+  check('deskSecureInput', !!target && secureChecks.dropped === 0
+    && secureChecks.forService.length > 0 && secureChecks.forService.every((p, i) => p !== 'plain' && p.k === 'svc' && p.n === i + 1)
+    && secureChecks.serviceOpened.some((e) => e.t === 'kd' && e.k === 0x44) && secureChecks.serviceOpened.every((e) => e.k !== 0x43)
+    && secureChecks.appCouldOpen === 0
+    && secureChecks.back.length > 0 && secureChecks.back.every((p, i) => p !== 'plain' && p.k === null && p.n === secureChecks.lastAppN + i + 1)
+    && secureChecks.backOpened.some((e) => e.t === 'kd' && e.k === 0x45), secureChecks);
   clearInterval(host.statsTimer);
   await closeApp(app);
 }
@@ -503,7 +553,7 @@ export async function runDeviceFiles(ctx, vp, m) {
  * 輸入的端對端加密裡被看的那台（探針扮演；演算法同宿主的 DeskSealRules 與網頁的 deskseal.js）：以自己新產生的金鑰與看的一方的公鑰算出金鑰，
  * 回自己的公鑰與解開一包的函式（解不開會丟例外）
  */
-async function sealTarget(sessionId, viewerPublic) {
+async function sealTarget(sessionId, viewerPublic, label = 'myriagent-desk-input-v1') {
   const subtle = webcrypto.subtle;
   const ecdh = { name: 'ECDH', namedCurve: 'P-256' };
   const fromB64 = (t) => new Uint8Array(Buffer.from(t.replace(/-/g, '+').replace(/_/g, '/'), 'base64'));
@@ -515,7 +565,7 @@ async function sealTarget(sessionId, viewerPublic) {
   const peer = await subtle.importKey('raw', viewerRaw, ecdh, false, []);
   const shared = await subtle.deriveBits({ name: 'ECDH', public: peer }, pair.privateKey, 256);
   const material = await subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
-  const prefix = enc.encode('myriagent-desk-input-v1');
+  const prefix = enc.encode(label);
   const info = new Uint8Array(prefix.length + 1 + 130);
   info.set(prefix, 0); info.set(viewerRaw, prefix.length + 1); info.set(targetRaw, prefix.length + 66);
   const key = await subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: enc.encode(sessionId), info }, material, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
@@ -524,7 +574,7 @@ async function sealTarget(sessionId, viewerPublic) {
     async open(n, ct) {
       const iv = new Uint8Array(12);
       new DataView(iv.buffer).setBigUint64(4, BigInt(n));
-      const plain = await subtle.decrypt({ name: 'AES-GCM', iv, additionalData: enc.encode('myriagent-desk-input-v1|' + sessionId + '|' + n), tagLength: 128 }, key, fromB64(ct));
+      const plain = await subtle.decrypt({ name: 'AES-GCM', iv, additionalData: enc.encode(label + '|' + sessionId + '|' + n), tagLength: 128 }, key, fromB64(ct));
       return JSON.parse(new TextDecoder().decode(plain));
     },
   };

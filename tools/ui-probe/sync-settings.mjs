@@ -543,8 +543,13 @@ export async function runSyncSettings(ctx, vp) {
     await until(() => sent('install').length === 1);
     const busyPill = await until(async () => ((await pill()) === '安裝中…' ? '安裝中…' : null));
     const busy = { pill: busyPill, buttons: await buttons(), detail: await textOf(page, G + ' [data-field="deskServiceDetail"]') };
+    // 裝好了，但服務記下的伺服器不是現在配對的這一台：只能看，請重新安裝
+    await host.send(svc({ installed: true, running: true, system: true, version: '0.2.950', build: 'abc1234', secureInput: 'reinstall' }));
+    const viewOnlyPill = await until(async () => ((await pill()) === '只能看' ? '只能看' : null));
+    const viewOnly = { pill: viewOnlyPill, buttons: await buttons(), detail: await textOf(page, G + ' [data-field="deskServiceDetail"]') };
+    await ctx.shot(page, T('desk-service-view-only'));
     // 裝好了
-    await host.send(svc({ installed: true, running: true, system: true, version: '0.2.950', build: 'abc1234',
+    await host.send(svc({ installed: true, running: true, system: true, version: '0.2.950', build: 'abc1234', secureInput: 'ready',
       probe: { desktop: 'Winlogon', secure: true, error: 0, desktops: ['Default', 'Winlogon'] } }));
     const donePill = await until(async () => ((await pill()) === '執行中' ? '執行中' : null));
     const done = { pill: donePill, buttons: await buttons(), detail: await textOf(page, G + ' [data-field="deskServiceDetail"]'), probe: await textOf(page, G + ' [data-field="deskServiceProbe"]') };
@@ -565,10 +570,11 @@ export async function runSyncSettings(ctx, vp) {
       && idle.pill === '未安裝' && idle.buttons.join() === '安裝…' && !!idle.text && idle.text.includes('開發中')
       && beforeConfirm === 0 && !!confirmText && confirmText.includes('系統權限') && confirmText.includes('UAC')
       && busy.pill === '安裝中…' && busy.buttons.length === 0 && !!busy.detail && busy.detail.includes('按「是」')
-      && done.pill === '執行中' && done.buttons.join() === '移除…' && !!done.detail && done.detail.includes('0.2.950（abc1234）')
+      && viewOnly.pill === '只能看' && viewOnly.buttons.join() === '重新安裝…,移除…' && !!viewOnly.detail && viewOnly.detail.includes('重新安裝')
+      && done.pill === '執行中' && done.buttons.join() === '移除…' && !!done.detail && done.detail.includes('0.2.950（abc1234）') && done.detail.includes('可以遠端操作')
       && !!done.probe && done.probe.includes('Winlogon') && done.probe.includes('鎖定')
       && !!error && error.includes('UAC') && !!removeText && removeText.includes('移除') && sent('uninstall').length === 0 && sent('check').length === 1,
-    { silent, notOffered, idle, beforeConfirm, confirmText, busy, done, error, removeText, uninstallSent: sent('uninstall').length, checks: sent('check').length });
+    { silent, notOffered, idle, beforeConfirm, confirmText, busy, viewOnly, done, error, removeText, uninstallSent: sent('uninstall').length, checks: sent('check').length });
     await closeWithCsp(ctx, app, csp);
   }
 

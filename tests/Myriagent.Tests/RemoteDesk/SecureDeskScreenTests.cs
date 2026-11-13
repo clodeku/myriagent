@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Myriagent.Remote;
 using Myriagent.RemoteDesk;
+using Myriagent.Security;
 using Myriagent.Sync;
 using Myriagent.Tests.Hub;
 using Newtonsoft.Json.Linq;
@@ -29,6 +30,13 @@ public sealed class SecureDeskScreenTests
 
         public bool Disposed { get; private set; }
 
+        /// <summary>幫手驗過信封之後回的公鑰；null 當成它不收（沒有信任的伺服器、信封驗不過、舊的服務）</summary>
+        public string? ServiceKey { get; set; }
+
+        public List<(CommandEnvelope Envelope, string Session)> Opened { get; } = new();
+
+        public Recorder<(string Session, long N, string Ct)> Forwarded { get; } = new();
+
         public DeskCapture? Capture(DeskRect bounds, int width, int height, byte[] bgra, bool force)
         {
             lock (Forced)
@@ -38,8 +46,19 @@ public sealed class SecureDeskScreenTests
             return Result;
         }
 
+        public string? OpenSecureInput(CommandEnvelope envelope, string sessionId)
+        {
+            lock (Opened)
+                Opened.Add((envelope, sessionId));
+            return ServiceKey;
+        }
+
+        public void SendSecureInput(string sessionId, long n, string ct) => Forwarded.Add((sessionId, n, ct));
+
         public void Dispose() => Disposed = true;
     }
+
+    private static readonly CommandEnvelope SomeEnvelope = new(CommandEnvelope.Version, "{}", "sig");
 
     /// <summary>記下平常的擷取每次收到的 force</summary>
     private sealed class ForceRecorder(FakeDeskScreen inner) : IDeskScreen
@@ -223,6 +242,133 @@ public sealed class SecureDeskScreenTests
                 session.OnPacket(new DeskPacket(SessionId, DeskRules.Input, 0, Tap()));
                 return inner.Injected.All.Count > 0;
             }, "解鎖後照常注入");
+        }
+        finally
+        {
+            session.Stop("test", "測試結束", notifyViewer: false);
+        }
+    }
+
+    // ---- 安全桌面的輸入：幫手驗過信封、回了公鑰才能操作 ----
+
+    [Fact]
+    public void 安全桌面的輸入_幫手驗過信封回了公鑰_可以操作_加密的輸入照順序轉給幫手()
+    {
+        var inner = new FakeDeskScreen { Locked = true };
+        var secure = new FakeSecure { ServiceKey = DeskSealRulesTests.TargetPublic };
+        using var screen = new SecureDeskScreen(inner, secure);
+        screen.OfferEnvelope(SessionId, SomeEnvelope);
+        var buffer = new byte[320 * 240 * 4];
+
+        screen.ServicePublicKey.Should().BeNull("還沒到安全桌面：不必問幫手");
+        screen.SubmitSecureInput(1, "x");
+        screen.Capture(Bounds, 320, 240, buffer, force: false).Should().Be(DeskCapture.Ok);
+        secure.Opened.Single().Should().Be((SomeEnvelope, SessionId));
+        screen.SecureActive.Should().BeTrue();
+        screen.ServicePublicKey.Should().Be(DeskSealRulesTests.TargetPublic);
+        screen.ViewOnlyNote.Should().BeNull("可以操作：不必說只能看");
+
+        // app 自己照樣不注入（一般權限送不進安全桌面）；加密的原樣轉給幫手
+        screen.Inject(NoEvents, Bounds, Bounds);
+        inner.Injected.All.Should().BeEmpty();
+        for (var n = 1; n <= 5; n++)
+            screen.SubmitSecureInput(n, "ct" + n);
+        SpinWait.SpinUntil(() => secure.Forwarded.Count == 5, 5000).Should().BeTrue();
+        secure.Forwarded.All.Should().Equal(Enumerable.Range(1, 5).Select(n => (SessionId, (long)n, "ct" + n)), "還沒有公鑰時的那一包不轉");
+
+        screen.Capture(Bounds, 320, 240, buffer, force: false);
+        secure.Opened.Should().HaveCount(1, "有了公鑰就不再問");
+    }
+
+    [Fact]
+    public void 安全桌面的輸入_沒有信封或幫手不收_只能看_不每一格都問()
+    {
+        var buffer = new byte[320 * 240 * 4];
+        var noEnvelope = new FakeSecure { ServiceKey = DeskSealRulesTests.TargetPublic };
+        using (var screen = new SecureDeskScreen(new FakeDeskScreen { Locked = true }, noEnvelope))
+        {
+            screen.OfferEnvelope(SessionId, null);
+            screen.Capture(Bounds, 320, 240, buffer, force: false);
+            noEnvelope.Opened.Should().BeEmpty("沒有信封（舊的伺服器、看的一方沒給公鑰）");
+            screen.ViewOnlyNote.Should().Be(SecureDeskScreen.ViewOnlyText);
+        }
+
+        var refuses = new FakeSecure { ServiceKey = null };
+        using (var screen = new SecureDeskScreen(new FakeDeskScreen { Locked = true }, refuses))
+        {
+            screen.OfferEnvelope(SessionId, SomeEnvelope);
+            for (var i = 0; i < 5; i++)
+                screen.Capture(Bounds, 320, 240, buffer, force: false);
+            refuses.Opened.Should().HaveCount(1, "幫手不收：隔一陣子才再試，不是每一格都問");
+            screen.ViewOnlyNote.Should().Be(SecureDeskScreen.ViewOnlyText);
+            screen.SecureActive.Should().BeTrue();
+            screen.SubmitSecureInput(1, "ct");
+            Thread.Sleep(50);
+            refuses.Forwarded.All.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public void 安全桌面的輸入_幫手斷了_公鑰作廢_解鎖後不算安全桌面()
+    {
+        var inner = new FakeDeskScreen { Locked = true };
+        var secure = new FakeSecure { ServiceKey = DeskSealRulesTests.TargetPublic };
+        using var screen = new SecureDeskScreen(inner, secure);
+        screen.OfferEnvelope(SessionId, SomeEnvelope);
+        var buffer = new byte[320 * 240 * 4];
+        screen.Capture(Bounds, 320, 240, buffer, force: false);
+        screen.ServicePublicKey.Should().NotBeNull();
+
+        // 幫手重開過：它那一端的金鑰沒了，舊的公鑰不能再告訴看的一方
+        secure.Result = null;
+        screen.Capture(Bounds, 320, 240, buffer, force: false).Should().Be(DeskCapture.Locked);
+        screen.ServicePublicKey.Should().BeNull();
+        screen.SecureActive.Should().BeFalse();
+
+        // 解鎖：公鑰留著沒關係（下次鎖定同一個幫手還認得），但不算安全桌面、app 照常注入
+        secure.Result = DeskCapture.Ok;
+        inner.Locked = false;
+        screen.Capture(Bounds, 320, 240, buffer, force: false).Should().Be(DeskCapture.Ok);
+        screen.SecureActive.Should().BeFalse();
+        screen.Inject(NoEvents, Bounds, Bounds);
+        inner.Injected.All.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task 工作階段_安全桌面可以操作時_status帶secure與服務的公鑰_給服務的輸入原樣轉過去_app不注入()
+    {
+        var inner = new FakeDeskScreen { Locked = true };
+        var secure = new FakeSecure { ServiceKey = DeskSealRulesTests.TargetPublic };
+        var screen = new SecureDeskScreen(inner, secure);
+        screen.OfferEnvelope(SessionId, SomeEnvelope);
+        var sent = new Recorder<DeskPacket>();
+        var session = new DeskSession(SessionId, "電腦「書房」", screen, sent.Add, (_, _) => { });
+        try
+        {
+            session.Start();
+            await Until(() => sent.All.Any(p => p.Kind == DeskRules.Status && p.Body?["svc"] is not null), "帶服務公鑰的 status");
+            var status = sent.All.Last(p => p.Kind == DeskRules.Status).Body!;
+            status.Value<bool>("secure").Should().BeTrue();
+            DeskSealRules.ServicePublic(status).Should().Be(DeskSealRulesTests.TargetPublic);
+            status.ContainsKey("note").Should().BeFalse("可以操作：沒有只能看的附註");
+
+            // 給服務的那一包：這裡解不開，原樣轉
+            session.OnPacket(new DeskPacket(SessionId, DeskRules.Input, 0,
+                new JObject { ["e2e"] = new JObject { ["n"] = 1, ["ct"] = DeskSealRulesTests.Sealed1, ["k"] = DeskSealRules.ServiceKeyTag } }));
+            await Until(() => secure.Forwarded.Count == 1, "轉給幫手");
+            secure.Forwarded.All.Single().Should().Be((SessionId, 1L, DeskSealRulesTests.Sealed1));
+
+            // 明文的事件：安全桌面時 app 不注入
+            session.OnPacket(new DeskPacket(SessionId, DeskRules.Input, 0,
+                new JObject { ["events"] = new JArray(new JObject { ["t"] = "md", ["x"] = 0.5, ["y"] = 0.5, ["b"] = 0 }) }));
+            inner.Injected.All.Should().BeEmpty();
+
+            // 解鎖：status 不再帶 secure
+            var statuses = sent.All.Count(p => p.Kind == DeskRules.Status);
+            session.OnPacket(new DeskPacket(SessionId, DeskRules.Ack, 0, new JObject { ["seq"] = sent.All.Last(p => p.Kind == DeskRules.Frame).Seq }));
+            inner.Locked = false;
+            await Until(() => sent.All.Count(p => p.Kind == DeskRules.Status) > statuses, "解鎖後的 status");
+            sent.All.Last(p => p.Kind == DeskRules.Status).Body!.ContainsKey("secure").Should().BeFalse();
         }
         finally
         {

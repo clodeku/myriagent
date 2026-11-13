@@ -35,7 +35,7 @@ internal static class Program
                     return RunForeground(command.Pipe!);
                 case DeskServiceMode.Install:
                     return (int)Elevated(command.ServiceName, (installer, programFiles) => installer.Install(new DeskInstallOptions(
-                        command.ServiceName, AppContext.BaseDirectory, programFiles, SelfVersion.Current, ReleaseKeys.Production, DateTimeOffset.UtcNow)));
+                        command.ServiceName, AppContext.BaseDirectory, programFiles, SelfVersion.Current, ReleaseKeys.Production, DateTimeOffset.UtcNow, command.Trust)));
                 case DeskServiceMode.Uninstall:
                     return (int)Elevated(command.ServiceName, (installer, programFiles) => installer.Uninstall(command.ServiceName, programFiles));
                 case DeskServiceMode.Query:
@@ -136,17 +136,38 @@ internal static class Program
     {
         DesktopCapturer.UsePhysicalPixels();
         var system = ProcessIdentity.IsSystem();
-        if (system && Environment.ProcessPath is { } exe)
-            ServiceLog.UseDirectory(Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(exe)!)!, "logs"));
+        // 安裝資料夾（執行檔在 <安裝資料夾>\p-xxxx\）：記錄與信任的伺服器都在那裡。只有系統權限的幫手才讀——
+        // 前景模式（一般權限）不在 Program Files 裡，沒有信任的伺服器，也注入不了安全桌面
+        var root = system && Environment.ProcessPath is { } exe ? Path.GetDirectoryName(Path.GetDirectoryName(exe)!) : null;
+        if (root is not null)
+            ServiceLog.UseDirectory(Path.Combine(root, "logs"));
         var session = System.Diagnostics.Process.GetCurrentProcess().SessionId;
         using var capturer = new DesktopCapturer();
-        using var server = new DeskPipeServer(pipe, system, new NativeClientIdentifier(system), new AgentPipeHandler(SelfVersion.Current, system, session, capturer));
+        using var injector = new DesktopInjector();
+        using var server = new DeskPipeServer(pipe, system, new NativeClientIdentifier(system),
+            new AgentPipeHandler(SelfVersion.Current, system, session, capturer, injector, () => ReadTrust(root)));
         server.Start();
         ServiceLog.Info($"擷取幫手啟動：工作階段 {session}，系統權限 {system}");
         while (server.ActiveConnections > 0 || Environment.TickCount64 - server.LastActivityTick < DeskServiceRules.HelperIdleExit.TotalMilliseconds)
             Thread.Sleep(500);
         ServiceLog.Info($"擷取幫手結束：工作階段 {session}（沒有連線）");
         return 0;
+    }
+
+    /// <summary>安裝時記下的信任的伺服器（<c>trust.json</c>）；沒有、讀不了、格式不對回 null</summary>
+    private static DeskServiceTrust? ReadTrust(string? root)
+    {
+        if (root is null)
+            return null;
+        try
+        {
+            var path = Path.Combine(root, DeskServiceRules.TrustFile);
+            return File.Exists(path) && new FileInfo(path).Length <= 16 * 1024 ? DeskServiceRules.ParseTrust(File.ReadAllText(path, Encoding.UTF8)) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static int RunForeground(string pipe)

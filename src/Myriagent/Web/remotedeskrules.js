@@ -255,6 +255,25 @@ export function kxPublic(kind, body) {
 }
 
 /**
+ * status 裡安全桌面的狀態（鎖定畫面支援）：secure＝那台現在的畫面是安全桌面（鎖定畫面、UAC）；svc＝那台的系統服務這個工作階段的公鑰
+ * （有它才能在安全桌面輸入：事件以服務的金鑰加密）。只帶金鑰的那一則（kx）不算。回 { secure, svc }
+ */
+export function statusSecure(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  const svc = b.svc && typeof b.svc === 'object' && b.svc.v === 1 && typeof b.svc.pub === 'string' && b.svc.pub ? b.svc.pub : null;
+  return { secure: b.secure === true, svc };
+}
+
+/**
+ * 安全桌面時一包事件怎麼送：有服務的加密器 → 'secure'（以服務的金鑰加密）；沒有（只能看）→ 'drop'（不送：那台也不會注入）；
+ * 不是安全桌面 → null（照平常的 sealAction）
+ */
+export function secureAction(secure, hasServiceSealer) {
+  if (!secure) return null;
+  return hasServiceSealer ? 'secure' : 'drop';
+}
+
+/**
  * 加密的狀態下一包輸入怎麼送。state：off（不加密）、wait（等那台的第一個封包）、deriving（正在算金鑰）、on（加密）。
  * 回 'plain'（照原樣送）、'hold'（先不送，事件留在批次裡：不讓任何按鍵在決定要不要加密之前以明文送出去）、'seal'（事件加密後送）
  */

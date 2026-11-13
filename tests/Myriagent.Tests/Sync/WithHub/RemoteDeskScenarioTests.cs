@@ -107,6 +107,101 @@ public sealed class RemoteDeskScenarioTests(ITestOutputHelper output)
         screenB.Released.Should().Be(1);
     }
 
+    [EnvFact(LongRunGate.Gate, "安全桌面的輸入的端到端：真的伺服器簽的 deskOpen 信封 → B 的同步留一份 → 鎖定畫面支援的幫手（測試程序裡的管道）驗章、解開、注入")]
+    public async Task 安全桌面的輸入_伺服器簽的信封經B轉給幫手_A以服務的金鑰加密的輸入才注入()
+    {
+        var keysBefore = UserKeyStore.FilesCreatedByTestHub();
+        var hub = await MyriagentHubProcess.StartAsync(publicOriginIsBaseAddress: true);
+        try
+        {
+            await SecureScenarioAsync(hub);
+        }
+        finally
+        {
+            await hub.DisposeAsync();
+        }
+
+        hub.ForcedKill.Should().BeFalse("MyriagentHub 要能正常停止（強制結束會留下孤兒金鑰檔）");
+        UserKeyStore.FilesCreatedByTestHub().Except(keysBefore).Should().BeEmpty("正常停止的 MyriagentHub 不留下金鑰檔");
+    }
+
+    private async Task SecureScenarioAsync(MyriagentHubProcess hub)
+    {
+        using var owner = await OwnerClient.LoginAsync(hub);
+
+        // B 的鎖定畫面支援：服務與幫手的管道都在測試程序裡（一般權限、假的擷取與注入），幫手信任的伺服器是 B 配對之後的那一組（真的安裝是安裝器記下的）
+        DeskServiceTrust? installedTrust = null;
+        var injector = new DeskSecureInputTests.FakeInjector();
+        var (helper, helperPipe) = await DeskSecureInputTests.StartHelperAsync(injector, () => installedTrust);
+        using var disposeHelper = helper;
+        var servicePipe = "desk-test-" + Guid.NewGuid().ToString("N")[..12];
+        using var service = await DeskSecureInputTests.StartServiceAsync(servicePipe, helperPipe);
+        // B 平常的擷取說鎖定中：畫面改由幫手給
+        var plainB = new FakeDeskScreen { Locked = true };
+
+        await using var a = await LongRunDevice.PairAndStartAsync(hub, owner, "desk-a", [AccountA], HubEngine.FastBackoff(0.2, 0.5, 1), () => new FakeDeskScreen());
+        await using var b = await LongRunDevice.PairAndStartAsync(hub, owner, "desk-b", [AccountB], HubEngine.FastBackoff(0.2, 0.5, 1),
+            () => new Myriagent.RemoteDesk.SecureDeskScreen(plainB, new Myriagent.RemoteDesk.SecureDeskCapture(() => true, servicePipe)));
+        await a.WaitUntilAsync(v => v.State == SyncEngineState.Live && v.Features.Contains(DeviceFeatureRules.DeskE2e1), Wait, "A 連上、協商出 deske2e1");
+        await b.WaitUntilAsync(v => v.State == SyncEngineState.Live && v.Features.Contains(DeviceFeatureRules.DeskE2e1), Wait, "B 連上、協商出 deske2e1");
+        var generation = await b.Inspect(v => v.ConnectionGeneration);
+        await b.Runtime.CommandAsync("syncSetPolicy", new JObject { ["remoteControlLevel"] = "Control" });
+        await b.WaitUntilAsync(v => v.State == SyncEngineState.Live && v.ConnectionGeneration > generation && v.Features.Contains(DeviceFeatureRules.Desk1), Wait,
+            "B 以新的政策重新連上");
+        (await a.Runtime.WaitUntilAsync(() => a.Runtime.Hub.PeerLive, Wait)).Should().BeTrue("A 能對其他電腦下指令");
+
+        // 「安裝」：B 現在信任的伺服器（釘選的身分金鑰、配對的來源、B 的裝置 id）
+        (await b.Runtime.WaitUntilAsync(() => b.Runtime.Sync.DeskTrust is not null, Wait)).Should().BeTrue("B 配對之後有可以交給安裝器的信任資料");
+        installedTrust = b.Runtime.Sync.DeskTrust;
+        installedTrust!.DeviceId.Should().Be(b.DeviceId);
+
+        // A（扮演看的一方的網頁）：這個工作階段的金鑰，公鑰放進 deskOpen
+        using var viewer = DeskSealRules.CreateKey();
+        var viewerPublic = DeskSealRules.ExportPublicKey(viewer);
+        var session = SyncIds.NewUlid(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        await a.Runtime.CommandAsync("deskOpen", new JObject
+        {
+            ["deviceId"] = b.DeviceId, ["requestId"] = session, ["commandId"] = SyncIds.NewUlid(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()),
+            [DeskSealRules.ViewerKeyField] = viewerPublic,
+        });
+
+        // B：鎖定中 → 幫手給畫面 → 幫手驗伺服器簽的信封 → status 帶 secure 與服務的公鑰，到 A
+        JObject? SecureStatus() => a.Runtime.View.DeskMessages.LastOrDefault(m =>
+            m.Value<string>("sessionId") == session && m.Value<string>("kind") == DeskRules.Status && DeskSealRules.ServicePublic(m["body"] as JObject) is not null);
+        (await a.Runtime.WaitUntilAsync(() => SecureStatus() is not null, Wait)).Should().BeTrue("A 收到服務的公鑰（幫手驗過了真的伺服器簽的信封）");
+        var status = (await a.Runtime.OnUi(SecureStatus))!;
+        status["body"]!.Value<bool>("secure").Should().BeTrue();
+        var servicePublic = DeskSealRules.ServicePublic(status["body"] as JObject)!;
+        (await a.Runtime.WaitUntilAsync(() => Frames(a, session).Any(), Wait)).Should().BeTrue("鎖定時照樣有畫面（幫手擷取的）");
+
+        // A 以服務的金鑰加密的輸入：經伺服器、B 的 app（解不開，原樣轉）到幫手，解開、注入
+        var key = DeskSealRules.DeriveKey(viewer, servicePublic, session, viewerPublic, servicePublic, DeskSealRules.SecureInfo)!;
+        async Task SendAsync(long seq, JObject body)
+            => await a.Runtime.CommandAsync("desk", new JObject { ["sessionId"] = session, ["kind"] = DeskRules.Input, ["seq"] = seq, ["body"] = body });
+        string Seal(long n, string label)
+            => DeskSealRules.Seal(key, session, n, System.Text.Encoding.UTF8.GetBytes(new JObject
+            {
+                ["events"] = new JArray(new JObject { ["t"] = "kd", ["k"] = 64 + n }),
+            }.ToString(Newtonsoft.Json.Formatting.None)), label);
+        JObject ForService(long n, string label) => new() { ["e2e"] = new JObject { ["n"] = n, ["ct"] = Seal(n, label), ["k"] = DeskSealRules.ServiceKeyTag } };
+
+        await SendAsync(1, ForService(1, DeskSealRules.SecureInfo));
+        (await a.Runtime.WaitUntilAsync(() => injector.Injected.Count == 1, Wait)).Should().BeTrue("幫手注入了第 1 包");
+        injector.Injected[0].Events.Single().Should().Be(new DeskInputEvent("kd", Key: 65));
+
+        // 明文的、以 app 的標籤加密卻標成給服務的：都進不了安全桌面；之後正確的那一包照收
+        await SendAsync(2, new JObject { ["events"] = new JArray(new JObject { ["t"] = "kd", ["k"] = 90 }) });
+        await SendAsync(3, ForService(2, DeskSealRules.Info));
+        await SendAsync(4, ForService(3, DeskSealRules.SecureInfo));
+        (await a.Runtime.WaitUntilAsync(() => injector.Injected.Count == 2, Wait)).Should().BeTrue("之後正確的那一包照收");
+        injector.Injected[1].Events.Single().Key.Should().Be(67);
+        injector.Injected.Should().HaveCount(2);
+        plainB.Injected.All.Should().BeEmpty("安全桌面時 B 的 app 自己不注入");
+
+        await a.Runtime.CommandAsync("desk", new JObject { ["sessionId"] = session, ["kind"] = DeskRules.Close, ["seq"] = 99, ["body"] = new JObject() });
+        (await b.Runtime.WaitUntilAsync(() => !b.Runtime.Hub.RemoteDeskActive, Wait)).Should().BeTrue("B 停止");
+    }
+
     private static List<JObject> Frames(LongRunDevice device, string session)
         => device.Runtime.View.DeskMessages.Where(m => m.Value<string>("sessionId") == session && m.Value<string>("kind") == DeskRules.Frame).ToList();
 }

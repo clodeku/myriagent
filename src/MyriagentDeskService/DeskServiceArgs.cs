@@ -19,7 +19,8 @@ internal enum DeskServiceMode
 /// <summary>解析過的命令列</summary>
 /// <param name="ServiceName">服務名稱（預設真的那一個；手動整合測試給暫時的名稱）</param>
 /// <param name="Pipe">run：前景模式的管道名稱；session-agent：幫手的管道名稱</param>
-internal sealed record DeskServiceCommand(DeskServiceMode Mode, string ServiceName, string? Pipe, string? Error)
+/// <param name="Trust">install：信任的伺服器（<c>--hub-key</c>、<c>--aud</c>、<c>--device</c> 三個一起；沒給是 null）</param>
+internal sealed record DeskServiceCommand(DeskServiceMode Mode, string ServiceName, string? Pipe, string? Error, DeskServiceTrust? Trust = null)
 {
     public static DeskServiceCommand Bad(string error) => new(DeskServiceMode.Usage, DeskServiceRules.ServiceName, null, error);
 }
@@ -31,7 +32,7 @@ internal sealed record DeskServiceCommand(DeskServiceMode Mode, string ServiceNa
 internal static class DeskServiceArgs
 {
     public const string Usage =
-        "MyriagentDesk service | install [--name <service>] | uninstall [--name <service>] | query [--name <service>] | run --pipe <name> | session-probe | session-agent --pipe <name> | version";
+        "MyriagentDesk service | install [--name <service>] [--hub-key <spki> --aud <origin> --device <id>] | uninstall [--name <service>] | query [--name <service>] | run --pipe <name> | session-probe | session-agent --pipe <name> | version";
 
     public static DeskServiceCommand Parse(IReadOnlyList<string> args)
     {
@@ -54,19 +55,42 @@ internal static class DeskServiceArgs
 
         var name = DeskServiceRules.ServiceName;
         string? pipe = null;
+        string? hubKey = null;
+        string? aud = null;
+        string? device = null;
         for (var i = 1; i < args.Count; i++)
         {
             var key = args[i];
-            if (key is not ("--name" or "--pipe"))
+            if (key is not ("--name" or "--pipe" or "--hub-key" or "--aud" or "--device"))
                 return DeskServiceCommand.Bad($"不認得的參數：{key}");
             if (i + 1 >= args.Count || string.IsNullOrWhiteSpace(args[i + 1]))
                 return DeskServiceCommand.Bad($"{key} 後面要接值");
             var value = args[++i];
-            if (key == "--name")
-                name = value;
-            else
-                pipe = value;
+            switch (key)
+            {
+                case "--name":
+                    name = value;
+                    break;
+                case "--pipe":
+                    pipe = value;
+                    break;
+                case "--hub-key":
+                    hubKey = value;
+                    break;
+                case "--aud":
+                    aud = value;
+                    break;
+                default:
+                    device = value;
+                    break;
+            }
         }
+
+        // 信任的伺服器只在安裝時給，三個要一起、而且合格（值是公鑰、來源與裝置 id，不是路徑）
+        if ((hubKey ?? aud ?? device) is not null && mode != DeskServiceMode.Install)
+            return DeskServiceCommand.Bad("--hub-key、--aud、--device 只用在 install");
+        if (!DeskServiceRules.TryTrustArgs(hubKey, aud, device, out var trust))
+            return DeskServiceCommand.Bad("--hub-key、--aud、--device 要三個一起給，而且是合格的公鑰、來源與裝置 id");
 
         // 服務名稱只收真的那一個與測試用的暫時名稱：安裝器以系統管理員執行，不讓呼叫的人隨便指定要建立、刪除哪個服務
         if (!DeskServiceRules.IsServiceName(name))
@@ -78,7 +102,7 @@ internal static class DeskServiceArgs
             return DeskServiceCommand.Bad("session-agent 要以 --pipe 指定幫手的管道名稱");
         if (pipe is not null && mode is not (DeskServiceMode.Run or DeskServiceMode.SessionAgent))
             return DeskServiceCommand.Bad("--pipe 只用在 run 與 session-agent");
-        return new DeskServiceCommand(mode, name, pipe, null);
+        return new DeskServiceCommand(mode, name, pipe, null, trust);
     }
 
     private static bool IsPipeName(string? pipe)

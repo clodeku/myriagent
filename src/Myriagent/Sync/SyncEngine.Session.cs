@@ -185,6 +185,7 @@ internal sealed partial class SyncEngine
                 }
 
                 Log.Info($"伺服器身分已輪換（舊金鑰簽過聲明），改釘新的指紋 {trust.HubFingerprint}");
+                RefreshDeskTrust();
                 break;
             case HubIdentityOutcome.NeedsLocalConfirmation:
                 candidateSpki = pin;

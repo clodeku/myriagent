@@ -121,6 +121,13 @@ internal static class DeskServiceHubRules
     }
 
     /// <summary>
+    /// 裝好的服務能不能在安全桌面輸入：<c>ready</c>（安裝時記下的伺服器就是現在配對的這一台）、<c>reinstall</c>（沒記、或配對的伺服器換了：
+    /// 要重新安裝才記得下來）、<c>unpaired</c>（這台沒有配對：遠端桌面本來就用不了）
+    /// </summary>
+    public static string SecureInputState(DeskServiceTrust? installed, DeskServiceTrust? current)
+        => current is null ? "unpaired" : installed == current ? "ready" : "reinstall";
+
+    /// <summary>
     /// 給網頁的 <c>deskService</c>（web-protocol）。<c>offered</c>＝設定頁要不要顯示這一區：功能還在開發，只給開了預覽的與已經裝了服務的電腦。
     /// 還沒查過（<paramref name="status"/> 是 null）時其他欄位都是還不知道的樣子
     /// </summary>
@@ -141,6 +148,7 @@ internal static class DeskServiceHubRules
             ["canInstall"] = bundled is not null,
             ["update"] = installed is not null && bundled is not null && DeskServiceRules.NeedsUpdate(installed, bundled.Version, bundled.Build, bundled.Payload),
             ["system"] = status?.Hello?.System,
+            ["secureInput"] = installed is null ? null : SecureInputState(status!.InstalledTrust, status.CurrentTrust),
             ["busy"] = busy,
             ["error"] = error,
         };

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createViewerSeal, sealSupported, toBase64Url, fromBase64Url } from '../../src/Myriagent/Web/deskseal.js';
-import { kxPublic, sealAction, createBatch } from '../../src/Myriagent/Web/remotedeskrules.js';
+import { kxPublic, sealAction, createBatch, statusSecure, secureAction } from '../../src/Myriagent/Web/remotedeskrules.js';
 
 const subtle = globalThis.crypto.subtle;
 const ECDH = { name: 'ECDH', namedCurve: 'P-256' };
@@ -19,6 +19,8 @@ const VIEWER_PUBLIC = 'BFFcPW6545a5BNP-yn9U_c0MwemXvzddylFa0KbDtANfRTa-OlDzGPv5p
 const TARGET_PUBLIC = 'BB8UAUa_sbJR-E9N2-DUzc_Xev2YSpUg41eUAh-DErue7JlaCLH6dwTfPcwLUKlmUmP7dxH5X5-KRJxQluR8iSs';
 const EVENTS = [{ t: 'kd', k: 65 }, { t: 'tx', s: '密碼 P@ss' }];
 const SEALED_1 = 'XjA1Tyyr5zCqEcCdBnSxWbNOWUNLQ3ZYAsmdOnH2U1tFVN0QEd9HBM6fVFyUoyEVPSsnKKMC5gv9Z2fliJfhVKcunI6Bk1KUYrat';
+// 以服務的標籤（安全桌面的輸入）算的第 1 包：和 C# 的 DeskSecureInputTests.SecureSealed1 是同一個值
+const SECURE_SEALED_1 = 'cCCyRwyyq8nlYt1hm-bmm-OwXbU19vwZEzLsMnuHf7-RUkBmOY9zix6JYtG2tdrYabKzLRdMWv7K9BmrRGJrMySEP22ba9VmHMUO';
 const SEALED_7 = '0X9krb4Yq4F95cL_wDzsLutZjBm6s2lqVoaitRFAJ8dOspHDNqFy-w43GDaf1LYPtcIOLJk_FCnV2kZCLUhIHEB2-6FuhSs9ZbH2';
 
 async function fixedViewerPair() {
@@ -77,6 +79,36 @@ test('固定的向量：公鑰、第 1 包與第 7 包的密文和宿主算的�
   let last = first;
   for (let i = 2; i <= 7; i++) last = await sealer.seal(EVENTS);
   assert.deepEqual(last, { n: 7, ct: SEALED_7 });
+});
+
+test('固定的向量（安全桌面的輸入）：以服務的標籤算，密文和宿主的一樣、多帶 k: svc，和給 app 的那一把不同', async () => {
+  const viewer = await createViewerSeal(await fixedViewerPair());
+  const secure = await viewer.acceptSecure(SESSION, TARGET_PUBLIC);
+  assert.ok(secure);
+  assert.deepEqual(await secure.seal(EVENTS), { n: 1, ct: SECURE_SEALED_1, k: 'svc' });
+  assert.notEqual(SECURE_SEALED_1, SEALED_1);
+  // 兩把各自編號：給服務的不佔給 app 的編號
+  const app = await viewer.accept(SESSION, TARGET_PUBLIC);
+  assert.deepEqual(await app.seal(EVENTS), { n: 1, ct: SEALED_1 });
+  assert.equal((await secure.seal(EVENTS)).n, 2);
+  assert.equal(await viewer.acceptSecure(SESSION, 'garbage'), null);
+});
+
+test('statusSecure：secure 與服務的公鑰（svc 版本 1）', () => {
+  assert.deepEqual(statusSecure({ text: null, secure: true, svc: { v: 1, pub: TARGET_PUBLIC } }), { secure: true, svc: TARGET_PUBLIC });
+  assert.deepEqual(statusSecure({ text: null, secure: true, note: '只能看' }), { secure: true, svc: null });
+  assert.deepEqual(statusSecure({ text: null }), { secure: false, svc: null });
+  assert.deepEqual(statusSecure({ secure: 'yes', svc: { v: 2, pub: TARGET_PUBLIC } }), { secure: false, svc: null });
+  assert.deepEqual(statusSecure({ svc: { v: 1, pub: 5 } }), { secure: false, svc: null });
+  assert.deepEqual(statusSecure({ svc: 'x' }), { secure: false, svc: null });
+  assert.deepEqual(statusSecure(null), { secure: false, svc: null });
+});
+
+test('secureAction：安全桌面時事件只走服務的金鑰，沒有就不送', () => {
+  assert.equal(secureAction(false, false), null);
+  assert.equal(secureAction(false, true), null, '不是安全桌面：照平常的（給 app 的金鑰）');
+  assert.equal(secureAction(true, true), 'secure');
+  assert.equal(secureAction(true, false), 'drop');
 });
 
 test('每個工作階段的金鑰都不同；被看的一方解得開，編號或工作階段不對就解不開', async () => {
