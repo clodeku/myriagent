@@ -87,6 +87,12 @@ internal static class RemoteCommandCatalog
     /// <summary>排程頁的交給代理（S3）</summary>
     public const string ScheduleAgent = "scheduleAgent";
 
+    /// <summary>Myriagent 的定時訊息：新增、修改（2026-11-13 使用者要求：跨電腦也能設定與編輯；那台要協商出 timed1）</summary>
+    public const string TimedSave = "timedSave";
+
+    /// <summary>Myriagent 的定時訊息：立即送一次、暫停、繼續、刪除（同上）</summary>
+    public const string TimedAction = "timedAction";
+
     /// <summary>
     /// 瀏覽器版新對話（伺服器草稿）的「瀏覽資料夾…」（2026-10-27）：網頁照樣送草稿 id 的 <c>listFiles</c>（dirsOnly），伺服器改成這個指令轉給草稿選的電腦
     /// （沒選是送出時會挑的那台）。那台還沒有這個對話，只列它的最近資料夾（同 dirsOnly 的範圍，不含工作資料夾）；輸出的 <c>files</c> 不帶 conversationId，
@@ -198,7 +204,7 @@ internal static class RemoteCommandCatalog
         // 儀表板的健康度：讀這台各 CLI 的設定資料夾、以這台的帳戶開對話
         "healthCheck", "healthFix",
         // 排程頁（只有桌面；瀏覽器版與其他電腦還沒有，設計 2026-10-26-schedule-manager 的 S3）
-        "scheduleWatch", "scheduleRefresh", "timedSave", "timedAction",
+        "scheduleWatch", "scheduleRefresh",
         // 儀表板的每週額度每 5% 的 token：紀錄在這台的資料夾
         "usageSegments",
         "draftSnapshot", "appUpdateCheck", "appUpdateRestartNow", "appUpdateForce", "appUpdateCancel", "appInstallHere",
@@ -346,6 +352,21 @@ internal static class RemoteCommandCatalog
             Text("note", 4000, required: false, nullable: true),
             Account(required: false, nullable: true),
         ]);
+        // Myriagent 的定時訊息（2026-11-13 使用者要求：跨電腦也能設定與編輯；那台要協商出 timed1）：在那台新增或修改。id 沒有＝新增；
+        // conversation 是那台的對話（線上 id；不叫 conversationId：路由 Device 的指令沒有對話，通用的檢查會把它當成對話指令）；text 沒帶＝修改時保留原文（同步的摘要只有前 300 字、秘密遮蔽過，網頁沒改就不送）。
+        // 時間到了把文字送進代理（同 send），改了也要「可以操作」
+        yield return ForDevice(TimedSave, 2,
+        [
+            Device(required: true),
+            Text("id", 64, required: false, nullable: true),
+            Text("conversation", 64),
+            new("newConversation", RemoteFieldKind.Bool, Required: false),
+            Choice("whenKind", true, false, "daily", "weekdays", "every", "at", "cron"),
+            Text("whenValue", 128),
+            Text("text", Myriagent.Schedules.TimedMessageRules.MaxTextLength, required: false, nullable: true),
+            Text("label", 200, required: false, nullable: true),
+        ]);
+        yield return ForDevice(TimedAction, 2, [Device(required: true), Text("id", 64), Choice("action", true, false, "run", "pause", "resume", "delete")]);
 
         // 遠端執行指令（只由桌面發起；deviceId 必帶）：那台要開「允許遠端執行指令」，高風險的另要在那台按同意（RemoteExecRiskRules）；
         // 結果的 done 只表示那台接下了，輸出與結束碼走 exec1 的串流（ExecOutput → ExecReply）

@@ -50,11 +50,15 @@ internal sealed partial class SyncEngine : ISyncEngineSchedules
         ScheduleSchedules(conn, SchedulesDue());
     }
 
-    /// <summary>Hello 的功能：有 port 才宣告 sched1</summary>
+    /// <summary>Hello 的功能：有 port 才宣告 sched1 與 timed1</summary>
     private void ContributeSchedulesFeatures(List<string> into)
     {
         if (SchedulesPort is not null)
+        {
             into.Add(DeviceFeatureRules.Sched1);
+            // 定時訊息的遠端設定（timedSave、timedAction，2026-11-13）：這版的中樞收得了
+            into.Add(DeviceFeatureRules.Timed1);
+        }
     }
 
     /// <summary><c>SchedulesUpdate</c>：格式不合格整則略過，否則整份交給協調者</summary>

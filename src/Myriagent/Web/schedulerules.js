@@ -265,6 +265,28 @@ export function localConversations(conversations) {
   return list(conversations).filter((c) => c && c.id && !c.deviceId).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
+/**
+ * 定時訊息要送進的那台的對話（2026-11-13：跨電腦也能設定）：dev 是 null＝這台（桌面本機的正式對話），否則是那台的對話
+ * （桌面上那台的副本、瀏覽器版清單上 deviceId 是那台的）；草稿與臨時對話不列，最近更新的在前
+ */
+export function deviceConversations(conversations, dev) {
+  if (!dev) return localConversations(conversations).filter((c) => !c.isDraft && !c.ephemeral);
+  return list(conversations).filter((c) => c && c.id && c.deviceId === dev && !c.isDraft && !c.ephemeral)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+/**
+ * timedSave 的指令（2026-11-13）：這台的照原本的形狀（when 是物件）；其他電腦的是型錄的遠端指令（deviceId、whenKind、whenValue 攤平），
+ * 文字只在改過時才帶——同步來的摘要不是原文（textPartial：截短或遮蔽過），沒改就不送、那台保留原文
+ */
+export function timedSaveCommand({ dev, id, conversationId, newConversation, kind, value, label, text, original }) {
+  if (!dev) return { cmd: 'timedSave', id: id || null, conversationId, newConversation: !!newConversation, when: { kind, value }, label, text };
+  const cmd = { cmd: 'timedSave', deviceId: dev, id: id || null, conversation: conversationId, newConversation: !!newConversation, whenKind: kind, whenValue: value, label: label || null };
+  const keep = !!original && original.textPartial === true && text === (original.text || '');
+  if (!keep) cmd.text = text;
+  return cmd;
+}
+
 /** 快速操作：執行中可以停止，否則立即執行；啟用的可以停用，停用的可以啟用 */
 export function quickActions(e) {
   if (!e || e.state === 'error') return [];

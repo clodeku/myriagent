@@ -84,9 +84,12 @@ internal static class ScheduleSyncRules
         var timed = new JArray();
         foreach (var t in (local["timed"] as JArray ?? new JArray()).OfType<JObject>().Take(MaxTimed))
         {
-            var o = Pick(t, "id", "label", "when", "enabled", "done", "newConversation", "conversationId", "conversationTitle", "provider", "nextAt", "createdAt");
+            var o = Pick(t, "id", "label", "when", "cron", "at", "folder", "enabled", "done", "newConversation", "conversationId", "conversationTitle",
+                "conversationExists", "provider", "nextAt", "createdAt");
             var text = t.Value<string>("text") ?? "";
             o["text"] = ScheduleRedactRules.Redact(text.Length > 300 ? text[..300] + "…" : text);
+            // 其他電腦編輯時：摘要的文字不是原文（截短或遮蔽過），網頁沒改文字就不送、那台保留原文（timedSave 的 text 省略）
+            o["textPartial"] = o.Value<string>("text") != text;
             o["upcoming"] = new JArray((t["upcoming"] as JArray ?? new JArray()).Take(48).Select(r => r.DeepClone()));
             if (t["createdBy"] is JObject c)
                 o["createdBy"] = Pick(c, "conversationId", "title", "provider");

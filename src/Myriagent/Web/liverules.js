@@ -174,7 +174,7 @@ export const PEER_COMMANDS = Object.freeze([
   'resetFolder', 'removeAttachment', 'addUploaded', 'voiceMessage', 'listFiles', 'fileSearch', 'fileFetch',
   'accountAdd', 'accountLogin', 'accountLoginCancel', 'accountLogout', 'accountRemove', 'accountRefresh', 'cliCheck', 'cliInstall', 'cliUpdate', 'accountLoginDevice',
   'accountLoginCode',
-  'scheduleAction', 'scheduleAgent',
+  'scheduleAction', 'scheduleAgent', 'timedSave', 'timedAction',
   'deviceBrowse', 'deviceFetch', 'devicePut', 'deviceTree', 'deviceFetchMany',
   'deskOpen',
 ]);

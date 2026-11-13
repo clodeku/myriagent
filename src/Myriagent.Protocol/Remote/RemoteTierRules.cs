@@ -116,6 +116,8 @@ internal static class RemoteTierRules
                 or "accountRemove" or "cliInstall" or "cliUpdate" or RemoteCommandCatalog.RemoteExec or RemoteCommandCatalog.ScheduleAction => Two,
             // 交給代理：在那台的管理對話送一則訊息（同開新對話＋送出）
             RemoteCommandCatalog.ScheduleAgent => One,
+            // Myriagent 的定時訊息：時間到了在那台把文字送進代理（不在使用者眼前），同排程的快速操作要「可以操作」
+            RemoteCommandCatalog.TimedSave or RemoteCommandCatalog.TimedAction => Two,
             RemoteCommandCatalog.ConversationCreate => CreateTier(command, facts, low),
             _ => throw new ArgumentOutOfRangeException(nameof(cmd), cmd, "不在型錄的指令沒有層級"),
         };

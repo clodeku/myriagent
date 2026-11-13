@@ -12,7 +12,8 @@ namespace Myriagent.Hub;
 // 存成不會再被改動的物件給同步引擎讀（任何執行緒），並通知它排一次 SchedulesPublish。
 // 下載：伺服器送來的其他電腦最後回報的摘要放進排程頁的 devices。
 // 遠端指令：其他電腦或手機下的 scheduleAction（立即執行、停止、啟用、停用）與 scheduleAgent（在那台的管理對話送出說明），
-// 照一般的遠端指令過閘門（政策要「可以操作」，擁有者 2026-10-26 決定不另開開關）；不再列出、納入管理是這台自己的選擇，遠端不改
+// 照一般的遠端指令過閘門（政策要「可以操作」，擁有者 2026-10-26 決定不另開開關）；不再列出、納入管理是這台自己的選擇，遠端不改。
+// Myriagent 的定時訊息（timedSave、timedAction，2026-11-13 使用者要求：跨電腦也能設定與編輯）也在這裡：照排程頁本機的同一條路做
 internal sealed partial class AgentHub
 {
     private JObject? scheduleSyncSnapshot;
@@ -43,7 +44,53 @@ internal sealed partial class AgentHub
         PostSchedules(force: true);
     }
 
-    private void RegisterScheduleRemoteHandlers(List<IRemoteCommandHandler> into) => into.Add(new ScheduleRemoteHandler(this));
+    private void RegisterScheduleRemoteHandlers(List<IRemoteCommandHandler> into)
+    {
+        into.Add(new ScheduleRemoteHandler(this));
+        into.Add(new TimedRemoteHandler(this));
+    }
+
+    /// <summary><c>timedSave</c>、<c>timedAction</c> 的處理者（其他指令回 false）：同排程頁本機的新增、修改、立即送、暫停、繼續、刪除</summary>
+    private sealed class TimedRemoteHandler(AgentHub hub) : IRemoteCommandHandler
+    {
+        public bool TryHandle(RemoteViewContext context, IAgentView view, string cmd, JObject command)
+        {
+            if (cmd is not (RemoteCommandCatalog.TimedSave or RemoteCommandCatalog.TimedAction))
+                return false;
+            if (!context.Authorized)
+            {
+                context.Reject(RemoteResultCodes.Invalid, "這個指令沒有經過這台電腦的遠端操作檢查", RemoteGateSteps.Handler);
+                return true;
+            }
+            if (hub.timedMessages is null)
+            {
+                context.Reject(RemoteResultCodes.Unsupported, "這台的 Myriagent 沒有開定時訊息（沒有排程頁）", RemoteGateSteps.Handler);
+                return true;
+            }
+            string? problem;
+            if (cmd == RemoteCommandCatalog.TimedAction)
+            {
+                problem = hub.TimedAction(command.Value<string>("id"), command.Value<string>("action"));
+            }
+            else
+            {
+                // 對話是線上 id：換成這台的；文字沒帶＝修改時保留原文（網頁拿到的摘要不是原文）
+                var wire = command.Value<string>("conversation");
+                var local = hub.conversations.Keys.FirstOrDefault(k => ConversationIds.ToWire(k) == wire);
+                var id = command.Value<string>("id");
+                var text = command.Value<string>("text");
+                if (text == null && id != null)
+                    text = hub.timedMessages?.FirstOrDefault(m => m.Id == id)?.Text;
+                (_, problem) = hub.SaveTimed(id, text, command.Value<string>("label"), command.Value<string>("whenKind"), command.Value<string>("whenValue"),
+                    local, command.Value<bool?>("newConversation") == true, null);
+            }
+            if (problem != null)
+                context.Reject(problem.StartsWith("找不到", StringComparison.Ordinal) ? RemoteResultCodes.Conflict : RemoteResultCodes.Invalid, problem, RemoteGateSteps.Handler);
+            else
+                context.Complete();
+            return true;
+        }
+    }
 
     /// <summary><c>scheduleAction</c>、<c>scheduleAgent</c> 的處理者（其他指令回 false）</summary>
     private sealed class ScheduleRemoteHandler(AgentHub hub) : IRemoteCommandHandler

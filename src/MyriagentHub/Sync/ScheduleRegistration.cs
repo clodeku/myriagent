@@ -15,6 +15,8 @@ internal static class ScheduleRegistration
         services.AddSingleton<ScheduleFanout>();
         services.AddHostedService(sp => sp.GetRequiredService<ScheduleFanout>());
         services.AddDeviceHubFeature(DeviceFeatureRules.Sched1);
+        // 定時訊息的遠端設定（2026-11-13）：timedSave、timedAction 只送給協商出 timed1 的電腦（CommandRouter）
+        services.AddDeviceHubFeature(DeviceFeatureRules.Timed1);
         return services;
     }
 }

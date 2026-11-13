@@ -98,7 +98,12 @@ export function makeSchedules(o = {}) {
           last: { code: 1, level: 'fail', text: '結束碼 1' }, nextRun: NOW + 17 * HOUR, streak: 1, runs: runs(['fail', 'ok', 'ok'], 24 * HOUR, NOW - 7 * HOUR),
           upcoming: [NOW + 17 * HOUR], provenance: { source: 'myriagent', verb: 'created', at: NOW - 9 * 24 * HOUR, conversationId: 'cx', title: 'ERP 匯出排程', provider: 'Antigravity' },
         })],
-        timed: [],
+        // 那台的定時訊息（2026-11-13 起其他電腦也能操作與編輯）：摘要的文字截短過（textPartial）
+        timed: [{
+          id: 'tm_pc1erp1', label: 'ERP 報表', text: '整理 ERP 昨天的訂單…', textPartial: true, when: '每天 09:00', cron: '0 9 * * *', at: null, enabled: true, done: false,
+          newConversation: false, conversationId: 'rc1', conversationTitle: 'ERP 報表對話', conversationExists: true, provider: 'Claude', nextAt: NOW + HOUR,
+          upcoming: [NOW + HOUR], createdAt: NOW - 3 * 24 * HOUR, last: null, runs: [],
+        }],
       },
     }],
   }, o);
@@ -342,7 +347,7 @@ export async function runSchedules(ctx, vp) {
   await page.click('.sch-head button:has-text("新增定時訊息")');
   await page.waitForSelector('.dlg-timed textarea', { timeout: 3000 });
   await page.fill('.dlg-timed textarea', '每天看一下佇列');
-  await page.selectOption('.dlg-timed select >> nth=1', 'every');
+  await page.selectOption('.dlg-timed .sch-when-row select', 'every');
   await page.fill('.dlg-timed .sch-when-row input', '30m');
   await page.click('.dlg-timed .dlg-foot button:has-text("儲存")');
   const saved = await until(() => host.last('timedSave'), 3000);
@@ -359,7 +364,12 @@ export async function runSchedules(ctx, vp) {
 
   // 其他電腦（S3）：另開一頁，這台加上 DEMO-PC-1 最後回報的
   {
-    const ra = await openApp('schedules-remote', { vp, layout: onePane('c1', 'schedules'), schedules: makeSchedules(), remote });
+    const ra = await openApp('schedules-remote', {
+      vp, layout: onePane('c1', 'schedules'), schedules: makeSchedules(), remote,
+      // 那台的對話：定時訊息的編輯器從這裡挑
+      hostSetup: (h) => h.conversations.push({ id: 'rc1', deviceId: 'd_pc1', accountId: 'a1', provider: 'Claude', title: 'ERP 報表對話', updatedAt: NOW - HOUR,
+        workingDirectory: 'C:\\repo', customFolder: true, running: false, waiting: false, unread: false }),
+    });
     const page = ra.page, host = ra.host;
     let st;
     await until(() => host.last('scheduleWatch'), 3000);
@@ -387,6 +397,41 @@ export async function runSchedules(ctx, vp) {
     const remoteAgent = await until(() => host.last('scheduleAgent'), 3000);
     check('schedRemoteAgent', !!remoteAgent && remoteAgent.deviceId === 'd_pc1' && remoteAgent.task === 'diagnose' && remoteAgent.note === '順便看記錄檔', remoteAgent);
     await page.screenshot({ path: outFile('schedules-remote-dark.png') });
+
+    // 其他電腦的定時訊息（2026-11-13）：列上的立即送一次帶 deviceId；明細的編輯改時間、沒改文字就不帶 text；新增時可以選那台
+    host.received.length = 0;
+    await page.click('.sch-row[data-path="d_pc1::tm_pc1erp1"] .sch-q >> nth=0');
+    const remoteFire = await until(() => host.last('timedAction'), 3000);
+    check('schedRemoteTimedRun', !!remoteFire && remoteFire.deviceId === 'd_pc1' && remoteFire.id === 'tm_pc1erp1' && remoteFire.action === 'run' && typeof remoteFire.commandId === 'string', remoteFire);
+    await page.click('.sch-row[data-path="d_pc1::tm_pc1erp1"]');
+    await page.click('.sch-quick button:has-text("編輯")');
+    await page.waitForSelector('.dlg-timed textarea', { timeout: 3000 });
+    const editForm = await page.evaluate(() => ({
+      machine: document.querySelector('.dlg-timed select')?.selectedOptions[0]?.textContent || null,
+      machineLocked: !!document.querySelector('.dlg-timed select')?.disabled,
+      conv: Array.from(document.querySelectorAll('.dlg-timed select'))[1]?.value || null,
+      note: Array.from(document.querySelectorAll('.dlg-timed .sch-sub')).map((n) => n.textContent).join('|'),
+    }));
+    await page.fill('.dlg-timed .sch-when-row input', '10:30');
+    host.received.length = 0;
+    await page.click('.dlg-timed .dlg-foot button:has-text("儲存")');
+    const remoteSave = await until(() => host.last('timedSave'), 3000);
+    check('schedRemoteTimedEdit', !!remoteSave && remoteSave.deviceId === 'd_pc1' && remoteSave.id === 'tm_pc1erp1' && remoteSave.conversation === 'rc1'
+      && remoteSave.whenKind === 'daily' && remoteSave.whenValue === '10:30' && !('text' in remoteSave) && !('when' in remoteSave) && typeof remoteSave.commandId === 'string'
+      && editForm.machine === 'DEMO-PC-1' && editForm.machineLocked && editForm.conv === 'rc1' && /保留那台的原文/.test(editForm.note), { remoteSave, editForm });
+    await page.waitForSelector('.dlg-timed', { state: 'detached', timeout: 3000 }).catch(() => {});
+    await page.click('.sch-head button:has-text("新增定時訊息")');
+    await page.waitForSelector('.dlg-timed textarea', { timeout: 3000 });
+    const machines = await page.evaluate(() => Array.from(document.querySelector('.dlg-timed select').options).map((o) => o.textContent));
+    await page.selectOption('.dlg-timed select >> nth=0', { label: 'DEMO-PC-1' });
+    const convOpts = await page.evaluate(() => Array.from(document.querySelectorAll('.dlg-timed select')[1].options).map((o) => o.value));
+    await page.fill('.dlg-timed textarea', '每天備份 ERP');
+    host.received.length = 0;
+    await page.click('.dlg-timed .dlg-foot button:has-text("儲存")');
+    const remoteNew = await until(() => host.last('timedSave'), 3000);
+    check('schedRemoteTimedCreate', JSON.stringify(machines) === JSON.stringify(['這台', 'DEMO-PC-1']) && JSON.stringify(convOpts) === JSON.stringify(['rc1'])
+      && !!remoteNew && remoteNew.deviceId === 'd_pc1' && remoteNew.id === null && remoteNew.text === '每天備份 ERP' && remoteNew.conversation === 'rc1',
+    { machines, convOpts, remoteNew });
 
     await closeApp(ra);
   }

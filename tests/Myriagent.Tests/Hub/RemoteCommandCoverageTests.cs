@@ -46,7 +46,7 @@ public sealed class RemoteCommandCoverageTests
     private static readonly string[] ExecHandled = [RemoteCommandCatalog.RemoteExec];
 
     /// <summary>排程頁（S3）：HubHarness 沒掛排程讀取器，處理者回 unsupported</summary>
-    private static readonly string[] ScheduleHandled = [RemoteCommandCatalog.ScheduleAction, RemoteCommandCatalog.ScheduleAgent];
+    private static readonly string[] ScheduleHandled = [RemoteCommandCatalog.ScheduleAction, RemoteCommandCatalog.ScheduleAgent, RemoteCommandCatalog.TimedSave, RemoteCommandCatalog.TimedAction];
 
     /// <summary>電腦狀態面板的檔案傳輸（AgentHub.DeviceFiles.cs）：範圍沒有磁碟，瀏覽被守門員拒絕；下載與存檔要和伺服器傳輸，回 unsupported</summary>
     private static readonly string[] DeviceTransferHandled = [RemoteCommandCatalog.DeviceBrowse, RemoteCommandCatalog.DeviceFetch, RemoteCommandCatalog.DevicePut,
@@ -131,7 +131,7 @@ public sealed class RemoteCommandCoverageTests
         outcomes.Keys.Should().BeEquivalentTo(fallback.Concat(Handled).Concat(Files).Concat(AccountHandled).Concat(Unsupported).Concat(ExecHandled).Concat(ScheduleHandled).Concat(DeviceTransferHandled).Concat(DeskHandled),
             "退路＋處理者＋檔案＋帳戶＋unsupported＋遠端執行指令＋排程頁＝型錄裡電腦執行的全部（契約:647）");
         (fallback.Length, Handled.Length, Files.Length, AccountHandled.Length, Unsupported.Length, ExecHandled.Length, ScheduleHandled.Length, DeviceTransferHandled.Length, outcomes.Count)
-            .Should().Be((10, 10, 5, 6, 1, 1, 2, 5, 41));
+            .Should().Be((10, 10, 5, 6, 1, 1, 4, 5, 43));
         outcomes.Where(p => p.Value is { State: RemoteResultStates.Rejected, Code: RemoteResultCodes.Unsupported, Step: RemoteGateSteps.Handler })
             .Select(p => p.Key).Should().BeEquivalentTo(Unsupported.Concat(FilesNeedingTransfer).Concat(NeedingVoice).Concat(ExecHandled).Concat(ScheduleHandled).Concat(DeviceTransferNeedingTransfer).Concat(DeskHandled),
                 "回 unsupported 而且 step 是 handler 的恰好是 accountAdd、要傳輸的 2 個、沒掛辨識器的語音訊息、沒接執行者的遠端執行指令、沒掛排程讀取器的排程頁");

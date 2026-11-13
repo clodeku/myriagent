@@ -1109,6 +1109,13 @@ Claude 帳戶已對應或宣告了邏輯帳戶、這台**沒有發布過**這個
 - **指令**：`removeAttachment {conversationId, id}` 的形狀不變（上傳 id 也是合格的項目 id）。協商出 `att1` 的那台：`id` 不是輸入區的附件時以 `RemoteUploadAttachments` 換成那個上傳匯入後的附件 id；還在下載或匯入的記進 `RemoteUploadsRemoved`，匯入完不加進輸入區、刪掉檔；都不是時照樣 `done`。
 - **舊版**：沒協商出 `att1` 的電腦找不到這個 id 會回 `done` 卻沒移除（使用者以為拿掉了、送出時還在），伺服器在 `IssueAsync` 立即拒絕 `unsupported`「版本太舊，還不能移除已附加的檔案；請先更新那台」。
 - **新對話**：伺服器草稿與桌面的遠端草稿上的 `addUploaded`／`removeAttachment` 不轉給電腦（草稿還沒有電腦上的對話），記在草稿上；第一次送出的 `conversationCreate` 帶 `uploads`（那台從 WP4.7 起就收，下載完才送第一則），不需要 `att1`。
+
+### 14.20 跨電腦設定 Myriagent 的定時訊息（`timed1`；2026-11-13）
+
+- **為什麼**：使用者要求其他電腦與瀏覽器版也能新增、編輯、操作某台的定時訊息（S4 的 `myriagent-schedule` 定時訊息存在那台、由那台送）。
+- **功能**：`timed1` 不對應任何 hub 方法。桌面跟著 `sched1` 宣告；伺服器宣告，只把 `timedSave`、`timedAction` 送給協商出它的電腦（舊版在閘門 5a 回 invalid，使用者看不懂），沒有就立即拒絕 `unsupported`「版本太舊，還不能從其他電腦設定定時訊息」。
+- **指令**（型錄的 Device、層級 2，同排程的快速操作要「可以操作」）：`timedSave {deviceId, id?, conversation, newConversation?, whenKind, whenValue, text?, label?}`（`whenKind` 是 daily／weekdays／every／at／cron；`conversation` 是那台的對話的線上 id——不叫 `conversationId`：路由 Device 的指令沒有對話；`text` 省略＝修改時保留原文）、`timedAction {deviceId, id, action}`（run／pause／resume／delete）。那台的處理者（`AgentHub.ScheduleRemote.cs` 的 `TimedRemoteHandler`）照排程頁本機的同一條路（`SaveTimed`、`TimedAction`）；不合格回 `invalid`、找不到回 `conflict`，都帶原因。
+- **摘要**：`ScheduleSyncRules.ForSync` 的定時訊息另帶 `cron`、`at`、`folder`、`conversationExists` 與 `textPartial`（摘要的文字截到 300 字、秘密遮蔽，和原文不同時是 true）：網頁以 `cron`／`at` 還原時間的欄位，`textPartial` 的沒改文字就不帶 `text`。
 ## 15. app 下載端點（app 自我更新 U2）
 
 桌面以存取權杖取得最新版與套件（U3 的 `HubReleaseSource`）。路由是 `AppReleaseRoutes`（`Update/AppReleaseMessages.cs`）的常數，回應以 `SyncJson` 序列化（1.2），形狀只加選用欄位（1.4 的不變式）。

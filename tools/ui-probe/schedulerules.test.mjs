@@ -166,3 +166,25 @@ test('第九批：每小時刻度、即將執行、新的執行結果', () => {
   assert.deepEqual(second.fresh, { a: 'fail' }, 'a 有新的一次（失敗）；b 沒變；c 剛出現不算');
   assert.equal(second.seen.c, NOW + ':ok');
 });
+
+test('跨電腦的定時訊息（2026-11-13）：那台的對話、timedSave 的形狀、沒改文字就保留原文', async () => {
+  const { deviceConversations, timedSaveCommand } = await import('../../src/Myriagent/Web/schedulerules.js');
+  const convs = [
+    { id: 'a', updatedAt: 1 }, { id: 'b', updatedAt: 3 }, { id: 'd', isDraft: true, updatedAt: 5 },
+    { id: 'r1', deviceId: 'd_x', updatedAt: 2 }, { id: 'r2', deviceId: 'd_x', updatedAt: 8 }, { id: 'r3', deviceId: 'd_y', updatedAt: 9 },
+    { id: 'q', deviceId: 'd_x', ephemeral: true, updatedAt: 10 },
+  ];
+  assert.deepEqual(deviceConversations(convs, null).map((c) => c.id), ['b', 'a'], '這台：草稿不列');
+  assert.deepEqual(deviceConversations(convs, 'd_x').map((c) => c.id), ['r2', 'r1'], '那台的對話，臨時對話不列');
+
+  const base = { conversationId: 'b', newConversation: false, kind: 'daily', value: '09:00', label: '報表', text: '整理報表' };
+  assert.deepEqual(timedSaveCommand(Object.assign({ dev: null, id: null }, base)),
+    { cmd: 'timedSave', id: null, conversationId: 'b', newConversation: false, when: { kind: 'daily', value: '09:00' }, label: '報表', text: '整理報表' });
+  assert.deepEqual(timedSaveCommand(Object.assign({ dev: 'd_x', id: 'tm_1' }, base)),
+    { cmd: 'timedSave', deviceId: 'd_x', id: 'tm_1', conversation: 'b', newConversation: false, whenKind: 'daily', whenValue: '09:00', label: '報表', text: '整理報表' });
+  const partial = { text: '整理報表…', textPartial: true };
+  assert.equal('text' in timedSaveCommand(Object.assign({ dev: 'd_x', id: 'tm_1', original: partial }, base, { text: '整理報表…' })), false, '摘要不是原文、沒改：不帶，那台保留原文');
+  assert.equal(timedSaveCommand(Object.assign({ dev: 'd_x', id: 'tm_1', original: partial }, base, { text: '改過了' })).text, '改過了');
+  assert.equal(timedSaveCommand(Object.assign({ dev: 'd_x', id: 'tm_1', original: { text: '整理報表', textPartial: false } }, base)).text, '整理報表', '摘要就是原文：照樣帶');
+  assert.equal(timedSaveCommand(Object.assign({ dev: 'd_x', id: null }, base, { label: '' })).label, null);
+});

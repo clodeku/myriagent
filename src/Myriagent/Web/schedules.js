@@ -12,7 +12,7 @@ import { fixCandidates } from './healthrules.js';
 import {
   ORIGIN_LABEL, ORIGIN_ORDER, DEFAULT_ORIGINS, STATE_FILTERS, AGENT_TASKS, entriesOf, filterEntries, sortEntries, originCounts, summaryOf,
   historyBars, timelineOf, timelineTicks, lastText, ledOf, primaryTask, provenanceText, providerKeyOf, pickSelection, quickActions, listActions, isManaged,
-  timedOf, timedAsEntry, timedStateText, WHEN_KINDS, whenOf, localConversations,
+  timedOf, timedAsEntry, timedStateText, WHEN_KINDS, whenOf, deviceConversations, timedSaveCommand,
   hourTicks, isSoon, soonestPoint, soonText, freshRuns,
 } from './schedulerules.js';
 import { openDialog, toast } from './ui.js';
@@ -164,12 +164,12 @@ function headerOf(s, now) {
   const create = h('button', { type: 'button', class: 'btn sm acc', title: '開一個對話請代理建立排程（先在輸入框寫要做什麼）' }, icon('plus'), h('span', { text: '新增排程（交給代理）' }));
   create.addEventListener('click', () => chooseAccount(create, null, 'create'));
   const timedBtn = h('button', { type: 'button', class: 'btn sm', title: '在指定的時間對某個對話送一則訊息（app 開著時才送）' }, icon('clock'), h('span', { text: '新增定時訊息' }));
-  timedBtn.addEventListener('click', () => openTimedDialog(null));
+  timedBtn.addEventListener('click', () => openTimedDialog(null, null, s));
   return h('div', { class: 'sch-head' },
     h('h1', { text: '排程' }),
     h('span', { class: 'sch-sub', text: isHub ? '各台電腦最後回報的排程' : (s.machine || '這台') + (s.scannedAt ? '・' + fmtRelative(s.scannedAt, now) + '讀取' : '') }),
     h('div', { class: 'grow' }),
-    isHub ? null : refresh, isHub ? null : timedBtn, isHub ? null : create);
+    isHub ? null : refresh, timedBtn, isHub ? null : create);
 }
 
 function pillsOf(all, now) {
@@ -272,7 +272,7 @@ function scheduleAction(e, dev, action) {
   track(id, { onSettle: (st) => { if (st === 'done') toast(`已在「${deviceOf(dev, state.remote, null).name}」${{ run: '開始執行', stop: '停止', enable: '啟用', disable: '停用' }[action] || '處理'} ${e.name}`, 'success'); } });
 }
 
-/** 其他電腦的一組：名稱、在不在線、最後回報的時間；排程與定時訊息各一張表（定時訊息只看，不在遠端改） */
+/** 其他電腦的一組：名稱、在不在線、最後回報的時間；排程與定時訊息各一張表（定時訊息也能在遠端新增、編輯、操作，2026-11-13） */
 function remoteGroupOf(r, now) {
   const snap = r.d.snapshot || {};
   const rows = r.visible.map((e) => rowOf(e, now, r.d.deviceId));
@@ -498,8 +498,8 @@ function timedGroupOf(timed, now, dev) {
     const e = timedAsEntry(t);
     const led = ledOf(e);
     const bars = historyBars(e);
-    const run = iconButton('play', '立即送一次', (ev) => { ev.stopPropagation(); post({ cmd: 'timedAction', id: t.id, action: 'run' }); }, 'sch-q');
-    const pause = iconButton(e.enabled ? 'pause' : 'play', e.enabled ? '暫停' : '繼續', (ev) => { ev.stopPropagation(); post({ cmd: 'timedAction', id: t.id, action: e.enabled ? 'pause' : 'resume' }); }, 'sch-q');
+    const run = iconButton('play', '立即送一次', (ev) => { ev.stopPropagation(); timedAct(t, dev, 'run'); }, 'sch-q');
+    const pause = iconButton(e.enabled ? 'pause' : 'play', e.enabled ? '暫停' : '繼續', (ev) => { ev.stopPropagation(); timedAct(t, dev, e.enabled ? 'pause' : 'resume'); }, 'sch-q');
     const pk = providerKeyOf(t.provider);
     const target = t.newConversation ? '每次開新對話' : (t.conversationTitle || '對話已刪除');
     const by = t.createdBy ? (t.createdBy.title || '對話') : '你在排程頁新增';
@@ -512,7 +512,7 @@ function timedGroupOf(timed, now, dev) {
       h('span', { class: 'sch-hist' }, bars.map((b) => h('i', { class: 'lvl-' + b.level, title: fmtDateTime(b.at) + '　' + b.text }))),
       h('span', { class: 'sch-next', text: t.nextAt ? fmtWhen(t.nextAt, now) : '—' }),
       h('span', { class: 'sch-prov' + (t.createdBy ? '' : ' guess') }, pk ? providerMark(pk, 'sch-pm') : h('i', { class: 'sch-pm none' }), h('span', { text: by })),
-      h('span', { class: 'sch-acts' }, dev ? null : run, dev ? null : pause));
+      h('span', { class: 'sch-acts' }, run, pause));
     row.addEventListener('click', () => { selected = key; render(true); });
     row.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { selected = key; render(true); } });
     return decorateRow(row, key, t.nextAt, now);
@@ -532,10 +532,10 @@ function timedDetailOf(t, now, dev) {
   const meta = h('div', { class: 'sch-d-meta' }, h('span', { text: t.when }), t.nextAt ? h('span', { text: '下一次 ' + fmtWhen(t.nextAt, now) }) : null);
   const btn = (ic, label, fn, cls) => { const b = h('button', { type: 'button', class: 'btn sm' + (cls ? ' ' + cls : '') }, icon(ic), h('span', { text: label })); b.addEventListener('click', fn); return b; };
   const quick = h('div', { class: 'sch-quick' },
-    btn('play', '立即送一次', () => post({ cmd: 'timedAction', id: t.id, action: 'run' }), 'acc'),
-    e.enabled ? btn('pause', '暫停', () => post({ cmd: 'timedAction', id: t.id, action: 'pause' })) : btn('play', '繼續', () => post({ cmd: 'timedAction', id: t.id, action: 'resume' })),
-    btn('edit', '編輯', () => openTimedDialog(t)),
-    btn('trash', '刪除', () => { if (window.confirm(`刪除定時訊息「${t.label}」？`)) post({ cmd: 'timedAction', id: t.id, action: 'delete' }); }));
+    btn('play', '立即送一次', () => timedAct(t, dev, 'run'), 'acc'),
+    e.enabled ? btn('pause', '暫停', () => timedAct(t, dev, 'pause')) : btn('play', '繼續', () => timedAct(t, dev, 'resume')),
+    btn('edit', '編輯', () => openTimedDialog(t, dev, null)),
+    btn('trash', '刪除', () => { if (window.confirm(`刪除定時訊息「${t.label}」？`)) timedAct(t, dev, 'delete'); }));
   const kv = (k, v) => (v ? [h('span', { class: 'k', text: k }), v] : []);
   const target = t.newConversation
     ? h('span', { text: '每次開新對話' + (t.folder ? '（' + t.folder + '）' : '') })
@@ -555,14 +555,44 @@ function timedDetailOf(t, now, dev) {
         r.conversationId && r.exists ? linkTo(r.text, r.conversationId, true) : h('span', { class: 'lvl-' + r.level, text: r.text }),
         r.late ? h('span', { class: 'sch-gap', text: '補送（原定 ' + fmtDateTime(r.scheduledAt) + '）' }) : null)))
       : h('div', { class: 'sch-sub', text: '還沒送過' }));
-  return h('div', { class: 'sch-detail' }, head, meta, dev ? null : quick, def, runSec);
+  return h('div', { class: 'sch-detail' }, head, meta, quick, def, runSec);
 }
 
-/** 新增或編輯定時訊息（timedSave）：對話、送進這個對話或每次開新對話、時間、名稱、文字 */
-function openTimedDialog(t) {
-  const convs = localConversations(state.conversations);
-  const conv = h('select', { class: 'input' }, convs.map((c) => h('option', { value: c.id, text: c.title || '（沒有標題）' })));
-  if (t && t.conversationId) conv.value = t.conversationId;
+/**
+ * 定時訊息的立即送、暫停、繼續、刪除：這台的直接送；其他電腦的帶 deviceId（遠端指令 timedAction，2026-11-13；結果由 cmdtrack 追，
+ * 被拒時伺服器或傳輸層已經提示：那台的版本太舊時說要先更新）
+ */
+function timedAct(t, dev, action) {
+  if (!dev) { post({ cmd: 'timedAction', id: t.id, action }); return; }
+  const id = post({ cmd: 'timedAction', deviceId: dev, id: t.id, action });
+  const done = { run: '已送出', pause: '已暫停', resume: '已繼續', delete: '已刪除' }[action] || '已處理';
+  track(id, { onSettle: (st) => { if (st === 'done') toast(`「${deviceOf(dev, state.remote, null).name}」的定時訊息「${t.label}」${done}`, 'success'); } });
+}
+
+/**
+ * 新增或編輯定時訊息（timedSave）：電腦、對話、送進這個對話或每次開新對話、時間、名稱、文字。
+ * 其他電腦的（2026-11-13 使用者要求：跨電腦也能設定與編輯）送遠端指令 timedSave（deviceId），對話是那台的；
+ * 編輯時電腦固定（dev），新增時可以挑：桌面的這台＋回報排程的其他電腦，瀏覽器版只有其他電腦
+ */
+function openTimedDialog(t, dev, s) {
+  const remotes = s ? devicesOf(s).map((d) => ({ id: d.deviceId, name: deviceOf(d.deviceId, state.remote, null).name })) : [];
+  const machines = t ? [{ id: dev, name: dev ? deviceOf(dev, state.remote, null).name : '這台' }]
+    : (isHub ? [] : [{ id: null, name: '這台' }]).concat(remotes);
+  if (!machines.length) { toast('還沒有電腦回報排程：那台要開著 Myriagent 並連上伺服器', 'error'); return; }
+  const machine = h('select', { class: 'input', disabled: !!t }, machines.map((m, i) => h('option', { value: String(i), text: m.name })));
+  const devOf = () => machines[Number(machine.value) || 0].id;
+  const conv = h('select', { class: 'input' });
+  const noConv = h('div', { class: 'sch-err', text: '' });
+  const fillConvs = () => {
+    const convs = deviceConversations(state.conversations, devOf());
+    conv.replaceChildren(...convs.map((c) => h('option', { value: c.id, text: c.title || '（沒有標題）' })));
+    if (t && t.conversationId && convs.some((c) => c.id === t.conversationId)) conv.value = t.conversationId;
+    conv.hidden = !convs.length;
+    noConv.hidden = !!convs.length;
+    noConv.textContent = devOf() ? '那台還沒有可以送進去的對話：先在那台開一個對話送出第一則' : '這台還沒有可以送進去的對話：先開一個對話送出第一則';
+  };
+  machine.addEventListener('change', fillConvs);
+  fillConvs();
   const modeNew = h('input', { type: 'checkbox', checked: !!(t && t.newConversation) });
   const w = whenOf(t);
   const kind = h('select', { class: 'input' }, WHEN_KINDS.map((k) => h('option', { value: k.kind, text: k.label })));
@@ -572,23 +602,32 @@ function openTimedDialog(t) {
   const label = h('input', { class: 'input', value: t && t.label ? t.label : '', placeholder: '沒填時取文字的第一行' });
   const text = h('textarea', { class: 'input sch-ta', rows: 6, placeholder: '時間到了要送給代理的文字，例如：整理昨天的訂單異常，寫成報表' });
   text.value = t ? t.text || '' : '';
+  const partial = t && dev && t.textPartial ? '其他電腦只看得到前 300 字（秘密已遮蔽）：沒改文字就保留那台的原文；改了就整段換成這裡的' : null;
   const field = (k, el, note) => h('label', { class: 'sch-field' }, h('span', { class: 'k', text: k }), el, note ? h('span', { class: 'sch-sub', text: note }) : null);
   const save = h('button', { type: 'button', class: 'btn acc' }, h('span', { text: '儲存' }));
   const cancel = h('button', { type: 'button', class: 'btn' }, h('span', { text: '取消' }));
   const d = openDialog({
     title: t ? '編輯定時訊息' : '新增定時訊息', width: 560, className: 'dlg-timed',
     body: h('div', { class: 'sch-form' },
-      convs.length ? field('對話', conv) : h('div', { class: 'sch-err', text: '這台還沒有可以送進去的對話：先開一個對話送出第一則' }),
+      machines.length > 1 || machines[0].id ? field('電腦', machine, '定時訊息存在那台、時間到了由那台送；那台的 app 要開著') : null,
+      field('對話', h('div', {}, conv, noConv)),
       h('label', { class: 'sch-switch' }, modeNew, h('span', { text: '每次開新對話（帳戶、模型、權限模式、資料夾照這個對話；適合每天跑的報表，前文不會越堆越長）' })),
       field('時間', h('div', { class: 'sch-when-row' }, kind, value), 'app 開著（含縮到系統匣）時才送；錯過的重複訊息只補一次'),
       field('名稱', label),
-      field('文字', text)),
+      field('文字', text, partial)),
     footer: [cancel, save],
   });
   cancel.addEventListener('click', () => d.close());
   save.addEventListener('click', () => {
-    if (!conv.value) return;
-    post({ cmd: 'timedSave', id: t ? t.id : null, conversationId: conv.value, newConversation: modeNew.checked, when: { kind: kind.value, value: value.value }, label: label.value, text: text.value });
+    if (!conv.value || conv.hidden) return;
+    const target = devOf();
+    const cmd = timedSaveCommand({ dev: target, id: t ? t.id : null, conversationId: conv.value, newConversation: modeNew.checked, kind: kind.value, value: value.value,
+      label: label.value, text: text.value, original: t });
+    const id = post(cmd);
+    if (target) {
+      const name = deviceOf(target, state.remote, null).name;
+      track(id, { onSettle: (st) => { if (st === 'done') toast(`已在「${name}」儲存定時訊息`, 'success'); } });
+    }
     d.close();
   });
 }

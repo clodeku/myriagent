@@ -1,5 +1,10 @@
 using Myriagent.Agents;
+using Myriagent.Core;
+using Myriagent.Hub;
+using Myriagent.Remote;
 using Myriagent.Schedules;
+using Myriagent.Sync;
+using Myriagent.Tests.Protocol.Remote;
 using Myriagent.Tests.TestSupport;
 using Newtonsoft.Json.Linq;
 
@@ -228,6 +233,51 @@ public sealed class AgentHubTimedMessagesTests
         Timed(h).Single().Value<bool>("enabled").Should().BeFalse();
         h.Ui.Invoke(() => h.Hub.HandleTimedCli(a, JObject.Parse($$"""{"op":"remove","id":"{{tid}}"}"""))).Value<bool>("ok").Should().BeTrue();
         Timed(h).Should().BeEmpty();
+    }
+
+    /// <summary>其他電腦或瀏覽器版送來的 timedSave／timedAction（路由 Device、沒有 conv）經真的閘門</summary>
+    private static async Task<RemoteOutcome> Remote(HubHarness h, string cmd, params (string Key, JToken? Value)[] fields)
+    {
+        var command = RemoteSamples.Command(cmd, [("deviceId", RemoteSamples.DeviceId), .. fields]);
+        var context = new RemoteViewContext(RemoteEntrySamples.NewCid(), RemoteSamples.DeviceId, null, null, 2, false, 1_000, 2_000, false, "Chrome・Windows");
+        return await h.Ui.Invoke(() => h.Hub.ExecuteRemoteAsync(context, command, _ => { })).WaitAsync(TimeSpan.FromSeconds(20));
+    }
+
+    [Fact]
+    public async Task 其他電腦設定定時訊息_新增_修改沒帶文字保留原文_暫停_找不到回conflict_不合格回invalid()
+    {
+        // 2026-11-13 使用者要求：跨電腦也能設定與編輯 Myriagent 的定時訊息
+        var (h, _) = Create();
+        using var dispose = h;
+        h.Ui.Invoke(() =>
+        {
+            h.Settings.Sync.RemoteControlLevel = SyncSettings.LevelControl;
+            h.Settings.Sync.AllowRemoteFullAccess = true;
+        });
+        var (id, _) = Conversation(h);
+        var wire = ConversationIds.ToWire(id)!;
+
+        var created = await Remote(h, RemoteCommandCatalog.TimedSave, ("conversation", wire), ("whenKind", "daily"), ("whenValue", "09:00"), ("text", "整理昨天的訂單異常"));
+        created.State.Should().Be(RemoteResultStates.Done, created.Message);
+        var t = (JObject)Timed(h).Single();
+        (t.Value<string>("when"), t.Value<string>("text"), t.Value<string>("conversationId")).Should().Be(("每天 09:00", "整理昨天的訂單異常", id));
+
+        var edited = await Remote(h, RemoteCommandCatalog.TimedSave, ("id", t.Value<string>("id")), ("conversation", wire), ("whenKind", "weekdays"), ("whenValue", "10:30"), ("label", "訂單報表"));
+        edited.State.Should().Be(RemoteResultStates.Done, edited.Message);
+        t = (JObject)Timed(h).Single();
+        (t.Value<string>("when"), t.Value<string>("text"), t.Value<string>("label")).Should().Be(("平日 10:30", "整理昨天的訂單異常", "訂單報表"), "沒帶文字：保留那台的原文");
+
+        (await Remote(h, RemoteCommandCatalog.TimedAction, ("id", t.Value<string>("id")), ("action", "pause"))).State.Should().Be(RemoteResultStates.Done);
+        ((JObject)Timed(h).Single()).Value<bool>("enabled").Should().BeFalse();
+
+        var missing = await Remote(h, RemoteCommandCatalog.TimedAction, ("id", "tm_nope"), ("action", "delete"));
+        (missing.State, missing.Code).Should().Be((RemoteResultStates.Rejected, RemoteResultCodes.Conflict));
+        var badWhen = await Remote(h, RemoteCommandCatalog.TimedSave, ("conversation", wire), ("whenKind", "every"), ("whenValue", "7m"), ("text", "x"));
+        (badWhen.State, badWhen.Code).Should().Be((RemoteResultStates.Rejected, RemoteResultCodes.Invalid));
+        badWhen.Message.Should().NotBeNullOrEmpty("帶原因");
+        var noConv = await Remote(h, RemoteCommandCatalog.TimedSave, ("conversation", new string('0', 32)), ("whenKind", "daily"), ("whenValue", "09:00"), ("text", "x"));
+        (noConv.State, noConv.Code).Should().Be((RemoteResultStates.Rejected, RemoteResultCodes.Conflict));
+        Timed(h).Should().HaveCount(1);
     }
 
     [Fact]

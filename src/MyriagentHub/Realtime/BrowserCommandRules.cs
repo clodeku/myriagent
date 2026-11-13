@@ -99,7 +99,7 @@ internal static class BrowserCommandRules
         // 儀表板的健康度：讀這台電腦各 CLI 的設定資料夾、以這台的帳戶開對話（瀏覽器版沒有健康度）
         "healthCheck", "healthFix",
         // 排程頁：這台電腦的 Windows 排程與以這台的帳戶開的對話（瀏覽器版還沒有排程頁，設計 2026-10-26-schedule-manager 的 S3）
-        "scheduleWatch", "scheduleRefresh", "timedSave", "timedAction",
+        "scheduleWatch", "scheduleRefresh",
         // 儀表板的每週額度每 5% 的 token：紀錄在這台電腦的資料夾（瀏覽器版的儀表板沒有這一區）
         "usageSegments",
         // app 自我更新是這台電腦自己的（伺服器的 init 沒有 appUpdate，瀏覽器版不顯示橫幅與設定區塊）
@@ -125,8 +125,8 @@ internal static class BrowserCommandRules
         "accountAdd", "accountLogin", "accountLoginCancel", "accountLogout", "accountRemove", "accountRefresh",
         "cliCheck", "cliInstall", "cliUpdate",
         "addUploaded", "fileFetch", "accountLoginDevice", "accountLoginCode", "voiceMessage", "takeover", "handoffCancel",
-        // 排程頁（S3）：由那台電腦執行（型錄的 Device 指令，伺服器轉送）
-        "scheduleAction", "scheduleAgent",
+        // 排程頁（S3）：由那台電腦執行（型錄的 Device 指令，伺服器轉送）；定時訊息的新增、編輯與操作（2026-11-13，目標要協商出 timed1）
+        "scheduleAction", "scheduleAgent", "timedSave", "timedAction",
         // 電腦狀態面板的檔案傳輸（2026-11-09）：由那台電腦執行（型錄的 Device 指令，伺服器轉送；目標要協商出 xfer1）
         "deviceBrowse", "deviceFetch", "devicePut", "deviceTree", "deviceFetchMany",
         // 遠端桌面（desk1，sync-protocol 14.16）：由那台執行（型錄的 Device 指令；之後的封包走伺服器處理的 desk）

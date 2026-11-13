@@ -267,6 +267,43 @@ public sealed class PeerCommandTests
         }
     }
 
+    private static readonly string[] TimedFeatures = [DeviceFeatureRules.Conv1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Timed1];
+
+    [Fact]
+    public async Task 定時訊息_目標有timed1才簽_沒有就立即拒絕unsupported()
+    {
+        // 2026-11-13：其他電腦設定 Myriagent 的定時訊息；舊版的桌面不認得 timedSave、timedAction
+        var save = new JObject
+        {
+            ["cmd"] = "timedSave", ["conversation"] = CommandRouterTests.Conv, ["whenKind"] = "daily", ["whenValue"] = "09:00", ["text"] = "整理報表",
+        };
+        await using (var s = await CommandRouterTests.Setup.StartAsync(features: TimedFeatures))
+        await using (var b = await PeerAsync(s, "B 電腦", TimedFeatures))
+        {
+            var cid = NewCommandId();
+            var cmd = (JObject)save.DeepClone();
+            cmd["deviceId"] = s.Owner.Id;
+            (await b.Client.PeerCmdAsync(new PeerCmd(cid, cmd))).Should().Be(new PeerCmdResult(true, cid, null));
+            var delivery = await s.Device!.WaitForAsync<CommandDelivery>();
+            var verdict = Verify(s, delivery, acceptsDevice: true);
+            verdict.Step.Should().BeNull(verdict.Detail);
+            verdict.Body!.Tier.Should().Be(2);
+            verdict.Body.Cmd.Value<string>("cmd").Should().Be("timedSave");
+        }
+
+        await using (var s = await CommandRouterTests.Setup.StartAsync(features: PeerFeatures))
+        await using (var b = await PeerAsync(s, "B 電腦", TimedFeatures))
+        {
+            var cid = NewCommandId();
+            var act = new JObject { ["cmd"] = "timedAction", ["deviceId"] = s.Owner.Id, ["id"] = "tm_12345678", ["action"] = "pause" };
+            (await b.Client.PeerCmdAsync(new PeerCmd(cid, act))).Accepted.Should().BeTrue();
+            var result = await b.Client.WaitForAsync<PeerReply>(r => (string?)r.Message["type"] == "commandResult");
+            result.Message["code"]!.Value<string>().Should().Be(RemoteResultCodes.Unsupported);
+            result.Message["message"]!.Value<string>().Should().Contain("版本太舊").And.Contain("定時訊息");
+            await CommandRouterTests.AssertNoDeliveryAsync(s.Device!, 200);
+        }
+    }
+
     private static readonly string[] Xfer2Features = [DeviceFeatureRules.Conv1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Xfer1, DeviceFeatureRules.Xfer2, DeviceFeatureRules.Desk1];
 
     [Fact]

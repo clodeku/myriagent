@@ -253,6 +253,10 @@ internal sealed partial class CommandRouter(
         if (name == RemoteCommandCatalog.ConversationCreate && mapped["ephemeral"] is { Type: JTokenType.Boolean } && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.Quick1))
             return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false,
                 "「" + (string.IsNullOrWhiteSpace(devices.Get(target)?.Name) ? PeerRules.UnnamedDevice : devices.Get(target)!.Name!.Trim()) + "」的 Clode Myriagent 版本太舊，還沒有臨時對話；請先更新那台，或在面板上換一台電腦"), cancellationToken);
+        // 定時訊息的遠端設定（2026-11-13）：舊版的桌面在閘門 5a 回 invalid（不在型錄），使用者看不懂——不送，說明那台要先更新
+        if (name is RemoteCommandCatalog.TimedSave or RemoteCommandCatalog.TimedAction && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.Timed1))
+            return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false,
+                "「" + (string.IsNullOrWhiteSpace(devices.Get(target)?.Name) ? PeerRules.UnnamedDevice : devices.Get(target)!.Name!.Trim()) + "」的 Myriagent 版本太舊，還不能從其他電腦設定定時訊息；請先更新那台"), cancellationToken);
         // 移除網頁上傳的附件（2026-11-13）：遠端的 removeAttachment 一律是網頁的上傳 id（網頁看不到那台的附件 id）；舊版的桌面找不到這個 id 會回 done 卻沒移除，
         // 使用者以為拿掉了、送出時卻還在——不送，說明那台要先更新
         if (name == RemoteCommandCatalog.RemoveAttachment && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.Att1))
