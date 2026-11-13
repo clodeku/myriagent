@@ -38,6 +38,8 @@ internal static class Program
                         command.ServiceName, AppContext.BaseDirectory, programFiles, SelfVersion.Current, ReleaseKeys.Production, DateTimeOffset.UtcNow, command.Trust)));
                 case DeskServiceMode.Uninstall:
                     return (int)Elevated(command.ServiceName, (installer, programFiles) => installer.Uninstall(command.ServiceName, programFiles));
+                case DeskServiceMode.SelfUpdate:
+                    return (int)Elevated(command.ServiceName, (installer, programFiles) => SelfUpdate(installer, programFiles, command.ServiceName));
                 case DeskServiceMode.Query:
                     return Query(DeskServiceRules.PipeNameOf(command.ServiceName));
                 case DeskServiceMode.Version:
@@ -88,6 +90,24 @@ internal static class Program
             if (owned)
                 mutex.ReleaseMutex();
         }
+    }
+
+    /// <summary>
+    /// 服務自己更新的第二步（服務啟動的、系統權限）：只從安裝資料夾的 incoming 執行——那是服務驗過簽章才寫進去的、只有系統管理員寫得了。
+    /// 從別的地方執行一律不做（不讓人拿這個模式把任意資料夾的檔裝成系統服務）。裝的是自己這一份，安裝器再驗一次簽章與版本
+    /// </summary>
+    private static DeskServiceExit SelfUpdate(DeskServiceInstaller installer, string programFiles, string serviceName)
+    {
+        var incoming = Path.Combine(DeskServiceRules.InstallRoot(programFiles, serviceName), DeskServiceRules.IncomingFolder);
+        var own = Path.TrimEndingDirectorySeparator(Path.GetFullPath(AppContext.BaseDirectory));
+        if (!ProcessIdentity.IsSystem() || !string.Equals(own, Path.GetFullPath(incoming), StringComparison.OrdinalIgnoreCase))
+        {
+            ServiceLog.Error($"self-update 只由服務從 {incoming} 執行（現在在 {own}）");
+            return DeskServiceExit.Usage;
+        }
+
+        return installer.Install(new DeskInstallOptions(serviceName, AppContext.BaseDirectory, programFiles, SelfVersion.Current, ReleaseKeys.Production,
+            DateTimeOffset.UtcNow, SelfUpdate: true));
     }
 
     private static int SessionProbe()
@@ -144,8 +164,10 @@ internal static class Program
         var session = System.Diagnostics.Process.GetCurrentProcess().SessionId;
         using var capturer = new DesktopCapturer();
         using var injector = new DesktopInjector();
+        // 安全桌面上的提示列只有系統權限的幫手畫得上去（前景模式看不到安全桌面：不必開）
+        using var banner = system ? new SecureDeskBanner() : null;
         using var server = new DeskPipeServer(pipe, system, new NativeClientIdentifier(system),
-            new AgentPipeHandler(SelfVersion.Current, system, session, capturer, injector, () => ReadTrust(root)));
+            new AgentPipeHandler(SelfVersion.Current, system, session, capturer, injector, () => ReadTrust(root), banner));
         server.Start();
         ServiceLog.Info($"擷取幫手啟動：工作階段 {session}，系統權限 {system}");
         while (server.ActiveConnections > 0 || Environment.TickCount64 - server.LastActivityTick < DeskServiceRules.HelperIdleExit.TotalMilliseconds)

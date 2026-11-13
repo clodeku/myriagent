@@ -567,7 +567,7 @@ export async function runSyncSettings(ctx, vp) {
     await page.click('.dlg-confirm .btn:not(.danger-solid)');
     await sleep(250);
     check('syncDeskService', !silent.shown && silent.asked === 1 && !notOffered
-      && idle.pill === '未安裝' && idle.buttons.join() === '安裝…' && !!idle.text && idle.text.includes('開發中')
+      && idle.pill === '未安裝' && idle.buttons.join() === '安裝…' && !!idle.text && idle.text.includes('還沒有在真的電腦上完整驗證過')
       && beforeConfirm === 0 && !!confirmText && confirmText.includes('系統權限') && confirmText.includes('UAC')
       && busy.pill === '安裝中…' && busy.buttons.length === 0 && !!busy.detail && busy.detail.includes('按「是」')
       && viewOnly.pill === '只能看' && viewOnly.buttons.join() === '重新安裝…,移除…' && !!viewOnly.detail && viewOnly.detail.includes('重新安裝')

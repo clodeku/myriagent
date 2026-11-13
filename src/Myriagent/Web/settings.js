@@ -1476,7 +1476,7 @@ function deskServiceBlock() {
   const node = h('div', { class: 'sync-group', hidden: true, dataset: { group: 'deskService' } },
     groupHead('遠端桌面的鎖定畫面支援'),
     h('p', { class: 'set-desc', text: '這台鎖定、或出現系統管理員確認畫面（UAC）時，遠端桌面要靠一個以系統權限執行的服務才看得到、才能操作。安裝、更新、移除都要有人在這台按 Windows 的確認。' }),
-    h('div', { class: 'note warn' }, icon('warning'), h('span', { text: '開發中：裝了之後遠端桌面看得到、也能操作鎖定畫面與系統管理員確認畫面；這部分還沒有在真的電腦上驗證過。' })),
+    h('div', { class: 'note warn' }, icon('warning'), h('span', { text: '這項功能還沒有在真的電腦上完整驗證過：裝了之後若鎖定畫面看不到或不能操作，遠端桌面的其他部分不受影響，可以在這裡移除。' })),
     err,
     card(h('div', { class: 'set-row' },
       h('div', { class: 'set-text' }, h('div', { class: 'set-label', text: '狀態' }), detail, probe),

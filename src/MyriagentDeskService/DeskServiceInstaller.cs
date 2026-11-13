@@ -14,8 +14,12 @@ namespace MyriagentDesk;
 /// <param name="Identity">這一份服務檔是哪一版（安裝器和服務是同一個 exe）</param>
 /// <param name="TrustedKeys">信任的發佈簽章金鑰（空的＝這個組建沒有內建金鑰，不驗）</param>
 /// <param name="Trust">信任的伺服器（安全桌面的輸入要它；這台還沒配對是 null：裝了只能看）</param>
+/// <param name="SelfUpdate">
+/// 服務自己更新（沒有人同意 UAC）：一定要有發佈清單與有效的簽章、版本要比已經安裝的新（<see cref="DeskServiceRules.CheckSelfUpdate"/>），
+/// 而且不動信任的伺服器（<c>trust.json</c> 是同意 UAC 的人定下的）
+/// </param>
 internal sealed record DeskInstallOptions(string ServiceName, string SourceDirectory, string ProgramFiles, ReleaseIdentity Identity,
-    IReadOnlyList<ReleaseKey> TrustedKeys, DateTimeOffset Now, DeskServiceTrust? Trust = null);
+    IReadOnlyList<ReleaseKey> TrustedKeys, DateTimeOffset Now, DeskServiceTrust? Trust = null, bool SelfUpdate = false);
 
 /// <summary>
 /// 安裝、更新、移除服務（<c>MyriagentDesk.exe install／uninstall</c>，以系統管理員執行）。
@@ -26,9 +30,9 @@ internal sealed record DeskInstallOptions(string ServiceName, string SourceDirec
 /// </summary>
 internal sealed class DeskServiceInstaller(IServiceControl control)
 {
-    public const string ManifestFile = "release.manifest.json";
+    public const string ManifestFile = DeskServiceRules.ManifestFile;
 
-    public const string SignatureFile = "release.manifest.sig";
+    public const string SignatureFile = DeskServiceRules.SignatureFile;
 
     private static readonly TimeSpan ServiceTimeout = TimeSpan.FromSeconds(30);
 
@@ -49,15 +53,39 @@ internal sealed class DeskServiceInstaller(IServiceControl control)
             hashes[name] = Sha256(bytes);
         }
 
-        // 2. 有發佈清單就要對得上
-        if (CheckSignature(options, hashes, out var signedBy) is { } reason)
+        var root = DeskServiceRules.InstallRoot(options.ProgramFiles, options.ServiceName);
+        var previous = ReadInstall(root);
+
+        // 2. 有發佈清單就要對得上；自己更新時一定要有、而且只往新的
+        string? signedBy;
+        if (options.SelfUpdate)
+        {
+            var parts = new Dictionary<string, byte[]>(payload, StringComparer.Ordinal);
+            foreach (var name in new[] { ManifestFile, SignatureFile })
+            {
+                if (PlainFile.TryRead(Path.Combine(options.SourceDirectory, name), ReleaseManifestRules.MaxManifestBytes, out var bytes) == PlainFileStatus.Ok)
+                    parts[name] = bytes;
+            }
+
+            if (DeskServiceRules.CheckSelfUpdate(parts, options.TrustedKeys, running: null, previous, out var release, out signedBy) is { } refused)
+            {
+                ServiceLog.Error("不自動更新：" + refused);
+                return DeskServiceExit.SignatureInvalid;
+            }
+
+            if (release != options.Identity)
+            {
+                ServiceLog.Error($"不自動更新：發佈清單是 {release!.Release}，這個執行檔是 {options.Identity.Release}");
+                return DeskServiceExit.SignatureInvalid;
+            }
+        }
+        else if (CheckSignature(options, hashes, out signedBy) is { } reason)
         {
             ServiceLog.Error("服務檔沒有通過發佈簽章的檢查：" + reason);
             return DeskServiceExit.SignatureInvalid;
         }
 
         var payloadHash = DeskServiceRules.PayloadHash(hashes);
-        var root = DeskServiceRules.InstallRoot(options.ProgramFiles, options.ServiceName);
         var folderName = DeskServiceRules.PayloadFolder(payloadHash);
         var folder = Path.Combine(root, folderName);
         ServiceLog.Info($"安裝 {options.ServiceName}：{options.Identity.Release}，服務檔 {folderName}，簽章 {signedBy ?? "沒有（開發版）"}");
@@ -110,12 +138,15 @@ internal sealed class DeskServiceInstaller(IServiceControl control)
                 options.Now.UtcDateTime.ToString("yyyy'-'MM'-'dd'T'HH':'mm':'ss'Z'", CultureInfo.InvariantCulture));
             File.WriteAllText(Path.Combine(root, DeskServiceRules.InstallFile), DeskServiceRules.SerializeInstall(install), new UTF8Encoding(false));
             // 信任的伺服器：這一次安裝給的為準（同意 UAC 的那一下定下來，之後只有系統管理員改得了）；沒給就拿掉舊的——
-            // 不留著上一次配對的伺服器
-            var trustPath = Path.Combine(root, DeskServiceRules.TrustFile);
-            if (options.Trust is { } anchor)
-                File.WriteAllText(trustPath, DeskServiceRules.SerializeTrust(anchor), new UTF8Encoding(false));
-            else
-                File.Delete(trustPath);
+            // 不留著上一次配對的伺服器。服務自己更新時不動它（沒有人同意 UAC）
+            if (!options.SelfUpdate)
+            {
+                var trustPath = Path.Combine(root, DeskServiceRules.TrustFile);
+                if (options.Trust is { } anchor)
+                    File.WriteAllText(trustPath, DeskServiceRules.SerializeTrust(anchor), new UTF8Encoding(false));
+                else
+                    File.Delete(trustPath);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -131,6 +162,7 @@ internal sealed class DeskServiceInstaller(IServiceControl control)
         catch (Exception ex) when (IsServiceError(ex))
         {
             ServiceLog.Error("服務啟動不了", ex);
+            Rollback(options.ServiceName, root, display, previous, folderName);
             return DeskServiceExit.StartFailed;
         }
 
@@ -138,6 +170,53 @@ internal sealed class DeskServiceInstaller(IServiceControl control)
         RemoveOtherPayloads(root, folderName);
         ServiceLog.Info($"安裝完成：{options.ServiceName}");
         return DeskServiceExit.Ok;
+    }
+
+    /// <summary>
+    /// 新的那一份啟動不了：原本那一份還在（新的啟動成功才清舊的）就把服務指回去、安裝紀錄改回來、重新啟動，再拿掉新的那一份。
+    /// 自己更新時沒有人在看，不能把原本好好的服務留在啟動不了的狀態；手動安裝也一樣退回。原本沒裝、或重裝的是同一份就沒得退
+    /// </summary>
+    private void Rollback(string serviceName, string root, string display, DeskServiceInstall? previous, string failedFolder)
+    {
+        if (previous is null || previous.Folder == failedFolder)
+            return;
+        var exe = Path.Combine(root, previous.Folder, DeskServiceRules.ExeName);
+        if (!File.Exists(exe))
+            return;
+        try
+        {
+            control.CreateOrUpdate(serviceName, display, DeskServiceRules.Description, DeskServiceRules.BinPath(exe));
+            File.WriteAllText(Path.Combine(root, DeskServiceRules.InstallFile), DeskServiceRules.SerializeInstall(previous), new UTF8Encoding(false));
+            control.Start(serviceName, ServiceTimeout);
+            ServiceLog.Warn($"已退回原本的 {previous.Version}（{previous.Folder}）");
+        }
+        catch (Exception ex) when (IsServiceError(ex) || ex is IOException or UnauthorizedAccessException)
+        {
+            ServiceLog.Error("退回原本的服務檔也失敗", ex);
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(Path.Combine(root, failedFolder), recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ServiceLog.Warn("啟動不了的那一份沒有清掉（下次安裝再清）：" + ex.Message);
+        }
+    }
+
+    private static DeskServiceInstall? ReadInstall(string root)
+    {
+        try
+        {
+            var path = Path.Combine(root, DeskServiceRules.InstallFile);
+            return File.Exists(path) && new FileInfo(path).Length <= 64 * 1024 ? DeskServiceRules.ParseInstall(File.ReadAllText(path, Encoding.UTF8)) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     public DeskServiceExit Uninstall(string serviceName, string programFiles)

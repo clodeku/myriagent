@@ -12,6 +12,9 @@ internal enum DeskServiceMode
     SessionAgent,
     Install,
     Uninstall,
+
+    /// <summary>服務自己更新時由服務啟動（從安裝資料夾的 incoming 執行）：把自己那一份裝進去</summary>
+    SelfUpdate,
     Query,
     Version,
 }
@@ -32,7 +35,7 @@ internal sealed record DeskServiceCommand(DeskServiceMode Mode, string ServiceNa
 internal static class DeskServiceArgs
 {
     public const string Usage =
-        "MyriagentDesk service | install [--name <service>] [--hub-key <spki> --aud <origin> --device <id>] | uninstall [--name <service>] | query [--name <service>] | run --pipe <name> | session-probe | session-agent --pipe <name> | version";
+        "MyriagentDesk service | install [--name <service>] [--hub-key <spki> --aud <origin> --device <id>] | uninstall [--name <service>] | self-update [--name <service>] | query [--name <service>] | run --pipe <name> | session-probe | session-agent --pipe <name> | version";
 
     public static DeskServiceCommand Parse(IReadOnlyList<string> args)
     {
@@ -46,6 +49,7 @@ internal static class DeskServiceArgs
             "session-agent" => DeskServiceMode.SessionAgent,
             "install" => DeskServiceMode.Install,
             "uninstall" => DeskServiceMode.Uninstall,
+            "self-update" => DeskServiceMode.SelfUpdate,
             "query" => DeskServiceMode.Query,
             "version" => DeskServiceMode.Version,
             _ => DeskServiceMode.Usage,

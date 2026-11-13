@@ -256,6 +256,8 @@ public sealed class DeskServiceExeTests
             return; // 以系統管理員跑測試時這個情況驗不了（也不能讓它真的去裝）
         Run("install", "--name", "MyriagentDeskTest-0000").Exit.Should().Be((int)DeskServiceExit.NotElevated);
         Run("uninstall", "--name", "MyriagentDeskTest-0000").Exit.Should().Be((int)DeskServiceExit.NotElevated);
+        // 自己更新的第二步只由服務（系統權限）從安裝資料夾的 incoming 執行：別人從別處執行什麼都不做
+        Run("self-update", "--name", "MyriagentDeskTest-0000").Exit.Should().Be((int)DeskServiceExit.NotElevated);
     }
 
     [Fact]

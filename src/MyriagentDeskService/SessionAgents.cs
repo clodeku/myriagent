@@ -20,6 +20,16 @@ internal sealed class SessionAgents(string exePath, string serviceName) : ISessi
     private readonly Dictionary<int, (SafeProcessHandle Process, string Pipe)> agents = new();
     private bool disposed;
 
+    /// <summary>有幫手還活著（遠端桌面正在用，或剛用完還沒自己結束）：服務這時不自己更新（服務一停幫手就跟著結束）</summary>
+    public bool AnyAlive
+    {
+        get
+        {
+            lock (gate)
+                return !disposed && agents.Values.Any(agent => !Exited(agent.Process));
+        }
+    }
+
     public string Open(int sessionId)
     {
         lock (gate)

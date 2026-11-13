@@ -61,9 +61,13 @@ public sealed class DeskServiceInstallerTests : IDisposable
                 State = ServiceRunState.Stopped;
         }
 
+        /// <summary>每次啟動先叫（丟例外就是那一次啟動不了）</summary>
+        public Action? StartHook { get; set; }
+
         public void Start(string name, TimeSpan timeout)
         {
             Calls.Add("start:" + name);
+            StartHook?.Invoke();
             if (FailStart is not null)
                 throw FailStart;
             State = ServiceRunState.Running;
@@ -132,6 +136,105 @@ public sealed class DeskServiceInstallerTests : IDisposable
         installer.Install(Options()).Should().Be(DeskServiceExit.Ok);
         File.Exists(trustPath).Should().BeFalse();
         File.Exists(Path.Combine(Root(), DeskServiceRules.InstallFile)).Should().BeTrue();
+    }
+
+    // ---- 服務自己更新（沒有人同意 UAC）：一定要簽章、只往新的、不動信任的伺服器 ----
+
+    private static readonly ReleaseIdentity Older = new(new ReleaseVersion(0, 2, 940), "0123456");
+
+    /// <summary>先裝一份舊的（940），再把來源換成簽章過的新版（950、內容不同）；回信任的金鑰</summary>
+    private IReadOnlyList<ReleaseKey> InstallOlderThenSignNewer(DeskServiceTrust? trust = null)
+    {
+        new DeskServiceInstaller(control).Install(Options() with { Identity = Older, Trust = trust }).Should().Be(DeskServiceExit.Ok);
+        foreach (var name in DeskServiceRules.PayloadFiles)
+            File.WriteAllBytes(Path.Combine(source, name), Encoding.UTF8.GetBytes("newer payload of " + name));
+        control.Calls.Clear();
+        return SignRelease();
+    }
+
+    [Fact]
+    public void 自己更新_簽章過而且比較新_換過去_信任的伺服器不動()
+    {
+        using var hub = new DeskOpenSamples();
+        var keys = InstallOlderThenSignNewer(hub.Trust);
+        var old = ReadInstall();
+
+        new DeskServiceInstaller(control).Install(Options(keys) with { SelfUpdate = true }).Should().Be(DeskServiceExit.Ok);
+
+        var now = ReadInstall();
+        (now.Version, now.Build, now.SignedBy).Should().Be(("0.2.950", "abc1234", keys[0].Kid));
+        now.Folder.Should().NotBe(old.Folder);
+        control.BinPath.Should().Be("\"" + Path.Combine(Root(), now.Folder, "MyriagentDesk.exe") + "\" service");
+        control.Calls.Should().Equal("stop:MyriagentDesk", "create:MyriagentDesk", "start:MyriagentDesk");
+        Directory.Exists(Path.Combine(Root(), old.Folder)).Should().BeFalse("新的起來了才清舊的");
+        DeskServiceRules.ParseTrust(File.ReadAllText(Path.Combine(Root(), DeskServiceRules.TrustFile))).Should().Be(hub.Trust, "同意 UAC 的人定下的，自己更新不動");
+    }
+
+    [Fact]
+    public void 自己更新_沒有簽章_沒有金鑰_不比已安裝的新_執行檔和清單不是同一版_都不裝也不停服務()
+    {
+        var keys = InstallOlderThenSignNewer();
+        var installed = ReadInstall();
+        DeskServiceExit Try(DeskInstallOptions options)
+        {
+            control.Calls.Clear();
+            var exit = new DeskServiceInstaller(control).Install(options with { SelfUpdate = true });
+            control.Calls.Should().BeEmpty("不收的更新不能把執行中的服務停下");
+            ReadInstall().Should().Be(installed);
+            return exit;
+        }
+
+        Try(Options()).Should().Be(DeskServiceExit.SignatureInvalid, "沒有內建金鑰的組建不自動更新");
+        Try(Options(keys) with { Identity = new ReleaseIdentity(new ReleaseVersion(0, 2, 951), "abc1234") }).Should().Be(DeskServiceExit.SignatureInvalid, "執行檔不是清單的那一版");
+
+        // 已經裝著更新的：簽章有效的舊版不能把它降回去
+        File.WriteAllText(Path.Combine(Root(), DeskServiceRules.InstallFile), DeskServiceRules.SerializeInstall(installed with { Version = "0.2.960", Build = "fedcba9" }));
+        installed = ReadInstall();
+        Try(Options(keys)).Should().Be(DeskServiceExit.SignatureInvalid);
+        File.WriteAllText(Path.Combine(Root(), DeskServiceRules.InstallFile), DeskServiceRules.SerializeInstall(installed with { Version = "0.2.940", Build = "0123456" }));
+        installed = ReadInstall();
+
+        File.Delete(Path.Combine(source, DeskServiceInstaller.SignatureFile));
+        Try(Options(keys)).Should().Be(DeskServiceExit.SignatureInvalid, "沒有簽章");
+        File.Delete(Path.Combine(source, DeskServiceInstaller.ManifestFile));
+        Try(Options(keys)).Should().Be(DeskServiceExit.SignatureInvalid, "沒有發佈清單（手動安裝的開發版可以，自己更新不行）");
+    }
+
+    [Fact]
+    public void 新的啟動不了_退回原本那一份_服務照樣在執行()
+    {
+        var keys = InstallOlderThenSignNewer();
+        var old = ReadInstall();
+        var oldBinPath = "\"" + Path.Combine(Root(), old.Folder, "MyriagentDesk.exe") + "\" service";
+        var starts = 0;
+        control.StartHook = () =>
+        {
+            if (++starts == 1)
+                throw new TimeoutException("服務沒有在時間內啟動");
+        };
+
+        new DeskServiceInstaller(control).Install(Options(keys) with { SelfUpdate = true }).Should().Be(DeskServiceExit.StartFailed);
+
+        ReadInstall().Should().Be(old, "安裝紀錄改回原本的");
+        control.BinPath.Should().Be(oldBinPath);
+        control.State.Should().Be(ServiceRunState.Running);
+        control.Calls.Should().Equal("stop:MyriagentDesk", "create:MyriagentDesk", "start:MyriagentDesk", "create:MyriagentDesk", "start:MyriagentDesk");
+        Directory.GetDirectories(Root(), "p-*").Select(Path.GetFileName).Should().Equal([old.Folder], "啟動不了的那一份拿掉");
+
+        // 手動安裝（按了 UAC）也一樣退回
+        control.Calls.Clear();
+        starts = 0;
+        new DeskServiceInstaller(control).Install(Options(keys)).Should().Be(DeskServiceExit.StartFailed);
+        ReadInstall().Should().Be(old);
+        control.State.Should().Be(ServiceRunState.Running);
+    }
+
+    [Fact]
+    public void 第一次安裝就啟動不了_沒得退_照舊回啟動失敗()
+    {
+        control.FailStart = new TimeoutException("服務沒有在時間內啟動");
+        new DeskServiceInstaller(control).Install(Options()).Should().Be(DeskServiceExit.StartFailed);
+        control.Calls.Should().Equal("stop:MyriagentDesk", "create:MyriagentDesk", "start:MyriagentDesk");
     }
 
     [Fact]
@@ -322,7 +425,7 @@ public sealed class DeskServiceInstallerTests : IDisposable
     }
 
     [Fact]
-    public void 啟動不了_回StartFailed_安裝紀錄留著_舊的服務檔不清()
+    public void 新的啟動不了_原本那一份也啟動不了_回StartFailed_服務指回原本的_兩份都留著()
     {
         var installer = new DeskServiceInstaller(control);
         installer.Install(Options()).Should().Be(DeskServiceExit.Ok);
@@ -332,7 +435,9 @@ public sealed class DeskServiceInstallerTests : IDisposable
         File.WriteAllText(Path.Combine(source, "MyriagentDesk.dll"), "a build that cannot start");
         installer.Install(Options(build: "def5678")).Should().Be(DeskServiceExit.StartFailed);
 
-        ReadInstall().Build.Should().Be("def5678", "app 要看得到裝了但沒在執行");
+        // 退回去也啟動不了（服務本身有別的問題）：登記與安裝紀錄是原本那一份，app 看得到「裝了但沒在執行」
+        ReadInstall().Should().Be(first);
+        control.BinPath.Should().Be("\"" + Path.Combine(Root(), first.Folder, "MyriagentDesk.exe") + "\" service");
         Directory.Exists(Path.Combine(Root(), first.Folder)).Should().BeTrue("新的沒起來，舊的服務檔先留著");
     }
 

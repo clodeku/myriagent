@@ -88,6 +88,26 @@ test('安全桌面能不能輸入：服務記下的伺服器要是現在配對�
   assert.equal(deskServiceSummary(s({ ...base, system: false, secureInput: 'reinstall' })).label, '不是系統權限');
 });
 
+test('更新不必按 UAC：服務會自己換版時說明不同，自動更新中沒有按鈕', () => {
+  const base = { installed: true, running: true, system: true, version: '0.2.940', build: '0123456', update: true };
+  const self = deskServiceSummary(s({ ...base, selfUpdate: true }));
+  assert.equal(self.label, '有更新');
+  assert.match(self.detail, /自己換成新版/);
+  assert.deepEqual(acts(self), ['install:更新…', 'uninstall:移除…']);
+  assert.doesNotMatch(deskServiceSummary(s({ ...base, selfUpdate: false })).detail, /自己換成新版/);
+
+  const updating = deskServiceSummary(s({ ...base, selfUpdate: true, busy: 'update' }));
+  assert.equal(updating.label, '更新中…');
+  assert.match(updating.detail, /不必按/);
+  assert.deepEqual(updating.actions, []);
+
+  const confirm = deskServiceConfirm('install', s({ ...base, selfUpdate: true }));
+  assert.match(confirm.message, /發佈簽章/);
+  assert.match(confirm.message, /不需要 Windows 的系統管理員確認/);
+  assert.match(deskServiceConfirm('install', s({ ...base, selfUpdate: false })).detail, /UAC/, '舊的服務照舊要按 UAC');
+  assert.match(deskServiceConfirm('install', s({ selfUpdate: true })).detail, /UAC/, '第一次安裝一定要按 UAC');
+});
+
 test('確認框：安裝時說明會記下配對的伺服器', () => {
   assert.match(deskServiceConfirm('install', s({})).message, /記下這台配對的伺服器/);
 });

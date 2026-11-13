@@ -65,9 +65,19 @@ internal static class ServiceHost
             var identity = SelfVersion.Current;
             var system = ProcessIdentity.IsSystem();
             agents = new SessionAgents(exe, serviceName);
+            // 自己更新只給真的服務（系統權限、有內建的發佈金鑰）：安裝資料夾是執行檔的上一層
+            var installRoot = Path.GetDirectoryName(Path.GetDirectoryName(exe)!)!;
+            var liveAgents = agents;
+            var updater = system ? new SelfUpdater(installRoot, serviceName, ReleaseKeys.Production, identity, () => liveAgents.AnyAlive, SelfUpdater.Launch) : null;
             server = new DeskPipeServer(DeskServiceRules.PipeNameOf(serviceName), system, new NativeClientIdentifier(system),
-                new ServicePipeHandler(identity, system, new HelperSessionProbe(system, exe), agents));
+                new ServicePipeHandler(identity, system, new HelperSessionProbe(system, exe), agents, updater is { Available: true } ? updater : null));
             server.Start();
+            if (system)
+            {
+                // 上一次換版的程式就在 incoming 裡執行、刪不掉自己：它結束之後由新的服務清
+                _ = Task.Delay(TimeSpan.FromSeconds(30)).ContinueWith(_ => SelfUpdater.CleanIncoming(installRoot), TaskScheduler.Default);
+            }
+
             ServiceLog.Info($"服務 {serviceName} 啟動：{identity.Release}，系統權限 {system}");
             Report(StateRunning, AcceptStop | AcceptShutdown);
             StopRequested.Wait();

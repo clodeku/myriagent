@@ -145,6 +145,40 @@ internal static class DeskServiceRules
 
     public const string CodeFailed = "failed";
 
+    /// <summary>現在不能做（另一個更新進行中、遠端桌面正在用幫手）：稍後再試</summary>
+    public const string CodeBusy = "busy";
+
+    // ---- 服務自己更新（不經 UAC；擁有者 2026-11-13 決定） ----
+    // app 把新版的服務檔、發佈清單與簽章經管道分段送進服務（服務不去讀使用者寫得到的資料夾），服務在記憶體裡驗：
+    // 清單的簽章（服務內建的發佈金鑰）、每個服務檔的雜湊、版本比現在的新。通過才寫進安裝資料夾的 incoming，
+    // 以那一份（驗過的新版）執行 self-update 換版。信任的伺服器（trust.json）不動
+
+    /// <summary>服務：開始送一份更新（回這一次的 id；之前沒送完的作廢）</summary>
+    public const string OpUpdateBegin = "updateBegin";
+
+    /// <summary>服務：送一段（照順序、接著上一段）</summary>
+    public const string OpUpdatePut = "updatePut";
+
+    /// <summary>服務：都送完了，驗過就換版（回要換成的版本；服務接著會重新啟動）</summary>
+    public const string OpUpdateApply = "updateApply";
+
+    /// <summary>服務認得 <see cref="OpUpdateBegin"/>、<see cref="OpUpdatePut"/>、<see cref="OpUpdateApply"/>，而且這個組建有內建的發佈金鑰</summary>
+    public const string FeatureSelfUpdate = "selfUpdate";
+
+    /// <summary>發佈清單與它的簽章（受管理安裝的 app 資料夾裡有；和服務檔一起送）</summary>
+    public const string ManifestFile = "release.manifest.json";
+
+    public const string SignatureFile = "release.manifest.sig";
+
+    /// <summary>安裝資料夾底下放驗過、等著換版的那一份的子資料夾</summary>
+    public const string IncomingFolder = "incoming";
+
+    /// <summary>一段最多幾個位元組（base64 之後一行不超過 <see cref="MaxLineChars"/>）</summary>
+    public const int UpdateChunkBytes = 32 * 1024;
+
+    /// <summary>整份更新（服務檔＋清單＋簽章）的上限：服務先收進記憶體才驗</summary>
+    public const long MaxUpdateBytes = 32L * 1024 * 1024;
+
     /// <summary>服務在 <c>%ProgramFiles%</c> 底下的資料夾（只有系統管理員能寫：LocalSystem 執行的檔絕不能放使用者寫得到的地方）</summary>
     public const string InstallFolder = @"Myriagent\DeskService";
 
@@ -507,6 +541,133 @@ internal static class DeskServiceRules
     /// <summary>回覆裡注入的事件數；錯誤、格式不對回 null</summary>
     public static int? ParseSecureInput(string? line)
         => ErrorOf(line) is null && TryObject(line) is { } o ? Int(o, "injected") : null;
+
+    // ---- 服務自己更新 ----
+
+    /// <summary>一份更新要送的檔：服務檔、發佈清單、簽章</summary>
+    public static IReadOnlyList<string> UpdateParts { get; } = [.. PayloadFiles, ManifestFile, SignatureFile];
+
+    private static long MaxPartBytes(string name)
+        => name == ManifestFile ? ReleaseManifestRules.MaxManifestBytes : name == SignatureFile ? ReleaseManifestRules.MaxSignatureBytes : MaxPayloadFileBytes;
+
+    public static string UpdateBeginRequest(IReadOnlyDictionary<string, int> sizes) => Line(new JObject
+    {
+        ["op"] = OpUpdateBegin,
+        ["parts"] = new JArray(UpdateParts.Select(name => new JObject { ["name"] = name, ["bytes"] = sizes[name] })),
+    });
+
+    /// <summary>
+    /// <c>updateBegin</c> 的內容：<see cref="UpdateParts"/> 的每個檔各一次、不多不少，大小在各自的上限內、合計不超過 <see cref="MaxUpdateBytes"/>。
+    /// 不合格回 null
+    /// </summary>
+    public static IReadOnlyDictionary<string, int>? ParseUpdateBegin(JObject request)
+    {
+        if (request["parts"] is not JArray parts || parts.Count != UpdateParts.Count)
+            return null;
+        var sizes = new Dictionary<string, int>(StringComparer.Ordinal);
+        long total = 0;
+        foreach (var token in parts)
+        {
+            if (token is not JObject part || Text(part, "name") is not { } name || !UpdateParts.Contains(name) || sizes.ContainsKey(name)
+                || Int(part, "bytes") is not { } bytes || bytes <= 0 || bytes > MaxPartBytes(name))
+                return null;
+            sizes[name] = bytes;
+            total += bytes;
+        }
+
+        return total <= MaxUpdateBytes ? sizes : null;
+    }
+
+    public static string UpdateBeginReply(string id) => Line(new JObject { ["ok"] = true, ["id"] = id });
+
+    /// <summary><c>updateBegin</c> 的回覆裡這一次的 id；錯誤、格式不對回 null</summary>
+    public static string? ParseUpdateBegin(string? line)
+        => ErrorOf(line) is null && TryObject(line) is { } o && Text(o, "id") is { } id && IsUpdateId(id) ? id : null;
+
+    /// <summary>這一次更新的 id：32 個小寫十六進位字（服務產生的亂數）</summary>
+    public static bool IsUpdateId([NotNullWhen(true)] string? id) => id is { Length: 32 } && id.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    public static string UpdatePutRequest(string id, string name, long offset, ReadOnlySpan<byte> data) => Line(new JObject
+    {
+        ["op"] = OpUpdatePut, ["id"] = id, ["name"] = name, ["offset"] = offset, ["data"] = Convert.ToBase64String(data),
+    });
+
+    /// <summary><c>updatePut</c> 的內容；不合格（id、檔名、位移、不是 base64、空的或超過一段的上限）回 null</summary>
+    public static (string Id, string Name, int Offset, byte[] Data)? ParseUpdatePut(JObject request)
+    {
+        if (Text(request, "id") is not { } id || !IsUpdateId(id) || Text(request, "name") is not { } name || !UpdateParts.Contains(name)
+            || Int(request, "offset") is not { } offset || offset < 0 || Text(request, "data") is not { Length: > 0 } text)
+            return null;
+        var buffer = new byte[UpdateChunkBytes];
+        return text.Length <= (UpdateChunkBytes + 2) / 3 * 4 && Convert.TryFromBase64String(text, buffer, out var written) && written > 0
+            ? (id, name, offset, buffer[..written])
+            : null;
+    }
+
+    public static string UpdatePutReply(int received) => Line(new JObject { ["ok"] = true, ["received"] = received });
+
+    /// <summary><c>updatePut</c> 的回覆：這個檔到目前收了幾個位元組；錯誤、格式不對回 null</summary>
+    public static int? ParseUpdatePut(string? line)
+        => ErrorOf(line) is null && TryObject(line) is { } o ? Int(o, "received") : null;
+
+    public static string UpdateApplyRequest(string id) => Line(new JObject { ["op"] = OpUpdateApply, ["id"] = id });
+
+    public static string? ParseUpdateApply(JObject request) => Text(request, "id") is { } id && IsUpdateId(id) ? id : null;
+
+    public static string UpdateApplyReply(string release) => Line(new JObject { ["ok"] = true, ["release"] = release });
+
+    /// <summary><c>updateApply</c> 的回覆：要換成的版本（服務接著會重新啟動）；錯誤、格式不對回 null</summary>
+    public static string? ParseUpdateApply(string? line)
+        => ErrorOf(line) is null && TryObject(line) is { } o && Text(o, "release") is { } release && ReleaseIdentity.TryParseRelease(release, out _) ? release : null;
+
+    /// <summary>
+    /// 一份更新能不能不經 UAC 就裝（純函式；服務收完之後、換版的程式動手之前各驗一次）。全部都要成立：
+    /// 這個組建有內建的發佈金鑰（開發版、沒有金鑰的組建一律不自動更新）；有發佈清單與簽章、簽章是內建的金鑰簽的；
+    /// 每個服務檔都在清單裡、雜湊相同（發佈清單一定是發佈版：開發版的 release 連解析都不過）；**版本比現在的新**——比執行中的服務新、也比安裝紀錄上的新
+    /// （同一個使用者的程式不能拿舊的、簽章照樣有效的版本把系統權限的服務降回去），而且不是已經裝著的那一份。
+    /// 通過回 null 並給要裝的版本與簽章的金鑰，否則回原因
+    /// </summary>
+    /// <param name="parts"><see cref="UpdateParts"/> 的內容（少了的算不通過）</param>
+    /// <param name="running">執行中的服務的版本（換版的程式自己就是新版，給 null）</param>
+    public static string? CheckSelfUpdate(IReadOnlyDictionary<string, byte[]> parts, IReadOnlyList<ReleaseKey> trustedKeys, ReleaseIdentity? running,
+        DeskServiceInstall? installed, out ReleaseIdentity? release, out string? signedBy)
+    {
+        release = null;
+        signedBy = null;
+        if (trustedKeys.Count == 0)
+            return "這個組建沒有內建的發佈簽章金鑰，不自動更新";
+        if (!parts.TryGetValue(ManifestFile, out var manifestBytes) || !parts.TryGetValue(SignatureFile, out var signatureBytes))
+            return "沒有發佈清單或簽章";
+        if (!ReleaseManifestRules.TryParseSignature(Encoding.UTF8.GetString(signatureBytes), out var signature))
+            return "簽章檔的格式不對";
+        if (ReleaseManifestRules.VerifySignature(manifestBytes, signature, trustedKeys, []) is { } bad)
+            return bad;
+        if (!ReleaseManifestRules.TryParse(manifestBytes, out var manifest, out var error))
+            return error ?? "發佈清單解析不了";
+        var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var name in PayloadFiles)
+        {
+            if (!parts.TryGetValue(name, out var bytes))
+                return $"少了服務檔 {name}";
+            hashes[name] = ReleaseManifestRules.Sha256Hex(bytes);
+        }
+
+        if (CheckPayload(manifest, hashes) is { } mismatch)
+            return mismatch;
+        if (running is { IsDev: false } && manifest.Identity.Version <= running.Version)
+            return $"{manifest.Identity.Release} 不比執行中的服務（{running.Release}）新";
+        if (installed is not null)
+        {
+            if (string.Equals(installed.Payload, PayloadHash(hashes), StringComparison.Ordinal))
+                return "和已經安裝的是同一份";
+            if (installed.Build != ReleaseIdentity.DevBuild && ReleaseVersion.TryParse(installed.Version, out var have) && manifest.Identity.Version <= have)
+                return $"{manifest.Identity.Release} 不比已經安裝的（{installed.Version}）新";
+        }
+
+        release = manifest.Identity;
+        signedBy = signature.Kid;
+        return null;
+    }
 
     // ---- 安裝紀錄 ----
 

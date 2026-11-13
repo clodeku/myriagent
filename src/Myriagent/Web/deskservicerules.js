@@ -2,7 +2,9 @@
 // 那是一個以系統權限執行的 Windows 服務：一般權限的 app 看不到也操作不了鎖定畫面與系統管理員確認畫面（UAC），
 // 裝了它，遠端桌面在那些畫面上才看得到、才能輸入。安裝、更新、移除都要有人在這台按 UAC。
 // 在那些畫面上輸入另要服務「安裝時記下的伺服器」就是這台現在配對的那一台（secureInput：ready／reinstall／unpaired）：
-// 服務只收那台伺服器簽發的遠端桌面工作階段的輸入，記的時候要系統管理員權限，所以沒記或換了伺服器要重新安裝
+// 服務只收那台伺服器簽發的遠端桌面工作階段的輸入，記的時候要系統管理員權限，所以沒記或換了伺服器要重新安裝。
+// 更新不必按 UAC（selfUpdate）：裝好的服務驗過 app 帶的那一版的發佈簽章、確定比較新，就自己換版；app 啟動後會自動請它換
+// （busy 是 update），也可以按「更新」。舊的服務、開發版不會自己換，照舊走 UAC
 
 /** 設定頁要不要顯示這一區（宿主沒接、功能還沒開放給這台時不顯示） */
 export function deskServiceShown(s) {
@@ -26,6 +28,7 @@ export function deskServiceSummary(s) {
   }
   if (s.busy === 'install') return busy(s.installed ? '更新中…' : '安裝中…', '請在 Windows 的系統管理員確認視窗按「是」。');
   if (s.busy === 'uninstall') return busy('移除中…', '請在 Windows 的系統管理員確認視窗按「是」。');
+  if (s.busy === 'update') return busy('更新中…', '服務正在自己換成新版，不必按 Windows 的確認。');
   if (s.busy === 'check') return busy('檢查中…', '');
 
   const remove = { act: 'uninstall', label: '移除…' };
@@ -44,7 +47,8 @@ export function deskServiceSummary(s) {
   }
   if (s.update && s.canInstall) {
     const next = s.bundled ? deskServiceVersion(s.bundled.version, s.bundled.build) : '';
-    return { tone: 'st-notLoggedIn', label: '有更新', detail: '已安裝 ' + have + '，這一版的 app 帶的是 ' + next + '。', actions: [{ act: 'install', label: '更新…' }, remove] };
+    const how = s.selfUpdate ? '服務會自己換成新版（驗過發佈簽章，不必按 Windows 的確認），也可以現在按「更新」。' : '';
+    return { tone: 'st-notLoggedIn', label: '有更新', detail: '已安裝 ' + have + '，這一版的 app 帶的是 ' + next + '。' + how, actions: [{ act: 'install', label: '更新…' }, remove] };
   }
   if (s.secureInput === 'reinstall') {
     return {
@@ -87,6 +91,14 @@ export function deskServiceConfirm(act, s) {
     };
   }
   const installed = !!(s && s.installed);
+  if (installed && s.selfUpdate) {
+    return {
+      title: '更新鎖定畫面支援',
+      message: '服務「MyriagentDesk」會驗過這一版的發佈簽章、確定比現在的新，然後自己換成新版，不需要 Windows 的系統管理員確認。',
+      detail: '換版時服務會重新啟動幾秒；記下的伺服器不變。服務沒有換成時才會改跳 Windows 的系統管理員確認（UAC）。',
+      confirmLabel: '更新',
+    };
+  }
   return {
     title: installed ? '更新鎖定畫面支援' : '安裝鎖定畫面支援',
     message: '會在這台安裝一個以系統權限執行的 Windows 服務「MyriagentDesk」（放在 Program Files，開機自動啟動）。它只接受這台登入的使用者的 Clode Myriagent 連線，不連網路；安裝時記下這台配對的伺服器，之後只有那台伺服器簽發的遠端桌面工作階段能在鎖定畫面輸入。',

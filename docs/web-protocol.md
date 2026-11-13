@@ -647,14 +647,15 @@ app 更新排空完成、要換版之前，宿主向每個視窗要輸入框裡�
 只有桌面：遠端桌面的鎖定畫面支援（2026-11-13）的狀態，回應 `deskService`（第二節）。那是一個以系統權限（LocalSystem）執行的 Windows 服務 `MyriagentDesk`：一般權限的 app 看不到也操作不了鎖定畫面與系統管理員確認畫面（UAC），裝了它遠端桌面才有辦法。送給這台自己的每個視窗（同步鏡像不送）；宿主沒接時不送。
 ```json
 { "type": "deskService", "offered": true, "known": true, "installed": true, "running": true, "version": "0.2.950", "build": "abc1234",
-  "bundled": { "version": "0.2.950", "build": "abc1234" }, "canInstall": true, "update": false, "system": true, "secureInput": "ready", "busy": null, "error": null,
+  "bundled": { "version": "0.2.950", "build": "abc1234" }, "canInstall": true, "update": false, "system": true, "selfUpdate": false, "secureInput": "ready", "busy": null, "error": null,
   "probe": { "desktop": "Default", "secure": false, "error": 0, "desktops": ["Default", "Winlogon"] } }
 ```
-- `offered`：設定頁要不要顯示這一區。功能還在開發，只給設了環境變數 `MYRIAGENT_DESK_SERVICE=1` 的與已經裝了服務的電腦（才移除得掉）。`known`：查過了沒（false 時其他欄位都是還不知道的樣子）。
+- `offered`：設定頁要不要顯示這一區（每台都是 true；要不要裝由使用者在那台按、同意 UAC）。`known`：查過了沒（false 時其他欄位都是還不知道的樣子）。
 - `installed`／`version`／`build`：裝在這台的（讀 `%ProgramFiles%\Myriagent\DeskService\install.json`；build 是提交前 7 碼或 `dev`）。`running`：服務的管道連得上。`system`：服務以系統權限執行（開發用的前景模式是 false；連不上是 null）。
 - `bundled`：app 帶的那一份服務檔的版本（檔案不完整是 null，這時 `canInstall` 是 false）。`update`：app 帶的比裝好的新（服務檔的指紋不同，而且兩邊都是發佈版時 app 的版本較新——app 回滾到舊版不把服務降回去）。
+- `selfUpdate`：按「更新」時服務會不會自己換版、不經 UAC。成立的條件：服務在執行、是系統權限、認得 `selfUpdate`（服務有內建的發佈金鑰，`ReleaseKeys.Production` 不是空的），app 帶的是有發佈清單與簽章的發佈版、而且比裝好的新（`DeskServiceHubRules.CanSelfUpdate`）。成立時宿主在 app 啟動 90 秒後自動請服務換版（`busy` 是 `update`；沒有人按、不跳 UAC，失敗只留 `error`），按「更新」（`install`）也先走這條路、服務沒換成才退回 UAC 的安裝器。做法：app 把服務檔、發佈清單與簽章經管道分段送進服務（服務不讀使用者的資料夾），服務驗內建金鑰的簽章、每個檔的雜湊、版本只能往新的（`DeskServiceRules.CheckSelfUpdate`），通過才放進安裝資料夾的 `incoming`、以那一份換版，新的啟動不了就退回原本那一份；信任的伺服器不動。舊的服務、開發版、沒有內建金鑰的組建照舊走 UAC。
 - `secureInput`（裝了才有，否則 null）：安全桌面能不能輸入。服務只收「安裝時記下的那台伺服器」簽發的遠端桌面工作階段的輸入（sync-protocol 14.16「安全桌面的輸入」），宿主安裝時把這台配對的伺服器身分金鑰、來源與裝置 id 交給安裝器記下（`MyriagentDesk.exe install --hub-key … --aud … --device …`，都是公開資訊）。`ready`＝記下的就是現在配對的這一台；`reinstall`＝沒記（安裝時還沒配對）或配對的伺服器換了，鎖定畫面看得到、不能操作，要重新安裝（網頁標「只能看」、給「重新安裝…」）；`unpaired`＝這台沒有配對。
-- `busy`：進行中的動作（`check`／`install`／`uninstall`）或 null；進行中再送的指令不重做、只重送狀態。`error`：上一個動作失敗的說明（UAC 沒有按「是」、安裝器的結束碼），下一個動作開始就清掉。
+- `busy`：進行中的動作（`check`／`install`／`uninstall`，或宿主自動更新的 `update`）或 null；進行中再送的指令不重做、只重送狀態。`error`：上一個動作失敗的說明（UAC 沒有按「是」、安裝器的結束碼），下一個動作開始就清掉。
 - `probe`（選用）：服務在這個工作階段看到的輸入桌面（診斷用）。`desktop` 是名稱（Default＝使用者的桌面，Winlogon 等＝安全桌面），開不了是 null、`error` 是 Win32 錯誤碼；`desktops` 是視窗站裡列得出來的桌面。
 - 網頁（`settings.js` 的 `deskServiceBlock`，規則 `deskservicerules.js`）：設定頁「多電腦同步」已配對時的一區，第一次畫的時候送一次 `deskService {action:"check"}`；按鈕（安裝／更新／重新安裝／移除）先跳確認框，確認了才送。
 

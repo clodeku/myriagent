@@ -32,28 +32,56 @@ internal interface IDesktopCapturer
 }
 
 /// <summary>
-/// 服務本體（工作階段 0）的要求：<c>hello</c>、<c>probe</c>（開一次性的幫手看輸入桌面）、<c>open</c>（開擷取用的幫手、回它的管道）。
+/// 服務本體（工作階段 0）的要求：<c>hello</c>、<c>probe</c>（開一次性的幫手看輸入桌面）、<c>open</c>（開擷取用的幫手、回它的管道）、
+/// <c>updateBegin</c>／<c>updatePut</c>／<c>updateApply</c>（服務自己更新，<see cref="SelfUpdater"/>）。
 /// 只做用戶端自己那個工作階段的事：要求裡不收工作階段編號
 /// </summary>
-internal sealed class ServicePipeHandler(ReleaseIdentity identity, bool system, IDeskSessionProbe probe, ISessionAgents agents) : IDeskPipeHandler
+/// <param name="updater">自己更新（沒有給＝這個服務不自己更新：前景模式、沒有內建發佈金鑰的組建）</param>
+internal sealed class ServicePipeHandler(ReleaseIdentity identity, bool system, IDeskSessionProbe probe, ISessionAgents agents, ISelfUpdater? updater = null) : IDeskPipeHandler
 {
     public string? Admit(DeskServiceClientInfo client) => DeskServiceRules.Admit(client, system);
 
     public DeskPipeReply Handle(string line, DeskServiceClientInfo client)
     {
-        if (!DeskServiceRules.TryParseRequest(line, out var op, out _))
+        if (!DeskServiceRules.TryParseRequest(line, out var op, out var request))
             return new DeskPipeReply(DeskServiceRules.ErrorReply(DeskServiceRules.CodeInvalid, "要求不是 JSON 物件或沒有 op"));
         switch (op)
         {
             case DeskServiceRules.OpHello:
                 return new DeskPipeReply(DeskServiceRules.HelloReply(new DeskServiceHello(DeskServiceRules.ProtocolVersion, identity.Version.ToString(), identity.Build,
-                    system, client.SessionId, [DeskServiceRules.FeatureProbe, DeskServiceRules.FeatureCapture])));
+                    system, client.SessionId, updater is null
+                        ? [DeskServiceRules.FeatureProbe, DeskServiceRules.FeatureCapture]
+                        : [DeskServiceRules.FeatureProbe, DeskServiceRules.FeatureCapture, DeskServiceRules.FeatureSelfUpdate])));
+            case DeskServiceRules.OpUpdateBegin when updater is not null:
+                return DeskServiceRules.ParseUpdateBegin(request) is { } sizes
+                    ? Updating(() => DeskServiceRules.UpdateBeginReply(updater.Begin(sizes)))
+                    : new DeskPipeReply(DeskServiceRules.ErrorReply(DeskServiceRules.CodeInvalid, "更新的檔案清單不合格"));
+            case DeskServiceRules.OpUpdatePut when updater is not null:
+                return DeskServiceRules.ParseUpdatePut(request) is { } put
+                    ? Updating(() => DeskServiceRules.UpdatePutReply(updater.Put(put.Id, put.Name, put.Offset, put.Data)))
+                    : new DeskPipeReply(DeskServiceRules.ErrorReply(DeskServiceRules.CodeInvalid, "這一段的格式不對"));
+            case DeskServiceRules.OpUpdateApply when updater is not null:
+                return DeskServiceRules.ParseUpdateApply(request) is { } applyId
+                    ? Updating(() => DeskServiceRules.UpdateApplyReply(updater.Apply(applyId).Release))
+                    : new DeskPipeReply(DeskServiceRules.ErrorReply(DeskServiceRules.CodeInvalid, "沒有這一次更新的 id"));
             case DeskServiceRules.OpProbe:
                 return Guarded(() => DeskServiceRules.ProbeReply(probe.Probe(client.SessionId)), $"看不到工作階段 {client.SessionId} 的輸入桌面");
             case DeskServiceRules.OpOpen:
                 return Guarded(() => DeskServiceRules.OpenReply(agents.Open(client.SessionId)), $"開不了工作階段 {client.SessionId} 的擷取幫手");
             default:
                 return new DeskPipeReply(DeskServiceRules.ErrorReply(DeskServiceRules.CodeUnsupported, $"這一版的服務不認得 {op}"));
+        }
+    }
+
+    private static DeskPipeReply Updating(Func<string> reply)
+    {
+        try
+        {
+            return new DeskPipeReply(reply());
+        }
+        catch (SelfUpdateException ex)
+        {
+            return new DeskPipeReply(DeskServiceRules.ErrorReply(ex.Code, ex.Message));
         }
     }
 
@@ -84,8 +112,9 @@ internal sealed class ServicePipeHandler(ReleaseIdentity identity, bool system, 
 /// </summary>
 /// <param name="injector">在安全桌面注入（沒有給＝這個幫手不收安全桌面的輸入）</param>
 /// <param name="trust">讀安裝時記下的信任的伺服器（每次 <c>secureOpen</c> 讀一次；沒有回 null）</param>
+/// <param name="banner">安全桌面上的提示列（擷取到安全桌面時顯示；沒有給就不顯示）</param>
 internal sealed class AgentPipeHandler(ReleaseIdentity identity, bool system, int session, IDesktopCapturer capturer,
-    IDesktopInjector? injector = null, Func<DeskServiceTrust?>? trust = null) : IDeskPipeHandler
+    IDesktopInjector? injector = null, Func<DeskServiceTrust?>? trust = null, IDeskBanner? banner = null) : IDeskPipeHandler
 {
     private static readonly TimeSpan BusyTimeout = TimeSpan.FromSeconds(10);
 
@@ -93,6 +122,9 @@ internal sealed class AgentPipeHandler(ReleaseIdentity identity, bool system, in
     private string? secureSession;
     private byte[]? secureKey;
     private long secureLastN;
+
+    /// <summary>驗過的信封裡的發起者（提示列寫出是誰在操作；還沒驗過是 null）</summary>
+    private string? secureViewer;
 
     /// <summary>幫手最近一次擷取的那塊螢幕（輸入的座標相對於它：看的一方看到的就是這一塊）</summary>
     private DeskRect? lastBounds;
@@ -156,6 +188,7 @@ internal sealed class AgentPipeHandler(ReleaseIdentity identity, bool system, in
             secureSession = proof.SessionId;
             secureKey = key;
             secureLastN = 0;
+            secureViewer = proof.IssuerLabel;
         }
 
         ServiceLog.Info($"安全桌面的輸入：工作階段 {proof.SessionId}（{proof.IssuerKind} {proof.IssuerLabel}）");
@@ -224,6 +257,15 @@ internal sealed class AgentPipeHandler(ReleaseIdentity identity, bool system, in
             {
                 ServiceLog.Warn("擷取失敗：" + ex.Message);
                 header = new DeskServiceCaptureHeader(DeskServiceRules.CaptureFailed, 0, null, false, 0);
+            }
+
+            // 有人在看安全桌面：讓坐在這台前面的人知道（提示列一陣子沒被叫就自己收掉）
+            if (banner is not null && header is { Result: DeskServiceRules.CaptureOk, Secure: true })
+            {
+                string? viewer;
+                lock (secureGate)
+                    viewer = secureViewer;
+                banner.Show(SecureDeskBanner.TextFor(viewer));
             }
 
             if (header.Result != DeskServiceRules.CaptureOk)

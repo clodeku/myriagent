@@ -43,6 +43,17 @@ public sealed class AgentHubDeskServiceTests
             return Status;
         }
 
+        /// <summary>請服務自己更新的結果（null＝成功，把狀態換成 <see cref="AfterInstall"/>）</summary>
+        public string? SelfUpdateError { get; set; }
+
+        public string? SelfUpdate()
+        {
+            Calls.Enqueue("selfUpdate");
+            if (SelfUpdateError is null)
+                Status = AfterInstall ?? Status;
+            return SelfUpdateError;
+        }
+
         public int RunElevated(string verb)
         {
             Calls.Enqueue(verb);
@@ -129,6 +140,112 @@ public sealed class AgentHubDeskServiceTests
         (await StateAsync(new DeskServiceStatus(Installed, Bundle, Hello, null, null, hub.Trust))).Should().Be("reinstall", "安裝時還沒配對");
         (await StateAsync(new DeskServiceStatus(Installed, Bundle, Hello, null, otherHub.Trust, hub.Trust))).Should().Be("reinstall", "之後換了伺服器");
         (await StateAsync(new DeskServiceStatus(Installed, Bundle, Hello, null, hub.Trust, null))).Should().Be("unpaired");
+    }
+
+    // ---- 更新不經 UAC：服務自己驗簽章後換版 ----
+
+    private static readonly DeskServiceInstall OldInstalled = Installed with { Version = "0.2.940", Build = "0123456", Payload = new string('b', 64) };
+
+    private static readonly DeskServiceHello UpdatingHello = new(1, "0.2.940", "0123456", true, 1, ["probe", "capture", "selfUpdate"]);
+
+    private static readonly DeskServiceBundle SignedBundle = Bundle with { Signed = true };
+
+    [Fact]
+    public void 能不能請服務自己更新_服務認得_系統權限_app帶的是簽章過而且比較新的()
+    {
+        var can = new DeskServiceStatus(OldInstalled, SignedBundle, UpdatingHello, null);
+        DeskServiceHubRules.CanSelfUpdate(can).Should().BeTrue();
+        DeskServiceHubRules.Message(can, true, null, null).Value<bool>("selfUpdate").Should().BeTrue();
+
+        DeskServiceHubRules.CanSelfUpdate(null).Should().BeFalse();
+        DeskServiceHubRules.CanSelfUpdate(can with { Installed = null }).Should().BeFalse("沒裝：第一次一定要按 UAC");
+        DeskServiceHubRules.CanSelfUpdate(can with { Hello = null }).Should().BeFalse("服務沒在執行");
+        DeskServiceHubRules.CanSelfUpdate(can with { Hello = UpdatingHello with { System = false } }).Should().BeFalse();
+        DeskServiceHubRules.CanSelfUpdate(can with { Hello = UpdatingHello with { Features = ["probe", "capture"] } }).Should().BeFalse("舊的服務不會自己更新");
+        DeskServiceHubRules.CanSelfUpdate(can with { Bundled = Bundle }).Should().BeFalse("沒有發佈清單與簽章（開發版的建置輸出）");
+        DeskServiceHubRules.CanSelfUpdate(can with { Bundled = SignedBundle with { Build = "dev" } }).Should().BeFalse();
+        DeskServiceHubRules.CanSelfUpdate(can with { Installed = Installed }).Should().BeFalse("已經是同一份");
+        DeskServiceHubRules.CanSelfUpdate(can with { Installed = OldInstalled with { Version = "0.2.960" } }).Should().BeFalse("app 回滾到舊版：不把服務降回去");
+        DeskServiceHubRules.Message(can with { Installed = Installed }, true, null, null).Value<bool>("selfUpdate").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 自動更新_能自己更新就請服務換版_不跳UAC_做完重查()
+    {
+        var (h, manager) = Create();
+        using var dispose = h;
+        manager.Status = new DeskServiceStatus(OldInstalled, SignedBundle, UpdatingHello, null);
+        manager.AfterInstall = new DeskServiceStatus(Installed, SignedBundle, Hello with { Features = ["probe", "capture", "selfUpdate"] }, null);
+        var mark = h.Main.Mark();
+        h.Ui.Invoke(h.Hub.StartDeskServiceAutoUpdate);
+
+        var done = await WaitIdleAsync(h.Main, mark);
+        h.Main.Messages("deskService", mark)[0].Value<string>("busy").Should().Be("update");
+        manager.Calls.Should().Equal("query:False", "selfUpdate", "query:False");
+        done.Value<string>("version").Should().Be("0.2.950");
+        done.Value<bool>("update").Should().BeFalse();
+        done.Value<string>("error").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task 自動更新_不能自己更新的不動_失敗只留說明不退回UAC()
+    {
+        var (h, manager) = Create();
+        using var dispose = h;
+        // 舊的服務（不認得 selfUpdate）：自動更新什麼都不做，等使用者在設定頁按
+        manager.Status = new DeskServiceStatus(OldInstalled, SignedBundle, UpdatingHello with { Features = ["probe", "capture"] }, null);
+        var mark = h.Main.Mark();
+        h.Ui.Invoke(h.Hub.StartDeskServiceAutoUpdate);
+        var idle = await WaitIdleAsync(h.Main, mark);
+        manager.Calls.Should().Equal("query:False");
+        idle.Value<bool>("update").Should().BeTrue();
+        idle.Value<string>("error").Should().BeNull();
+
+        // 服務不收（例如遠端桌面正在用）：不能自己跳 UAC
+        manager.Status = new DeskServiceStatus(OldInstalled, SignedBundle, UpdatingHello, null);
+        manager.SelfUpdateError = "服務沒有收下更新：busy：遠端桌面正在使用鎖定畫面支援，稍後再更新";
+        manager.Calls.Clear();
+        mark = h.Main.Mark();
+        h.Ui.Invoke(h.Hub.StartDeskServiceAutoUpdate);
+        var failed = await WaitIdleAsync(h.Main, mark);
+        manager.Calls.Should().Equal("query:False", "selfUpdate", "query:False");
+        manager.Calls.Should().NotContain("install");
+        failed.Value<string>("error").Should().Contain("自動更新沒有完成").And.Contain("稍後再更新");
+    }
+
+    [Fact]
+    public async Task 按更新_先請服務自己換版_不成才退回UAC的安裝器()
+    {
+        var (h, manager) = Create();
+        using var dispose = h;
+        async Task<JObject> RunAsync(string action)
+        {
+            var mark = h.Main.Mark();
+            h.Command(h.Main, "deskService", new { action });
+            return await WaitIdleAsync(h.Main, mark);
+        }
+
+        // 設定頁先查過狀態（知道服務能自己更新），再按「更新」
+        manager.Status = new DeskServiceStatus(OldInstalled, SignedBundle, UpdatingHello, null);
+        manager.AfterInstall = new DeskServiceStatus(Installed, SignedBundle, Hello, null);
+        (await RunAsync("check")).Value<bool>("selfUpdate").Should().BeTrue();
+        manager.Calls.Clear();
+        (await RunAsync("install")).Value<string>("version").Should().Be("0.2.950");
+        manager.Calls.Should().Equal("selfUpdate", "query:True");
+        manager.Calls.Should().NotContain("install", "服務自己換好了，不必按 UAC");
+
+        manager.Status = new DeskServiceStatus(OldInstalled, SignedBundle, UpdatingHello, null);
+        manager.SelfUpdateError = "服務沒有在時間內換成新版";
+        await RunAsync("check");
+        manager.Calls.Clear();
+        var done = await RunAsync("install");
+        manager.Calls.Should().Equal("selfUpdate", "install", "query:True");
+        done.Value<string>("error").Should().BeNull("安裝器裝好了");
+
+        // 移除不走這條路
+        manager.Calls.Clear();
+        await RunAsync("uninstall");
+        manager.Calls.Should().Equal("uninstall", "query:True");
     }
 
     [Fact]

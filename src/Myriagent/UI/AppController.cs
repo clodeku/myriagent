@@ -178,11 +178,13 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
                     Myriagent.Remote.DeskServiceRules.PipeNameOf(Myriagent.Remote.DeskServiceRules.ServiceName))),
             (text, disconnect) => RemoteDeskBanner.ShowFor(text, disconnect));
         Sync.AttachDesk(Hub.DeskEndpoint);
-        // 遠端桌面的鎖定畫面支援（docs/web-protocol.md 的 deskService）：系統服務的安裝與狀態。功能還在開發：設定頁的那一區只給設了
-        // MYRIAGENT_DESK_SERVICE=1 的與已經裝了服務的電腦看到（DeskServiceHubRules.Message 的 offered）
+        // 遠端桌面的鎖定畫面支援（docs/web-protocol.md 的 deskService）：系統服務的安裝與狀態。設定頁的那一區每台都看得到
+        // （之前只給設了 MYRIAGENT_DESK_SERVICE=1 的），要不要裝由使用者在那台按、同意 UAC。
+        // 裝好的服務之後由它自己驗簽章更新：app 啟動 90 秒後看一次
         var deskTrustSource = Sync;
         Hub.AttachDeskService(new Myriagent.RemoteDesk.DeskServiceManager(AppContext.BaseDirectory, () => deskTrustSource.DeskTrust),
-            preview: Environment.GetEnvironmentVariable("MYRIAGENT_DESK_SERVICE") == "1");
+            autoUpdateAfter: TimeSpan.FromSeconds(90),
+            preview: true);
         Accounts.UsagePollPolicy = Sync;
         Sync.StatusChanged += OnSyncStatusChanged;
         // 升級後第一次啟動：補上 Antigravity、Grok 的本機預設帳戶（各只補一次；帳戶清單這次唯讀時下次再補）

@@ -11,7 +11,8 @@ using Myriagent.Update;
 namespace Myriagent.RemoteDesk;
 
 /// <summary>app 帶的那一份服務檔（和 app 同一個資料夾）</summary>
-internal sealed record DeskServiceBundle(string Version, string Build, string Payload);
+/// <param name="Signed">資料夾裡有發佈清單與簽章（受管理安裝的發佈版）：服務自己更新要它們，開發版的建置輸出沒有</param>
+internal sealed record DeskServiceBundle(string Version, string Build, string Payload, bool Signed = false);
 
 /// <summary>鎖定畫面支援目前的樣子（背景執行緒查出來的快照）</summary>
 /// <param name="Installed">裝在這台的（安裝紀錄；沒裝是 null）</param>
@@ -36,6 +37,12 @@ internal interface IDeskServiceManager
     /// 回安裝器的結束碼（<see cref="DeskServiceExit"/>）；使用者在 UAC 按了否回 <see cref="DeskServiceManager.Declined"/>
     /// </summary>
     int RunElevated(string verb);
+
+    /// <summary>
+    /// 請裝好的服務自己換成 app 帶的這一版（不經 UAC；<see cref="DeskServiceHubRules.CanSelfUpdate"/> 成立時才叫）：
+    /// 把服務檔、發佈清單與簽章經管道送進去，服務驗過就換版、重新啟動，等它以新版回來。成功回 null，否則回給人看的原因
+    /// </summary>
+    string? SelfUpdate();
 }
 
 /// <param name="currentTrust">這台現在信任的伺服器（同步的快照，任何執行緒；沒配對回 null）：安裝時交給安裝器記下</param>
@@ -126,6 +133,57 @@ internal sealed class DeskServiceManager(string appDirectory, Func<DeskServiceTr
         }
     }
 
+    /// <summary>服務換版、重新啟動、以新版回應的上限（停下 30 秒內、啟動 30 秒內）</summary>
+    private static readonly TimeSpan SelfUpdateTimeout = TimeSpan.FromSeconds(90);
+
+    public string? SelfUpdate()
+    {
+        var bundled = ReadBundled();
+        if (bundled is not { Signed: true })
+            return "這一份 app 沒有發佈清單與簽章（開發版），服務不會自己更新";
+        Dictionary<string, byte[]> parts;
+        try
+        {
+            parts = DeskServiceRules.UpdateParts.ToDictionary(name => name, name => File.ReadAllBytes(Path.Combine(appDirectory, name)), StringComparer.Ordinal);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return "讀不到 app 帶的服務檔：" + ex.Message;
+        }
+
+        var pipeName = DeskServiceRules.PipeNameOf(DeskServiceRules.ServiceName);
+        try
+        {
+            using var client = DeskServiceClient.Connect(pipeName, TimeSpan.FromSeconds(3));
+            var release = client.SelfUpdate(parts);
+            Log.Info($"鎖定畫面支援的服務收下了更新，正在換成 {release}");
+        }
+        catch (Exception ex) when (ex is IOException or TimeoutException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return "服務沒有收下更新：" + ex.Message;
+        }
+
+        // 換版的程式停下舊的、啟動新的：等新的以這一版回應
+        var deadline = Environment.TickCount64 + (long)SelfUpdateTimeout.TotalMilliseconds;
+        while (Environment.TickCount64 < deadline)
+        {
+            Thread.Sleep(1000);
+            try
+            {
+                using var client = DeskServiceClient.Connect(pipeName, TimeSpan.FromSeconds(2));
+                var hello = client.Hello();
+                if (hello.Build == bundled.Build && hello.Version == bundled.Version)
+                    return null;
+            }
+            catch (Exception ex) when (ex is IOException or TimeoutException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                // 正在換版：管道還沒回來
+            }
+        }
+
+        return "服務沒有在時間內換成新版（換不成時它會退回原本那一版；細節在服務的記錄）";
+    }
+
     /// <summary>這台有沒有裝服務（只看安裝紀錄在不在；很便宜，擷取迴圈也用它決定要不要試著連）</summary>
     public static bool IsInstalled()
     {
@@ -180,7 +238,8 @@ internal sealed class DeskServiceManager(string appDirectory, Func<DeskServiceTr
 
             var hashes = DeskServiceRules.PayloadFiles.ToDictionary(n => n,
                 n => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(Path.Combine(appDirectory, n)))).ToLowerInvariant(), StringComparer.Ordinal);
-            var fresh = new DeskServiceBundle(AppVersionInfo.VersionText, AppVersionInfo.Current.Build, DeskServiceRules.PayloadHash(hashes));
+            var signed = File.Exists(Path.Combine(appDirectory, DeskServiceRules.ManifestFile)) && File.Exists(Path.Combine(appDirectory, DeskServiceRules.SignatureFile));
+            var fresh = new DeskServiceBundle(AppVersionInfo.VersionText, AppVersionInfo.Current.Build, DeskServiceRules.PayloadHash(hashes), signed);
             lock (gate)
             {
                 bundle = fresh;
@@ -258,6 +317,30 @@ internal sealed class DeskServiceClient : IDisposable
     {
         var reply = Call(DeskServiceRules.SecureInputRequest(session, n, ct));
         return DeskServiceRules.ParseSecureInput(reply) ?? throw Failure(reply);
+    }
+
+    /// <summary>
+    /// 把一份更新（<see cref="DeskServiceRules.UpdateParts"/> 的每個檔）分段送進服務、請它驗過就換版。回要換成的版本；
+    /// 服務不收（不比現在的新、簽章不對、正在用）丟 <see cref="InvalidOperationException"/>。回覆之後服務會重新啟動、這條連線跟著斷
+    /// </summary>
+    public string SelfUpdate(IReadOnlyDictionary<string, byte[]> parts)
+    {
+        var begin = Call(DeskServiceRules.UpdateBeginRequest(parts.ToDictionary(pair => pair.Key, pair => pair.Value.Length, StringComparer.Ordinal)));
+        var id = DeskServiceRules.ParseUpdateBegin(begin) ?? throw Failure(begin);
+        foreach (var name in DeskServiceRules.UpdateParts)
+        {
+            var bytes = parts[name];
+            for (var offset = 0; offset < bytes.Length; offset += DeskServiceRules.UpdateChunkBytes)
+            {
+                var length = Math.Min(DeskServiceRules.UpdateChunkBytes, bytes.Length - offset);
+                var put = Call(DeskServiceRules.UpdatePutRequest(id, name, offset, bytes.AsSpan(offset, length)));
+                if (DeskServiceRules.ParseUpdatePut(put) != offset + length)
+                    throw Failure(put);
+            }
+        }
+
+        var apply = Call(DeskServiceRules.UpdateApplyRequest(id));
+        return DeskServiceRules.ParseUpdateApply(apply) ?? throw Failure(apply);
     }
 
     /// <summary>
