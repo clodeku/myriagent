@@ -3558,7 +3558,7 @@ function desktopHost(o = {}) {
           host.send({ type: 'trash', entries: st.trash }).catch(() => {});
         }, o.restoreDelayMs || 0);
         break;
-      default: break;
+      default: if (o.extra) o.extra(m, host); break;
     }
   };
   return { st, onPost };
@@ -5685,6 +5685,55 @@ async function runPeerReplicaFolder() {
   await HP.closePage(app);
 }
 
+async function runPeerReplicaPaste() {
+  // 桌面遠端操作：在其他電腦的對話貼上截圖（2026-11-13 使用者回報：卡在上傳中）。剪貼簿的圖片不在磁碟上，真的 WebView2 的
+  // postMessageWithAdditionalObjects 直接丟 TypeError、宿主什麼都沒收到；網頁要接住、改帶 dataUrl 送 peerUpload，晶片照常走完
+  const id = LF.CONV.running;
+  const conversations = LF.desktopList(NOW).map((c) => (c.id === id ? Object.assign({}, c, { running: false, waiting: false }) : c));
+  const sync = Object.assign(LF.syncWith(NOW, { remoteSupported: true }), { peer: true });
+  const remote = LF.liveDesktopInit(NOW, { sync }).remote;
+  remote.devices = remote.devices.map((d) => (d.id === LF.DEVICE.offline ? Object.assign({}, d, { online: true }) : d)); // 那台在線、政策 Control
+  const uploads = [];
+  const app = await openDesktopLive('peer-replica-paste', {
+    init: { conversations, layout: desktopLayout([id]), sync },
+    initPatch: { remote },
+    host: {
+      conversations,
+      replica: () => ({ waiting: false, items: LF.desktopItems(NOW, 'r').slice(0, 1) }),
+      extra: (m, host) => {
+        if (m.cmd === 'peerUpload') {
+          uploads.push({ dataUrl: typeof m.dataUrl === 'string' ? m.dataUrl.slice(0, 22) : null, files: (m.__files || []).length });
+          if (!m.dataUrl) { host.send({ type: 'peerUpload', uploadId: m.uploadId, status: 400, json: JSON.stringify({ error: 'no_path' }) }); return; }
+          setTimeout(() => host.send({ type: 'peerUpload', uploadId: m.uploadId, status: 201, json: JSON.stringify({ uploadId: m.uploadId, sha256: 'a'.repeat(64), size: 68 }) }), 100);
+        } else if (m.cmd === 'addUploaded' && m.commandId) {
+          host.send(serverResult(m.commandId, 'done'));
+        }
+      },
+    },
+  });
+  const { page } = app;
+  await waitLoaded(app, [id]);
+  // 照真的 WebView2：附上不在磁碟上的 File 就丟例外（探針裡的 File 都不在磁碟上）
+  await page.evaluate(() => {
+    const wv = window.chrome.webview;
+    const orig = wv.postMessageWithAdditionalObjects.bind(wv);
+    wv.postMessageWithAdditionalObjects = (m, objs) => {
+      if (Array.from(objs || []).some((f) => f instanceof File)) throw new TypeError("Failed to execute 'postMessageWithAdditionalObjects' on 'EmbeddedBrowserWebView': Failed to post a message: additional File object is not a file on the disk.");
+      return orig(m, objs);
+    };
+  });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e && e.message)));
+  await page.focus(convSel(id) + ' textarea.cinput');
+  await dropFiles(app, id, 'paste', [{ name: 'image.png', text: 'png-bytes', type: 'image/png' }]);
+  const done = await untilChips(app, id, (st) => st.chips.length === 1 && st.chips[0].state === 'attached', 5000);
+  const added = postedOf(app, 'addUploaded');
+  check('desktopPeerReplicaPasteImage', !!done && uploads.length === 1 && uploads[0].dataUrl === 'data:image/png;base64,' && added.length === 1
+    && added[0].conversationId === id && errors.length === 0,
+  { chips: done ? done.chips : (await uploadState(app, id)), uploads, added: added.length, errors });
+  await HP.closePage(app);
+}
+
 async function runPeerDraftFolder() {
   // 桌面遠端操作（2026-10-27 使用者要求：選好電腦就能選工作區，不必先送一次）：草稿選了其他電腦（header.deviceId）時資料夾晶片照常可按，
   // 選單同瀏覽器版的草稿——手輸那台的路徑、挑那台最近用過的（宿主從那台的副本取 recentFolders）、恢復預設工作區；這台的資料夾對話框、
@@ -6235,6 +6284,7 @@ const SCENARIOS = [
   { checks: ['hubFileFetchUnknownOnReinit'], run: runReviewFileFetchUnknown },
   { checks: ['desktopReplicaTabRunning', 'desktopReplicaConvRunning'], run: runReviewReplicaTabRunning },
   { checks: ['desktopPeerReplicaFolderShown', 'desktopPeerReplicaFolderOwnerRunning'], run: runPeerReplicaFolder },
+  { checks: ['desktopPeerReplicaPasteImage'], run: runPeerReplicaPaste },
   { checks: ['desktopPeerDraftFolderMenu', 'desktopPeerDraftFolderChosen', 'desktopPeerDraftFolderCreating'], run: runPeerDraftFolder },
   { checks: ['desktopPeerReplicaModelMenu', 'desktopPeerReplicaModelRevert'], run: runPeerReplicaModel },
   { checks: ['desktopPeerReplicaModelWhileRunning'], run: runPeerReplicaModelWhileRunning },

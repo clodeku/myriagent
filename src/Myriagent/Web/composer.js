@@ -1693,7 +1693,7 @@ export class Composer {
   addFiles(files) {
     if (this.remoteUploads()) { this.uploadFiles(Array.from(files || [])); return; }
     if (!postWithFiles({ cmd: 'addFiles', conversationId: this.conv.id }, files)) {
-      toast('這個版本的 WebView2 不支援拖放或貼上檔案，請改用迴紋針', 'error');
+      toast('這些檔案不在磁碟上（例如網頁或剪貼簿裡的），請先存成檔案再用迴紋針附加', 'error');
     }
   }
 
@@ -1788,18 +1788,8 @@ export class Composer {
         if (this.destroyed || c.state !== 'uploading') { inFlight.delete(c); continue; }
         // 取消（晶片的 ×、關掉分頁、伺服器關閉對話）時中止 PUT（cancelUploads）
         c.ctrl = typeof AbortController === 'function' ? new AbortController() : null;
-        const r = isHub
-          ? await uploadFile(c.uploadId, c.file, (loaded, total) => {
-            // 上傳速度：和上一次記下的進度相隔 0.2 秒以上才算一次（fxrules.byteRate），再和前一次的平均（晶片上的讀數）
-            const at = performance.now();
-            const rate = byteRate(c.rateMark, { bytes: loaded, at });
-            if (rate !== null || !c.rateMark) c.rateMark = { bytes: loaded, at };
-            if (rate !== null) c.bps = smoothRate(c.bps, rate);
-            c.loaded = loaded;
-            c.total = total;
-            if (!this.destroyed) this.renderUploads();
-          }, c.ctrl ? c.ctrl.signal : undefined)
-          : await hostUpload(c.uploadId, c.file, this.conv.id, c.ctrl ? c.ctrl.signal : undefined);
+        // 上傳本身丟例外（不該發生）也要讓晶片變成失敗：以前整個 worker 被拒絕，晶片一直停在上傳中（2026-11-13）
+        const r = await this.uploadOne(c).catch(() => ({ ok: false, status: 0, json: null }));
         c.ctrl = null;
         c.file = null;
         if (this.destroyed || c.state !== 'uploading') { inFlight.delete(c); continue; }
@@ -1821,6 +1811,21 @@ export class Composer {
     const ok = todo.filter((c) => c.state === 'adding');
     if (ok.length) this.addUploaded(ok);
     else this.updateSend();
+  }
+
+  /** 上傳一個晶片的檔：瀏覽器版 E4、桌面由宿主代傳；回 { ok, status, json }（async：同步丟出的例外也變成被拒絕的 Promise） */
+  async uploadOne(c) {
+    if (!isHub) return hostUpload(c.uploadId, c.file, this.conv.id, c.ctrl ? c.ctrl.signal : undefined);
+    return uploadFile(c.uploadId, c.file, (loaded, total) => {
+      // 上傳速度：和上一次記下的進度相隔 0.2 秒以上才算一次（fxrules.byteRate），再和前一次的平均（晶片上的讀數）
+      const at = performance.now();
+      const rate = byteRate(c.rateMark, { bytes: loaded, at });
+      if (rate !== null || !c.rateMark) c.rateMark = { bytes: loaded, at };
+      if (rate !== null) c.bps = smoothRate(c.bps, rate);
+      c.loaded = loaded;
+      c.total = total;
+      if (!this.destroyed) this.renderUploads();
+    }, c.ctrl ? c.ctrl.signal : undefined);
   }
 
   /**

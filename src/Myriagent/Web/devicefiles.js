@@ -662,7 +662,11 @@ async function startUpload(t) {
     return;
   }
   hostUploads.set(t.uploadId, t);
-  postWithFiles({ cmd: 'peerUpload', uploadId: t.uploadId, deviceId: t.deviceId }, [t.file]);
+  if (!postWithFiles({ cmd: 'peerUpload', uploadId: t.uploadId, deviceId: t.deviceId }, [t.file])) {
+    // 不在磁碟上的檔（網頁拖來的圖片）宿主拿不到路徑：說明，不一直等宿主的回覆（2026-11-13）
+    hostUploads.delete(t.uploadId);
+    fail(t, '這個檔案不在磁碟上，請先存成檔案再上傳');
+  }
 }
 
 /** 宿主的 peerUpload（桌面代傳的結果）：自己送的才收，回 true */

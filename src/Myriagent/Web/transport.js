@@ -32,11 +32,19 @@ export function newId() {
   return hub && hub.rules && typeof hub.rules.ulid === 'function' ? hub.rules.ulid(Date.now()) : null;
 }
 
-/** 附 File 物件送給宿主（拖放／貼上檔案）；瀏覽器版不走這裡（上傳是 hubapi.js 的 uploadFile，E4），回 false */
+/**
+ * 附 File 物件送給宿主（拖放／貼上檔案）；送不出去回 false，瀏覽器版不走這裡（上傳是 hubapi.js 的 uploadFile，E4）。
+ * 不在磁碟上的 File（剪貼簿的截圖、網頁拖來的圖片）WebView2 直接丟 TypeError「additional File object is not a file on the disk」、
+ * 整則訊息都沒送到宿主（2026-11-13 實機：桌面對其他電腦的對話貼上截圖，晶片一直停在上傳中）：接住、回 false，呼叫的一方改走 dataUrl 或說明
+ */
 export function postWithFiles(msg, files) {
   if (wv && typeof wv.postMessageWithAdditionalObjects === 'function') {
-    wv.postMessageWithAdditionalObjects(msg, files);
-    return true;
+    try {
+      wv.postMessageWithAdditionalObjects(msg, files);
+      return true;
+    } catch {
+      return false;
+    }
   }
   return false;
 }
