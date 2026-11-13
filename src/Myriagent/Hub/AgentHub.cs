@@ -2662,6 +2662,12 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                 ChangeAutoStart(value);
                 PostSettings();
                 return;
+            case "autoStartLock":
+                // 開機自動啟動後鎖定電腦：只收布林、只有能設定開機啟動時
+                if (value.Type != JTokenType.Boolean || AutoStart is not { Available: true })
+                    return;
+                settings.AutoStartLock = value.Value<bool>();
+                break;
             case "notifications":
                 settings.Notifications = value.Type == JTokenType.Boolean && value.Value<bool>();
                 break;

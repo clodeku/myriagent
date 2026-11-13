@@ -5,6 +5,23 @@ namespace Myriagent.UI;
 /// <summary>Windows API：標題列深色模式與顏色（Windows 11 DWM）、工作列閃爍、前景權限、還原最小化的視窗、使用者閒置時間、AppUserModelID、NTFS 替代資料流</summary>
 internal static class NativeMethods
 {
+    /// <summary>鎖定電腦（同 Win+L；開機自動啟動後鎖定，AutoStartRules.LockAfterStart）。失敗回 false</summary>
+    public static bool LockWorkstation()
+    {
+        try
+        {
+            return LockWorkStation();
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool LockWorkStation();
+
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     private const int DWMWA_BORDER_COLOR = 34;
     private const int DWMWA_CAPTION_COLOR = 35;

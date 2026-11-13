@@ -172,7 +172,7 @@ export function makeCli(now) {
 }
 
 export const SETTINGS = {
-  theme: 'dark', fontSize: 14, closeToTray: true, autoStart: false, notifications: true, voiceNotifications: true, autoUpdateCli: true, enterToSend: true, claudeRemoteControl: true, claudeIdleTokenRefresh: true, autoSwitchAccount: true, autoSwitchCrossProvider: false, shareCrossCliCustomizations: false,
+  theme: 'dark', fontSize: 14, closeToTray: true, autoStart: true, autoStartLock: false, autoLogon: false, notifications: true, voiceNotifications: true, autoUpdateCli: true, enterToSend: true, claudeRemoteControl: true, claudeIdleTokenRefresh: true, autoSwitchAccount: true, autoSwitchCrossProvider: false, shareCrossCliCustomizations: false,
   instructions: '回覆一律使用臺灣繁體中文。工作資料夾是 {cwd}，使用者附加的檔案在 {attachments}。',
 };
 

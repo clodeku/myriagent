@@ -50,4 +50,17 @@ public sealed class AutoStartRulesTests
     [InlineData(false, false, false)]
     public void 開機啟動且縮到系統匣時才藏主視窗(bool autoStart, bool closeToTray, bool expected)
         => AutoStartRules.StartHidden(autoStart, closeToTray).Should().Be(expected);
+
+    [Fact]
+    public void 自動啟動後鎖定_只在這次是autostart而且設定開著時_自動登入只認1()
+    {
+        AutoStartRules.LockAfterStart(autoStart: true, autoStartLock: true).Should().BeTrue();
+        AutoStartRules.LockAfterStart(autoStart: false, autoStartLock: true).Should().BeFalse("換版重開、手動開不鎖");
+        AutoStartRules.LockAfterStart(autoStart: true, autoStartLock: false).Should().BeFalse();
+        AutoStartRules.AutoLogon("1").Should().BeTrue();
+        AutoStartRules.AutoLogon(" 1 ").Should().BeTrue();
+        AutoStartRules.AutoLogon("0").Should().BeFalse();
+        AutoStartRules.AutoLogon("").Should().BeFalse();
+        AutoStartRules.AutoLogon(null).Should().BeNull();
+    }
 }

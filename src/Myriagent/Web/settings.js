@@ -102,6 +102,9 @@ export function openSettings(opts = {}) {
   // 開機時自動啟動：狀態在登錄；null＝這次執行不能設定（不是安裝版、或用 --data 執行），開關停用並說明
   const bootSw = has('autoStart') ? switchControl({ checked: s.autoStart === true, disabled: s.autoStart == null, label: '開機時自動啟動', onChange: (v) => set('autoStart', v) }) : null;
   const bootRow = bootSw && row('開機時自動啟動', autoStartDesc(s), bootSw, 'autoStart');
+  // 開機自動啟動後鎖定電腦（2026-11-13，搭配 Windows 自動登入）：不能設定開機啟動時宿主送 null，不建
+  const lockSw = has('autoStartLock') && s.autoStartLock != null ? sw('autoStartLock', '自動啟動後鎖定電腦') : null;
+  const lockRow = lockSw && row('自動啟動後鎖定電腦', '搭配 Windows 自動登入：重新開機自動登入、這個 app 起來後馬上鎖定電腦，別人看不到桌面，app 照常在背景執行。手動登入時也會鎖定（要再解鎖一次）。', lockSw, 'autoStartLock');
   // 語音通知與它底下的語速、音調（桌面：宿主的設定；瀏覽器：存在這個瀏覽器〔voice.js〕，不經伺服器、不跟其他裝置同步）
   const deskTune = has('voiceNotifications')
     ? voiceTune(() => ({ speed: normSpeed(state.settings.voiceSpeed), pitch: normPitch(state.settings.voicePitch) }),
@@ -174,6 +177,7 @@ export function openSettings(opts = {}) {
     fxSw && row('動態效果', '執行中的掃描光、圓環轉動、電腦狀態面板的雷達等持續的動畫。關掉可以減輕處理器與顯示卡的負擔；Windows 設定了減少動畫效果時一律不播。', fxSw, 'visualEffects'));
   put('system', '系統',
     bootRow,
+    lockRow,
     traySw && row('關閉視窗時縮到系統匣', '對話會繼續在背景執行，從系統匣圖示叫回視窗。', traySw, 'closeToTray'));
   put('notify', '通知',
     row('系統通知', '代理提問、要求核准或完成工作時通知你。', notifySw, 'notifications'),
@@ -243,6 +247,7 @@ export function openSettings(opts = {}) {
       bootSw.input.disabled = cur.autoStart == null;
       bootRow.querySelector('.set-desc').textContent = autoStartDesc(cur);
     }
+    if (lockSw) lockSw.input.checked = cur.autoStartLock === true;
     if (voiceSw) voiceSw.input.checked = cur.voiceNotifications !== false;
     if (schedDiagSw) schedDiagSw.input.checked = cur.scheduleAutoDiagnose !== false;
     if (deskTune) deskTune.refresh(cur.voiceNotifications !== false);
@@ -366,9 +371,13 @@ function withTune(rowNode, tune) {
 /** 「開機時自動啟動」的說明：不能設定時說原因；能設定時說開機後視窗在哪（跟著「關閉視窗時縮到系統匣」） */
 function autoStartDesc(cur) {
   if (cur.autoStart == null) return '只有安裝到這台電腦的 Clode Myriagent 才能設定（開發版或以其他資料夾執行時無法使用）。';
-  return cur.closeToTray !== false
+  const base = cur.closeToTray !== false
     ? '登入 Windows 時自動在背景啟動，只顯示系統匣圖示，點圖示叫出視窗。'
     : '登入 Windows 時自動啟動並開啟視窗。';
+  // 2026-11-13：沒開 Windows 自動登入的電腦重新開機（含 Windows 更新自動重開）後停在登入畫面，要有人登入才會啟動
+  return cur.autoStart === true && cur.autoLogon === false
+    ? base + '這台沒開 Windows 自動登入：重新開機（含 Windows 更新自動重開）之後要有人登入 Windows 才會啟動。'
+    : base;
 }
 
 export function refreshSettings() {

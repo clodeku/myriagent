@@ -523,6 +523,8 @@ internal sealed partial class AgentHub
             ["visualEffects"] = settings.VisualEffects,
             ["closeToTray"] = settings.CloseToTray,
             ["autoStart"] = RenderAutoStart(),
+            ["autoStartLock"] = RenderAutoStartLock(),
+            ["autoLogon"] = RenderAutoLogon(),
             ["notifications"] = settings.Notifications,
             ["voiceNotifications"] = settings.VoiceNotifications,
             // 排程頁的自動診斷（AgentHub.Schedules.cs）：沒掛排程讀取器時是 null，設定頁不顯示

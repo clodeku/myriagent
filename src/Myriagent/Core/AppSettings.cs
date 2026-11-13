@@ -167,6 +167,12 @@ internal sealed class AppSettings
     /// <summary>關閉視窗時縮到系統匣（背景繼續執行）</summary>
     public bool CloseToTray { get; set; } = true;
 
+    /// <summary>
+    /// 開機自動啟動後鎖定電腦（2026-11-13 使用者要求：各台開 Windows 自動登入，重新開機後 app 才會自己起來；自動登入之後桌面不能一直開著）。
+    /// 只在這次是登入時由 Run 機碼啟動（--autostart）時鎖；手動登入也會跟著鎖（要再解鎖一次）。預設關；舊版讀不到這個欄位時忽略
+    /// </summary>
+    public bool AutoStartLock { get; set; }
+
     /// <summary>代理提問、核准、完成時系統通知</summary>
     public bool Notifications { get; set; } = true;
 

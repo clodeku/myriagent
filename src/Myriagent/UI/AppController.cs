@@ -254,6 +254,15 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         // WebView2 環境已在最前面預熱；介面初始化排到訊息迴圈開始後才執行：缺少執行階段時環境工作會同步失敗，
         // 錯誤處理（提示後 ExitImmediately 關閉主視窗）若在建構子裡就跑完，接著的 Show() 與 Application.Run 會碰到已釋放的主視窗而當掉
         BeginInvoke(mainForm.StartInitialization);
+        if (AutoStartRules.LockAfterStart(appStartup.Options.AutoStart, Settings.AutoStartLock))
+        {
+            // 開機自動啟動後鎖定電腦（搭配 Windows 自動登入，2026-11-13）：主視窗與系統匣起來之後鎖，app 照常在背景執行
+            _ = Task.Delay(AutoStartRules.LockDelay).ContinueWith(_ => BeginInvoke(() =>
+            {
+                var locked = NativeMethods.LockWorkstation();
+                Log.Info(locked ? "開機自動啟動：已鎖定電腦（設定「自動啟動後鎖定電腦」）" : "開機自動啟動：鎖定電腦失敗");
+            }), TaskScheduler.Default);
+        }
         // 換版幫手啟動的這一次、交棒前主視窗藏著（系統匣、最小化）：照樣藏著（設計 9.3），使用者不在時不把視窗叫到面前。
         // Application.Run 顯示主視窗的那一次由 MainForm 擋下；訊息迴圈開始後（排在 Application.Run 的顯示之後）恢復，之後系統匣與再次啟動照常叫得出來
         if (ResumeIntentRules.StartMainHidden(startupResume.File, appStartup.Options.AfterUpdateToken ?? appStartup.Options.AfterUpdateFailedToken))

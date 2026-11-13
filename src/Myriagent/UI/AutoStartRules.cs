@@ -35,4 +35,16 @@ internal static class AutoStartRules
     /// 藏起來會以為沒有啟動
     /// </summary>
     public static bool StartHidden(bool autoStart, bool closeToTray) => autoStart && closeToTray;
+
+    /// <summary>開機自動啟動後鎖定電腦（設定 AutoStartLock）：只在這次是 --autostart 啟動時（換版重開、手動開都不鎖）</summary>
+    public static bool LockAfterStart(bool autoStart, bool autoStartLock) => autoStart && autoStartLock;
+
+    /// <summary>鎖定之前等多久：讓主視窗、系統匣圖示與同步先起來（鎖定之後 app 照常在背景執行）</summary>
+    public static readonly TimeSpan LockDelay = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// Windows 自動登入（HKLM Winlogon 的 AutoAdminLogon 是 "1"）：沒開時重新開機（含 Windows 更新自動重開）之後停在登入畫面，
+    /// 要有人登入 app 才會啟動——設定頁在說明裡提醒。讀不到是 null（不提醒）
+    /// </summary>
+    public static bool? AutoLogon(string? autoAdminLogon) => autoAdminLogon == null ? null : autoAdminLogon.Trim() == "1";
 }

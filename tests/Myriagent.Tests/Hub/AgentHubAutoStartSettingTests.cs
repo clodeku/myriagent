@@ -23,6 +23,10 @@ public sealed class AgentHubAutoStartSettingTests
 
         public bool IsEnabled() => Enabled;
 
+        public bool? Logon { get; set; }
+
+        public bool? AutoLogon() => Logon;
+
         public void SetEnabled(bool enabled)
         {
             Calls.Add(enabled);
@@ -111,6 +115,30 @@ public sealed class AgentHubAutoStartSettingTests
         toast.Value<string>("text").Should().Be("開啟開機時自動啟動失敗：拒絕存取");
         toast.Value<string>("level").Should().Be("error");
         AutoStartIn(h.Main.Messages("settings", mark).Single())!.Value<bool>().Should().BeFalse("網頁先把開關打開了，要回到登錄的實際狀態");
+    }
+
+    [Fact]
+    public void 自動啟動後鎖定電腦_能設定時才送_存進設定_不能設定時是null而且不收()
+    {
+        // 2026-11-13：搭配 Windows 自動登入，開機自動啟動之後鎖定電腦
+        using var h = new HubHarness();
+        h.Command(h.Main, "ready");
+        var init = h.Main.Last("init")!["settings"]!;
+        (init["autoStartLock"]!.Type, init["autoLogon"]!.Type).Should().Be((JTokenType.Null, JTokenType.Null), "不能設定開機啟動時不顯示");
+        h.Command(h.Main, "setting", new { key = "autoStartLock", value = true });
+        h.Ui.Invoke(() => h.Settings.AutoStartLock).Should().BeFalse("不能設定時不收");
+
+        var fake = Attach(h, available: true);
+        fake.Logon = false;
+        var mark = h.Main.Mark();
+        h.Command(h.Main, "setting", new { key = "autoStartLock", value = true });
+        h.Ui.Invoke(() => h.Settings.AutoStartLock).Should().BeTrue();
+        var sent = h.Main.Messages("settings", mark).Last()["settings"]!;
+        sent.Value<bool>("autoStartLock").Should().BeTrue();
+        sent.Value<bool>("autoLogon").Should().BeFalse("沒開 Windows 自動登入：設定頁提醒重新開機後要有人登入");
+
+        h.Command(h.Main, "setting", new { key = "autoStartLock", value = "x" });
+        h.Ui.Invoke(() => h.Settings.AutoStartLock).Should().BeTrue("不是布林不改");
     }
 
     [Theory]

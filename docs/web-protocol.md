@@ -1661,6 +1661,8 @@ MyriagentHub 主機（伺服器）自己的負載（`deviceStats` 的 `hub`）�
   "visualEffects": true,                // 介面的持續動態效果（執行中的掃描光、圓環轉動、電腦狀態面板的雷達等）；false 時網頁在根元素設 data-fx="off"，照「減少動態」的規則停掉持續的動畫（載入中的轉圈照轉），系統要求減少動態時一律停。桌面專屬（瀏覽器版的設定頁不顯示，伺服器當成其他鍵回 invalid）
   "closeToTray": true,                  // 關閉視窗時縮到系統匣（背景繼續執行）
   "autoStart": false,                   // 開機時自動啟動：登入 Windows 時由目前使用者的 Run 機碼執行 current\Myriagent.exe --autostart（「關閉視窗時縮到系統匣」開著時主視窗藏著、只留系統匣圖示）。狀態以登錄為準（工作管理員停用也算關閉），不存 settings.json、每次送設定時重讀；null＝這次執行不能設定（不是受管理的安裝、用 --data 執行或端到端測試），網頁停用開關並說明原因。以 setting 修改（只接受布林），不論成敗都重送設定、失敗時另送 toast。桌面專屬（瀏覽器版的設定頁不顯示，伺服器當成其他鍵回 invalid）
+  "autoStartLock": false,               // 開機自動啟動後鎖定電腦（2026-11-13，搭配 Windows 自動登入）：這次是 --autostart 啟動時，主視窗與系統匣起來 3 秒後鎖定（LockWorkStation），app 照常在背景執行；手動登入也會鎖。存 settings.json；不能設定開機啟動時是 null（設定頁不顯示）。以 setting 修改（只接受布林）。桌面專屬
+  "autoLogon": true,                    // 唯讀：這台開了 Windows 自動登入（HKLM Winlogon 的 AutoAdminLogon 是 "1"）；false 時設定頁在「開機時自動啟動」的說明提醒「重新開機後要有人登入才會啟動」。不能設定開機啟動或讀不到是 null。桌面專屬
   "notifications": true,                // 代理提問、核准、完成時系統通知
   "voiceNotifications": true,           // 語音通知：對話完成、失敗，或代理提問、要求核准、計畫等確認時，用 Windows 內建的雅婷語音（語速與音調照 voiceSpeed、voicePitch，SpeechAudioRules）念一句說明（對話標題＋完成了什麼／問什麼／要核准什麼，VoiceNotifyRules；沒有字數上限；視窗在前景也念；使用者按停止的那一輪不念），開始念時送帶 speaking 的 flash（不帶 speaking 的 flash 不管這個開關，事情一發生就送）；以 setting 打開時宿主念一句試聽、關掉時停下正在念的。桌面專屬（瀏覽器版的設定頁不顯示，伺服器當成其他鍵回 invalid）
   "voiceSpeed": 1.5,                    // 語音通知的語速（總倍速，0.5～2.5、間距 0.1；設定頁「語音通知」底下的滑桿，放開時送）：宿主限制在範圍內、取到 0.1，不是數字的值不改也不重送設定；值變了而且語音通知開著時，先停下正在念的、以新的語速與音調念一句試聽（VoiceNotifyRules.TuningSample）。SAPI 的語速只有整數級，零頭以不改音高的時間伸縮補上（SpeechAudioRules.Plan）。桌面專屬（同 voiceNotifications）

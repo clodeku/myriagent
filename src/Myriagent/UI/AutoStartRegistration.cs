@@ -41,6 +41,19 @@ internal sealed class AutoStartRegistration : IAutoStart
         }
     }
 
+    public bool? AutoLogon()
+    {
+        try
+        {
+            using var winlogon = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon");
+            return AutoStartRules.AutoLogon(winlogon?.GetValue("AutoAdminLogon") as string ?? "0");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
+        {
+            return null;
+        }
+    }
+
     public void SetEnabled(bool enabled)
     {
         if (!Available)
