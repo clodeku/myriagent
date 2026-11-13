@@ -45,13 +45,21 @@ export function sealSupported() {
  * accept(sessionId, targetPublic) 在收到被看的那台的公鑰之後呼叫，回加密器 { seal(events) → {n, ct} }，對方的公鑰不合格回 null；
  * acceptSecure(sessionId, servicePublic) 同樣的做法、對象是那台的系統服務（安全桌面的輸入），加密出來的多帶 k: 'svc'。
  * seal 一次一包、照呼叫的順序編號：呼叫的人要等上一包好了再叫下一包（送出去的順序才和編號一致）。
+ * 同一個工作階段、同一把對方的公鑰再問一次，拿到的是**同一個加密器**（編號接著算）：同一把金鑰的編號不能重複用——
+ * AES-GCM 重複的 nonce 會洩漏內容，對方也只收比上一包大的編號（那台的公鑰從 status 消失又出現時會再問一次）。
  * keyPair 只給測試（固定的金鑰）
  */
 export async function createViewerSeal(keyPair) {
   const subtle = globalThis.crypto.subtle;
   const pair = keyPair || await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
   const viewerRaw = new Uint8Array(await subtle.exportKey('raw', pair.publicKey));
-  const derive = async (sessionId, targetPublic, label) => {
+  const sealers = new Map();
+  const derive = (sessionId, targetPublic, label) => {
+    const id = label + '|' + sessionId + '|' + targetPublic;
+    if (!sealers.has(id)) sealers.set(id, deriveNew(sessionId, targetPublic, label));
+    return sealers.get(id);
+  };
+  const deriveNew = async (sessionId, targetPublic, label) => {
       const targetRaw = fromBase64Url(targetPublic);
       if (!targetRaw || targetRaw.length !== PUBLIC_KEY_BYTES || targetRaw[0] !== 4) return null;
       let key;

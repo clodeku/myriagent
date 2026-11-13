@@ -74,6 +74,11 @@ export function openRemoteDesk(deviceId, name) {
  */
 function settleSecure(mine, st) {
   const seal = mine.seal;
+  // 安全桌面的影格不帶游標（那台讀不到安全桌面上的游標）：收掉停在舊位置的那一個，回到使用者的桌面時下一個影格會再帶
+  if (st.secure && !seal.secure && mine.cursor && mine.cursor.v) {
+    mine.cursor.v = false;
+    placeCursor(mine);
+  }
   seal.secure = st.secure;
   if (st.svc === seal.svcPub) return;
   seal.svcPub = st.svc;

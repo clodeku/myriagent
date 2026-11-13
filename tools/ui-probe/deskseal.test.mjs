@@ -94,6 +94,25 @@ test('固定的向量（安全桌面的輸入）：以服務的標籤算，密�
   assert.equal(await viewer.acceptSecure(SESSION, 'garbage'), null);
 });
 
+test('同一把對方的公鑰再問一次：同一個加密器、編號接著算（同一把金鑰的編號不重複用）', async () => {
+  const viewer = await createViewerSeal(await fixedViewerPair());
+  const first = await viewer.acceptSecure(SESSION, TARGET_PUBLIC);
+  assert.deepEqual(await first.seal(EVENTS), { n: 1, ct: SECURE_SEALED_1, k: 'svc' });
+  // 那台的公鑰從 status 消失又出現（螢幕關了又回到鎖定畫面）：網頁再問一次
+  const again = await viewer.acceptSecure(SESSION, TARGET_PUBLIC);
+  assert.equal(again, first);
+  const second = await again.seal(EVENTS);
+  assert.equal(second.n, 2);
+  assert.notEqual(second.ct, SECURE_SEALED_1);
+  // 同時問兩次也只有一個
+  const [a, b] = await Promise.all([viewer.accept(SESSION, TARGET_PUBLIC), viewer.accept(SESSION, TARGET_PUBLIC)]);
+  assert.equal(a, b);
+  assert.notEqual(a, first, '給 app 的和給服務的是兩把');
+  // 別的工作階段、別的公鑰各自一個
+  assert.notEqual(await viewer.acceptSecure('01JDESKSEALVECTOR00000000B', TARGET_PUBLIC), first);
+  assert.notEqual(await viewer.acceptSecure(SESSION, VIEWER_PUBLIC), first);
+});
+
 test('statusSecure：secure 與服務的公鑰（svc 版本 1）', () => {
   assert.deepEqual(statusSecure({ text: null, secure: true, svc: { v: 1, pub: TARGET_PUBLIC } }), { secure: true, svc: TARGET_PUBLIC });
   assert.deepEqual(statusSecure({ text: null, secure: true, note: '只能看' }), { secure: true, svc: null });

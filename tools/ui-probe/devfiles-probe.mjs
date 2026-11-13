@@ -512,6 +512,21 @@ export async function runDeviceFiles(ctx, vp, m) {
       try { serviceOpened.push(...(await service.open(c.body.e2e.n, c.body.e2e.ct)).events); } catch { /* 解不開：下面的檢查會看到 */ }
       try { await target.open(c.body.e2e.n, c.body.e2e.ct); appCouldOpen++; } catch { /* 應該解不開 */ }
     }
+    // 服務的公鑰從 status 消失又出現（那台螢幕關了又回到鎖定畫面）：同一把金鑰，編號接著算、不從 1 重來
+    const lastServiceN = Math.max(...forService.filter((c) => c.body.e2e).map((c) => c.body.e2e.n));
+    host.send({ type: 'desk', sessionId: open2.requestId, kind: 'status', seq: 0, body: { text: '那台的螢幕關著' } });
+    await sleep(150);
+    host.send({ type: 'desk', sessionId: open2.requestId, kind: 'status', seq: 0, body: { text: null, secure: true, svc: { v: 1, pub: service.publicKey } } });
+    await sleep(250);
+    const beforeAgain = eventPackets().length;
+    await page.keyboard.press('KeyF');
+    await until(() => eventPackets().length > beforeAgain, 3000);
+    await sleep(300);
+    const againPackets = eventPackets().slice(beforeAgain).filter((c) => c.body.e2e);
+    const againOpened = [];
+    for (const c of againPackets) {
+      try { againOpened.push(...(await service.open(c.body.e2e.n, c.body.e2e.ct)).events); } catch { /* 下面的檢查會看到 */ }
+    }
     const afterSecure = eventPackets().length;
     host.send({ type: 'desk', sessionId: open2.requestId, kind: 'status', seq: 0, body: { text: null } });
     await sleep(200);
@@ -529,6 +544,7 @@ export async function runDeviceFiles(ctx, vp, m) {
       serviceOpened, appCouldOpen,
       back: back.map((c) => (c.body.e2e ? { n: c.body.e2e.n, k: c.body.e2e.k || null } : 'plain')), backOpened,
       lastAppN: numbers[numbers.length - 1],
+      lastServiceN, again: againPackets.map((c) => ({ n: c.body.e2e.n, k: c.body.e2e.k || null })), againOpened,
     };
     host.send({ type: 'desk', sessionId: open2.requestId, kind: 'end', seq: 0, body: { reason: 'targetClosed', text: '那台的人中斷了遠端桌面' } });
     await until(() => page.evaluate(() => !document.querySelector('.rd-wrap')), 2000);
@@ -542,6 +558,8 @@ export async function runDeviceFiles(ctx, vp, m) {
     && secureChecks.forService.length > 0 && secureChecks.forService.every((p, i) => p !== 'plain' && p.k === 'svc' && p.n === i + 1)
     && secureChecks.serviceOpened.some((e) => e.t === 'kd' && e.k === 0x44) && secureChecks.serviceOpened.every((e) => e.k !== 0x43)
     && secureChecks.appCouldOpen === 0
+    && secureChecks.again.length > 0 && secureChecks.again.every((p, i) => p.k === 'svc' && p.n === secureChecks.lastServiceN + i + 1)
+    && secureChecks.againOpened.some((e) => e.t === 'kd' && e.k === 0x46)
     && secureChecks.back.length > 0 && secureChecks.back.every((p, i) => p !== 'plain' && p.k === null && p.n === secureChecks.lastAppN + i + 1)
     && secureChecks.backOpened.some((e) => e.t === 'kd' && e.k === 0x45), secureChecks);
   clearInterval(host.statsTimer);
