@@ -27,6 +27,17 @@ internal sealed record DeskServiceProbe(int Session, string? Desktop, bool Secur
 /// <summary>服務回的錯誤</summary>
 internal sealed record DeskServiceError(string Code, string Message);
 
+/// <summary>要幫手擷取的範圍與大小：螢幕上的矩形（虛擬桌面的像素）縮成 <c>OutW</c>×<c>OutH</c></summary>
+/// <param name="Force">就算和上一張一樣也要整張回（看的一方要求整個畫面重送、來源剛換過）</param>
+internal sealed record DeskServiceCaptureRequest(int X, int Y, int W, int H, int OutW, int OutH, bool Force);
+
+/// <summary>幫手對 <c>capture</c> 的回覆的第一行；<see cref="DeskServiceRules.CaptureOk"/> 時後面緊接 <c>Bytes</c> 個位元組的 BGRA（由上而下）</summary>
+/// <param name="Result">ok（有新的畫面）、unchanged（和上一張一樣，沒有資料）、failed（擷取不到）</param>
+/// <param name="Desktop">擷取的是哪個桌面（開不了是 null）</param>
+/// <param name="Secure">那是安全桌面</param>
+/// <param name="Error">擷取不到時的 Win32 錯誤碼</param>
+internal sealed record DeskServiceCaptureHeader(string Result, int Bytes, string? Desktop, bool Secure, int Error);
+
 /// <summary>裝在這台的服務（<c>install.json</c>，裝的時候寫、只有系統管理員能改）</summary>
 /// <param name="Payload">服務檔的指紋（<see cref="DeskServiceRules.PayloadHash"/>）</param>
 /// <param name="SignedBy">驗過的發佈簽章金鑰（開發版的服務檔沒有簽章是 null）</param>
@@ -77,7 +88,33 @@ internal static class DeskServiceRules
 
     public const string OpProbe = "probe";
 
+    /// <summary>服務：在用戶端的工作階段開（或沿用）擷取用的幫手，回它的管道名稱</summary>
+    public const string OpOpen = "open";
+
+    /// <summary>幫手：擷取目前的輸入桌面</summary>
+    public const string OpCapture = "capture";
+
     public const string FeatureProbe = "probe";
+
+    /// <summary>服務認得 <see cref="OpOpen"/>、幫手認得 <see cref="OpCapture"/></summary>
+    public const string FeatureCapture = "capture";
+
+    public const string CaptureOk = "ok";
+
+    public const string CaptureUnchanged = "unchanged";
+
+    public const string CaptureFailed = "failed";
+
+    /// <summary>擷取輸出的上限（和遠端桌面最大的傳送寬度一致，高度留給直立的螢幕）：超過的要求不收，幫手不會被要求配置巨大的緩衝</summary>
+    public const int MaxCaptureWidth = 3840;
+
+    public const int MaxCaptureHeight = 3840;
+
+    /// <summary>螢幕矩形的座標與邊長的上限（虛擬桌面是 16 位元的範圍）</summary>
+    public const int MaxScreenExtent = 32768;
+
+    /// <summary>幫手多久沒有連線就自己結束</summary>
+    public static readonly TimeSpan HelperIdleExit = TimeSpan.FromSeconds(30);
 
     public const string CodeInvalid = "invalid";
 
@@ -278,6 +315,98 @@ internal static class DeskServiceRules
 
     public static string HelperProbeLine(string? desktop, int error, IReadOnlyList<string> desktops)
         => Line(new JObject { ["desktop"] = desktop, ["error"] = error, ["desktops"] = new JArray(desktops) });
+
+    // ---- 擷取：app 先向服務 open 拿到幫手的管道，再直接向幫手 capture ----
+
+    /// <summary>
+    /// 幫手的管道名稱：服務名稱＋工作階段＋每次開幫手新產生的亂數（32 個十六進位字）。亂數不是秘密（管道本來就只收那個工作階段登入的使用者），
+    /// 只是讓同一個工作階段前後兩個幫手不撞名
+    /// </summary>
+    public static string HelperPipeName(string serviceName, int sessionId, string nonce) => $"{serviceName}-s{sessionId}-{nonce}";
+
+    public static bool IsHelperPipeName([NotNullWhen(true)] string? name)
+    {
+        if (name is null || name.Length > 96)
+            return false;
+        var s = name.LastIndexOf("-s", StringComparison.Ordinal);
+        if (s <= 0 || !IsServiceName(name[..s]))
+            return false;
+        var parts = name[(s + 2)..].Split('-');
+        return parts.Length == 2 && parts[0].Length is >= 1 and <= 6 && parts[0].All(char.IsAsciiDigit)
+               && parts[1].Length == 32 && parts[1].All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+    }
+
+    /// <summary>
+    /// 幫手收不收這個用戶端：除了 <see cref="Admit"/>，用戶端還要和幫手在同一個工作階段——幫手看的是自己那個工作階段的畫面，
+    /// 另一個工作階段登入的人（切換使用者）不能經它看到這邊
+    /// </summary>
+    public static string? AdmitHelper(DeskServiceClientInfo client, int helperSession, bool helperIsSystem)
+    {
+        if (Admit(client, helperIsSystem) is { } denied)
+            return denied;
+        return client.SessionId == helperSession ? null : "不是這個工作階段的程序";
+    }
+
+    public static string OpenRequest() => Line(new JObject { ["op"] = OpOpen });
+
+    public static string OpenReply(string helperPipe) => Line(new JObject { ["ok"] = true, ["pipe"] = helperPipe });
+
+    /// <summary>服務對 <c>open</c> 的回覆 → 幫手的管道名稱；錯誤、格式不對、名稱不合格回 null</summary>
+    public static string? ParseOpen(string? line)
+        => ErrorOf(line) is null && TryObject(line) is { } o && Text(o, "pipe") is { } pipe && IsHelperPipeName(pipe) ? pipe : null;
+
+    public static string CaptureRequest(DeskServiceCaptureRequest r) => Line(new JObject
+    {
+        ["op"] = OpCapture,
+        ["x"] = r.X,
+        ["y"] = r.Y,
+        ["w"] = r.W,
+        ["h"] = r.H,
+        ["outW"] = r.OutW,
+        ["outH"] = r.OutH,
+        ["force"] = r.Force,
+    });
+
+    /// <summary>解析擷取的要求：座標與大小都要在範圍內（幫手照 <c>OutW×OutH×4</c> 配置緩衝，所以輸出大小一定要有上限）；不合格回 null</summary>
+    public static DeskServiceCaptureRequest? ParseCaptureRequest(JObject request)
+    {
+        if (Int(request, "x") is not { } x || Int(request, "y") is not { } y || Int(request, "w") is not { } w || Int(request, "h") is not { } h
+            || Int(request, "outW") is not { } outW || Int(request, "outH") is not { } outH)
+            return null;
+        if (Math.Abs(x) > MaxScreenExtent || Math.Abs(y) > MaxScreenExtent || w is < 1 or > MaxScreenExtent || h is < 1 or > MaxScreenExtent)
+            return null;
+        if (outW is < 1 or > MaxCaptureWidth || outH is < 1 or > MaxCaptureHeight)
+            return null;
+        return new DeskServiceCaptureRequest(x, y, w, h, outW, outH, request["force"] is JValue { Type: JTokenType.Boolean, Value: true });
+    }
+
+    /// <summary>一張畫面的位元組數（BGRA）</summary>
+    public static int CaptureBytes(int outW, int outH) => checked(outW * outH * 4);
+
+    public static string CaptureReply(DeskServiceCaptureHeader header) => Line(new JObject
+    {
+        ["ok"] = true,
+        ["result"] = header.Result,
+        ["bytes"] = header.Bytes,
+        ["desktop"] = header.Desktop,
+        ["secure"] = header.Secure,
+        ["error"] = header.Error,
+    });
+
+    /// <summary>
+    /// 幫手對 <c>capture</c> 的回覆的第一行。<paramref name="expectedBytes"/> 是用戶端要的那張的大小：ok 的位元組數一定要正好是它
+    /// （用戶端照它讀、寫進自己的緩衝），其他結果一定是 0；對不上、格式不對回 null（用戶端當成連線壞了）
+    /// </summary>
+    public static DeskServiceCaptureHeader? ParseCaptureReply(string? line, int expectedBytes)
+    {
+        if (ErrorOf(line) is not null || TryObject(line) is not { } o || Text(o, "result") is not { } result || Int(o, "bytes") is not { } bytes)
+            return null;
+        if (result is not (CaptureOk or CaptureUnchanged or CaptureFailed))
+            return null;
+        if (bytes != (result == CaptureOk ? expectedBytes : 0))
+            return null;
+        return new DeskServiceCaptureHeader(result, bytes, Text(o, "desktop"), o["secure"] is JValue { Type: JTokenType.Boolean, Value: true }, Int(o, "error") ?? 0);
+    }
 
     // ---- 安裝紀錄 ----
 

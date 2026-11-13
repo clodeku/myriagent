@@ -90,21 +90,30 @@ internal static class InputDesktop
     /// </summary>
     public static (string? Name, int Error) Read()
     {
-        var desktop = OpenInputDesktop(0, false, DesktopReadObjects);
+        var desktop = Open(DesktopReadObjects);
         if (desktop == IntPtr.Zero)
             return (null, Marshal.GetLastWin32Error());
         try
         {
-            var buffer = new byte[512];
-            if (!GetUserObjectInformationW(desktop, UoiName, buffer, buffer.Length, out var needed))
-                return (null, Marshal.GetLastWin32Error());
-            var chars = Math.Max(0, Math.Min(needed, buffer.Length) / 2 - 1);
-            return (Encoding.Unicode.GetString(buffer, 0, chars * 2).TrimEnd('\0'), 0);
+            return NameOf(desktop) is { } name ? (name, 0) : (null, Marshal.GetLastWin32Error());
         }
         finally
         {
             CloseDesktop(desktop);
         }
+    }
+
+    /// <summary>開目前的輸入桌面（呼叫的人負責 <c>CloseDesktop</c>）；開不了回 0，錯誤碼在 <see cref="Marshal.GetLastWin32Error"/></summary>
+    public static IntPtr Open(uint access) => OpenInputDesktop(0, false, access);
+
+    /// <summary>桌面的名稱；問不到回 null（錯誤碼在 <see cref="Marshal.GetLastWin32Error"/>）</summary>
+    public static string? NameOf(IntPtr desktop)
+    {
+        var buffer = new byte[512];
+        if (!GetUserObjectInformationW(desktop, UoiName, buffer, buffer.Length, out var needed))
+            return null;
+        var chars = Math.Max(0, Math.Min(needed, buffer.Length) / 2 - 1);
+        return Encoding.Unicode.GetString(buffer, 0, chars * 2).TrimEnd('\0');
     }
 
     /// <summary>這個程序的視窗站裡有哪些桌面（列不出來回空的）</summary>
@@ -161,47 +170,17 @@ internal static class SessionProcess
     /// <summary>執行並等它結束；逾時就結束它、丟 <see cref="TimeoutException"/>。回結束碼與標準輸出（UTF-8）</summary>
     public static (int ExitCode, string Output) Run(int sessionId, string exePath, string arguments, TimeSpan timeout)
     {
-        // 這三個權限 LocalSystem 的權杖裡都有，但不一定是啟用的：先啟用（已經啟用、或不是系統權限就沒有作用）
-        EnablePrivilege("SeTcbPrivilege");
-        EnablePrivilege("SeAssignPrimaryTokenPrivilege");
-        EnablePrivilege("SeIncreaseQuotaPrivilege");
-
-        if (!OpenProcessToken(GetCurrentProcess(), TokenDuplicate | TokenQuery | TokenAssignPrimary | TokenAdjustDefault | TokenAdjustSessionId, out var own))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "開不了自己的權杖");
-        var token = IntPtr.Zero;
         var read = IntPtr.Zero;
         var write = IntPtr.Zero;
         var process = default(ProcessInformation);
         try
         {
-            if (!DuplicateTokenEx(own, MaximumAllowed, IntPtr.Zero, SecurityImpersonation, TokenPrimary, out token))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "複製權杖失敗");
-            // 權杖本來就在目標的工作階段時不必改（改工作階段要 SeTcbPrivilege）：服務在工作階段 0、目標一定不同，一定會改；
-            // 測試在自己的工作階段跑這一段（沒有系統權限），驗的是建立程序、接輸出與逾時
-            var session = (uint)sessionId;
-            if (!(GetTokenInformation(token, TokenSessionId, out var current, sizeof(uint), out _) && current == session)
-                && !SetTokenInformation(token, TokenSessionId, ref session, sizeof(uint)))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), $"權杖換不到工作階段 {sessionId}");
-
             var inheritable = new SecurityAttributes { Length = Marshal.SizeOf<SecurityAttributes>(), InheritHandle = true };
             if (!CreatePipe(out read, out write, ref inheritable, 0))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "建不了收輸出的管線");
             // 讀的這一端不給子程序繼承（不然子程序握著它，讀不到結尾）
             SetHandleInformation(read, HandleFlagInherit, 0);
-
-            var startup = new StartupInfo
-            {
-                Size = Marshal.SizeOf<StartupInfo>(),
-                // 互動的視窗站；幫手再自己切到目前的輸入桌面
-                Desktop = @"WinSta0\Default",
-                Flags = StartfUseStdHandles,
-                StdOutput = write,
-                StdError = write,
-            };
-            var commandLine = new StringBuilder("\"" + exePath + "\" " + arguments);
-            if (!CreateProcessAsUserW(token, exePath, commandLine, IntPtr.Zero, IntPtr.Zero, true, CreateNoWindow,
-                    IntPtr.Zero, Path.GetDirectoryName(exePath), ref startup, out process))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), $"在工作階段 {sessionId} 開不了幫手");
+            process = Create(sessionId, exePath, arguments, write);
 
             // 寫的這一端只留給子程序：這裡關掉，子程序結束時讀的那端才會讀到結尾
             CloseHandle(write);
@@ -226,6 +205,59 @@ internal static class SessionProcess
             Close(process.Process);
             Close(write);
             Close(read);
+        }
+    }
+
+    /// <summary>
+    /// 開了就回、不等它結束（擷取用的幫手：一直開著，沒人連了自己結束）。標準輸出入都不接。回程序的控制代碼（呼叫的人負責釋放）與程序 id
+    /// </summary>
+    public static (SafeProcessHandle Process, int ProcessId) Start(int sessionId, string exePath, string arguments)
+    {
+        var process = Create(sessionId, exePath, arguments, IntPtr.Zero);
+        Close(process.Thread);
+        return (new SafeProcessHandle(process.Process, ownsHandle: true), process.ProcessId);
+    }
+
+    /// <summary>以複製出來、換到 <paramref name="sessionId"/> 的權杖建立程序；<paramref name="output"/> 不是 0 時當它的標準輸出與標準錯誤（要是可繼承的）</summary>
+    private static ProcessInformation Create(int sessionId, string exePath, string arguments, IntPtr output)
+    {
+        // 這三個權限 LocalSystem 的權杖裡都有，但不一定是啟用的：先啟用（已經啟用、或不是系統權限就沒有作用）
+        EnablePrivilege("SeTcbPrivilege");
+        EnablePrivilege("SeAssignPrimaryTokenPrivilege");
+        EnablePrivilege("SeIncreaseQuotaPrivilege");
+
+        if (!OpenProcessToken(GetCurrentProcess(), TokenDuplicate | TokenQuery | TokenAssignPrimary | TokenAdjustDefault | TokenAdjustSessionId, out var own))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "開不了自己的權杖");
+        var token = IntPtr.Zero;
+        try
+        {
+            if (!DuplicateTokenEx(own, MaximumAllowed, IntPtr.Zero, SecurityImpersonation, TokenPrimary, out token))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "複製權杖失敗");
+            // 權杖本來就在目標的工作階段時不必改（改工作階段要 SeTcbPrivilege）：服務在工作階段 0、目標一定不同，一定會改；
+            // 測試在自己的工作階段跑這一段（沒有系統權限），驗的是建立程序、接輸出與逾時
+            var session = (uint)sessionId;
+            if (!(GetTokenInformation(token, TokenSessionId, out var current, sizeof(uint), out _) && current == session)
+                && !SetTokenInformation(token, TokenSessionId, ref session, sizeof(uint)))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), $"權杖換不到工作階段 {sessionId}");
+
+            var startup = new StartupInfo
+            {
+                Size = Marshal.SizeOf<StartupInfo>(),
+                // 互動的視窗站；幫手再自己切到目前的輸入桌面
+                Desktop = @"WinSta0\Default",
+                Flags = StartfUseStdHandles,
+                StdOutput = output,
+                StdError = output,
+            };
+            var commandLine = new StringBuilder("\"" + exePath + "\" " + arguments);
+            // 只有收輸出的那一端是可繼承的（.NET 開的控制代碼預設都不繼承）
+            if (!CreateProcessAsUserW(token, exePath, commandLine, IntPtr.Zero, IntPtr.Zero, output != IntPtr.Zero, CreateNoWindow,
+                    IntPtr.Zero, Path.GetDirectoryName(exePath), ref startup, out var process))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), $"在工作階段 {sessionId} 開不了幫手");
+            return process;
+        }
+        finally
+        {
             Close(token);
             Close(own);
         }

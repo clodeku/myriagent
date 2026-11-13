@@ -72,6 +72,7 @@ export function onDesk(m) {
     }
     case 'status':
       setStatus(m.body && typeof m.body.text === 'string' ? m.body.text : null);
+      setNote(R.statusNote(m.body));
       break;
     case 'end':
       end(R.endText(m.body), false);
@@ -90,6 +91,9 @@ function build(s) {
   s.stage = h('div', { class: 'rd-stage', tabIndex: 0, 'aria-label': '「' + s.name + '」的畫面' }, s.canvas, s.cursorEl, s.statusEl);
   s.keyInput = h('textarea', { class: 'rd-keyinput', 'aria-label': '打字到遠端', autocapitalize: 'off', autocomplete: 'off', spellcheck: false });
   s.info = h('span', { class: 'rd-info' });
+  // 有畫面時那台給的附註（例：鎖定畫面目前只能看）：放在工具列，不擋畫面
+  s.noteEl = h('span', { class: 'rd-note', role: 'status' });
+  setHidden(s.noteEl, true);
   s.screenBtn = toolBtn('desktop', '螢幕', () => pickScreen(s));
   setHidden(s.screenBtn, true);
   s.qualityBtn = toolBtn('gauge', '畫質：自動', () => pickQuality(s));
@@ -105,7 +109,7 @@ function build(s) {
   const closeBtn = h('button', { type: 'button', class: 'btn rd-close' }, icon('x'), h('span', { text: '中斷' }));
   closeBtn.addEventListener('click', () => end(null));
   s.bar = h('div', { class: 'rd-bar' },
-    h('span', { class: 'rd-title', text: '遠端桌面：' + s.name }), s.info,
+    h('span', { class: 'rd-title', text: '遠端桌面：' + s.name }), s.info, s.noteEl,
     h('span', { class: 'rd-spacer' }), h('span', { class: 'rd-zoomgroup' }, zoomOutBtn, s.zoomLabel, zoomInBtn),
     s.screenBtn, s.qualityBtn, keysBtn, typeBtn, fullBtn, closeBtn);
   s.root = h('div', { class: 'rd-wrap', role: 'dialog', 'aria-modal': 'true', 'aria-label': '遠端桌面：' + s.name }, s.bar, s.stage, s.keyInput);
@@ -126,6 +130,14 @@ function toolBtn(iconName, label, onClick) {
   const b = h('button', { type: 'button', class: 'btn rd-tool', title: label }, icon(iconName), h('span', { class: 'rd-tool-label', text: label }));
   b.addEventListener('click', onClick);
   return b;
+}
+
+/** 那台給的附註（每則 status 都照它帶的換：沒帶就收掉） */
+function setNote(text) {
+  if (!s) return;
+  s.noteEl.textContent = text || '';
+  s.noteEl.title = text || '';
+  setHidden(s.noteEl, !text);
 }
 
 /** local：這一頁自己的等待文字（第一張畫面來了就收掉）；那台送來的說明由那台自己清掉 */

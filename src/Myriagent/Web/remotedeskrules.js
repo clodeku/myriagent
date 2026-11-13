@@ -229,6 +229,15 @@ export function fpsOf(times, now) {
   return Math.round(recent.length / 2);
 }
 
+/**
+ * status 的附註（body.note）：有畫面時那台另外給的一句話（例：鎖定畫面目前只能看、還不能操作），和蓋在畫面中間的 text 分開。
+ * 沒帶、不是字串、空白都當沒有；太長的截到 200 字
+ */
+export function statusNote(body) {
+  const note = body && typeof body.note === 'string' ? body.note.trim() : '';
+  return note ? note.slice(0, 200) : null;
+}
+
 /** 選單項目（電腦卡片的右鍵）：條件同檔案傳輸（devicefilesrules.transferMenu 的結果） */
 export function deskMenuItem(avail) {
   if (!avail) return null;

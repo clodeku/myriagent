@@ -9,6 +9,7 @@ internal enum DeskServiceMode
     Service,
     Run,
     SessionProbe,
+    SessionAgent,
     Install,
     Uninstall,
     Query,
@@ -17,7 +18,7 @@ internal enum DeskServiceMode
 
 /// <summary>解析過的命令列</summary>
 /// <param name="ServiceName">服務名稱（預設真的那一個；手動整合測試給暫時的名稱）</param>
-/// <param name="Pipe">run：前景模式的管道名稱</param>
+/// <param name="Pipe">run：前景模式的管道名稱；session-agent：幫手的管道名稱</param>
 internal sealed record DeskServiceCommand(DeskServiceMode Mode, string ServiceName, string? Pipe, string? Error)
 {
     public static DeskServiceCommand Bad(string error) => new(DeskServiceMode.Usage, DeskServiceRules.ServiceName, null, error);
@@ -30,7 +31,7 @@ internal sealed record DeskServiceCommand(DeskServiceMode Mode, string ServiceNa
 internal static class DeskServiceArgs
 {
     public const string Usage =
-        "MyriagentDesk service | install [--name <service>] | uninstall [--name <service>] | query [--name <service>] | run --pipe <name> | session-probe | version";
+        "MyriagentDesk service | install [--name <service>] | uninstall [--name <service>] | query [--name <service>] | run --pipe <name> | session-probe | session-agent --pipe <name> | version";
 
     public static DeskServiceCommand Parse(IReadOnlyList<string> args)
     {
@@ -41,6 +42,7 @@ internal static class DeskServiceArgs
             "service" => DeskServiceMode.Service,
             "run" => DeskServiceMode.Run,
             "session-probe" => DeskServiceMode.SessionProbe,
+            "session-agent" => DeskServiceMode.SessionAgent,
             "install" => DeskServiceMode.Install,
             "uninstall" => DeskServiceMode.Uninstall,
             "query" => DeskServiceMode.Query,
@@ -71,8 +73,11 @@ internal static class DeskServiceArgs
             return DeskServiceCommand.Bad($"不合法的服務名稱：{name}");
         if (mode == DeskServiceMode.Run && !IsPipeName(pipe))
             return DeskServiceCommand.Bad("run 要以 --pipe 指定管道名稱（英數字、-、_、.，最多 80 字）");
-        if (pipe is not null && mode != DeskServiceMode.Run)
-            return DeskServiceCommand.Bad("--pipe 只用在 run");
+        // 幫手的管道名稱是服務產生的固定格式（服務名稱-s工作階段-亂數）：別的名稱不收
+        if (mode == DeskServiceMode.SessionAgent && !DeskServiceRules.IsHelperPipeName(pipe))
+            return DeskServiceCommand.Bad("session-agent 要以 --pipe 指定幫手的管道名稱");
+        if (pipe is not null && mode is not (DeskServiceMode.Run or DeskServiceMode.SessionAgent))
+            return DeskServiceCommand.Bad("--pipe 只用在 run 與 session-agent");
         return new DeskServiceCommand(mode, name, pipe, null);
     }
 

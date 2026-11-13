@@ -171,7 +171,12 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         Hub.TimedToolAvailable = File.Exists(Path.Combine(AppContext.BaseDirectory, TimedHubRules.ToolFileName));
         remoteExec.StartPipe();
         // 遠端桌面（docs/sync-protocol.md 14.16）：被看時以 GDI 擷取、SendInput 注入，主螢幕上方顯示提示列（不出現在傳出去的畫面）
-        Hub.AttachRemoteDesk(Sync, () => new Myriagent.RemoteDesk.DxgiDeskScreen(), (text, disconnect) => RemoteDeskBanner.ShowFor(text, disconnect));
+        // 鎖定畫面、UAC 的確認畫面一般權限擷取不到：裝了鎖定畫面支援的服務時改向它的幫手要畫面（SecureDeskScreen；沒裝就和以前一樣只說明原因）
+        Hub.AttachRemoteDesk(Sync,
+            () => new Myriagent.RemoteDesk.SecureDeskScreen(new Myriagent.RemoteDesk.DxgiDeskScreen(),
+                new Myriagent.RemoteDesk.SecureDeskCapture(Myriagent.RemoteDesk.DeskServiceManager.IsInstalled,
+                    Myriagent.Remote.DeskServiceRules.PipeNameOf(Myriagent.Remote.DeskServiceRules.ServiceName))),
+            (text, disconnect) => RemoteDeskBanner.ShowFor(text, disconnect));
         Sync.AttachDesk(Hub.DeskEndpoint);
         // 遠端桌面的鎖定畫面支援（docs/web-protocol.md 的 deskService）：系統服務的安裝與狀態。功能還在開發：設定頁的那一區只給設了
         // MYRIAGENT_DESK_SERVICE=1 的與已經裝了服務的電腦看到（DeskServiceHubRules.Message 的 offered）

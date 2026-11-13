@@ -102,12 +102,27 @@ internal sealed class DeskServiceManager(string appDirectory) : IDeskServiceMana
         }
     }
 
+    /// <summary>這台有沒有裝服務（只看安裝紀錄在不在；很便宜，擷取迴圈也用它決定要不要試著連）</summary>
+    public static bool IsInstalled()
+    {
+        try
+        {
+            return File.Exists(InstallFilePath());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static string InstallFilePath()
+        => Path.Combine(DeskServiceRules.InstallRoot(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), DeskServiceRules.ServiceName), DeskServiceRules.InstallFile);
+
     private static DeskServiceInstall? ReadInstalled()
     {
         try
         {
-            var path = Path.Combine(DeskServiceRules.InstallRoot(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), DeskServiceRules.ServiceName),
-                DeskServiceRules.InstallFile);
+            var path = InstallFilePath();
             var info = new FileInfo(path);
             if (!info.Exists || info.Length > 64 * 1024)
                 return null;
@@ -166,6 +181,7 @@ internal sealed class DeskServiceClient : IDisposable
 
     private readonly NamedPipeClientStream pipe;
     private readonly MemoryStream pending = new();
+    private readonly byte[] chunk = new byte[4096];
 
     private DeskServiceClient(NamedPipeClientStream pipe) => this.pipe = pipe;
 
@@ -196,6 +212,39 @@ internal sealed class DeskServiceClient : IDisposable
         return DeskServiceRules.ParseProbe(reply) ?? throw Failure(reply);
     }
 
+    /// <summary>請服務在這個工作階段開（或沿用）擷取用的幫手；回幫手的管道名稱</summary>
+    public string Open()
+    {
+        var reply = Call(DeskServiceRules.OpenRequest());
+        return DeskServiceRules.ParseOpen(reply) ?? throw Failure(reply);
+    }
+
+    /// <summary>
+    /// 向幫手要一張畫面：ok 時畫面（BGRA，<c>OutW×OutH×4</c> 個位元組）寫進 <paramref name="bgra"/>；unchanged、failed 不動它。
+    /// 回覆對不上要求的大小丟 <see cref="IOException"/>（之後的資料對不齊了，這條連線不能再用）
+    /// </summary>
+    public DeskServiceCaptureHeader Capture(DeskServiceCaptureRequest request, byte[] bgra)
+    {
+        var bytes = DeskServiceRules.CaptureBytes(request.OutW, request.OutH);
+        if (bgra.Length < bytes)
+            throw new ArgumentException("緩衝太小", nameof(bgra));
+        using var timeout = new CancellationTokenSource(CallTimeout);
+        try
+        {
+            var reply = Call(DeskServiceRules.CaptureRequest(request), timeout.Token);
+            if (DeskServiceRules.ErrorOf(reply) is { } error)
+                throw new InvalidOperationException($"{error.Code}：{error.Message}");
+            var header = DeskServiceRules.ParseCaptureReply(reply, bytes) ?? throw new IOException("幫手的回覆和要求的大小對不上");
+            if (header.Bytes > 0)
+                ReadExact(bgra, header.Bytes, timeout.Token);
+            return header;
+        }
+        catch (OperationCanceledException)
+        {
+            throw new TimeoutException("幫手沒有在時間內回覆");
+        }
+    }
+
     private static InvalidOperationException Failure(string reply)
     {
         var error = DeskServiceRules.ErrorOf(reply);
@@ -208,34 +257,60 @@ internal sealed class DeskServiceClient : IDisposable
         using var timeout = new CancellationTokenSource(CallTimeout);
         try
         {
-            pipe.WriteAsync(Encoding.UTF8.GetBytes(request + "\n"), timeout.Token).AsTask().GetAwaiter().GetResult();
-            pipe.FlushAsync(timeout.Token).GetAwaiter().GetResult();
-            var chunk = new byte[4096];
-            while (true)
-            {
-                var buffer = pending.GetBuffer();
-                var newline = Array.IndexOf(buffer, (byte)'\n', 0, (int)pending.Length);
-                if (newline >= 0)
-                {
-                    var line = Encoding.UTF8.GetString(buffer, 0, newline).TrimEnd('\r');
-                    var rest = (int)pending.Length - newline - 1;
-                    Buffer.BlockCopy(buffer, newline + 1, buffer, 0, rest);
-                    pending.SetLength(rest);
-                    return line;
-                }
-
-                if (pending.Length > DeskServiceRules.MaxLineChars * 3)
-                    throw new IOException("服務的回覆太長");
-                var read = pipe.ReadAsync(chunk, timeout.Token).AsTask().GetAwaiter().GetResult();
-                if (read <= 0)
-                    throw new IOException("服務關掉了連線");
-                pending.Seek(0, SeekOrigin.End);
-                pending.Write(chunk, 0, read);
-            }
+            return Call(request, timeout.Token);
         }
         catch (OperationCanceledException)
         {
             throw new TimeoutException("服務沒有在時間內回覆");
+        }
+    }
+
+    private string Call(string request, CancellationToken ct)
+    {
+        pipe.WriteAsync(Encoding.UTF8.GetBytes(request + "\n"), ct).AsTask().GetAwaiter().GetResult();
+        pipe.FlushAsync(ct).GetAwaiter().GetResult();
+        while (true)
+        {
+            var buffer = pending.GetBuffer();
+            var newline = Array.IndexOf(buffer, (byte)'\n', 0, (int)pending.Length);
+            if (newline >= 0)
+            {
+                var line = Encoding.UTF8.GetString(buffer, 0, newline).TrimEnd('\r');
+                var rest = (int)pending.Length - newline - 1;
+                Buffer.BlockCopy(buffer, newline + 1, buffer, 0, rest);
+                pending.SetLength(rest);
+                return line;
+            }
+
+            if (pending.Length > DeskServiceRules.MaxLineChars * 3)
+                throw new IOException("服務的回覆太長");
+            var read = pipe.ReadAsync(chunk, ct).AsTask().GetAwaiter().GetResult();
+            if (read <= 0)
+                throw new IOException("服務關掉了連線");
+            pending.Seek(0, SeekOrigin.End);
+            pending.Write(chunk, 0, read);
+        }
+    }
+
+    /// <summary>讀正好 <paramref name="count"/> 個位元組（那一行後面緊接的資料）：先拿讀那一行時多讀進來的，不夠的再從管道讀</summary>
+    private void ReadExact(byte[] target, int count, CancellationToken ct)
+    {
+        var have = (int)Math.Min(pending.Length, count);
+        if (have > 0)
+        {
+            var buffer = pending.GetBuffer();
+            Buffer.BlockCopy(buffer, 0, target, 0, have);
+            var rest = (int)pending.Length - have;
+            Buffer.BlockCopy(buffer, have, buffer, 0, rest);
+            pending.SetLength(rest);
+        }
+
+        while (have < count)
+        {
+            var read = pipe.ReadAsync(target.AsMemory(have, count - have), ct).AsTask().GetAwaiter().GetResult();
+            if (read <= 0)
+                throw new IOException("服務關掉了連線");
+            have += read;
         }
     }
 

@@ -245,6 +245,7 @@ internal sealed class DeskSession : IDisposable
         var lastScreen = -1;
         var lastSentMs = 0L;
         string? statusShown = null;
+        string? noteShown = null;
         var statusSentMs = 0L;
         var needKey = false;
         DeskCursorState? lastCursor = null;
@@ -324,6 +325,7 @@ internal sealed class DeskSession : IDisposable
                         && (text != statusShown || NowMs() - statusSentMs >= DeskScreenRules.StatusRepeatMs))
                     {
                         statusShown = text;
+                        noteShown = null;
                         statusSentMs = NowMs();
                         SendSafely(new DeskPacket(SessionId, DeskRules.Status, 0, new JObject { ["text"] = text }));
                     }
@@ -344,11 +346,14 @@ internal sealed class DeskSession : IDisposable
                 }
 
                 retries = 0;
-                inputBlocked = false;
-                if (statusShown is not null)
+                // 有畫面但只能看（安全桌面的畫面是鎖定畫面支援的幫手給的，SecureDeskScreen）：不注入輸入，說明放在 note（畫面照常顯示）
+                var note = (screen as IDeskViewOnly)?.ViewOnlyNote;
+                inputBlocked = note is not null;
+                if (statusShown is not null || note != noteShown)
                 {
                     statusShown = null;
-                    SendSafely(new DeskPacket(SessionId, DeskRules.Status, 0, new JObject { ["text"] = JValue.CreateNull() }));
+                    noteShown = note;
+                    SendSafely(new DeskPacket(SessionId, DeskRules.Status, 0, DeskRules.StatusBody(null, note)));
                 }
 
                 IReadOnlyList<DeskTile> tiles = captured == DeskCapture.Unchanged

@@ -45,12 +45,26 @@ public sealed class DeskServicePipeTests
         }
     }
 
+    private sealed class FakeAgents : ISessionAgents
+    {
+        public Func<int, string> Answer { get; set; } = session => DeskServiceRules.HelperPipeName(DeskServiceRules.ServiceName, session, new string('a', 32));
+
+        public List<int> Sessions { get; } = new();
+
+        public string Open(int sessionId)
+        {
+            lock (Sessions)
+                Sessions.Add(sessionId);
+            return Answer(sessionId);
+        }
+    }
+
     private static string NewPipe() => "desk-test-" + Guid.NewGuid().ToString("N")[..12];
 
-    private static async Task<(DeskPipeServer Server, string Pipe)> StartAsync(IDeskClientIdentifier identifier, IDeskSessionProbe probe)
+    private static async Task<(DeskPipeServer Server, string Pipe)> StartAsync(IDeskClientIdentifier identifier, IDeskSessionProbe probe, ISessionAgents? agents = null)
     {
         var pipe = NewPipe();
-        var server = new DeskPipeServer(pipe, system: false, Version, identifier, probe);
+        var server = new DeskPipeServer(pipe, system: false, identifier, new ServicePipeHandler(Version, system: false, probe, agents ?? new FakeAgents()));
         server.Start();
         await server.Listening.WaitAsync(TimeSpan.FromSeconds(10));
         return (server, pipe);
@@ -66,7 +80,7 @@ public sealed class DeskServicePipeTests
 
         using var client = DeskServiceClient.Connect(pipe, TimeSpan.FromSeconds(5));
         var hello = client.Hello();
-        hello.Should().BeEquivalentTo(new DeskServiceHello(DeskServiceRules.ProtocolVersion, "0.2.950", "abc1234", false, 7, [DeskServiceRules.FeatureProbe]));
+        hello.Should().BeEquivalentTo(new DeskServiceHello(DeskServiceRules.ProtocolVersion, "0.2.950", "abc1234", false, 7, [DeskServiceRules.FeatureProbe, DeskServiceRules.FeatureCapture]));
         client.Probe().Should().BeEquivalentTo(new DeskServiceProbe(7, "Winlogon", true, 0, ["Default", "Winlogon"]));
         client.Probe().Session.Should().Be(7);
 
@@ -96,6 +110,7 @@ public sealed class DeskServicePipeTests
 
         using var client = DeskServiceClient.Connect(pipe, TimeSpan.FromSeconds(5));
         DeskServiceRules.ErrorOf(client.Call("not json"))!.Code.Should().Be(DeskServiceRules.CodeInvalid);
+        // capture 是幫手的指令，服務本體不認得
         DeskServiceRules.ErrorOf(client.Call(new JObject { ["op"] = "capture" }.ToString(Newtonsoft.Json.Formatting.None)))!.Code.Should().Be(DeskServiceRules.CodeUnsupported);
         // 要求裡自己帶工作階段編號沒有用：服務只看管道查出來的那個
         var probe = DeskServiceRules.ParseProbe(client.Call(new JObject { ["op"] = "probe", ["session"] = 99 }.ToString(Newtonsoft.Json.Formatting.None)))!;
@@ -116,6 +131,26 @@ public sealed class DeskServicePipeTests
         error.Message.Should().Contain("逾時");
         FluentActions.Invoking(() => client.Probe()).Should().Throw<InvalidOperationException>().WithMessage("*failed*");
         client.Hello().Proto.Should().Be(DeskServiceRules.ProtocolVersion);
+    }
+
+    [Fact]
+    public async Task open_開用戶端自己那個工作階段的幫手_回它的管道_開不了回failed()
+    {
+        var agents = new FakeAgents();
+        var (server, pipe) = await StartAsync(new FakeIdentifier(new DeskServiceClientInfo(3, Me, Me)), new FakeProbe(), agents);
+        using var dispose = server;
+
+        using var client = DeskServiceClient.Connect(pipe, TimeSpan.FromSeconds(5));
+        client.Open().Should().Be(DeskServiceRules.HelperPipeName(DeskServiceRules.ServiceName, 3, new string('a', 32)));
+        agents.Sessions.Should().Equal(3);
+
+        agents.Answer = _ => throw new TimeoutException("擷取幫手沒有在時間內準備好");
+        FluentActions.Invoking(() => client.Open()).Should().Throw<InvalidOperationException>().WithMessage("*failed*");
+
+        // 服務回了不合格的管道名稱（不該發生）：用戶端不拿去連
+        agents.Answer = _ => @"..\evil";
+        FluentActions.Invoking(() => client.Open()).Should().Throw<InvalidOperationException>();
+        client.Hello().Proto.Should().Be(DeskServiceRules.ProtocolVersion, "連線還在");
     }
 
     [Fact]
@@ -176,7 +211,8 @@ public sealed class DeskServicePipeTests
         // 和真的服務同一份存取控制清單（拒絕網路、LocalSystem 完全控制、互動登入的使用者只能讀寫）。測試程序不是 LocalSystem：
         // 第一個管道建得起來（新物件不檢查清單），之後的建不了——正好驗「一般使用者不能冒充服務再開一個」；連上的那一條照常服務
         var pipe = NewPipe();
-        using var server = new DeskPipeServer(pipe, system: true, Version, new FakeIdentifier(new DeskServiceClientInfo(1, Me, Me)), new FakeProbe());
+        using var server = new DeskPipeServer(pipe, system: true, new FakeIdentifier(new DeskServiceClientInfo(1, Me, Me)),
+            new ServicePipeHandler(Version, system: true, new FakeProbe(), new FakeAgents()));
         server.Start();
         await server.Listening.WaitAsync(TimeSpan.FromSeconds(10));
 

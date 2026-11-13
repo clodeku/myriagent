@@ -86,6 +86,18 @@ internal static class DeskRules
     /// <summary>被看的電腦送的種類</summary>
     public static bool IsTargetKind(string? kind) => kind is Frame or Status or End;
 
+    /// <summary>
+    /// <c>status</c> 的內容：<paramref name="text"/> 是擷取不到的說明（蓋在畫面中間；null＝收掉），<paramref name="note"/> 是有畫面時的附註
+    /// （例：安全桌面目前只能看；放在工具列旁，不擋畫面。沒有就不帶這個鍵——舊的網頁本來就不認得它）
+    /// </summary>
+    public static JObject StatusBody(string? text, string? note)
+    {
+        var body = new JObject { ["text"] = text is null ? JValue.CreateNull() : text };
+        if (!string.IsNullOrEmpty(note))
+            body["note"] = note;
+        return body;
+    }
+
     /// <summary>看的一方送的種類</summary>
     public static bool IsViewerKind(string? kind) => kind is Input or Ack or Config or Close;
 

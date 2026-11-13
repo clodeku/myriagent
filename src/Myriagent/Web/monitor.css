@@ -389,6 +389,7 @@
 }
 .rd-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
 .rd-info { font-size: 12px; opacity: .65; font-variant-numeric: tabular-nums; }
+.rd-note { font-size: 12px; color: var(--amber); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rd-spacer { flex: 1; }
 .rd-tool .ic { width: 15px; height: 15px; }
 .rd-close { background: #b42318; color: #fff; border-color: transparent; }

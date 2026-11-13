@@ -56,6 +56,7 @@ internal static class ServiceHost
 
         Report(StateStartPending, 0, waitHintMs: 10_000);
         DeskPipeServer? server = null;
+        SessionAgents? agents = null;
         try
         {
             var exe = Environment.ProcessPath ?? throw new InvalidOperationException("不知道自己的執行檔在哪裡");
@@ -63,7 +64,9 @@ internal static class ServiceHost
             ServiceLog.UseDirectory(Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(exe)!)!, "logs"));
             var identity = SelfVersion.Current;
             var system = ProcessIdentity.IsSystem();
-            server = new DeskPipeServer(DeskServiceRules.PipeNameOf(serviceName), system, identity, new NativeClientIdentifier(system), new HelperSessionProbe(system, exe));
+            agents = new SessionAgents(exe, serviceName);
+            server = new DeskPipeServer(DeskServiceRules.PipeNameOf(serviceName), system, new NativeClientIdentifier(system),
+                new ServicePipeHandler(identity, system, new HelperSessionProbe(system, exe), agents));
             server.Start();
             ServiceLog.Info($"服務 {serviceName} 啟動：{identity.Release}，系統權限 {system}");
             Report(StateRunning, AcceptStop | AcceptShutdown);
@@ -78,6 +81,8 @@ internal static class ServiceHost
         finally
         {
             server?.Dispose();
+            // 服務停了：還在的擷取幫手一起結束（它們是系統權限的程序，不留著）
+            agents?.Dispose();
             Report(StateStopped, 0);
         }
     }

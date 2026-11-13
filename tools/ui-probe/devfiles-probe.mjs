@@ -362,6 +362,18 @@ export async function runDeviceFiles(ctx, vp, m) {
   }), 3000);
   check('deskFrameDrawn', !!drawn && drawn.h === 270 && drawn.px[0] > 200 && drawn.px[2] > 200 && drawn.screenBtn && drawn.cursor && drawn.status, drawn);
   await shot(page, 'remotedesk-dark');
+  // 有畫面但只能看（那台的鎖定畫面由鎖定畫面支援的服務擷取）：status 的 note 顯示在工具列、不蓋畫面；下一則沒帶 note 的 status 就收掉
+  const noteText = '那台目前是鎖定畫面或系統管理員確認畫面：看得到，但還不能操作（開發中）';
+  host.send({ type: 'desk', sessionId: open.requestId, kind: 'status', seq: 0, body: { text: null, note: noteText } });
+  const noted = await until(() => page.evaluate(() => {
+    const n = document.querySelector('.rd-note');
+    const st = document.querySelector('.rd-status');
+    return n && !n.hidden && n.textContent ? { text: n.textContent, statusHidden: st.hidden, inBar: !!n.closest('.rd-bar'), w: n.getBoundingClientRect().width } : null;
+  }), 2000);
+  await shot(page, 'remotedesk-viewonly');
+  host.send({ type: 'desk', sessionId: open.requestId, kind: 'status', seq: 0, body: { text: null } });
+  const noteGone = await until(() => page.evaluate(() => document.querySelector('.rd-note').hidden), 2000);
+  check('deskViewOnlyNote', !!noted && noted.text === noteText && noted.statusHidden && noted.inBar && noted.w > 40 && !!noteGone, { noted, noteGone });
   // 點畫面正中間、按 A：確認併在輸入裡（每 66 ms 最多一包）
   const box = await page.locator('.rd-canvas').boundingBox();
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);

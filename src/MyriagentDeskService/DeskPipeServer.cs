@@ -3,8 +3,6 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using Myriagent.Remote;
-using Myriagent.Update;
-using Newtonsoft.Json.Linq;
 
 namespace MyriagentDesk;
 
@@ -15,15 +13,25 @@ internal interface IDeskClientIdentifier
     DeskServiceClientInfo Identify(NamedPipeServerStream pipe);
 }
 
-/// <summary>看一個工作階段目前的輸入桌面（真的在那個工作階段開幫手；測試以假的換掉）</summary>
-internal interface IDeskSessionProbe
+/// <summary>
+/// 一個要求的回覆：一行 JSON，後面可以緊接一段二進位資料（擷取的畫面）。<paramref name="Done"/> 在資料寫完（或寫不出去）之後呼叫一次——
+/// 處理者把共用的緩衝借給這次回覆，寫完才能再用
+/// </summary>
+internal readonly record struct DeskPipeReply(string Line, byte[]? Payload = null, int PayloadLength = 0, Action? Done = null);
+
+/// <summary>管道上的要求由誰處理（服務本體與使用者工作階段裡的幫手各一個）</summary>
+internal interface IDeskPipeHandler
 {
-    DeskServiceProbe Probe(int sessionId);
+    /// <summary>收不收這個用戶端；收回 null，不收回原因（每條連線問一次）</summary>
+    string? Admit(DeskServiceClientInfo client);
+
+    /// <summary>處理一行要求（已經確認收這個用戶端）</summary>
+    DeskPipeReply Handle(string line, DeskServiceClientInfo client);
 }
 
 /// <summary>
-/// 服務的管道（<see cref="DeskServiceRules"/> 的協定）。每條連線先查出用戶端是誰（<see cref="DeskServiceRules.Admit"/>），
-/// 不收的每個要求都回 denied；收的才處理。以 LocalSystem 執行時管道開給互動登入的使用者、明確拒絕從網路連進來的
+/// 服務與幫手共用的管道伺服器（<see cref="DeskServiceRules"/> 的協定）。每條連線先查出用戶端是誰、問處理者收不收，
+/// 不收的回 denied 就斷線；收的才處理。以 LocalSystem 執行時管道開給互動登入的使用者、明確拒絕從網路連進來的
 /// （具名管道經 SMB 連得到）；前景模式只開給執行它的使用者
 /// </summary>
 internal sealed class DeskPipeServer : IDisposable
@@ -34,29 +42,42 @@ internal sealed class DeskPipeServer : IDisposable
     /// <summary>一條連線多久沒有要求就關掉（不讓不講話的連線佔著位置）</summary>
     public static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(2);
 
+    /// <summary>
+    /// 一個回覆最多寫多久：用戶端要了畫面卻不讀，管道的緩衝滿了寫入就停住——處理者借出去的緩衝要等這個回覆寫完才收得回來，
+    /// 不設上限的話一條不讀的連線會讓其他連線都要不到畫面。超過就關掉那條連線
+    /// </summary>
+    public static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(30);
+
     private readonly string pipeName;
     private readonly bool system;
-    private readonly ReleaseIdentity identity;
     private readonly IDeskClientIdentifier identifier;
-    private readonly IDeskSessionProbe probe;
+    private readonly IDeskPipeHandler handler;
     private readonly CancellationTokenSource stop = new();
+    private readonly TaskCompletionSource listening = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task? loop;
+    private int connections;
+    private long lastActivityTick = Environment.TickCount64;
 
-    public DeskPipeServer(string pipeName, bool system, ReleaseIdentity identity, IDeskClientIdentifier identifier, IDeskSessionProbe probe)
+    public DeskPipeServer(string pipeName, bool system, IDeskClientIdentifier identifier, IDeskPipeHandler handler)
     {
         this.pipeName = pipeName;
         this.system = system;
-        this.identity = identity;
         this.identifier = identifier;
-        this.probe = probe;
+        this.handler = handler;
     }
 
-    /// <summary>第一個管道已經建好、可以連了（測試等它）</summary>
+    /// <summary>第一個管道已經建好、可以連了</summary>
     public Task Listening => listening.Task;
 
-    private readonly TaskCompletionSource listening = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>現在連著幾條</summary>
+    public int ActiveConnections => Volatile.Read(ref connections);
+
+    /// <summary>最近一次有連線連上、斷開或送要求的時間（<see cref="Environment.TickCount64"/>）：幫手拿它決定閒置多久了</summary>
+    public long LastActivityTick => Volatile.Read(ref lastActivityTick);
 
     public void Start() => loop = Task.Run(AcceptLoopAsync);
+
+    private void Touch() => Volatile.Write(ref lastActivityTick, Environment.TickCount64);
 
     private async Task AcceptLoopAsync()
     {
@@ -129,6 +150,8 @@ internal sealed class DeskPipeServer : IDisposable
 
     private async Task ServeAsync(NamedPipeServerStream pipe)
     {
+        Interlocked.Increment(ref connections);
+        Touch();
         using (pipe)
         {
             try
@@ -143,19 +166,32 @@ internal sealed class DeskPipeServer : IDisposable
                     var line = await reader.ReadLineAsync(idle.Token).ConfigureAwait(false);
                     if (line is null)
                         break;
+                    Touch();
                     if (client is null)
                     {
                         client = identifier.Identify(pipe);
-                        denied = DeskServiceRules.Admit(client, system);
+                        denied = handler.Admit(client);
                         if (denied is not null)
                             ServiceLog.Warn($"不收的用戶端（工作階段 {client.SessionId}、使用者 {client.UserSid ?? "?"}）：{denied}");
                     }
 
                     var reply = denied is not null
-                        ? DeskServiceRules.ErrorReply(DeskServiceRules.CodeDenied, denied)
-                        : Handle(line, client);
-                    await pipe.WriteAsync(Encoding.UTF8.GetBytes(reply + "\n"), stop.Token).ConfigureAwait(false);
-                    await pipe.FlushAsync(stop.Token).ConfigureAwait(false);
+                        ? new DeskPipeReply(DeskServiceRules.ErrorReply(DeskServiceRules.CodeDenied, denied))
+                        : handler.Handle(line, client);
+                    try
+                    {
+                        using var writing = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
+                        writing.CancelAfter(WriteTimeout);
+                        await pipe.WriteAsync(Encoding.UTF8.GetBytes(reply.Line + "\n"), writing.Token).ConfigureAwait(false);
+                        if (reply.Payload is { } payload && reply.PayloadLength > 0)
+                            await pipe.WriteAsync(payload.AsMemory(0, reply.PayloadLength), writing.Token).ConfigureAwait(false);
+                        await pipe.FlushAsync(writing.Token).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        reply.Done?.Invoke();
+                    }
+
                     if (denied is not null)
                         break;
                 }
@@ -168,32 +204,11 @@ internal sealed class DeskPipeServer : IDisposable
             {
                 ServiceLog.Error("處理管道連線時發生錯誤", ex);
             }
-        }
-    }
-
-    /// <summary>處理一行要求（已經確認收這個用戶端）</summary>
-    internal string Handle(string line, DeskServiceClientInfo client)
-    {
-        if (!DeskServiceRules.TryParseRequest(line, out var op, out JObject? _))
-            return DeskServiceRules.ErrorReply(DeskServiceRules.CodeInvalid, "要求不是 JSON 物件或沒有 op");
-        switch (op)
-        {
-            case DeskServiceRules.OpHello:
-                return DeskServiceRules.HelloReply(new DeskServiceHello(DeskServiceRules.ProtocolVersion, identity.Version.ToString(), identity.Build,
-                    system, client.SessionId, [DeskServiceRules.FeatureProbe]));
-            case DeskServiceRules.OpProbe:
-                try
-                {
-                    // 只看用戶端自己的工作階段：要求裡不收工作階段編號
-                    return DeskServiceRules.ProbeReply(probe.Probe(client.SessionId));
-                }
-                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException or TimeoutException)
-                {
-                    ServiceLog.Warn($"看不到工作階段 {client.SessionId} 的輸入桌面：{ex.Message}");
-                    return DeskServiceRules.ErrorReply(DeskServiceRules.CodeFailed, ex.Message);
-                }
-            default:
-                return DeskServiceRules.ErrorReply(DeskServiceRules.CodeUnsupported, $"這一版的服務不認得 {op}");
+            finally
+            {
+                Interlocked.Decrement(ref connections);
+                Touch();
+            }
         }
     }
 
