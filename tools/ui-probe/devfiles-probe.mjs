@@ -231,6 +231,17 @@ export async function runDeviceFiles(ctx, vp, m) {
   await shot(page, 'devfiles-folders-dark');
   fs.rmSync(tmp, { recursive: true, force: true });
 
+  // 一次上傳很多檔（2026-11-14 使用者回報：手機上傳輸清單的列疊在一起）：列不能被壓扁，清單要能捲動
+  await page.setInputFiles('.df-dlg input[type=file]:not([webkitdirectory])',
+    Array.from({ length: 24 }, (_, i) => ({ name: 'IMG_' + (7300 + i) + '.jpeg', mimeType: 'image/jpeg', buffer: Buffer.alloc(64) })));
+  const manyRows = await until(() => page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('.df-dlg .df-xfers > .df-x'));
+    const list = document.querySelector('.df-dlg .df-xfers');
+    return rows.length >= 30 ? { rows: rows.length, minH: Math.min(...rows.map((r) => r.getBoundingClientRect().height)), scroll: list.scrollHeight, client: list.clientHeight } : null;
+  }), 4000);
+  check('devfilesManyRowsNotSquashed', !!manyRows && manyRows.minH >= 24 && manyRows.scroll > manyRows.client + 100, manyRows);
+  await shot(page, 'devfiles-many-dark');
+
   // 網路芳鄰：「網路」找不到電腦時也切到那一層（路徑列是「網路」、清單是空的、錯誤寫在下方），不能留在上一層
   await page.fill('.df-dlg .df-path', '\\\\');
   await page.press('.df-dlg .df-path', 'Enter');

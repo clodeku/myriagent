@@ -11,8 +11,11 @@ import { uploadFile, fetchTransfer } from './hubapi.js';
 import { uploadResult, peerOf } from './liverules.js';
 import * as R from './devicefilesrules.js';
 import { openRemoteDesk } from './remotedesk.js';
+import { isHandheld } from './voicemsgrules.js';
 
 const FOLDER_KEY = 'myriagent.app.xfer.folder.v1';
+const coarseMq = typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: coarse)') : null;
+const handheld = () => isHandheld({ coarsePointer: !!(coarseMq && coarseMq.matches), userAgent: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints });
 
 /** deviceBrowse 的 requestId → 對話框的工作階段 */
 const browses = new Map();
@@ -109,18 +112,22 @@ function buildDialog(s) {
   s.xferWrap = h('div', { class: 'df-xfer-wrap' }, s.xferHead, s.xfers);
   s.fileInput = h('input', { type: 'file', multiple: true, hidden: true });
   s.fileInput.addEventListener('change', () => {
+    preparing(s, false);
     const files = Array.from(s.fileInput.files || []);
     s.fileInput.value = '';
     if (files.length) queueUploads(s, files.map((file) => ({ file, rel: '' })));
   });
+  s.fileInput.addEventListener('cancel', () => preparing(s, false));
   // 整個資料夾的上傳（2026-11-09）：選一個資料夾，連子資料夾一起
   s.folderInput = h('input', { type: 'file', multiple: true, hidden: true });
   s.folderInput.setAttribute('webkitdirectory', '');
   s.folderInput.addEventListener('change', () => {
+    preparing(s, false);
     const files = Array.from(s.folderInput.files || []);
     s.folderInput.value = '';
     if (files.length) queueUploads(s, files.map((file) => ({ file, rel: file.webkitRelativePath || file.name })));
   });
+  s.folderInput.addEventListener('cancel', () => preparing(s, false));
   s.list.addEventListener('dragover', (e) => {
     if (!hasFiles(e) || !R.canUploadHere(s.path)) return;
     e.preventDefault();
@@ -197,7 +204,18 @@ function pickUploads(folder = false) {
   const s = session;
   if (!s) return;
   if (!R.canUploadHere(s.path)) { toast('先開到要放檔案的資料夾（磁碟與常用資料夾、網路、電腦這幾層不能放檔案）', 'info'); return; }
+  // 手機（2026-11-14 使用者回報：一次上傳很多大檔時要等很久才開始）：從相簿選的相片、影片，系統要先轉檔或複製完才把檔案交給網頁
+  // （change 之前網頁什麼都拿不到），這段期間在狀態列說明，免得以為卡住
+  if (handheld()) preparing(s, true);
   (folder ? s.folderInput : s.fileInput).click();
+}
+
+/** 手機正在準備選的檔案：狀態列顯示說明；交出檔案、取消或 10 分鐘後拿掉（取消時有的系統不發 cancel） */
+function preparing(s, on) {
+  clearTimeout(s.preparingTimer);
+  s.preparing = on;
+  if (on) s.preparingTimer = setTimeout(() => preparing(s, false), 10 * 60 * 1000);
+  renderStatus(s);
 }
 
 /**
@@ -344,6 +362,7 @@ function renderStatus(s) {
   s.status.textContent = '';
   if (s.loading) s.status.append(spinner('df-spin'), h('span', { text: '讀取中…' }));
   else if (s.error) s.status.append(icon('warning'), h('span', { class: 'df-err', text: s.error }));
+  else if (s.preparing) s.status.append(spinner('df-spin'), h('span', { text: '手機正在準備選的檔案（相片、影片要先轉檔或複製），檔案大、數量多時要等一下才開始上傳' }));
   else if (!s.entries.length) s.status.append(h('span', { text: s.path ? '這個資料夾是空的' : '沒有可以瀏覽的磁碟' }));
   else if (s.truncated) s.status.append(h('span', { text: '項目太多，只列出前面的一部分' }));
   setHidden(s.status, !s.status.childNodes.length);
