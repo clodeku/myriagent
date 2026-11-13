@@ -8,6 +8,7 @@ import { post, isHub, peerId } from './store.js';
 import { openMenu, toast } from './ui.js';
 import { track } from './cmdtrack.js';
 import * as R from './remotedeskrules.js';
+import { sealSupported, createViewerSeal } from './deskseal.js';
 
 /** 目前的工作階段（同時只開一個） */
 let s = null;
@@ -31,23 +32,54 @@ export function openRemoteDesk(deviceId, name) {
     // 放大縮小（2026-11-10）：view 是 transform 的倍數與位置；fit 是符合框的大小；sentMaxWidth 是要求那台傳的寬度（那台預設 1920）
     view: { zoom: 1, left: 0, top: 0 }, fit: { width: 0, height: 0 }, box: { w: 0, h: 0 }, sentMaxWidth: 1920, sharpTimer: 0,
     pointers: new Map(), edge: null, edgeRaf: 0, lastMouse: null,
+    // 輸入的端對端加密（deskseal.js）：state 見 remotedeskrules.sealAction；chain 讓加密後的封包照順序送
+    seal: { state: 'off', viewer: null, sealer: null, chain: Promise.resolve() },
   };
   build(s);
   setStatus(R.waitingText(s.name, 0), true);
-  const cid = post({ cmd: 'deskOpen', deviceId, requestId: id });
-  if (cid === null) { end('沒有送出：目前沒有連上伺服器'); return; }
   const mine = s;
-  track(cid, {
-    onSettle: (state, code) => {
-      if (s !== mine) return;
-      if (state !== 'done') { end(openFailText(code)); return; }
-      mine.opened = true;
-      mine.openedAt = performance.now();
-      // 手機：要求小一點的傳送寬度（省頻寬、畫面更快）；放大之後再要求清楚一點的
-      requestSharpness(mine);
-    },
-  });
+  const start = (viewer) => {
+    if (s !== mine || mine.closed) return;
+    mine.seal.viewer = viewer;
+    mine.seal.state = viewer ? 'wait' : 'off';
+    const cmd = { cmd: 'deskOpen', deviceId, requestId: id };
+    if (viewer) cmd.viewerKey = viewer.publicKey;
+    const cid = post(cmd);
+    if (cid === null) { end('沒有送出：目前沒有連上伺服器'); return; }
+    track(cid, {
+      onSettle: (state, code) => {
+        if (s !== mine) return;
+        if (state !== 'done') { end(openFailText(code)); return; }
+        mine.opened = true;
+        mine.openedAt = performance.now();
+        // 手機：要求小一點的傳送寬度（省頻寬、畫面更快）；放大之後再要求清楚一點的
+        requestSharpness(mine);
+      },
+    });
+  };
+  // 先產生這個工作階段的金鑰（幾毫秒），公鑰跟著 deskOpen 送；這個環境不能加密（不是安全的來源）就照舊
+  if (sealSupported()) createViewerSeal().then(start, () => start(null));
+  else start(null);
   mine.stallTimer = setInterval(() => checkStall(mine), 1000);
+}
+
+/**
+ * 那台的第一個封包決定這次的輸入要不要加密：是帶 kx 的 status 就算金鑰、之後的事件都加密；不是（舊版的那台）就照舊送明文。
+ * 決定之前按的鍵留在批次裡（remotedeskrules.sealAction 的 hold），決定之後才送
+ */
+function settleSeal(mine, m) {
+  const seal = mine.seal;
+  if (seal.state !== 'wait') return;
+  const pub = R.kxPublic(m.kind, m.body);
+  if (!pub) { seal.state = 'off'; scheduleSend(mine); return; }
+  seal.state = 'deriving';
+  seal.viewer.accept(mine.id, pub).then((sealer) => sealer, () => null).then((sealer) => {
+    if (s !== mine || mine.closed) return;
+    seal.sealer = sealer;
+    seal.state = sealer ? 'on' : 'off';
+    setHidden(mine.sealEl, !sealer);
+    scheduleSend(mine);
+  });
 }
 
 function openFailText(code) {
@@ -63,6 +95,7 @@ function openFailText(code) {
 /** 宿主或伺服器送來的 desk 訊息 */
 export function onDesk(m) {
   if (!s || !m || m.sessionId !== s.id) return;
+  settleSeal(s, m);
   switch (m.kind) {
     case 'frame': {
       s.bytes += JSON.stringify(m.body || {}).length;
@@ -71,6 +104,8 @@ export function onDesk(m) {
       break;
     }
     case 'status':
+      // 只帶金鑰的那一則不動畫面上的說明（「連線到…」留到第一張畫面）
+      if (R.kxPublic(m.kind, m.body)) break;
       setStatus(m.body && typeof m.body.text === 'string' ? m.body.text : null);
       setNote(R.statusNote(m.body));
       break;
@@ -94,6 +129,9 @@ function build(s) {
   // 有畫面時那台給的附註（例：鎖定畫面目前只能看）：放在工具列，不擋畫面
   s.noteEl = h('span', { class: 'rd-note', role: 'status' });
   setHidden(s.noteEl, true);
+  // 輸入端對端加密中的標示（那台回了公鑰、金鑰算好之後才顯示）
+  s.sealEl = h('span', { class: 'rd-seal', title: '鍵盤與滑鼠的輸入在這裡加密、到那台才解開，伺服器看不到內容' }, icon('lock'), h('span', { class: 'rd-tool-label', text: '輸入已加密' }));
+  setHidden(s.sealEl, true);
   s.screenBtn = toolBtn('desktop', '螢幕', () => pickScreen(s));
   setHidden(s.screenBtn, true);
   s.qualityBtn = toolBtn('gauge', '畫質：自動', () => pickQuality(s));
@@ -109,7 +147,7 @@ function build(s) {
   const closeBtn = h('button', { type: 'button', class: 'btn rd-close' }, icon('x'), h('span', { text: '中斷' }));
   closeBtn.addEventListener('click', () => end(null));
   s.bar = h('div', { class: 'rd-bar' },
-    h('span', { class: 'rd-title', text: '遠端桌面：' + s.name }), s.info, s.noteEl,
+    h('span', { class: 'rd-title', text: '遠端桌面：' + s.name }), s.info, s.sealEl, s.noteEl,
     h('span', { class: 'rd-spacer' }), h('span', { class: 'rd-zoomgroup' }, zoomOutBtn, s.zoomLabel, zoomInBtn),
     s.screenBtn, s.qualityBtn, keysBtn, typeBtn, fullBtn, closeBtn);
   s.root = h('div', { class: 'rd-wrap', role: 'dialog', 'aria-modal': 'true', 'aria-label': '遠端桌面：' + s.name }, s.bar, s.stage, s.keyInput);
@@ -400,10 +438,31 @@ function scheduleSend(s) {
 }
 
 function flush(s) {
+  if (s.closed) return;
+  const seal = s.seal;
+  const action = R.sealAction(seal.state, s.batch.size > 0);
+  if (action === 'hold') {
+    // 還沒決定要不要加密：事件先留著（確認照送），決定之後 settleSeal 會再排一次
+    const ack = s.batch.takeAck();
+    if (ack !== null) { s.lastSendAt = performance.now(); sendPacket('input', { ack }); }
+    return;
+  }
   const body = s.batch.take();
-  if (!body || s.closed) return;
+  if (!body) return;
   s.lastSendAt = performance.now();
-  sendPacket('input', body);
+  if (action === 'seal' && body.events) {
+    // 加密是非同步的：一包接一包，送出去的順序和編號一致
+    const mine = s;
+    const sealer = seal.sealer;
+    seal.chain = seal.chain.then(() => sealer.seal(body.events)).then((e2e) => {
+      if (s !== mine || mine.closed) return;
+      const sealedBody = { e2e };
+      if (body.ack !== undefined) sealedBody.ack = body.ack;
+      sendPacket('input', sealedBody);
+    }, () => { /* 加密失敗：這一包不送（不退回明文） */ });
+  } else {
+    sendPacket('input', body);
+  }
   if (s.batch.size) scheduleSend(s);
 }
 

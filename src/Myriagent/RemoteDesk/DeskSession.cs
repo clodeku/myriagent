@@ -39,7 +39,13 @@ internal sealed class DeskSession : IDisposable
     /// <summary>鎖定或安全桌面：輸入送不進去（鎖定時還會白白叫醒那台的螢幕），先不注入</summary>
     private volatile bool inputBlocked;
 
-    public DeskSession(string sessionId, string viewerLabel, IDeskScreen screen, Action<DeskPacket> send, Action<DeskSession, string> ended, TimeProvider? time = null)
+    /// <summary>看的一方給了公鑰時這個工作階段的輸入解密（沒有就是 null：收明文）</summary>
+    private readonly DeskInputCipher? cipher;
+
+    private bool sealedInputWarned;
+
+    public DeskSession(string sessionId, string viewerLabel, IDeskScreen screen, Action<DeskPacket> send, Action<DeskSession, string> ended, TimeProvider? time = null,
+        DeskInputCipher? cipher = null)
     {
         SessionId = sessionId;
         ViewerLabel = viewerLabel;
@@ -47,7 +53,11 @@ internal sealed class DeskSession : IDisposable
         this.send = send;
         this.ended = ended;
         this.time = time ?? TimeProvider.System;
+        this.cipher = cipher;
     }
+
+    /// <summary>這個工作階段的輸入是端對端加密的（看的一方給了合格的公鑰）</summary>
+    public bool InputSealed => cipher is not null;
 
     public string SessionId { get; }
 
@@ -77,6 +87,9 @@ internal sealed class DeskSession : IDisposable
     {
         lock (gate)
             lastAckMs = NowMs();
+        // 輸入的加密：自己的公鑰一定是第一個封包（看的一方看第一個封包決定之後的輸入要不要加密）
+        if (cipher is not null)
+            SendSafely(new DeskPacket(SessionId, DeskRules.Status, 0, DeskRules.KeyExchangeBody(cipher.PublicKey)));
         thread = new Thread(Loop) { IsBackground = true, Name = "遠端桌面 " + SessionId };
         thread.Start();
     }
@@ -90,8 +103,31 @@ internal sealed class DeskSession : IDisposable
             case DeskRules.Input:
                 if (DeskRules.AckOf(packet.Body) is { } inputAck)
                     Ack(inputAck);
-                if (DeskRules.ParseInput(packet.Body) is { Count: > 0 } events && !Stopped)
+                if (Stopped)
+                    break;
+                if (DeskSealRules.SealedOf(packet.Body, out _) is { } sealedInput)
+                {
+                    // 加密的輸入：只有這個工作階段的金鑰解得開；解不開（沒有金鑰、被動過、重送）就丟掉
+                    if (cipher?.Open(sealedInput.N, sealedInput.Ct) is { } opened)
+                    {
+                        if (opened.Count > 0)
+                            InjectSafely(opened);
+                    }
+                    else if (!sealedInputWarned)
+                    {
+                        sealedInputWarned = true;
+                        Log.Warn($"遠端桌面 {SessionId} 收到解不開的輸入（第 {sealedInput.N} 包），已丟掉");
+                    }
+                }
+                else if (cipher is { Established: true })
+                {
+                    // 看的一方已經在加密了：之後明文的事件一律不收（不讓中途被換回明文）
+                }
+                else if (DeskRules.ParseInput(packet.Body) is { Count: > 0 } events)
+                {
                     InjectSafely(events);
+                }
+
                 break;
             case DeskRules.Ack:
                 if (DeskRules.AckOf(packet.Body) is { } ack)

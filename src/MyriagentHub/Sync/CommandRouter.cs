@@ -287,6 +287,13 @@ internal sealed partial class CommandRouter(
 
             if (deskRelays.CheckOpen(RemoteCommandShapeRules.IsString(mapped["requestId"], out var deskSession) ? deskSession : null, target) is { } deskProblem)
                 return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Conflict, CmdError: false, deskProblem), cancellationToken);
+            // 輸入的端對端加密（2026-11-13）：看的一方的公鑰只送給認得它的電腦；舊版的桌面不認得這一欄（閘門會回 invalid），
+            // 拿掉之後照舊以明文操作——看的一方收到的第一個封包沒有 kx，就知道這次沒有加密
+            if (mapped[DeskSealRules.ViewerKeyField] is not null && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.DeskE2e1))
+            {
+                mapped = (JObject)mapped.DeepClone();
+                mapped.Remove(DeskSealRules.ViewerKeyField);
+            }
         }
 
         // 遠端執行指令（14.11）：目標要能送輸出、發起的這條連線要能收（兩邊都要協商出 exec1）

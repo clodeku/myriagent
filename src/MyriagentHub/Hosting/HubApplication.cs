@@ -119,6 +119,8 @@ internal static class HubApplication
         builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Xfer2);
         // 遠端桌面（sync-protocol 14.16）：deskOpen、DeskUp／DeskDown（Sync/DeskRelays.cs）
         builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Desk1);
+        // 遠端桌面輸入的端對端加密（14.16）：伺服器只轉密文；deskOpen 的 viewerKey 只送給協商出它的電腦（CommandRouter 替舊版拿掉）
+        builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.DeskE2e1);
         // 第 5 階段（sync-protocol 第 16 節）：log1、hand1 排在 tok1 之後，各自依開關登記（預設都關）
         builder.Services.AddHubLogs(options);
         builder.Services.AddHubHandoff(options);

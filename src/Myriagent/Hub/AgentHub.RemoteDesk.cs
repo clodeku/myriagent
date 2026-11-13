@@ -26,6 +26,9 @@ internal sealed partial class AgentHub
 
     private IDeskIndicator? deskIndicator;
 
+    /// <summary>被看的工作階段的輸入解密（看的一方給了公鑰才有；工作階段結束時清掉金鑰）</summary>
+    private DeskInputCipher? deskCipher;
+
     private System.Threading.Timer? deskPolicyTimer;
 
     /// <summary>
@@ -179,12 +182,14 @@ internal sealed partial class AgentHub
     };
 
     /// <summary>開始被看（處理者確認過之後；UI 執行緒）</summary>
-    private void StartDeskTarget(string sessionId, string viewerLabel)
+    private void StartDeskTarget(string sessionId, string viewerLabel, string? viewerKey)
     {
         var transport = deskTransport!;
         deskScreen = deskScreenFactory!();
+        // 輸入的端對端加密（DeskSealRules）：看的一方給了公鑰就用；沒給（舊的網頁）照舊收明文
+        deskCipher = DeskInputCipher.TryCreate(sessionId, viewerKey);
         var session = new DeskSession(sessionId, viewerLabel, deskScreen, transport.SendDeskUp,
-            (s, reason) => host.BeginInvoke(() => OnDeskTargetEnded(s, reason)));
+            (s, reason) => host.BeginInvoke(() => OnDeskTargetEnded(s, reason)), cipher: deskCipher);
         deskSession = session;
         deskAllowedShared = true;
         deskSessionShared = session;
@@ -206,7 +211,7 @@ internal sealed partial class AgentHub
             if (deskSession is { Stopped: false } live && !deskAllowedShared)
                 live.Stop("policy", "那台不再允許遠端操作，遠端桌面已經結束", notifyViewer: true);
         }), null, 2000, 2000);
-        Log.Info($"遠端桌面 {sessionId} 開始：{who}");
+        Log.Info($"遠端桌面 {sessionId} 開始：{who}（輸入{(deskCipher is null ? "沒有加密" : "端對端加密")}）");
         PostToAll(PeerFileRules.Toast(who + " 開始遠端操控這台電腦（右上角的提示列可以中斷）", "info"));
         session.Start();
     }
@@ -238,6 +243,8 @@ internal sealed partial class AgentHub
         }
 
         deskIndicator = null;
+        deskCipher?.Dispose();
+        deskCipher = null;
         // 畫面由工作階段釋放：擷取執行緒可能還在擷取的途中，等它結束才能釋放（DeskSession.ReleaseScreen）
         if (ended is not null)
             ended.ReleaseScreen();
@@ -283,7 +290,7 @@ internal sealed partial class AgentHub
                 return true;
             }
 
-            hub.StartDeskTarget(sessionId, context.IssuerLabel);
+            hub.StartDeskTarget(sessionId, context.IssuerLabel, command.Value<string>(DeskSealRules.ViewerKeyField));
             context.Complete();
             return true;
         }

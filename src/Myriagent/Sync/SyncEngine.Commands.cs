@@ -128,7 +128,11 @@ internal sealed partial class SyncEngine : ISyncEngineCommands
             into.Add(DeviceFeatureRules.Xfer2);
             // 遠端桌面（14.16）：宿主接得住才宣告（SyncEngine.Desk.cs）
             if (DeskPort is not null)
+            {
                 into.Add(DeviceFeatureRules.Desk1);
+                // 遠端桌面輸入的端對端加密（DeskSealRules）：收帶 viewerKey 的 deskOpen
+                into.Add(DeviceFeatureRules.DeskE2e1);
+            }
         }
         try
         {

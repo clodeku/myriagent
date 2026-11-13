@@ -339,7 +339,8 @@ internal static class RemoteCommandCatalog
         yield return ForDevice(DeviceTree, 2, [Device(required: true), RequestId(), Text("path")], ["fileTree", "toast"]);
         yield return ForDevice(DeviceFetchMany, 2, [Device(required: true), RequestId(), Text("root"), Text("pathsJson", 60_000)], ["fileRefs", "toast"]);
         // 遠端桌面（2026-11-09）：看與操作那台的畫面（同遠端執行指令，要「可以操作」）；requestId 是工作階段 id
-        yield return ForDevice(DeskOpen, 2, [Device(required: true), RequestId()]);
+        // viewerKey（2026-11-13，選用）：看的一方這個工作階段的公鑰，輸入端對端加密用（DeskSealRules；目標沒有 deske2e1 時伺服器拿掉）
+        yield return ForDevice(DeskOpen, 2, [Device(required: true), RequestId(), Text(DeskSealRules.ViewerKeyField, 128, required: false, nullable: true)]);
 
         // 排程頁（S3，docs/sync-protocol.md 14.12）：其他電腦或手機對那台的 Windows 排程立即執行、停止、啟用、停用（只有這四個：
         // 不再列出、納入管理是那台自己的選擇，遠端不寫那台的持久設定），交給代理＝在那台的管理對話送出說明（沒有就開一個）

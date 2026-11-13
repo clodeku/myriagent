@@ -123,6 +123,12 @@ export function createBatch() {
     },
     get size() { return events.length; },
     get full() { return events.length >= MAX_EVENTS; },
+    /** 只拿確認（事件留在批次裡）：還不能送事件的時候確認照送；沒有回 null */
+    takeAck() {
+      const a = ack;
+      ack = null;
+      return a;
+    },
     take() {
       if (!events.length && ack === null) return null;
       const body = {};
@@ -236,6 +242,26 @@ export function fpsOf(times, now) {
 export function statusNote(body) {
   const note = body && typeof body.note === 'string' ? body.note.trim() : '';
   return note ? note.slice(0, 200) : null;
+}
+
+/**
+ * 輸入的端對端加密（deskseal.js）：被看的那台第一個封包 status 的 kx 裡的公鑰；不是 status、沒有 kx、版本不認得、不是字串都回 null。
+ * 看的一方只看第一個封包：有就加密之後的輸入，沒有（舊版的那台、伺服器替它拿掉了公鑰）就照舊送明文
+ */
+export function kxPublic(kind, body) {
+  if (kind !== 'status' || !body || typeof body !== 'object') return null;
+  const kx = body.kx;
+  return kx && typeof kx === 'object' && kx.v === 1 && typeof kx.pub === 'string' && kx.pub ? kx.pub : null;
+}
+
+/**
+ * 加密的狀態下一包輸入怎麼送。state：off（不加密）、wait（等那台的第一個封包）、deriving（正在算金鑰）、on（加密）。
+ * 回 'plain'（照原樣送）、'hold'（先不送，事件留在批次裡：不讓任何按鍵在決定要不要加密之前以明文送出去）、'seal'（事件加密後送）
+ */
+export function sealAction(state, hasEvents) {
+  if (state === 'on') return hasEvents ? 'seal' : 'plain';
+  if (state === 'wait' || state === 'deriving') return hasEvents ? 'hold' : 'plain';
+  return 'plain';
 }
 
 /** 選單項目（電腦卡片的右鍵）：條件同檔案傳輸（devicefilesrules.transferMenu 的結果） */

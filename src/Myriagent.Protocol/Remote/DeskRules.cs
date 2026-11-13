@@ -98,6 +98,12 @@ internal static class DeskRules
         return body;
     }
 
+    /// <summary>
+    /// 被看的一方的第一個封包：<c>status {text: null, kx}</c>——接受了看的一方在 <c>deskOpen</c> 給的公鑰、回自己的（<see cref="DeskSealRules"/>）。
+    /// 只在看的一方給了公鑰時送（那是認得 <c>kx</c> 的網頁）；看的一方看到它就開始加密輸入，第一個封包沒有它就照舊送明文
+    /// </summary>
+    public static JObject KeyExchangeBody(string targetPublic) => new() { ["text"] = JValue.CreateNull(), ["kx"] = DeskSealRules.KeyExchange(targetPublic) };
+
     /// <summary>看的一方送的種類</summary>
     public static bool IsViewerKind(string? kind) => kind is Input or Ack or Config or Close;
 
@@ -127,13 +133,19 @@ internal static class DeskRules
 
     /// <summary>
     /// 輸入事件（<c>body.events</c>，0～<see cref="MaxEvents"/> 個；可以順便帶 <c>ack</c>：瀏覽器每秒的指令數有上限，網頁把確認併進輸入一起送）。
-    /// 格式不對、或事件與 ack 都沒有，整包回 null
+    /// 格式不對、或事件與 ack 都沒有，整包回 null。事件端對端加密時（<c>body.e2e</c>，<see cref="DeskSealRules"/>）這裡只檢查形狀、回空的清單——
+    /// 內容只有被看的那台解得開（伺服器照樣以這個函式檢查封包）；加密的和明文的事件不能放在同一包
     /// </summary>
     public static IReadOnlyList<DeskInputEvent>? ParseInput(JObject? body)
     {
         if (body is null)
             return null;
         var hasAck = AckOf(body) is not null;
+        var sealedInput = DeskSealRules.SealedOf(body, out var malformed);
+        if (malformed || sealedInput is not null && body["events"] is not (null or { Type: JTokenType.Null }))
+            return null;
+        if (sealedInput is not null)
+            return [];
         if (body["events"] is null or { Type: JTokenType.Null })
             return hasAck ? [] : null;
         if (body["events"] is not JArray { Count: <= MaxEvents } events || events.Count == 0 && !hasAck)

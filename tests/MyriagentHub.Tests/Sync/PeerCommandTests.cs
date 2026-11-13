@@ -366,6 +366,40 @@ public sealed class PeerCommandTests
         }
     }
 
+    private static readonly string[] SealFeatures = [.. Xfer2Features, DeviceFeatureRules.DeskE2e1];
+
+    [Fact]
+    public async Task 遠端桌面_看的一方的公鑰只送給有deske2e1的電腦_沒有的拿掉之後照樣簽()
+    {
+        // 2026-11-13 輸入的端對端加密：舊版的桌面不認得 viewerKey（閘門會回 invalid）——伺服器替它拿掉，照舊以明文操作
+        const string viewerKey = "BFFcPW6545a5BNP-yn9U_c0MwemXvzddylFa0KbDtANfRTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"; // gitleaks:allow（測試用的固定公鑰，不是秘密）
+        JObject Open(string deviceId) => new()
+        {
+            ["cmd"] = "deskOpen", ["deviceId"] = deviceId, ["requestId"] = "01J9QZ3K8M5R7T2V4W6X8Y0DSK", [DeskSealRules.ViewerKeyField] = viewerKey,
+        };
+
+        await using (var s = await CommandRouterTests.Setup.StartAsync(features: SealFeatures))
+        await using (var b = await PeerAsync(s, "B 電腦", SealFeatures))
+        {
+            var cid = NewCommandId();
+            (await b.Client.PeerCmdAsync(new PeerCmd(cid, Open(s.Owner.Id)))).Should().Be(new PeerCmdResult(true, cid, null));
+            var verdict = Verify(s, await s.Device!.WaitForAsync<CommandDelivery>(), acceptsDevice: true);
+            verdict.Step.Should().BeNull(verdict.Detail);
+            verdict.Body!.Cmd.Value<string>(DeskSealRules.ViewerKeyField).Should().Be(viewerKey, "公鑰原樣轉給被看的那台");
+        }
+
+        await using (var s = await CommandRouterTests.Setup.StartAsync(features: Xfer2Features))
+        await using (var b = await PeerAsync(s, "B 電腦", SealFeatures))
+        {
+            var cid = NewCommandId();
+            (await b.Client.PeerCmdAsync(new PeerCmd(cid, Open(s.Owner.Id)))).Should().Be(new PeerCmdResult(true, cid, null));
+            var verdict = Verify(s, await s.Device!.WaitForAsync<CommandDelivery>(), acceptsDevice: true);
+            verdict.Step.Should().BeNull(verdict.Detail);
+            verdict.Body!.Cmd.Value<string>("cmd").Should().Be("deskOpen");
+            verdict.Body.Cmd.ContainsKey(DeskSealRules.ViewerKeyField).Should().BeFalse("那台不認得這一欄：拿掉之後照樣開遠端桌面");
+        }
+    }
+
     private static readonly string[] ExecFeatures = [DeviceFeatureRules.Conv1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Exec1];
 
     private static JObject RemoteExec(string deviceId, string command = "Get-Date") => new()

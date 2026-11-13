@@ -7,6 +7,7 @@ import { syncStatus } from './sync-settings.mjs';
 const DF_FOLDER = 'D:\\專案\\交付';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 import fs from 'node:fs';
+import { webcrypto } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -450,6 +451,81 @@ export async function runDeviceFiles(ctx, vp, m) {
   const ended = await until(() => page.evaluate(() => (!document.querySelector('.rd-wrap')
     ? Array.from(document.querySelectorAll('.toast')).map((t) => t.textContent).join('|') : null)), 2000);
   check('deskEnded', ended !== null && ended.includes('那台的人中斷了遠端桌面'), ended);
+
+  // 輸入的端對端加密（deskseal.js）：再開一次。假宿主扮演被看的那台——以 deskOpen 的 viewerKey 算金鑰、第一個封包回自己的公鑰（kx），
+  // 之後網頁送的事件要是密文（封包裡沒有明文的 events），以同一把金鑰解得開、內容就是按的鍵；工具列標出「輸入已加密」
+  await page.click((await cardSel('LAB-WORKSTATION')) + ' .mon-name', { button: 'right' });
+  await until(menuItems, 1500);
+  await page.click('.menu.df-menu .menu-item:nth-of-type(3)');
+  const open2 = await until(() => { const o = host.last('deskOpen'); return o && o.requestId !== open.requestId ? o : null; }, 3000);
+  const target = open2 && typeof open2.viewerKey === 'string' ? await sealTarget(open2.requestId, open2.viewerKey) : null;
+  let sealedChecks = { open: !!open2, viewerKey: open2 && open2.viewerKey };
+  if (target) {
+    host.send({ type: 'desk', sessionId: open2.requestId, kind: 'status', seq: 0, body: { text: null, kx: { v: 1, pub: target.publicKey } } });
+    host.send({ type: 'desk', sessionId: open2.requestId, kind: 'frame', seq: 1, body: { w: 480, h: 270, key: true, screen: 0, q: 'auto',
+      screens: [{ i: 0, name: '螢幕 1', w: 3840, h: 2160, primary: true }], tiles } });
+    const badge = await until(() => page.evaluate(() => {
+      const el = document.querySelector('.rd-seal');
+      return el && !el.hidden ? { text: el.textContent, waiting: !document.querySelector('.rd-status').hidden } : null;
+    }), 3000);
+    await until(() => page.evaluate(() => { const c = document.querySelector('.rd-canvas'); return c && c.width === 480; }), 3000);
+    const box2 = await page.locator('.rd-canvas').boundingBox();
+    await page.mouse.click(box2.x + box2.width / 2, box2.y + box2.height / 2);
+    await page.keyboard.press('KeyB');
+    const mine = () => host.received.filter((c) => c.cmd === 'desk' && c.kind === 'input' && c.sessionId === open2.requestId);
+    await until(() => mine().filter((c) => c.body.e2e).length >= 1, 3000);
+    await sleep(400);
+    const packets = mine();
+    const opened = [];
+    let failed = 0;
+    for (const c of packets.filter((x) => x.body.e2e)) {
+      try { opened.push(...(await target.open(c.body.e2e.n, c.body.e2e.ct)).events); } catch { failed++; }
+    }
+    const numbers = packets.filter((x) => x.body.e2e).map((x) => x.body.e2e.n);
+    sealedChecks = {
+      badge, packets: packets.length, plainEvents: packets.filter((c) => c.body.events).length, failed, numbers,
+      opened, json: JSON.stringify(packets).includes('"k":66'),
+    };
+    host.send({ type: 'desk', sessionId: open2.requestId, kind: 'end', seq: 0, body: { reason: 'targetClosed', text: '那台的人中斷了遠端桌面' } });
+    await until(() => page.evaluate(() => !document.querySelector('.rd-wrap')), 2000);
+  }
+  check('deskInputSealed', !!target && !!sealedChecks.badge && sealedChecks.badge.text.includes('輸入已加密')
+    && sealedChecks.plainEvents === 0 && sealedChecks.failed === 0 && !sealedChecks.json
+    && sealedChecks.numbers.length > 0 && sealedChecks.numbers.every((n, i) => n === i + 1)
+    && sealedChecks.opened.some((e) => e.t === 'md' && e.b === 0) && sealedChecks.opened.some((e) => e.t === 'kd' && e.k === 0x42)
+    && sealedChecks.opened.some((e) => e.t === 'ku' && e.k === 0x42), sealedChecks);
   clearInterval(host.statsTimer);
   await closeApp(app);
+}
+
+
+/**
+ * 輸入的端對端加密裡被看的那台（探針扮演；演算法同宿主的 DeskSealRules 與網頁的 deskseal.js）：以自己新產生的金鑰與看的一方的公鑰算出金鑰，
+ * 回自己的公鑰與解開一包的函式（解不開會丟例外）
+ */
+async function sealTarget(sessionId, viewerPublic) {
+  const subtle = webcrypto.subtle;
+  const ecdh = { name: 'ECDH', namedCurve: 'P-256' };
+  const fromB64 = (t) => new Uint8Array(Buffer.from(t.replace(/-/g, '+').replace(/_/g, '/'), 'base64'));
+  const toB64 = (b) => Buffer.from(b).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const enc = new TextEncoder();
+  const pair = await subtle.generateKey(ecdh, false, ['deriveBits']);
+  const targetRaw = new Uint8Array(await subtle.exportKey('raw', pair.publicKey));
+  const viewerRaw = fromB64(viewerPublic);
+  const peer = await subtle.importKey('raw', viewerRaw, ecdh, false, []);
+  const shared = await subtle.deriveBits({ name: 'ECDH', public: peer }, pair.privateKey, 256);
+  const material = await subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+  const prefix = enc.encode('myriagent-desk-input-v1');
+  const info = new Uint8Array(prefix.length + 1 + 130);
+  info.set(prefix, 0); info.set(viewerRaw, prefix.length + 1); info.set(targetRaw, prefix.length + 66);
+  const key = await subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: enc.encode(sessionId), info }, material, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  return {
+    publicKey: toB64(targetRaw),
+    async open(n, ct) {
+      const iv = new Uint8Array(12);
+      new DataView(iv.buffer).setBigUint64(4, BigInt(n));
+      const plain = await subtle.decrypt({ name: 'AES-GCM', iv, additionalData: enc.encode('myriagent-desk-input-v1|' + sessionId + '|' + n), tagLength: 128 }, key, fromB64(ct));
+      return JSON.parse(new TextDecoder().decode(plain));
+    },
+  };
 }
