@@ -66,6 +66,12 @@ internal static class RemoteCommandCatalog
     /// <summary>只由伺服器送給電腦、不是網頁指令的</summary>
     public const string ConversationCreate = "conversationCreate";
 
+    /// <summary>移除輸入區的附件（遠端送的 id 是網頁的上傳 id，2026-11-13；那台要協商出 att1）</summary>
+    public const string RemoveAttachment = "removeAttachment";
+
+    /// <summary>把網頁上傳的檔加進輸入區</summary>
+    public const string AddUploaded = "addUploaded";
+
     /// <summary>Claude 遠端登入貼回授權碼（2026-10-26）</summary>
     public const string AccountLoginCode = "accountLoginCode";
 
@@ -278,8 +284,8 @@ internal static class RemoteCommandCatalog
         yield return Owner("setAccount", 2, [Account(), Choice("when", false, true, "now", "turnEnd")]);
         yield return Owner("setFolder", 1, [Text("path")], limits: RemoteLimits.NoRememberFolder);
         yield return Owner("resetFolder", 1, []);
-        yield return Owner("removeAttachment", 1, [Item("id")]);
-        yield return Owner("addUploaded", 1, [Uploads(required: true)]);
+        yield return Owner(RemoveAttachment, 1, [Item("id")]);
+        yield return Owner(AddUploaded, 1, [Uploads(required: true)]);
         // 語音訊息（2026-10-23）：網頁上傳的錄音（uploads 只有一筆），那台電腦下載、轉成逐字稿後當成一則訊息送進代理（同 send 的輸出）
         yield return Owner("voiceMessage", 1, [Uploads(required: true)], ["sendRejected", "toast"]);
         yield return Owner("listFiles", 1, [RequestId(), Text("path", required: false, nullable: true), new("dirsOnly", RemoteFieldKind.Bool, Required: false)], ["files", "toast"]);

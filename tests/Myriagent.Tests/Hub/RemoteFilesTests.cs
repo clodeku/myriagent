@@ -621,6 +621,34 @@ public sealed class RemoteFilesTests
     }
 
     [Fact]
+    public async Task removeAttachment以上傳id移除_已匯入的拿掉附件_還在下載的匯入完不加_不在的照樣done()
+    {
+        // 2026-11-13 使用者要求：跨電腦也要能刪已附加、還沒送出的圖片。網頁只知道上傳 id（att1）
+        using var rig = new Rig();
+        ShouldBeDone((await rig.RunAsync("addUploaded", UploadsArgs(Upload(1), Upload(2)))).Outcome);
+        await rig.H.WaitUntilAsync(() => rig.H.Hub.ComposerStateForTest(rig.Id).Attachments.Count == 2, "兩個上傳成為附件");
+
+        ShouldBeDone((await rig.RunAsync("removeAttachment", new { id = Upload(1).UploadId })).Outcome);
+        rig.Composer().Attachments.Should().Equal(["檔案2.txt"], "以上傳 id 找到那個附件拿掉");
+
+        // 還在下載時就拿掉：匯入完不加進輸入區
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        rig.Transfer.Download = async (u, file, ct) =>
+        {
+            await gate.Task;
+            await File.WriteAllTextAsync(file, "內容", ct);
+        };
+        ShouldBeDone((await rig.RunAsync("addUploaded", UploadsArgs(Upload(3)))).Outcome);
+        ShouldBeDone((await rig.RunAsync("removeAttachment", new { id = Upload(3).UploadId })).Outcome);
+        gate.SetResult();
+        await rig.H.WaitUntilAsync(() => rig.H.Hub.ComposerStateForTest(rig.Id).Importing == 0, "下載與匯入結束");
+        rig.Composer().Attachments.Should().Equal(["檔案2.txt"], "下載途中拿掉的不加進輸入區");
+
+        ShouldBeDone((await rig.RunAsync("removeAttachment", new { id = "upload-404" })).Outcome);
+        rig.Composer().Attachments.Should().Equal(["檔案2.txt"]);
+    }
+
+    [Fact]
     public async Task addUploaded_20個全部成為附件()
     {
         using var rig = new Rig();

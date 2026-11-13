@@ -104,8 +104,11 @@ internal sealed partial class AgentHub
         /// <summary>從網頁上傳、已成為待送附件的 id（遠端 send 只帶這些，<see cref="RemoteUploadedPending"/>）</summary>
         public readonly HashSet<string> RemoteUploadedAttachmentIds = new(StringComparer.Ordinal);
 
-        /// <summary>網頁上傳（uploadId）匯入後成為的附件 id（語音訊息以它找到自己的錄音，AgentHub.Voice.cs）；只在記憶體</summary>
+        /// <summary>網頁上傳（uploadId）匯入後成為的附件 id（語音訊息以它找到自己的錄音，AgentHub.Voice.cs；網頁以上傳 id 移除附件）；只在記憶體</summary>
         public readonly Dictionary<string, string> RemoteUploadAttachments = new(StringComparer.Ordinal);
+
+        /// <summary>還在下載或匯入時就被網頁移除的上傳 id（2026-11-13）：匯入完不加進輸入區、刪掉檔案</summary>
+        public readonly HashSet<string> RemoteUploadsRemoved = new(StringComparer.Ordinal);
 
         /// <summary>還在下載或匯入的上傳批數</summary>
         public int RemoteUploadBatches;
@@ -719,6 +722,8 @@ internal sealed partial class AgentHub
     private void FinishRemoteUploadBatch(ConversationState c)
     {
         c.RemoteUploadBatches--;
+        if (c.RemoteUploadBatches == 0)
+            c.RemoteUploadsRemoved.Clear();   // 下載失敗、沒有匯入的：記號不再用得到
         if (c.RemoteUploadBatches > 0 || c.AfterRemoteUploads.Count == 0)
             return;
         var pending = c.AfterRemoteUploads.ToList();
@@ -810,7 +815,21 @@ internal sealed partial class AgentHub
             var attachment = await Task.Run(() => AgentAttachmentProcessor.ImportFileAsync(file, attachmentDirectory, modelImageDirectory, CancellationToken.None));
             // 附件是以串流複製出來的（替代資料流不跟著過去）：附件本身也標成從網際網路下載
             MarkOfTheWeb.Mark(attachment.StoredPath);
-            if (conversations.TryGetValue(c.Meta.Id, out var live) && ReferenceEquals(live, c))
+            if (c.RemoteUploadsRemoved.Remove(uploadId))
+            {
+                // 匯入途中網頁就拿掉了（removeAttachment 以上傳 id，2026-11-13）：不加進輸入區
+                foreach (var path in attachment.ModelImagePaths.Append(attachment.StoredPath).Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        File.Delete(path);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                    }
+                }
+            }
+            else if (conversations.TryGetValue(c.Meta.Id, out var live) && ReferenceEquals(live, c))
             {
                 c.PendingAttachments.Add(attachment);
                 c.RemoteUploadedAttachmentIds.Add(attachment.Id);

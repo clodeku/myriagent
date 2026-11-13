@@ -41,7 +41,8 @@ internal sealed partial class AgentHub
         // 電腦狀態面板的檔案傳輸（2026-11-09）：帶 deviceId（另一台已配對的電腦）而不是副本的對話
         var deviceId = command.Value<string>("deviceId");
         var forDevice = conversationId == null && SyncIds.IsDeviceId(deviceId) && peerSink?.DeviceId is { } own && !string.Equals(own, deviceId, StringComparison.Ordinal);
-        var forReplica = conversationId != null && conversations.TryGetValue(conversationId, out var c) && c.IsReplica;
+        // 副本，或要在其他電腦開的新對話（2026-11-13：第一則送出之前也能附加）
+        var forReplica = conversationId != null && conversations.TryGetValue(conversationId, out var c) && (c.IsReplica || c.IsDraft && c.PeerDeviceId != null);
         if (!(forDevice || forReplica) || !peerLive
             || (PeerUploaderForTest ?? CurrentReplicaMediaSource() as IPeerUploader) is not { } uploader || peerUploads.ContainsKey(uploadId!))
         {

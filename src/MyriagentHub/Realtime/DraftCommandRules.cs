@@ -25,6 +25,9 @@ internal static class DraftCommandRules
 {
     public const string SetOption = "setOption", SetAccount = "setAccount", SetFolder = "setFolder", ResetFolder = "resetFolder", Rename = "rename";
 
+    /// <summary>草稿上附加、移除上傳的檔（2026-11-13）</summary>
+    public const string AddUploaded = RemoteCommandCatalog.AddUploaded, RemoveAttachment = RemoteCommandCatalog.RemoveAttachment;
+
     /// <summary>草稿已送出、新對話還在建立中時又送 send 的說明（立即拒絕 busy，D33）</summary>
     public const string CreatingMessage = "新對話還在建立中，請稍候再送";
 
@@ -35,7 +38,8 @@ internal static class DraftCommandRules
     public const int MaxTitleLength = 80;
 
     /// <summary>草稿上可以改的指令（其他指令回 invalid）</summary>
-    public static IReadOnlySet<string> EditCommands { get; } = new HashSet<string>(StringComparer.Ordinal) { SetOption, SetAccount, SetFolder, ResetFolder, Rename };
+    public static IReadOnlySet<string> EditCommands { get; } = new HashSet<string>(StringComparer.Ordinal)
+        { SetOption, SetAccount, SetFolder, ResetFolder, Rename, AddUploaded, RemoveAttachment };
 
     /// <summary>形狀檢查時代入的線上對話 id（草稿 id 不是線上 id 的形狀）</summary>
     private const string PlaceholderConversationId = "00000000000000000000000000000000";
@@ -101,6 +105,24 @@ internal static class DraftCommandRules
             }
             case ResetFolder:
                 return (draft with { WorkingDirectory = null, CustomFolder = false }, null);
+            case AddUploaded:
+            {
+                // 同一則最多 20 個（同那台的輸入區）；已經附加過的同一個上傳不重複
+                var added = draft.Uploads.ToList();
+                foreach (var o in ((JArray)projected["uploads"]!).Cast<JObject>())
+                {
+                    var upload = new DraftUpload((string)o["uploadId"]!, (string)o["name"]!, (long)o["size"]!, (string)o["sha256"]!);
+                    if (!added.Any(u => string.Equals(u.UploadId, upload.UploadId, StringComparison.Ordinal)))
+                        added.Add(upload);
+                }
+                return added.Count > AgentAttachmentRules.MaxAttachmentsPerMessage ? Invalid : (draft with { Uploads = added }, null);
+            }
+            case RemoveAttachment:
+            {
+                // id 是網頁的上傳 id；不在（已經拿掉、從沒加過）照樣成功
+                var id = (string)projected["id"]!;
+                return (draft with { Uploads = draft.Uploads.Where(u => !string.Equals(u.UploadId, id, StringComparison.Ordinal)).ToList() }, null);
+            }
             case Rename:
             {
                 var title = ((string)projected["title"]!).Trim();
@@ -138,6 +160,17 @@ internal static class DraftCommandRules
             cmd["title"] = title;
         if (text.Length > 0)
             cmd["text"] = text;
+        // 第一則送出之前附加的檔（2026-11-13）：那台下載完才送第一則
+        if (draft.Uploads.Count > 0)
+        {
+            cmd["uploads"] = new JArray(draft.Uploads.Select(u => new JObject
+            {
+                ["uploadId"] = u.UploadId,
+                ["name"] = u.Name,
+                ["size"] = u.Size,
+                ["sha256"] = u.Sha256,
+            }));
+        }
         // 臨時對話（quickChat 開的草稿）：那台建成不列在清單、關掉就刪掉的對話
         if (draft.Ephemeral)
             cmd["ephemeral"] = true;

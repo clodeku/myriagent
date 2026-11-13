@@ -393,6 +393,8 @@ export class Composer {
 
   // ───── 宿主資料 ─────
   setHeader(hd) {
+    // 〔桌面遠端操作〕遠端草稿換回這台（draftSetDevice 沒帶 deviceId）：附加的檔在伺服器上、宿主已丟掉，晶片跟著清掉（2026-11-13）
+    if (!isHub && this.uploads.length && hd && hd.isDraft && !hd.deviceId) this.uploadsClosed();
     this.renderQuotaWait(hd);
     this.renderToolbar();
     this.renderInfo();
@@ -406,7 +408,17 @@ export class Composer {
   remoteUploads() {
     if (isHub) return true;
     const info = this.conv.liveInfo ? this.conv.liveInfo() : null;
-    return !!info && controllable(info.origin, info.peer);
+    return !!info && (controllable(info.origin, info.peer) || this.peerDraft(info));
+  }
+
+  /** 〔桌面遠端操作〕要在其他電腦開的新對話：附件由宿主代傳、記在草稿上（2026-11-13）；送給宿主的附件指令要自己帶 commandId */
+  peerDraft(info = this.conv.liveInfo ? this.conv.liveInfo() : null) {
+    return !isHub && !!info && info.origin === 'draft' && !!info.remoteDraft;
+  }
+
+  /** 附件的遠端指令（addUploaded、removeAttachment）：桌面的遠端草稿另外帶 commandId（副本由 store.post 帶、瀏覽器版由傳輸層） */
+  postAttachmentCmd(msg) {
+    return post(this.peerDraft() ? Object.assign({}, msg, { commandId: peerId() }) : msg);
   }
 
   /** 〔同步〕桌面上其他電腦的副本（不是這台的帳戶，不看 accountMissing，D22） */
@@ -1845,7 +1857,7 @@ export class Composer {
       this.renderUploads();
       this.updateSend();
     };
-    const cid = post({ cmd: 'addUploaded', conversationId: this.conv.id, uploads: chips.map((c) => c.entry) });
+    const cid = this.postAttachmentCmd({ cmd: 'addUploaded', conversationId: this.conv.id, uploads: chips.map((c) => c.entry) });
     if (typeof cid !== 'string' || !this.conv.ctx.track || !this.conv.ctx.track(cid, { onSettle: (st) => settle(st) })) settle(typeof cid === 'string' ? 'unknown' : 'rejected');
     this.updateSend();
   }
@@ -1913,13 +1925,39 @@ export class Composer {
     }
   }
 
-  /** 拿掉一個晶片：失敗的直接拿掉、上傳中的先取消（已附加的沒有移除鈕：電腦那邊沒有對應的移除指令） */
+  /**
+   * 拿掉一個晶片：失敗的直接拿掉、上傳中的先取消；已附加的（2026-11-13 使用者要求：跨電腦也要能刪）送 removeAttachment {id: 上傳 id}
+   * 給那台（或伺服器、宿主的草稿），done 或不明才拿掉，被拒時留著（原因看伺服器的提示：那台的版本太舊時說要先更新）
+   */
   dismissUpload(c) {
+    if (c.state === 'attached') { this.removeAttached(c); return; }
     if (c.state === 'uploading') this.cancelUploads([c]);
     else if (c.state !== 'error') return;
     this.uploads = this.uploads.filter((u) => u !== c);
     this.renderUploads();
     this.updateSend();
+  }
+
+  removeAttached(c) {
+    if (c.removing || !c.uploadId) return;
+    const drop = () => {
+      c.removing = false;
+      this.uploads = this.uploads.filter((u) => u !== c);
+      if (this.destroyed) { this.saveUploads(); return; }
+      this.saveUploads();
+      this.renderUploads();
+      this.updateSend();
+    };
+    const keep = () => {
+      c.removing = false;
+      if (this.destroyed) return;
+      this.renderUploads();
+    };
+    c.removing = true;
+    this.renderUploads();
+    const cid = this.postAttachmentCmd({ cmd: 'removeAttachment', conversationId: this.conv.id, id: c.uploadId });
+    if (cid === null) { keep(); return; } // 〔遠端〕瀏覽器版沒送出（沒有連線：傳輸層已提示）
+    if (typeof cid !== 'string' || !this.conv.ctx.track || !this.conv.ctx.track(cid, { onSettle: (st) => (st === 'done' || st === 'unknown' ? drop() : keep()) })) drop();
   }
 
   renderUploads() {
@@ -1928,7 +1966,7 @@ export class Composer {
   }
 }
 
-/** 〔遠端〕一個網頁上傳的晶片：副檔名、名稱、狀態（上傳中的百分比、加入中、大小、失敗的原因）；失敗的才有移除鈕 */
+/** 〔遠端〕一個網頁上傳的晶片：副檔名、名稱、狀態（上傳中的百分比、加入中、大小、失敗的原因）；加入中、移除中以外都有移除鈕 */
 function uploadChip(c, onDismiss) {
   const sub = h('span', { class: 'att-size up-sub' });
   const fill = h('span', { class: 'up-fill' });
@@ -1946,6 +1984,9 @@ function uploadChip(c, onDismiss) {
   return wrap;
 }
 
+/** 已附加的晶片的移除鈕 */
+const REMOVE_ATTACHED_TITLE = '移除這個附件';
+
 function updateUploadChip(wrap, c) {
   // 上傳完成、附加進輸入框的那一下：外框閃一下綠（fx.css 的 .up-chip.fx-up-done）
   if (c.state === 'attached' && (wrap.dataset.state === 'uploading' || wrap.dataset.state === 'adding')) replayClass(wrap, 'fx-up-done', 800);
@@ -1953,16 +1994,16 @@ function updateUploadChip(wrap, c) {
   const pct = c.total > 0 ? Math.min(100, Math.floor((c.loaded / c.total) * 100)) : 0;
   // 上傳中：「3.2／12 MB・1.1 MB/s」（fxrules.uploadReadout；還沒有進度時照舊寫百分比）
   const sub = c.state === 'uploading' ? (c.loaded > 0 && uploadReadout(c.loaded, c.total, c.bps)) || '上傳中 ' + pct + '%'
-    : c.state === 'adding' ? '加入輸入區…' : c.state === 'error' ? c.error || '上傳失敗' : fmtBytes(c.size);
+    : c.state === 'adding' ? '加入輸入區…' : c.state === 'error' ? c.error || '上傳失敗' : c.removing ? '移除中…' : fmtBytes(c.size);
   setText(wrap._sub, sub);
   if (c.state === 'error') wrap._sub.setAttribute('role', 'alert'); else wrap._sub.removeAttribute('role');
   // 進度條只伸縮（transform，交給合成器；以前改寬度，每次進度都要重排版面）
   const frac = c.state === 'uploading' ? (c.total > 0 ? Math.min(1, c.loaded / c.total) : 0) : c.state === 'adding' ? 1 : 0;
   const fill = 'scaleX(' + frac.toFixed(3) + ')';
   if (wrap._fill.style.transform !== fill) wrap._fill.style.transform = fill;
-  // 失敗的拿掉、上傳中的取消（合併前審查 PERF-2）；加入中與已附加的沒有 ×
-  wrap._x.hidden = !(c.state === 'error' || c.state === 'uploading');
-  const xTitle = c.state === 'uploading' ? CANCEL_UPLOAD_TITLE : DISMISS_TITLE;
+  // 失敗的拿掉、上傳中的取消（合併前審查 PERF-2）、已附加的請那台移除（2026-11-13）；加入中、移除中沒有 ×
+  wrap._x.hidden = !(c.state === 'error' || c.state === 'uploading' || c.state === 'attached' && !c.removing);
+  const xTitle = c.state === 'uploading' ? CANCEL_UPLOAD_TITLE : c.state === 'attached' ? REMOVE_ATTACHED_TITLE : DISMISS_TITLE;
   if (wrap._x.title !== xTitle) { wrap._x.title = xTitle; wrap._x.setAttribute('aria-label', xTitle); }
   const title = c.name + '（' + sub + '）';
   if (wrap._tile.title !== title) wrap._tile.title = title;

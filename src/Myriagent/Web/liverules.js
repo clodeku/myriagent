@@ -1213,12 +1213,18 @@ function remoteBlock(device, live, what) {
 }
 
 /**
- * 附加檔案的閘門（D32、1.2）：桌面只擋副本；瀏覽器版的草稿「送出第一則訊息後才能附加檔案」（伺服器草稿只收設定類的指令），
- * 其他照沒連線、電腦離線、政策不是 Control 擋（完全自動不擋：擋的是送出）。回 {enabled, reason}
+ * 附加檔案的閘門（D32、1.2）：桌面只擋副本與沒連線的遠端草稿；瀏覽器版照沒連線、電腦離線、政策不是 Control 擋（完全自動不擋：擋的是送出）。
+ * 新對話（瀏覽器版的伺服器草稿、桌面要在其他電腦開的草稿）在第一則送出之前也能附加（2026-11-13 使用者要求：新對話也要能貼圖）：
+ * 檔先上傳到伺服器、記在草稿上，第一則送出時連檔一起交給那台。回 {enabled, reason}
  */
 export function attachGate({ mode, origin, device, live, peer, remoteDraft } = {}) {
-  // 〔桌面遠端操作〕要在其他電腦開的新對話：同瀏覽器的伺服器草稿，送出第一則訊息後才能附加
-  if (remoteDraft && origin === 'draft' && !isHubMode(mode)) return { enabled: false, reason: '送出第一則訊息後才能附加檔案' };
+  // 〔桌面遠端操作〕要在其他電腦開的新對話：宿主代傳上傳（同副本），沒連上伺服器時不行
+  if (remoteDraft && origin === 'draft' && !isHubMode(mode)) {
+    if (peer === 'down') return { enabled: false, reason: PEER_DOWN_TEXT };
+    if (peer !== 'live') return { enabled: false, reason: '目前沒有連上伺服器，連上之後才能附加檔案' };
+    const blocked = remoteBlock(device, true, '附加檔案');
+    return { enabled: !blocked, reason: blocked };
+  }
   if (origin === 'replica') {
     if (peer === 'down') return { enabled: false, reason: PEER_DOWN_TEXT };
     if (peer !== 'live') return { enabled: false, reason: replicaText(device) };
@@ -1227,7 +1233,6 @@ export function attachGate({ mode, origin, device, live, peer, remoteDraft } = {
     return { enabled: !blocked, reason: blocked };
   }
   if (!isHubMode(mode)) return { enabled: true, reason: null };
-  if (origin === 'draft') return { enabled: false, reason: '送出第一則訊息後才能附加檔案' };
   const reason = remoteBlock(device, live, '附加檔案');
   return { enabled: !reason, reason };
 }

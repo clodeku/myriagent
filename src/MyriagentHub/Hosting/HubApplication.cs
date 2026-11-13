@@ -110,6 +110,8 @@ internal static class HubApplication
         builder.Services.AddHubComposerDrafts();
         // 臨時對話（2026-11-11）：帶 ephemeral 的 conversationCreate 只送給協商出 quick1 的電腦（CommandRouter）
         builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Quick1);
+        // 網頁上傳的附件可以移除（2026-11-13）：removeAttachment 只送給協商出 att1 的電腦（CommandRouter）
+        builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Att1);
         // 多人協作（sync-protocol 14.14）：協作人發起的信封、CollabCmd、CollabUpdate；服務在 AddHubBrowser 登記
         builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Collab1);
         // 電腦狀態面板的檔案傳輸（2026-11-09）：只把 deviceBrowse、deviceFetch、devicePut 送給協商出 xfer1 的連線

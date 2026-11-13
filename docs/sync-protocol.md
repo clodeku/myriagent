@@ -919,7 +919,7 @@ Claude 帳戶已對應或宣告了邏輯帳戶、這台**沒有發布過**這個
   - 信封的 `issuer` 是 `{kind: "device", label}`：`label` 是發起電腦在伺服器目錄的名稱，去掉 Cc／Cf／Zl／Zp 類字元與不成對的代理字元、去掉前後空白、截成 64 個 Unicode 字元，空的是「另一台電腦」（`PeerRules.DeviceLabel`）；`auth.uvAt` 是 null（裝置沒有輸入密碼這回事；兩個時間窗目前都是 null，`IsFresh` 照樣通過）、`auth.defaultPassword` 照舊。列的 `issuer` 照樣存 `{kind, label}`；稽核的 actor 是 `device`、id 是發起電腦的 id。
   - 回覆（立即拒絕的 `commandResult`、toast、`sendRejected`，與電腦回報的結果與輸出）經 `CommandReplies` 以 `PeerReply` 送給發起電腦目前 `Order` 最大、已證明、協商出 `peer1` 的連線（重連之後照樣收得到；沒有就丟掉，桌面等不到就當結果不明）；toast 不做 10 秒節流；序列化後超過 1 MB − 4 KB 的丟掉並記錄。`TrackedCommand.OriginDeviceId` 記發起的電腦。
 - **被操作的電腦**：Hello 跟著 `cmd1` 一起宣告 `peer1`；驗章時 `AcceptsDeviceIssuer` 是這條連線有沒有協商出 `peer1`。其他驗證、去重、閘門 5a～5j、遠端限制完全不變；遠端操作紀錄、通知與回收區的發起者顯示成「電腦「X」」（`RemoteNotifyRules.IssuerDisplay`）。
-- **在其他電腦開新對話**（`CommandRouter.PeerCreate.cs`）：桌面的草稿在桌面本機（不用伺服器草稿），第一次送出時送 `PeerCmd {cmd: "conversationCreate", deviceId, accountId: "la_…", permissionMode, model?, effort?, folder?, title?, text}`（`folder` 是草稿上選的那台的資料夾，沒選就省略＝對話自己的 workspace；那台照 14.4 的 `conversationCreate` 檢查，2026-10-27 起桌面才帶）。`deviceId` 必帶（不是 `d_` 的格式回 `invalid`；型錄沒有這個欄位，投影時去掉）、要存在而且沒撤銷、不是發起的電腦（立即拒絕 `invalid`）；`accountId` 要是目錄裡的邏輯帳戶（不在立即拒絕 `invalid`「這個帳戶已從目錄刪除…」），換成那台連結的本機 id（那台沒有連結回 `rejected invalid`）。之後同一般的指令；新對話的 id＝`RemoteConversationIdRules.FromCommandId(cid)`，寫列之後、送出之前先以 `PeerReply` 送 `peerCreated {commandId, conversationId}`；電腦回的 `sendRejected` 輸出以這個 id 核對。
+- **在其他電腦開新對話**（`CommandRouter.PeerCreate.cs`）：桌面的草稿在桌面本機（不用伺服器草稿），第一次送出時送 `PeerCmd {cmd: "conversationCreate", deviceId, accountId: "la_…", permissionMode, model?, effort?, folder?, title?, text?, uploads?}`（2026-11-13 起第一則之前附加的檔：網頁經宿主代傳上傳、`addUploaded`／`removeAttachment` 記在宿主的草稿上，送出時帶 `uploads`；只附檔時不帶 `text`）（`folder` 是草稿上選的那台的資料夾，沒選就省略＝對話自己的 workspace；那台照 14.4 的 `conversationCreate` 檢查，2026-10-27 起桌面才帶）。`deviceId` 必帶（不是 `d_` 的格式回 `invalid`；型錄沒有這個欄位，投影時去掉）、要存在而且沒撤銷、不是發起的電腦（立即拒絕 `invalid`）；`accountId` 要是目錄裡的邏輯帳戶（不在立即拒絕 `invalid`「這個帳戶已從目錄刪除…」），換成那台連結的本機 id（那台沒有連結回 `rejected invalid`）。之後同一般的指令；新對話的 id＝`RemoteConversationIdRules.FromCommandId(cid)`，寫列之後、送出之前先以 `PeerReply` 送 `peerCreated {commandId, conversationId}`；電腦回的 `sendRejected` 輸出以這個 id 核對。
 - **附件與檔案**：上傳是裝置端點 `PUT /api/v1/device/uploads/{uploadId}`（`DeviceAccess`、免 CSRF；和瀏覽器 E4 同一個 `UploadRegistry` 與上限，之後的 `addUploaded` 照樣經 `PeerCmd`）。`fileFetch` 的 `fileRef` 是本站的 `/f/{鍵}`（擁有者 cookie），桌面改以 E11 `GET /api/v1/device/media/{key}?purpose=file`（`DeviceAccess`；同 `/f/`，只收 `file` 的參照、`no-store`）取檔；`listFiles` 的 `files` 裡的 `/m/`、`/t/` 照 E9 取（`list` 的參照）。
 - **發起的電腦**（`SyncEngine.Peer.cs`）：只在目前這條連線交握完成、協商出 `peer1` 時呼叫 `PeerCmd`；沒有這種連線時不排隊，立刻交回一則合成的 `commandResult {state: "rejected", code: "not_sent", origin: "transport"}`（同瀏覽器 transport-hub 的合成）；伺服器回 `accepted: false` 時合成 rejected＋那個錯誤碼；呼叫因斷線失敗時不合成（伺服器可能已經處理）。`PeerReply` 只檢查 `commandId` 是 ULID、`message` 有非空字串的 `type`。交握完成、連線丟掉時回報「能不能送」（web-protocol 的 `sync.peer`）。
 
@@ -1100,6 +1100,14 @@ Claude 帳戶已對應或宣告了邏輯帳戶、這台**沒有發布過**這個
 - **不列**：伺服器讀對話清單時略過 meta_json 有 `ephemeral` 的（`ConversationReader.List`），標頭照帶 `ephemeral`；其他電腦的副本也不列（`ReplicaRules.ToMeta` 帶進 `AgentConversation.Ephemeral`）。
 - **關**：瀏覽器關掉面板時，還沒送出的草稿送 `close`（伺服器丟掉），已建立的送 `delete`：那台收到臨時對話的遠端刪除時直接刪掉（不進回收區，連 CLI 的逐字稿），照一般的刪除發布到伺服器。
 
+
+### 14.19 移除網頁上傳的附件（`att1`；2026-11-13）
+
+- **為什麼**：瀏覽器版與桌面操作其他電腦的對話，附件由網頁自己管（上傳晶片），網頁只知道上傳 id、不知道那台的附件 id，所以已附加的檔以前沒有移除鈕。2026-11-13 使用者要求跨電腦也要能刪。
+- **功能**：`att1` 不對應任何 hub 方法。桌面一律宣告（跟著 `draft1`、`quick1`）；伺服器宣告。
+- **指令**：`removeAttachment {conversationId, id}` 的形狀不變（上傳 id 也是合格的項目 id）。協商出 `att1` 的那台：`id` 不是輸入區的附件時以 `RemoteUploadAttachments` 換成那個上傳匯入後的附件 id；還在下載或匯入的記進 `RemoteUploadsRemoved`，匯入完不加進輸入區、刪掉檔；都不是時照樣 `done`。
+- **舊版**：沒協商出 `att1` 的電腦找不到這個 id 會回 `done` 卻沒移除（使用者以為拿掉了、送出時還在），伺服器在 `IssueAsync` 立即拒絕 `unsupported`「版本太舊，還不能移除已附加的檔案；請先更新那台」。
+- **新對話**：伺服器草稿與桌面的遠端草稿上的 `addUploaded`／`removeAttachment` 不轉給電腦（草稿還沒有電腦上的對話），記在草稿上；第一次送出的 `conversationCreate` 帶 `uploads`（那台從 WP4.7 起就收，下載完才送第一則），不需要 `att1`。
 ## 15. app 下載端點（app 自我更新 U2）
 
 桌面以存取權杖取得最新版與套件（U3 的 `HubReleaseSource`）。路由是 `AppReleaseRoutes`（`Update/AppReleaseMessages.cs`）的常數，回應以 `SyncJson` 序列化（1.2），形狀只加選用欄位（1.4 的不變式）。

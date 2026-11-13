@@ -15,6 +15,9 @@ internal sealed record DraftAccount(string Id, AgentProvider Provider);
 /// WP4.5 的草稿指令（setOption、setAccount、setFolder、resetFolder、rename）經 <see cref="IBrowserDrafts.TryUpdate"/> 以 <c>with</c> 改它，
 /// 第一次 send 時轉成正式對話。模型、強度、權限模式是 null＝帳戶預設（同標頭的「預設」）
 /// </summary>
+/// <summary>草稿上已附加的上傳（<c>addUploaded</c> 的一筆；形狀已照型錄檢查過）</summary>
+internal sealed record DraftUpload(string UploadId, string Name, long Size, string Sha256);
+
 internal sealed record BrowserDraft(string Id, string AccountId, AgentProvider Provider)
 {
     public string? Model { get; init; }
@@ -45,6 +48,12 @@ internal sealed record BrowserDraft(string Id, string AccountId, AgentProvider P
     /// 關掉面板就刪掉的對話（要那台協商出 quick1）
     /// </summary>
     public bool Ephemeral { get; init; }
+
+    /// <summary>
+    /// 第一則送出之前就附加的檔（2026-11-13 使用者要求：新對話也要能貼圖）：網頁照常 PUT 上傳、對草稿送 <c>addUploaded</c>，記在這裡（只在記憶體）；
+    /// 第一次 send 組成的 <c>conversationCreate</c> 帶 <c>uploads</c>，那台下載完才送第一則。<c>removeAttachment</c> 以上傳 id 拿掉
+    /// </summary>
+    public IReadOnlyList<DraftUpload> Uploads { get; init; } = [];
 
     /// <summary>最近使用的順序（數字越大越新；由 <see cref="BrowserDrafts"/> 維護，超過上限時丟最小的）</summary>
     public long Used { get; init; }

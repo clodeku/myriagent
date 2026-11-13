@@ -995,10 +995,17 @@ test('storedUploads_只收形狀對的_去重_最多20筆_壞字串回空', () =
   assert.equal(L.uploadsKey(CONV_A), 'myriagent.app.uploaded.v1:' + CONV_A);
 });
 
-test('attachGate_瀏覽器草稿停用並說明_副本唯讀_離線與政策照擋', () => {
+test('attachGate_新對話也能附加_副本唯讀_離線與政策照擋', () => {
   const hub = (over) => L.attachGate(Object.assign({ mode: 'hub', origin: 'remote', device: dev(), live: true }, over));
   assert.deepEqual(hub({}), { enabled: true, reason: null });
-  assert.deepEqual(hub({ origin: 'draft' }), { enabled: false, reason: '送出第一則訊息後才能附加檔案' });
+  // 2026-11-13：新對話（伺服器草稿）在第一則送出之前也能附加，沒連線時照擋
+  assert.deepEqual(hub({ origin: 'draft', device: null }), { enabled: true, reason: null });
+  assert.deepEqual(hub({ origin: 'draft', device: null, live: false }), { enabled: false, reason: '目前沒有連線，連上之後才能附加檔案' });
+  // 桌面要在其他電腦開的新對話：連上伺服器就能附加（宿主代傳），沒連上、那台離線時擋
+  const peerDraft = (over) => L.attachGate(Object.assign({ mode: 'desktop', origin: 'draft', remoteDraft: true, device: dev(), peer: 'live' }, over));
+  assert.deepEqual(peerDraft({}), { enabled: true, reason: null });
+  assert.deepEqual(peerDraft({ peer: 'off' }), { enabled: false, reason: '目前沒有連上伺服器，連上之後才能附加檔案' });
+  assert.equal(peerDraft({ device: dev({ online: false }) }).enabled, false);
   assert.deepEqual(hub({ live: false }), { enabled: false, reason: '目前沒有連線，連上之後才能附加檔案' });
   assert.deepEqual(hub({ device: dev({ online: false, name: XSS }) }), { enabled: false, reason: '電腦離線：' + XSS + ' 重新上線後才能附加檔案' });
   assert.deepEqual(hub({ device: dev({ level: 'View', name: 'HOME-PC' }) }), { enabled: false, reason: '在 HOME-PC 的設定中允許遠端操作' });

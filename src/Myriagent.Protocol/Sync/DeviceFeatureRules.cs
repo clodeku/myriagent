@@ -121,8 +121,14 @@ internal static class DeviceFeatureRules
     /// </summary>
     public const string Quick1 = "quick1";
 
+    /// <summary>
+    /// 網頁上傳的附件可以移除（2026-11-13）：協商出它的連線收 <c>removeAttachment</c> 的 <c>id</c> 是上傳 id（網頁的晶片只知道上傳 id，
+    /// 不知道那台的附件 id）——還在下載或匯入的也不再加進輸入區。不對應任何 hub 方法；舊版的桌面找不到這個 id 會當成沒事，伺服器不送給它們
+    /// </summary>
+    public const string Att1 = "att1";
+
     /// <summary>這版認得的功能（不認得的名稱照收、不啟用：交集裡不會有它）</summary>
-    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1, Xfer1, Xfer2, Desk1, Draft1, Quick1];
+    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1, Xfer1, Xfer2, Desk1, Draft1, Quick1, Att1];
 
     public const int MaxFeatures = 32;
 

@@ -94,8 +94,25 @@ internal sealed partial class AgentHub
 
     private void RemoveAttachment(ConversationState? c, string? attachmentId)
     {
-        var attachment = c?.PendingAttachments.FirstOrDefault(a => a.Id == attachmentId);
-        if (c == null || attachment == null)
+        if (c == null || attachmentId == null)
+            return;
+        // 網頁上傳的附件（瀏覽器版、其他電腦的桌面）：網頁只知道上傳 id（att1，2026-11-13）。已匯入的換成附件 id；
+        // 還在下載或匯入的記下來，匯入完不加進輸入區（ImportRemoteUploadAsync）
+        if (!c.PendingAttachments.Any(a => a.Id == attachmentId))
+        {
+            if (c.RemoteUploadAttachments.TryGetValue(attachmentId, out var imported))
+            {
+                c.RemoteUploadAttachments.Remove(attachmentId);
+                attachmentId = imported;
+            }
+            else if (c.RemoteUploadBatches > 0 && remoteUploadsInFlight.Contains(attachmentId))
+            {
+                c.RemoteUploadsRemoved.Add(attachmentId);
+                return;
+            }
+        }
+        var attachment = c.PendingAttachments.FirstOrDefault(a => a.Id == attachmentId);
+        if (attachment == null)
             return;
         c.PendingAttachments.Remove(attachment);
         foreach (var path in attachment.ModelImagePaths.Where(p => !string.Equals(p, attachment.StoredPath, StringComparison.OrdinalIgnoreCase)).Append(attachment.StoredPath))

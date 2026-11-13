@@ -11,7 +11,9 @@ namespace Myriagent.Hub;
 // 改組 conversationCreate {deviceId, accountId, permissionMode, model?, effort?, folder?, title?, text} 交給同步（PeerCmd）；伺服器先回 peerCreated {conversationId}，
 // 那台建好、副本出現在這台時，把開著草稿的每個檢視換成副本（conversationClosed {conversationId: 草稿, replacedBy: 副本}）並丟掉草稿。
 // 被拒時以 sendRejected 把文字還給草稿。遠端草稿可以先選那台的工作資料夾（setFolder 手輸或挑最近用過的、resetFolder 回到那台對話自己的工作區；
-// 第一次 send 帶 folder，那台建立時檢查，同瀏覽器的伺服器草稿），不能附加檔案（送出第一則訊息後才能附加）。只在 UI 執行緒
+// 第一次 send 帶 folder，那台建立時檢查，同瀏覽器的伺服器草稿）。附加檔案（2026-11-13 使用者要求：新對話也要能貼圖）：網頁照副本的做法
+// 由宿主代傳上傳（peerUpload），再對草稿送 addUploaded／removeAttachment（帶 commandId，這裡直接回 commandResult），記在草稿上，
+// 第一次 send 的 conversationCreate 帶 uploads（那台下載完才送第一則）。只在 UI 執行緒
 internal sealed partial class AgentHub
 {
     /// <summary>遠端草稿的狀態（只有 <see cref="ConversationState.IsDraft"/> 而且 <see cref="PeerDeviceId"/> 不是 null 時有意義）</summary>
@@ -37,6 +39,12 @@ internal sealed partial class AgentHub
 
         /// <summary>那台電腦上的工作資料夾（完整路徑；null＝那台對話自己的工作區）。換電腦、回到這台時清掉</summary>
         public string? PeerFolder;
+
+        /// <summary>
+        /// 第一則送出之前附加的檔（addUploaded 的 uploads 的一筆，<c>{uploadId, name, size, sha256}</c>；已經上傳到伺服器）。
+        /// 第一次 send 帶給那台；回到這台時清掉（上傳在伺服器，這台的本機草稿用不到）
+        /// </summary>
+        public readonly List<JObject> PeerUploads = new();
     }
 
     /// <summary>
@@ -72,6 +80,11 @@ internal sealed partial class AgentHub
             SetPeerDraftFolder(view, c, cmd == "setFolder" ? command["path"] as JValue : null, reset: cmd == "resetFolder");
             return true;
         }
+        if (cmd is RemoteCommandCatalog.AddUploaded or RemoteCommandCatalog.RemoveAttachment)
+        {
+            PeerDraftAttachment(view, c, cmd, command);
+            return true;
+        }
         if (cmd == "voiceMessage")
         {
             // 錄音要在建立對話的那台辨識（要先有對話才能上傳給它）
@@ -82,7 +95,7 @@ internal sealed partial class AgentHub
         {
             Post(view, PeerFileRules.Toast(cmd == "chooseFolder"
                 ? "這是要在其他電腦開的新對話：工作資料夾要輸入那台電腦上的路徑，或從最近用過的挑"
-                : "這是要在其他電腦開的新對話：送出第一則訊息之後才能附加檔案", "error"));
+                : "這是要在其他電腦開的新對話：附加的檔案要上傳給那台，請用輸入框的迴紋針或直接貼上", "error"));
             return true;
         }
         return false;
@@ -99,6 +112,8 @@ internal sealed partial class AgentHub
         if (string.IsNullOrEmpty(deviceId) || deviceId == peerSink?.DeviceId)
         {
             (c.PeerDeviceId, c.PeerAccountId, c.PeerAccountShownId, c.PeerFolder) = (null, null, null, null);
+            // 附加的檔在伺服器上（給那台下載的）：這台的本機草稿用不到，網頁同時清掉晶片（liverules.draftUploadsDropped）
+            c.PeerUploads.Clear();
             // 回到本機：帳戶要是這台的（遠端草稿可能換過代理種類）
             if (accounts.Find(c.Meta.AccountId) is { } local && local.Provider != c.Meta.Provider)
                 ApplyDraftProvider(c, local.Provider);
@@ -151,6 +166,55 @@ internal sealed partial class AgentHub
         MarkHeaderDirty(c);
     }
 
+    /// <summary>
+    /// 遠端草稿的 addUploaded／removeAttachment（2026-11-13）：記在草稿上、回 commandResult（網頁照副本的做法追蹤結果）。
+    /// addUploaded 的形狀照型錄（1～20 個 {uploadId, name, size, sha256}）、合計最多 20 個；removeAttachment 的 id 是上傳 id，不在也算成功。
+    /// 上傳有沒有真的在伺服器上由第一次 send 時伺服器檢查（不在就整則被拒、文字還給草稿）
+    /// </summary>
+    private void PeerDraftAttachment(IAgentView view, ConversationState c, string cmd, JObject command)
+    {
+        var commandId = command.Value<string>("commandId");
+        void Reply(string state, string? code = null, string? message = null)
+        {
+            if (!SyncIds.IsUlid(commandId))
+                return;
+            Post(view, new JObject
+            {
+                ["type"] = "commandResult", ["commandId"] = commandId, ["state"] = state, ["code"] = code, ["message"] = message, ["tier"] = null, ["origin"] = null,
+            });
+        }
+
+        if (c.PeerCreatingCommandId != null)
+        {
+            Reply(RemoteResultStates.Rejected, RemoteResultCodes.Busy, "新對話建立中，請稍候");
+            return;
+        }
+        if (cmd == RemoteCommandCatalog.RemoveAttachment)
+        {
+            var id = command.Value<string>("id");
+            c.PeerUploads.RemoveAll(u => string.Equals(u.Value<string>("uploadId"), id, StringComparison.Ordinal));
+            Reply(RemoteResultStates.Done);
+            return;
+        }
+        var probe = new JObject { ["cmd"] = cmd, ["conversationId"] = ConversationIds.ToWire(c.Meta.Id) ?? "00000000000000000000000000000000", ["uploads"] = command["uploads"]?.DeepClone() };
+        if (RemoteCommandShapeRules.Check(probe) is not null || command["uploads"] is not JArray uploads)
+        {
+            Reply(RemoteResultStates.Rejected, RemoteResultCodes.Invalid, "附加的檔案格式不對");
+            return;
+        }
+        var added = uploads.Cast<JObject>()
+            .Where(u => !c.PeerUploads.Any(x => string.Equals(x.Value<string>("uploadId"), u.Value<string>("uploadId"), StringComparison.Ordinal)))
+            .ToList();
+        if (c.PeerUploads.Count + added.Count > AgentAttachmentRules.MaxAttachmentsPerMessage)
+        {
+            Reply(RemoteResultStates.Rejected, RemoteResultCodes.Invalid, $"每則訊息最多附 {AgentAttachmentRules.MaxAttachmentsPerMessage} 個檔案");
+            return;
+        }
+        foreach (var u in added)
+            c.PeerUploads.Add((JObject)u.DeepClone());
+        Reply(RemoteResultStates.Done);
+    }
+
     /// <summary>換了代理種類：權限模式改成那一家的預設、模型與推理強度與自訂代理改回預設</summary>
     private void ApplyDraftProvider(ConversationState c, AgentProvider provider)
     {
@@ -173,9 +237,9 @@ internal sealed partial class AgentHub
                 Post(view, PeerCommandRules.Synthesized(commandId, RemoteResultCodes.Invalid).Message);
         }
 
-        if (!SyncIds.IsUlid(commandId) || string.IsNullOrWhiteSpace(text))
+        if (!SyncIds.IsUlid(commandId) || string.IsNullOrWhiteSpace(text) && c.PeerUploads.Count == 0)
         {
-            Reject("要在其他電腦開的新對話，第一則一定要有文字");
+            Reject("要在其他電腦開的新對話，第一則一定要有文字或附件");
             return;
         }
         if (c.PeerCreatingCommandId != null)
@@ -190,7 +254,7 @@ internal sealed partial class AgentHub
             return;
         }
 
-        var create = PeerDraftRules.ConversationCreate(c.PeerDeviceId!, c.PeerAccountId!, c.Meta, text, c.PeerFolder);
+        var create = PeerDraftRules.ConversationCreate(c.PeerDeviceId!, c.PeerAccountId!, c.Meta, text, c.PeerFolder, c.PeerUploads);
         c.PeerCreatingCommandId = commandId;
         c.PeerCreatingText = text;
         MarkHeaderDirty(c);
@@ -302,9 +366,11 @@ internal static class PeerDraftRules
     /// <summary>
     /// 第一次 send 組成的 <c>conversationCreate</c>（PeerCmd 的 cmd；伺服器去掉 <c>deviceId</c>、把邏輯帳戶換成那台的本機 id）：
     /// 權限模式是正規化之後的名稱、模型與推理強度是 null 或 <c>default</c> 時不帶、標題不是預設的「新對話」才帶；
-    /// 資料夾（<paramref name="folder"/>）是 null 時不帶（那台對話自己的工作區）。鍵照型錄的順序
+    /// 資料夾（<paramref name="folder"/>）是 null 時不帶（那台對話自己的工作區）；附加的檔（<paramref name="uploads"/>，2026-11-13）有才帶、文字是空的時不帶 text。
+    /// 鍵照型錄的順序
     /// </summary>
-    public static JObject ConversationCreate(string deviceId, string logicalAccountId, AgentConversation meta, string text, string? folder = null)
+    public static JObject ConversationCreate(string deviceId, string logicalAccountId, AgentConversation meta, string text, string? folder = null,
+        IReadOnlyList<JObject>? uploads = null)
     {
         ArgumentNullException.ThrowIfNull(meta);
         var create = new JObject
@@ -322,7 +388,10 @@ internal static class PeerDraftRules
             create["folder"] = folder;
         if (!string.IsNullOrWhiteSpace(meta.Title) && meta.Title != "新對話")
             create["title"] = meta.Title;
-        create["text"] = text;
+        if (text.Length > 0 || uploads is not { Count: > 0 })
+            create["text"] = text;
+        if (uploads is { Count: > 0 })
+            create["uploads"] = new JArray(uploads.Select(u => u.DeepClone()));
         return create;
     }
 

@@ -52,7 +52,7 @@ internal sealed partial class SyncEngine : ISyncEngineComposerDrafts
 
     /// <summary>
     /// Hello 的功能：有 port 才宣告 draft1；臨時對話的 quick1（這版的中樞收得了帶 ephemeral 的 conversationCreate，2026-11-11）跟著一起宣告——
-    /// 兩個都由協調者的 EnginePort 接上，正式環境一定同時有
+    /// 兩個都由協調者的 EnginePort 接上，正式環境一定同時有；att1（網頁上傳的附件以上傳 id 移除，2026-11-13）也一起
     /// </summary>
     private void ContributeDraftFeatures(List<string> into)
     {
@@ -60,6 +60,8 @@ internal sealed partial class SyncEngine : ISyncEngineComposerDrafts
             return;
         into.Add(DeviceFeatureRules.Draft1);
         into.Add(DeviceFeatureRules.Quick1);
+        // 網頁上傳的附件以上傳 id 移除（2026-11-13，AgentHub.Files.cs 的 RemoveAttachment）
+        into.Add(DeviceFeatureRules.Att1);
     }
 
     /// <summary><c>ComposerDraftUpdate</c>：格式不合格整則略過，否則連同還沒送成功的對話交給協調者</summary>

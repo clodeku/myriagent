@@ -4109,7 +4109,6 @@ async function runDesktopHistoryScope() {
 
 const SHA_RE = /^[0-9a-f]{64}$/;
 const UPLOADING_TEXT = '附件上傳中，完成後才能送出';
-const DRAFT_ATTACH_TEXT = '送出第一則訊息後才能附加檔案';
 const AWAIT_ATTACH_TEXT = '附件還在處理中，請稍候';
 const FILE_REF_ERROR = '這個檔案不能從網頁讀取';
 const POLICY_OFF_TEXT = '這台電腦的遠端政策是關閉，只能看縮圖';
@@ -4376,27 +4375,32 @@ async function runUploadBlocksReload() {
 }
 
 async function runDraftAttach() {
+  // 2026-11-13 使用者要求：新對話（伺服器草稿）在第一則送出之前也能貼圖，已附加的也能移除（跨電腦也要能刪）
   const app = await openWithLayout('draft-attach', layoutOf([[[LF.DRAFT], LF.DRAFT]]));
-  const { api } = app;
+  const { api, hub } = app;
   await waitLoaded(app, [LF.DRAFT]);
   api.uploads();
+  serveAddUploaded(hub);
+  hub.onCmd('removeAttachment', (cmd, arg) => ({ push: [serverResult(arg.commandId, 'done')] }));
   const s = await uploadState(app, LF.DRAFT);
-  const t0 = (await HP.domToasts(app)).length;
-  // 拖放、貼上、程式選的檔案都不上傳，提示原因
-  await dropFiles(app, LF.DRAFT, 'drop', [{ name: '草稿拖放.txt', text: 'x', type: 'text/plain' }]);
-  await dropFiles(app, LF.DRAFT, 'paste', [{ name: '草稿貼上.txt', text: 'x', type: 'text/plain' }]);
-  await app.page.setInputFiles(convSel(LF.DRAFT) + ' [data-field="attachInput"]', [fileOf('草稿選的.txt', 'x')]);
-  await sleep(500);
-  const after = await uploadState(app, LF.DRAFT);
-  const toasts = (await HP.domToasts(app)).slice(t0);
+  await app.page.focus(convSel(LF.DRAFT) + ' textarea.cinput');
+  await dropFiles(app, LF.DRAFT, 'paste', [{ name: 'image.png', text: 'png-bytes', type: 'image/png' }]);
+  const attached = await untilChips(app, LF.DRAFT, allState('attached', 1));
+  const adds = hub.cmds('addUploaded').filter((c) => c.cmd.conversationId === LF.DRAFT);
+  const x = await app.page.evaluate((sel) => { const b = document.querySelector(sel + ' [data-field="uploads"] .up-chip .chip-x'); return b ? { hidden: b.hidden, title: b.title } : null; }, convSel(LF.DRAFT));
+  await app.page.click(convSel(LF.DRAFT) + ' [data-field="uploads"] .up-chip .chip-x');
+  const removed = await untilChips(app, LF.DRAFT, (st) => st.chips.length === 0, 4000);
+  const rm = hub.cmds('removeAttachment');
   // 資料夾選單有「瀏覽資料夾…」（伺服器轉給選的那台，runDraftDirsPicker）也有「輸入資料夾路徑…」
   await app.page.click(convSel(LF.DRAFT) + ' .ch-folder');
   await app.page.waitForSelector('.menu');
   const menu = await menuState(app);
   await closeMenu(app);
-  check('hubDraftAttachDisabled', !!s && s.attach.disabled && s.attach.title === DRAFT_ATTACH_TEXT && uploadReqs(api).length === 0 && after.chips.length === 0
-    && toasts.length === 3 && toasts.every((t) => t === DRAFT_ATTACH_TEXT) && menu.some((x) => x.label === '瀏覽資料夾…') && menu.some((x) => x.label === '輸入資料夾路徑…'),
-  { attach: s && s.attach, puts: uploadReqs(api).length, chips: after.chips, toasts, menu: menu.map((x) => x.label || x.head) });
+  check('hubDraftAttach', !!s && !s.attach.disabled && !!attached && adds.length === 1 && adds[0].cmd.uploads.length === 1
+    && !!x && !x.hidden && x.title === '移除這個附件'
+    && !!removed && rm.length === 1 && rm[0].cmd.conversationId === LF.DRAFT && rm[0].cmd.id === adds[0].cmd.uploads[0].uploadId
+    && menu.some((m) => m.label === '瀏覽資料夾…') && menu.some((m) => m.label === '輸入資料夾路徑…'),
+  { attach: s && s.attach, attached: attached && attached.chips, adds: adds.map((a) => a.cmd), x, removed: !!removed, rm: rm.map((r) => r.cmd), menu: menu.map((m) => m.label || m.head) });
   await HP.closePage(app);
 }
 
@@ -5694,6 +5698,7 @@ async function runPeerReplicaPaste() {
   const remote = LF.liveDesktopInit(NOW, { sync }).remote;
   remote.devices = remote.devices.map((d) => (d.id === LF.DEVICE.offline ? Object.assign({}, d, { online: true }) : d)); // 那台在線、政策 Control
   const uploads = [];
+  const removes = [];
   const app = await openDesktopLive('peer-replica-paste', {
     init: { conversations, layout: desktopLayout([id]), sync },
     initPatch: { remote },
@@ -5707,6 +5712,9 @@ async function runPeerReplicaPaste() {
           setTimeout(() => host.send({ type: 'peerUpload', uploadId: m.uploadId, status: 201, json: JSON.stringify({ uploadId: m.uploadId, sha256: 'a'.repeat(64), size: 68 }) }), 100);
         } else if (m.cmd === 'addUploaded' && m.commandId) {
           host.send(serverResult(m.commandId, 'done'));
+        } else if (m.cmd === 'removeAttachment') {
+          removes.push({ id: m.id, commandId: m.commandId || null });
+          if (m.commandId) host.send(serverResult(m.commandId, 'done'));
         }
       },
     },
@@ -5731,6 +5739,66 @@ async function runPeerReplicaPaste() {
   check('desktopPeerReplicaPasteImage', !!done && uploads.length === 1 && uploads[0].dataUrl === 'data:image/png;base64,' && added.length === 1
     && added[0].conversationId === id && errors.length === 0,
   { chips: done ? done.chips : (await uploadState(app, id)), uploads, added: added.length, errors });
+  // 已附加的也能移除（2026-11-13）：× 送 removeAttachment {id: 上傳 id}（store.post 帶 commandId，經同步交給那台）
+  const upId = added.length && added[0].uploads && added[0].uploads[0] ? added[0].uploads[0].uploadId : null;
+  await page.click(convSel(id) + ' [data-field="uploads"] .up-chip .chip-x');
+  const gone = await untilChips(app, id, (st) => st.chips.length === 0, 4000);
+  check('desktopPeerReplicaRemoveAttached', !!gone && removes.length === 1 && !!upId && removes[0].id === upId && /^[0-9A-HJKMNP-TV-Z]{26}$/.test(removes[0].commandId || ''),
+    { removes, upId, gone: !!gone });
+  await HP.closePage(app);
+}
+
+async function runPeerDraftPaste() {
+  // 桌面要在其他電腦開的新對話（2026-11-13 使用者要求）：第一則送出之前貼圖 → 宿主代傳（peerUpload，剪貼簿的圖改帶 dataUrl）→
+  // 對草稿送 addUploaded（網頁自己帶 commandId）→ 已附加；按 × 送 removeAttachment {id: 上傳 id}（帶 commandId）→ 拿掉
+  const host0 = LF.desktopList(NOW).find((c) => !c.deviceId);
+  const sync = Object.assign(LF.syncWith(NOW, { remoteSupported: true }), { peer: true });
+  const remote = LF.liveDesktopInit(NOW, { sync }).remote;
+  remote.devices = remote.devices.map((d) => (d.id === LF.DEVICE.offline ? Object.assign({}, d, { online: true }) : d));
+  const got = [];
+  const app = await openDesktopLive('peer-draft-paste', {
+    init: { layout: desktopLayout([host0.id]), sync }, initPatch: { remote },
+    host: {
+      extra: (m, host) => {
+        if (m.cmd === 'peerUpload') {
+          got.push({ cmd: 'peerUpload', dataUrl: typeof m.dataUrl === 'string' });
+          if (!m.dataUrl) { host.send({ type: 'peerUpload', uploadId: m.uploadId, status: 400, json: JSON.stringify({ error: 'no_path' }) }); return; }
+          setTimeout(() => host.send({ type: 'peerUpload', uploadId: m.uploadId, status: 201, json: JSON.stringify({ uploadId: m.uploadId, sha256: 'b'.repeat(64), size: 9 }) }), 80);
+        } else if (m.cmd === 'addUploaded' || m.cmd === 'removeAttachment') {
+          got.push({ cmd: m.cmd, conversationId: m.conversationId, commandId: m.commandId || null, id: m.id || null, uploads: m.uploads || null });
+          if (m.commandId) host.send(serverResult(m.commandId, 'done'));
+        }
+      },
+    },
+  });
+  const { page } = app;
+  await waitLoaded(app, [host0.id]);
+  const id = 'dr2';
+  const header = { isDraft: true, title: '', deviceId: LF.DEVICE.offline, workingDirectory: null, customFolder: false, recentFolders: [], peerCreating: false };
+  await app.host.send(Object.assign(LF.localMessage(NOW, id, '', { conversationSync: null, items: [], header }), { paneId: 'p1' }));
+  await page.waitForSelector(convSel(id) + ' textarea.cinput', { timeout: 4000 });
+  // 照真的 WebView2：附上不在磁碟上的 File 就丟例外
+  await page.evaluate(() => {
+    const wv = window.chrome.webview;
+    const orig = wv.postMessageWithAdditionalObjects.bind(wv);
+    wv.postMessageWithAdditionalObjects = (m, objs) => {
+      if (Array.from(objs || []).some((f) => f instanceof File)) throw new TypeError('additional File object is not a file on the disk.');
+      return orig(m, objs);
+    };
+  });
+  const s = await uploadState(app, id);
+  await page.focus(convSel(id) + ' textarea.cinput');
+  await dropFiles(app, id, 'paste', [{ name: 'image.png', text: 'png-bytes', type: 'image/png' }]);
+  const attached = await untilChips(app, id, allState('attached', 1));
+  await page.click(convSel(id) + ' [data-field="uploads"] .up-chip .chip-x');
+  const removed = await untilChips(app, id, (st) => st.chips.length === 0, 4000);
+  const add = got.find((g) => g.cmd === 'addUploaded');
+  const rm = got.find((g) => g.cmd === 'removeAttachment');
+  const ulid = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+  check('desktopPeerDraftPasteAndRemove', !!s && !s.attach.disabled && !!attached && got.some((g) => g.cmd === 'peerUpload' && g.dataUrl)
+    && !!add && add.conversationId === id && ulid.test(add.commandId || '') && add.uploads.length === 1
+    && !!removed && !!rm && rm.conversationId === id && ulid.test(rm.commandId || '') && rm.id === add.uploads[0].uploadId,
+  { attach: s && s.attach, attached: attached && attached.chips, got, removed: !!removed });
   await HP.closePage(app);
 }
 
@@ -6260,7 +6328,7 @@ const SCENARIOS = [
   { checks: ['hubUploadChipsKeptOnSendRejected'], run: runUploadKept },
   { checks: ['hubUploadChipsRestoredAfterReload', 'hubUploadChipsClearedOnClose'], run: runUploadRestore },
   { checks: ['hubUploadBlocksBuildReload'], run: runUploadBlocksReload },
-  { checks: ['hubDraftAttachDisabled'], run: runDraftAttach },
+  { checks: ['hubDraftAttach'], run: runDraftAttach },
   { checks: ['hubDirsOnlyPicker', 'hubDirsOnlyNeedsControl'], run: runDirsPicker },
   { checks: ['hubDraftDirsPicker', 'hubDraftDirsPickerOldDevice'], run: runDraftDirsPicker },
   { checks: ['hubFileFetchDialog', 'hubFileRefErrorFixedText', 'hubFileRefAbsoluteRejected', 'hubOfficeFileDownloads'], run: runFileFetch },
@@ -6284,7 +6352,8 @@ const SCENARIOS = [
   { checks: ['hubFileFetchUnknownOnReinit'], run: runReviewFileFetchUnknown },
   { checks: ['desktopReplicaTabRunning', 'desktopReplicaConvRunning'], run: runReviewReplicaTabRunning },
   { checks: ['desktopPeerReplicaFolderShown', 'desktopPeerReplicaFolderOwnerRunning'], run: runPeerReplicaFolder },
-  { checks: ['desktopPeerReplicaPasteImage'], run: runPeerReplicaPaste },
+  { checks: ['desktopPeerReplicaPasteImage', 'desktopPeerReplicaRemoveAttached'], run: runPeerReplicaPaste },
+  { checks: ['desktopPeerDraftPasteAndRemove'], run: runPeerDraftPaste },
   { checks: ['desktopPeerDraftFolderMenu', 'desktopPeerDraftFolderChosen', 'desktopPeerDraftFolderCreating'], run: runPeerDraftFolder },
   { checks: ['desktopPeerReplicaModelMenu', 'desktopPeerReplicaModelRevert'], run: runPeerReplicaModel },
   { checks: ['desktopPeerReplicaModelWhileRunning'], run: runPeerReplicaModelWhileRunning },

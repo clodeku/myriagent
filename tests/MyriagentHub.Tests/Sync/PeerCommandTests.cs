@@ -236,6 +236,37 @@ public sealed class PeerCommandTests
         }
     }
 
+    private static readonly string[] AttFeatures = [DeviceFeatureRules.Conv1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Att1];
+
+    [Fact]
+    public async Task 移除已附加的檔_目標有att1才簽_沒有就立即拒絕unsupported()
+    {
+        // 2026-11-13：遠端的 removeAttachment 的 id 是網頁的上傳 id；舊版的桌面找不到會回 done 卻沒移除，所以不送給它們
+        await using (var s = await CommandRouterTests.Setup.StartAsync(features: AttFeatures))
+        await using (var b = await PeerAsync(s, "B 電腦", AttFeatures))
+        {
+            var cid = NewCommandId();
+            var remove = new JObject { ["cmd"] = "removeAttachment", ["conversationId"] = CommandRouterTests.Conv, ["id"] = "01J9QZ3K8M5R7T2V4W6X8Y0A1B" };
+            (await b.Client.PeerCmdAsync(new PeerCmd(cid, remove))).Should().Be(new PeerCmdResult(true, cid, null));
+            var delivery = await s.Device!.WaitForAsync<CommandDelivery>();
+            var verdict = Verify(s, delivery, acceptsDevice: true);
+            verdict.Step.Should().BeNull(verdict.Detail);
+            verdict.Body!.Cmd.Value<string>("cmd").Should().Be("removeAttachment");
+        }
+
+        await using (var s = await CommandRouterTests.Setup.StartAsync(features: PeerFeatures))
+        await using (var b = await PeerAsync(s, "B 電腦", AttFeatures))
+        {
+            var cid = NewCommandId();
+            var remove = new JObject { ["cmd"] = "removeAttachment", ["conversationId"] = CommandRouterTests.Conv, ["id"] = "01J9QZ3K8M5R7T2V4W6X8Y0A1B" };
+            (await b.Client.PeerCmdAsync(new PeerCmd(cid, remove))).Accepted.Should().BeTrue();
+            var result = await b.Client.WaitForAsync<PeerReply>(r => (string?)r.Message["type"] == "commandResult");
+            result.Message["code"]!.Value<string>().Should().Be(RemoteResultCodes.Unsupported);
+            result.Message["message"]!.Value<string>().Should().Contain("版本太舊").And.Contain("移除已附加的檔案");
+            await CommandRouterTests.AssertNoDeliveryAsync(s.Device!, 200);
+        }
+    }
+
     private static readonly string[] Xfer2Features = [DeviceFeatureRules.Conv1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Xfer1, DeviceFeatureRules.Xfer2, DeviceFeatureRules.Desk1];
 
     [Fact]

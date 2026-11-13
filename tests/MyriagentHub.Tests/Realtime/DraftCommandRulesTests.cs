@@ -153,6 +153,33 @@ public sealed class DraftCommandRulesTests
     }
 
     [Fact]
+    public void 第一則之前附加的檔_addUploaded記在草稿_重複不加_removeAttachment以上傳id拿掉_conversationCreate帶uploads()
+    {
+        // 2026-11-13 使用者要求：新對話也要能貼圖、已附加的也要能刪
+        object Up(string id) => new { uploadId = id, name = id + ".png", size = 3L, sha256 = new string('a', 64) };
+        var (one, e1) = Apply(Draft, new { cmd = "addUploaded", conversationId = DraftId, uploads = new[] { Up("upA"), Up("upB") } });
+        e1.Should().BeNull();
+        var (two, e2) = Apply(one!, new { cmd = "addUploaded", conversationId = DraftId, uploads = new[] { Up("upB") } });
+        e2.Should().BeNull();
+        two!.Uploads.Select(u => u.UploadId).Should().Equal("upA", "upB");
+        var (three, e3) = Apply(two, new { cmd = "removeAttachment", conversationId = DraftId, id = "upA" });
+        e3.Should().BeNull();
+        three!.Uploads.Select(u => u.UploadId).Should().Equal("upB");
+        Apply(three, new { cmd = "removeAttachment", conversationId = DraftId, id = "upZ" }).Draft!.Uploads.Should().HaveCount(1, "不在的照樣成功");
+        Apply(three, new { cmd = "addUploaded", conversationId = DraftId, uploads = new[] { new { uploadId = "x y", name = "a", size = 1, sha256 = "z" } } }).Error.Should().Be(BrowserErrorCodes.Invalid);
+        var full = Enumerable.Range(0, AgentAttachmentRules.MaxAttachmentsPerMessage).Select(i => Up("u" + i)).ToArray();
+        var (twenty, _) = Apply(Draft, new { cmd = "addUploaded", conversationId = DraftId, uploads = full });
+        Apply(twenty!, new { cmd = "addUploaded", conversationId = DraftId, uploads = new[] { Up("more") } }).Error.Should().Be(BrowserErrorCodes.Invalid, "一則最多 20 個");
+
+        var create = DraftCommandRules.ConversationCreate(three, "");
+        create.Properties().Select(p => p.Name).Should().Equal("cmd", "accountId", "permissionMode", "uploads");
+        ((JArray)create["uploads"]!).Single().ToString(Newtonsoft.Json.Formatting.None).Should().Be(
+            "{\"uploadId\":\"upB\",\"name\":\"upB.png\",\"size\":3,\"sha256\":\"" + new string('a', 64) + "\"}");
+        RemoteCommandShapeRules.Check(create).Should().BeNull();
+        DraftCommandRules.ConversationCreate(Draft, "x").Property("uploads").Should().BeNull("沒附檔不帶");
+    }
+
+    [Fact]
     public void send組出的conversationCreate過ShapeRules_沒有deviceId()
     {
         var draft = Draft with { Model = "m1", Effort = "high", PermissionMode = "Plan", WorkingDirectory = @"C:\work", CustomFolder = true, Title = "標題", DeviceId = SyncIds.NewDeviceId() };

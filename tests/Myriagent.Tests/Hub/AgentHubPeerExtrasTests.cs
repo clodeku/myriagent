@@ -367,7 +367,7 @@ public sealed class AgentHubPeerExtrasTests
 
         h.Command(h.Main, "attach", new { conversationId = draft });
         await h.Ui.DrainAsync();
-        h.Main.Messages("toast", mark).Single().Value<string>("text").Should().Contain("送出第一則訊息之後");
+        h.Main.Messages("toast", mark).Single().Value<string>("text").Should().Contain("要上傳給那台", "這台的附件對話框挑的是這台的檔；網頁改走上傳");
 
         var choose = h.Main.Mark();
         h.Command(h.Main, "chooseFolder", new { conversationId = draft });
@@ -378,6 +378,46 @@ public sealed class AgentHubPeerExtrasTests
         h.Command(h.Main, "draftSetDevice", new { conversationId = draft, deviceId = OwnDevice });
         var local = await h.Main.WaitForAsync("header", since: back, conversationId: draft);
         local["header"]!.Value<string>("deviceId").Should().BeNull("回到這台的本機草稿");
+    }
+
+    [Fact]
+    public async Task 遠端草稿_第一則之前附加的檔_第一次send帶uploads_移除的不帶_只附檔也能送()
+    {
+        // 2026-11-13 使用者要求：新對話也要能貼圖、已附加的也要能刪
+        using var h = new HubHarness();
+        var sink = new FakeSink();
+        h.Ui.Invoke(() =>
+        {
+            h.Hub.AttachPeerSink(sink);
+            h.Hub.PeerLive = true;
+        });
+        var draft = h.NewConversation(h.Main, h.Claude);
+        h.Command(h.Main, "draftSetDevice", new { conversationId = draft, deviceId = OtherDevice, accountId = Logical, provider = "Claude" });
+        JObject Up(string id) => JObject.FromObject(new { uploadId = id, name = id + ".png", size = 3L, sha256 = new string('a', 64) });
+        async Task<JObject> Run(string cmd, JObject args)
+        {
+            var cid = NewId();
+            var mark = h.Main.Mark();
+            args["cmd"] = cmd;
+            args["conversationId"] = draft;
+            args["commandId"] = cid;
+            h.Ui.Invoke(() => h.Hub.HandleCommand(h.Main, args));
+            return await h.Main.WaitForAsync("commandResult", m => m.Value<string>("commandId") == cid, mark);
+        }
+
+        (await Run("addUploaded", new JObject { ["uploads"] = new JArray(Up("upA"), Up("upB")) })).Value<string>("state").Should().Be("done");
+        (await Run("addUploaded", new JObject { ["uploads"] = new JArray(Up("upB")) })).Value<string>("state").Should().Be("done", "同一個上傳不重複");
+        (await Run("removeAttachment", new JObject { ["id"] = "upA" })).Value<string>("state").Should().Be("done");
+        var bad = await Run("addUploaded", new JObject { ["uploads"] = new JArray(JObject.FromObject(new { uploadId = "x y", name = "a", size = 1, sha256 = "z" })) });
+        (bad.Value<string>("state"), bad.Value<string>("code")).Should().Be(("rejected", "invalid"));
+
+        var send = NewId();
+        h.Command(h.Main, "send", new { conversationId = draft, text = "", commandId = send });
+        await h.Ui.DrainAsync();
+        var call = sink.Calls.Should().ContainSingle().Subject;
+        call.Cmd.ContainsKey("text").Should().BeFalse("只附檔、沒有文字");
+        ((JArray)call.Cmd["uploads"]!).Select(u => u.Value<string>("uploadId")).Should().Equal("upB");
+        call.Cmd.Properties().Select(p => p.Name).Should().Equal("cmd", "deviceId", "accountId", "permissionMode", "uploads");
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using Myriagent.Remote;
 using Myriagent.Sync;
+using MyriagentHub.Media;
 using MyriagentHub.Realtime;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -39,6 +40,14 @@ internal sealed partial class CommandRouter
         {
             log.LogDebug("草稿上不能做 {Cmd}", name);
             return new CmdResult(false, route.CommandId, BrowserErrorCodes.Invalid);
+        }
+
+        // 草稿上附加的檔（2026-11-13）：先確認每個都已上傳到這台伺服器（同一般指令簽章之前的檢查；送出時 IssueAsync 會再查一次）
+        if (name == DraftCommandRules.AddUploaded
+            && (CommandUploadRules.Claims(route.Body) is not { Count: > 0 } claims || !uploads.TryVerify(claims)))
+        {
+            log.LogDebug("草稿上的 addUploaded 有沒上傳過的檔");
+            return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Invalid, CmdError: false, UploadsUnknownMessage), cancellationToken);
         }
 
         // 先以讀到的那份檢查（不合格就不動草稿），再在草稿的鎖裡對最新的那份套用同一個修改

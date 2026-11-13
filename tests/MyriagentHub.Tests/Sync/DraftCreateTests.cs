@@ -3,6 +3,7 @@ using Myriagent.Security;
 using Myriagent.Sync;
 using MyriagentHub.Audit;
 using MyriagentHub.Data;
+using MyriagentHub.Media;
 using MyriagentHub.Realtime;
 using MyriagentHub.Sync;
 using MyriagentHub.Tests.TestSupport;
@@ -51,6 +52,47 @@ public sealed class DraftCreateTests
         (audit.Outcome, audit.Target).Should().Be((AuditOutcomes.Ok, delivery.CommandId));
         audit.Detail.Should().NotContain("第一則");
         await s.Browser.Hub.AssertNoMessageAsync("sendRejected", 200);
+    }
+
+    private sealed class DraftUploads : IUploadRegistry
+    {
+        public HashSet<string> Known { get; } = new(StringComparer.Ordinal);
+
+        public bool TryVerify(IReadOnlyList<UploadClaim> uploads)
+        {
+            lock (Known)
+                return uploads.All(u => Known.Contains(u.UploadId));
+        }
+    }
+
+    [Fact]
+    public async Task 草稿上附加的檔_沒上傳過的invalid_加上與移除只改草稿不轉送_第一次send的conversationCreate帶uploads()
+    {
+        // 2026-11-13 使用者要求：新對話也要能貼圖、已附加的也要能刪
+        var uploads = new DraftUploads();
+        await using var s = await Setup.StartAsync(services: services => services.AddSingleton<IUploadRegistry>(uploads));
+        var (_, draftId) = await DraftAsync(s);
+        object Up(string id) => new { uploadId = id, name = id + ".png", size = 3, sha256 = new string('a', 64) };
+        async Task<JObject> Run(object cmd)
+        {
+            var cid = NextCommandId();
+            (await s.Browser.Hub.CmdAsync(cmd, commandId: cid))["accepted"]!.Value<bool>().Should().BeTrue();
+            return await s.Browser.Hub.WaitForAsync("commandResult", m => (string?)m["commandId"] == cid);
+        }
+
+        var unknown = await Run(new { cmd = "addUploaded", conversationId = draftId, uploads = new[] { Up("up_1") } });
+        (unknown["state"]!.Value<string>(), unknown["code"]!.Value<string>()).Should().Be((RemoteResultStates.Rejected, RemoteResultCodes.Invalid));
+        uploads.Known.UnionWith(["up_1", "up_2"]);
+        (await Run(new { cmd = "addUploaded", conversationId = draftId, uploads = new[] { Up("up_1"), Up("up_2") } }))["state"]!.Value<string>().Should().Be(RemoteResultStates.Done);
+        (await Run(new { cmd = "removeAttachment", conversationId = draftId, id = "up_1" }))["state"]!.Value<string>().Should().Be(RemoteResultStates.Done);
+        await CommandRouterTests.AssertNoDeliveryAsync(s.Device!, 200);
+        EventLogTests.Count(s.Host, "SELECT COUNT(*) FROM commands").Should().Be(0, "草稿上的附件只改伺服器記憶體");
+
+        (await s.Browser.Hub.CmdAsync(new { cmd = "send", conversationId = draftId, text = "" }, commandId: NextCommandId()))["accepted"]!.Value<bool>().Should().BeTrue();
+        var verdict = s.Verify(await s.Device!.WaitForAsync<CommandDelivery>());
+        verdict.Step.Should().BeNull(verdict.Detail);
+        verdict.Body!.Cmd.Properties().Select(p => p.Name).Should().Equal("cmd", "accountId", "permissionMode", "uploads");
+        ((JArray)verdict.Body.Cmd["uploads"]!).Select(u => u.Value<string>("uploadId")).Should().Equal("up_2");
     }
 
     [Fact]

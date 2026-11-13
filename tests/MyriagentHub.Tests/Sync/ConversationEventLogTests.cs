@@ -854,7 +854,7 @@ public sealed partial class ConversationEventLogTests(ITestOutputHelper output)
 
         // 依登記的順序：AddHubRealtime 的 conv1、prov1、live1，AddHubPairing 之後的 AddHubReleases 宣告 update1（U2），AddHubBrowser 裡 AddHubCommands 的 cmd1（WP4.5 步 6），
         // 之後是 AddHubMedia 的 media1（WP4.7 步 4）、AddHubStats 的 stat1（各電腦的即時狀態）、AddHubTokens 的 tok1、tok2（各帳戶的 token 計數、其他電腦的 token 計數）
-        hello.Features.Should().Equal(DeviceFeatureRules.Conv1, DeviceFeatureRules.Prov1, DeviceFeatureRules.Live1, DeviceFeatureRules.Live2, DeviceFeatureRules.Update1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Exec1, DeviceFeatureRules.Media1, DeviceFeatureRules.Stat1, DeviceFeatureRules.Tok1, DeviceFeatureRules.Tok2, DeviceFeatureRules.Sched1, DeviceFeatureRules.Draft1, DeviceFeatureRules.Quick1, DeviceFeatureRules.Collab1, DeviceFeatureRules.Xfer1, DeviceFeatureRules.Xfer2, DeviceFeatureRules.Desk1);
+        hello.Features.Should().Equal(DeviceFeatureRules.Conv1, DeviceFeatureRules.Prov1, DeviceFeatureRules.Live1, DeviceFeatureRules.Live2, DeviceFeatureRules.Update1, DeviceFeatureRules.Cmd1, DeviceFeatureRules.Peer1, DeviceFeatureRules.Exec1, DeviceFeatureRules.Media1, DeviceFeatureRules.Stat1, DeviceFeatureRules.Tok1, DeviceFeatureRules.Tok2, DeviceFeatureRules.Sched1, DeviceFeatureRules.Draft1, DeviceFeatureRules.Quick1, DeviceFeatureRules.Att1, DeviceFeatureRules.Collab1, DeviceFeatureRules.Xfer1, DeviceFeatureRules.Xfer2, DeviceFeatureRules.Desk1);
     }
 
     [Fact]
