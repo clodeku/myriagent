@@ -81,4 +81,52 @@ public sealed class MyriagentRemoteCliTests
         var lines = stdout.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.TrimEnd('\r')).ToList();
         lines.Should().Equal("DESK\t這台\td_a", "LAPTOP（LT-01）\t在線，可以執行\td_b", "OLD\t在線，版本太舊（要先更新那台）\td_c", "OFF\t離線\td_d");
     }
+
+    [Fact]
+    public void 對話之間互送訊息_conversations與send的參數()
+    {
+        CliArgs.Parse(["conversations"]).Should().Be(new CliArgs("conversations", null, null, null, null, null, false, false, false, null));
+        CliArgs.Parse(["conversations", "PC-B", "--json"]).Should().Be(new CliArgs("conversations", "PC-B", null, null, null, null, false, true, false, null));
+        var send = CliArgs.Parse(["send", "PC-B", "0123456789abcdef0123456789abcdef", "--", "報表", "好了"]);
+        send.Error.Should().BeNull();
+        send.Op.Should().Be("send");
+        send.Device.Should().Be("PC-B");
+        send.Target.Should().Be("0123456789abcdef0123456789abcdef");
+        send.Command.Should().Be("報表 好了");
+        var stdin = CliArgs.Parse(["send", "這台", "部署", "--stdin"]);
+        stdin.ReadStdin.Should().BeTrue();
+        stdin.Target.Should().Be("部署");
+
+        var o = Newtonsoft.Json.Linq.JObject.Parse(CliArgs.Request(send, "conv", "tok"));
+        o.Value<string>("op").Should().Be("send");
+        o.Value<string>("target").Should().Be("0123456789abcdef0123456789abcdef");
+        o.Value<string>("command").Should().Be("報表 好了");
+        var parsed = Myriagent.RemoteExec.RemoteExecPipeRules.ParseRequest(o.ToString(Newtonsoft.Json.Formatting.None));
+        parsed.Problem.Should().BeNull();
+        parsed.Request!.Target.Should().Be("0123456789abcdef0123456789abcdef");
+        Myriagent.RemoteExec.RemoteExecPipeRules.ParseRequest(CliArgs.Request(CliArgs.Parse(["conversations", "PC-B"]), "conv", "tok")).Request!.Device.Should().Be("PC-B");
+    }
+
+    [Theory]
+    [InlineData(new[] { "send" }, "少了要送的電腦")]
+    [InlineData(new[] { "send", "PC-B" }, "少了要送的對話")]
+    [InlineData(new[] { "send", "PC-B", "部署" }, "少了要送的訊息")]
+    [InlineData(new[] { "send", "PC-B", "部署", "--stdin", "--", "x" }, "擇一")]
+    [InlineData(new[] { "send", "--bogus", "PC-B", "部署", "x" }, "不認得選項")]
+    [InlineData(new[] { "conversations", "A", "B" }, "只收一台")]
+    public void 對話之間互送訊息_參數不對(string[] args, string error) => CliArgs.Parse(args).Error.Should().Contain(error);
+
+    [Fact]
+    public void 對話之間互送訊息_回應的輸出()
+    {
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var printer = new ReplyPrinter(stdout, stderr, json: false);
+        printer.Handle("{\"t\":\"conversations\",\"paired\":true,\"items\":[{\"id\":\"abc\",\"title\":\"部署\",\"device\":\"PC-B\",\"self\":false,\"running\":true}]}").Should().Be(0);
+        stdout.ToString().Should().Contain("PC-B	abc	執行中	部署");
+        printer.Handle("{\"t\":\"sent\",\"device\":\"PC-B\",\"conversation\":\"abc\",\"title\":\"部署\",\"queued\":true}").Should().Be(0);
+        stdout.ToString().Should().Contain("已送到「PC-B」的對話「部署」（abc）").And.Contain("正在執行");
+        printer.Handle("{\"t\":\"error\",\"code\":\"rejected\",\"message\":\"那台的設定不允許\"}").Should().Be(ExitCodes.NotSent);
+        stderr.ToString().Should().Contain("那台的設定不允許");
+    }
 }

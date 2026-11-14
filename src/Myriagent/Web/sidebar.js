@@ -5,11 +5,11 @@
 // 搜尋：標題在網頁即時比對；桌面另外請宿主搜內容（searchConversations），結果回來後補上只有內容符合的對話，並在標題下顯示符合處的片段
 // 〔同步〕（WP3.5）：連結到目錄的帳戶另有各電腦的登入小點；remoteOnly 帳戶（目錄裡有、這台沒有）的卡是灰的，
 // 點擊、Enter、右鍵都只開「在這台登入」，沒有＋按鈕、不能拖曳，也不出現在帳戶篩選與拖曳排序的 ids 裡
-import { h, iconButton, reconcile, setAcc, setPulse, setTempo, safeColor, pctText, fmtSpanShort, fmtReset, fmtRelative, fmtDateTime, replayClass, setHidden } from './util.js';
+import { h, iconButton, reconcile, setAcc, setPulse, setTempo, safeColor, pctText, fmtSpanShort, fmtReset, fmtRelative, fmtDateTime, replayClass, setHidden, copyToClipboard } from './util.js';
 import { gaugeFx, titleDecodeFx, listEntranceCount, LIST_STAGGER_MS, quotaLocked, accountPulse, pulsePhase } from './fxrules.js';
 import { icon } from './icons.js';
 import { post, state, accountOf, STATUS_LABEL, isHub, isCollaborator, on, emit } from './store.js';
-import { openMenu, spinner } from './ui.js';
+import { openMenu, spinner, toast } from './ui.js';
 import { confirmDeleteConversation } from './conversation.js';
 import { deviceStrip, deviceStripSig } from './remote.js';
 import { remoteOnlyElsewhere, sessionTotals, sessionTitle, programsTitle, subagentsTitle, subagentsTooltip } from './remoterules.js';
@@ -1081,9 +1081,18 @@ function rowMenu(id, anchor, at) {
     { label: '在新視窗開啟', icon: 'popout', onSelect: () => post({ cmd: 'popout', conversationId: id }) },
     // 延伸成新對話（forkConversation，同標頭的「⋯」選單）：只有桌面這台的對話，新對話開在旁邊的窗格
     autoTitle && !isHub && state.mode === 'main' && { label: '延伸成新對話', icon: 'gitBranch', desc: '複製目前的內容，由新的代理接著做', onSelect: () => ws.forkConversation(id) },
+    // 對話 ID（2026-11-15：貼給代理，讓它用 myriagent-remote send 通知這個對話；每台電腦、瀏覽器版都是同一個）
+    { label: '複製對話 ID', icon: 'copy', desc: id.toLowerCase(), onSelect: () => copyConversationId(id) },
     { type: 'sep' },
     { label: '刪除…', icon: 'trash', danger: true, hint: 'Del', onSelect: () => confirmDelete(id) },
   ].filter(Boolean), { at, placement: 'bottom-end', minWidth: autoTitle ? 240 : 190 });
+}
+
+/** 複製對話 ID（線上 id：小寫的 32 個十六進位，每台電腦、瀏覽器版都一樣） */
+async function copyConversationId(id) {
+  const wire = String(id).toLowerCase();
+  const ok = await copyToClipboard(wire, (text) => post({ cmd: 'copyText', text }));
+  toast(ok ? '已複製對話 ID：' + wire : '已請宿主複製對話 ID', 'success');
 }
 
 function confirmDelete(id) {

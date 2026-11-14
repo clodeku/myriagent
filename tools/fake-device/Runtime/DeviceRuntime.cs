@@ -309,6 +309,8 @@ internal sealed partial class DeviceRuntime : IAsyncDisposable
                 id => Host.InvokeAsync(() => Hub.ConversationTitle(id)), isElevated: () => false);
             Hub.AttachRemoteExec(RemoteExec.Runner);
             Sync.AttachRemoteExec(RemoteExec);
+            // 對話之間互送訊息（myriagent-remote conversations／send，2026-11-15）
+            RemoteExec.ConversationHandler = (id, request, directory) => Host.InvokeAsync(() => Hub.HandleConversationCli(id, request, directory)).Unwrap();
             RemoteExec.StartPipe();
         }
 

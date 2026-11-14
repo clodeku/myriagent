@@ -109,6 +109,22 @@ public sealed class RemoteExecScenarioTests(ITestOutputHelper output)
         audit.Count(e => e.Cmd == RemoteCommandCatalog.RemoteExec && e.State == RemoteResultStates.Done && e.IssuerLabel == "電腦「exec-a」")
             .Should().BeGreaterThanOrEqualTo(4);
 
+        // 對話之間互送訊息（2026-11-15）：B 開一個對話，A 的 myriagent-remote conversations 列得出它（在 exec-b、對話 ID），send 送進去，B 的代理收到並註明來源
+        var b1 = (await b.Runtime.ChatAsync(new ChatSpec("通知對象", AccountB.Alias, "開始", [], null, Wait))).ConversationId;
+        var wire = b1.ToLowerInvariant();
+        var convs = await WaitForCliAsync(a, r => r.ExitCode == 0 && r.Stdout.Contains(wire), "A 的 conversations 列出 B 的對話",
+            "conversations", "exec-b", "--json");
+        JArray.Parse(convs.Stdout).OfType<JObject>().Should().Contain(c => c.Value<string>("id") == wire && c.Value<string>("device") == "exec-b");
+        var sent = await RunCliAsync(a, "send", "exec-b", wire, "--", "報表做好了，請接著部署");
+        output.WriteLine($"send：exit={sent.ExitCode} stdout={sent.Stdout} stderr={sent.Stderr}");
+        sent.ExitCode.Should().Be(0, sent.Stderr);
+        sent.Stdout.Should().Contain("已送到「exec-b」");
+        await WaitAsync(() => b.Runtime.OnUi(() => b.Runtime.Hub.GetItems(b1).Any(i => i.Text.Contains("【其他對話送來的訊息】") && i.Text.Contains("電腦「exec-a」")
+            && i.Text.EndsWith("報表做好了，請接著部署", StringComparison.Ordinal))).GetAwaiter().GetResult(), "B 的對話收到 A 送的訊息");
+        var wrongDevice = await RunCliAsync(a, "send", "這台", wire, "--", "x");
+        wrongDevice.ExitCode.Should().Be(125);
+        wrongDevice.Stderr.Should().Contain("在「exec-b」");
+
         // 5. B 關掉開關：之後被拒（A 看到新的政策之前由 B 的閘門拒絕，之後在送出前就擋）
         generation = await b.Inspect(v => v.ConnectionGeneration);
         await b.Runtime.CommandAsync("syncSetPolicy", new JObject { ["allowRemoteExec"] = false });

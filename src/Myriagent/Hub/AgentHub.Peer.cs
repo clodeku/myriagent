@@ -43,6 +43,12 @@ internal sealed partial class AgentHub
 
         /// <summary>結果到了的時間（之後 <see cref="PeerHubRules.OutputGraceMs"/> 內還收輸出）</summary>
         public long? CompletedAt { get; set; }
+
+        /// <summary>
+        /// 不是網頁發起、是中樞自己等結果的（myriagent-remote send，AgentHub.ConversationMessages.cs）：<c>commandResult</c> 或 <c>sendRejected</c> 到了就交給它、不轉給任何檢視；
+        /// 被清掉（逾時、解除配對）時給 null
+        /// </summary>
+        public TaskCompletionSource<JObject?>? Completion { get; init; }
     }
 
     /// <summary>協調者在建立引擎時掛上、解除配對時拿掉（UI 執行緒）；拿掉時等結果的一律忘掉（網頁 150 秒後當成結果不明）</summary>
@@ -51,6 +57,8 @@ internal sealed partial class AgentHub
         peerSink = sink;
         if (sink is null)
         {
+            foreach (var p in peerPending.Values)
+                p.Completion?.TrySetResult(null);
             peerPending.Clear();
             peerLive = false;
         }
@@ -117,6 +125,16 @@ internal sealed partial class AgentHub
         }
         if (message.Value<string>("type") == "commandResult")
             pending.CompletedAt ??= Environment.TickCount64;
+        if (pending.Completion is { } completion)
+        {
+            if (message.Value<string>("type") is "commandResult" or "sendRejected")
+            {
+                peerPending.Remove(commandId);
+                completion.TrySetResult(message);
+            }
+
+            return;
+        }
         // 遠端草稿（AgentHub.PeerDrafts.cs）：peerCreated 不轉給網頁；被拒時還原草稿的文字
         if (HandlePeerDraftReply(pending, message))
             return;
@@ -159,10 +177,17 @@ internal sealed partial class AgentHub
         foreach (var (id, p) in peerPending.ToList())
         {
             if (now - p.At > PeerHubRules.PendingMs || p.CompletedAt is { } done && now - done > PeerHubRules.OutputGraceMs)
+            {
                 peerPending.Remove(id);
+                p.Completion?.TrySetResult(null);
+            }
         }
 
         while (peerPending.Count >= PeerHubRules.MaxPending)
-            peerPending.Remove(peerPending.MinBy(p => p.Value.At).Key);
+        {
+            var oldest = peerPending.MinBy(p => p.Value.At);
+            peerPending.Remove(oldest.Key);
+            oldest.Value.Completion?.TrySetResult(null);
+        }
     }
 }

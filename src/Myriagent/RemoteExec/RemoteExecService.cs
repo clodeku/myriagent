@@ -82,6 +82,12 @@ internal sealed class RemoteExecService : IRemoteExecEndpoint, IDisposable
     /// <summary>myriagent-schedule 的定時訊息（AppController 接到中樞，在 UI 執行緒處理）：對話 id、要求 → 結果；沒接時回錯誤</summary>
     public Func<string, JObject, Task<JObject>>? TimedHandler { get; set; }
 
+    /// <summary>
+    /// myriagent-remote 的 conversations 與 send（對話之間互送訊息；AppController 接到中樞，在 UI 執行緒處理）：
+    /// 發起的對話 id、要求、同步的現況 → 一行的內容；沒接時回錯誤
+    /// </summary>
+    public Func<string, RemoteExecPipeRequest, RemoteExecDirectory, Task<JObject>>? ConversationHandler { get; set; }
+
     /// <summary>這個對話的權杖（給對話的 CLI 的環境變數）</summary>
     public string TokenFor(string conversationId) => RemoteExecPipeRules.Token(secret, conversationId);
 
@@ -216,6 +222,17 @@ internal sealed class RemoteExecService : IRemoteExecEndpoint, IDisposable
             }
 
             var directory = await transport.GetDirectoryAsync().ConfigureAwait(false);
+
+            // 對話之間互送訊息（myriagent-remote conversations／send）：未配對也能送給這台的對話
+            if (request.Op is RemoteExecPipeRules.OpConversations or RemoteExecPipeRules.OpSend)
+            {
+                var result = ConversationHandler is { } handler
+                    ? await handler(request.Conversation, request, directory).ConfigureAwait(false)
+                    : new JObject { ["t"] = "error", ["code"] = RemoteExecPipeRules.ErrorUnknown, ["message"] = "這台的 Clode Myriagent 不支援對話之間互送訊息" };
+                output.Writer.TryWrite(result.ToString(Newtonsoft.Json.Formatting.None));
+                return;
+            }
+
             if (!directory.Paired || directory.SelfDeviceId is null)
             {
                 output.Writer.TryWrite(RemoteExecPipeRules.Error(RemoteExecPipeRules.ErrorNotPaired, "這台電腦還沒有和 MyriagentHub 配對，沒有其他電腦可以操作"));

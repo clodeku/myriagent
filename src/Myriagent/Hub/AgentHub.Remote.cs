@@ -790,10 +790,14 @@ internal sealed partial class AgentHub
     /// <summary>測試接縫：登記的處理者（直接呼叫 TryHandle，驗「沒授權就拒絕」）</summary>
     internal IReadOnlyList<IRemoteCommandHandler> RemoteHandlersForTest => remoteHandlers.ToList();
 
-    internal void MarkReplicaForTest(string conversationId, bool replica = true)
+    internal void MarkReplicaForTest(string conversationId, bool replica = true, string? ownerDeviceId = null)
     {
         if (conversations.TryGetValue(conversationId, out var c))
+        {
             c.IsReplica = replica;
+            if (ownerDeviceId != null)
+                c.ReplicaOwnerDeviceId = ownerDeviceId;
+        }
     }
 
     /// <summary>測試接縫：佇列每一則的 Id、文字、來源與是否被留下（WP4.4 計畫步 8）</summary>

@@ -22,6 +22,9 @@ internal sealed record RemoteExecPipeRequest(string Op, string Conversation, str
 {
     /// <summary>op 是 timed（myriagent-schedule）時的內容：{op:"add"|"list"|"remove"|"pause"|"resume", …}</summary>
     public Newtonsoft.Json.Linq.JObject? Timed { get; init; }
+
+    /// <summary>op 是 send 時要送的對話（對話 ID 或標題）；訊息內容在 <see cref="Command"/></summary>
+    public string? Target { get; init; }
 }
 
 /// <summary>
@@ -57,6 +60,15 @@ internal static class RemoteExecPipeRules
 
     /// <summary>myriagent-schedule 的定時訊息（不需要配對；結果一行 {t:"timed", ok, message?, item?, items?}）</summary>
     public const string OpTimed = "timed";
+
+    /// <summary>
+    /// 列出找得到的對話（2026-11-15：對話之間互送訊息；不需要配對，未配對只有這台的）：選填的 device；
+    /// 結果一行 {t:"conversations", self, paired, items:[{id, title, device, deviceId, self, running, waiting, updatedAt, current}]}
+    /// </summary>
+    public const string OpConversations = "conversations";
+
+    /// <summary>把訊息送進某個對話（同上）：device、target（對話 ID 或標題）、command（訊息）；結果一行 {t:"sent", device, conversation, title, queued?} 或 {t:"error"}</summary>
+    public const string OpSend = "send";
 
     // 錯誤代碼（{t:"error"}）
     public const string ErrorInvalid = "invalid";
@@ -117,7 +129,7 @@ internal static class RemoteExecPipeRules
         if (o["v"] is not JValue { Type: JTokenType.Integer, Value: long v } || v != Version)
             return (null, "myriagent-remote 與這台的 Clode Myriagent 版本不一致，請在對話裡重新開始（讓 CLI 以新版重開）");
         var op = Str(o, "op");
-        if (op is not (OpList or OpRun or OpTimed))
+        if (op is not (OpList or OpRun or OpTimed or OpConversations or OpSend))
             return (null, "不認得的操作");
         if (Str(o, "conversation") is not { Length: > 0 } conversation || Str(o, "token") is not { Length: > 0 } token)
             return (null, "少了對話或權杖：myriagent-remote 只能在 Clode Myriagent 的對話裡執行");
@@ -132,9 +144,22 @@ internal static class RemoteExecPipeRules
         var request = new RemoteExecPipeRequest(op, conversation, token, Str(o, "device"), Str(o, "shell"), Str(o, "cwd"), timeout, Str(o, "command"))
         {
             Timed = o["timed"] as JObject,
+            Target = Str(o, "target"),
         };
         if (op == OpTimed && request.Timed == null)
             return (null, "少了定時訊息的內容");
+        if (op == OpSend)
+        {
+            if (string.IsNullOrWhiteSpace(request.Device))
+                return (null, "少了要送的電腦（「這台」或 myriagent-remote list 列出的電腦）");
+            if (string.IsNullOrWhiteSpace(request.Target))
+                return (null, "少了要送的對話（對話 ID 或標題；myriagent-remote conversations 列出）");
+            if (string.IsNullOrWhiteSpace(request.Command))
+                return (null, "少了要送的訊息");
+            if (request.Command.Length > Myriagent.Hub.ConversationMessageRules.MaxBodyLength)
+                return (null, $"訊息超過 {Myriagent.Hub.ConversationMessageRules.MaxBodyLength} 字（長的內容先寫成檔案，再告訴對方檔案在哪）");
+        }
+
         if (op == OpRun)
         {
             if (string.IsNullOrWhiteSpace(request.Device))

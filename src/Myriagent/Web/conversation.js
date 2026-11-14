@@ -1,5 +1,5 @@
 // 一個開著的分頁＝一個 ConvView：保留自己的對話狀態與 DOM，非作用中時隱藏（切分頁不必重新 open）
-import { h, iconButton, baseName, fmtElapsed, setAcc, safeColor, replayClass, setHidden } from './util.js';
+import { h, iconButton, baseName, fmtElapsed, setAcc, safeColor, replayClass, setHidden, copyToClipboard } from './util.js';
 import { icon } from './icons.js';
 import { post, state, accountOf, summaryOf, emit, providerKeys, isHub, isCollaborator, on, nextRequestId } from './store.js';
 import { canManageCollaborators, openShareDialog } from './collab.js';
@@ -2385,6 +2385,14 @@ export class ConvView {
     if (!this.readOnlyReplica()) items.push({ label: this.drawer && this.drawer.isOpen ? '關閉檔案瀏覽器' : '瀏覽工作資料夾', icon: 'panelRight', onSelect: () => this.toggleDrawer() });
     // 延伸成新對話（forkConversation）：複製到目前為止的內容，交給新的代理在旁邊的窗格接著做別的事；只有桌面這台的正式對話（瀏覽器版是 desktop_only）
     if (this.canFork()) items.push({ label: '延伸成新對話', icon: 'gitBranch', desc: '複製目前的內容，由新的代理在旁邊的窗格接著做', onSelect: () => this.ws.forkConversation(this.id) });
+    // 對話 ID（2026-11-15：貼給代理，讓它用 myriagent-remote send 通知這個對話；每台電腦、瀏覽器版都是同一個）：草稿還沒有
+    if (!hd.isDraft) {
+      const wire = String(this.id).toLowerCase();
+      items.push({ label: '複製對話 ID', icon: 'copy', desc: wire, onSelect: async () => {
+        const ok = await copyToClipboard(wire, (text) => post({ cmd: 'copyText', text }));
+        toast(ok ? '已複製對話 ID：' + wire : '已請宿主複製對話 ID', 'success');
+      } });
+    }
     // 多人協作：擁有者把這個對話分享給協作人（設定頁有協作人的清單才有：桌面要已配對）
     if (!hd.isDraft && canManageCollaborators()) {
       const n = sharedWith(state.collaborators, this.id).length;

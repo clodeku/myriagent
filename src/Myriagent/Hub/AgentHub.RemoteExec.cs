@@ -117,7 +117,10 @@ internal static class RemoteExecHubRules
         "\n\n這台電腦已和其他電腦配對。要在其他配對的電腦執行主控台指令，用 myriagent-remote（已在 PATH）：" +
         "`myriagent-remote list` 列出電腦與能不能執行；`myriagent-remote run <電腦> [--shell powershell|pwsh|cmd] [--cwd 資料夾] [--timeout 秒] -- <指令>` " +
         "在那台以一般權限執行，輸出與結束碼照樣傳回（預設 powershell、上限 600 秒；結束碼 125 是沒有送出或被拒、126 是那台的人拒絕、124 逾時、255 結果不明）。" +
-        "關機、格式化、改系統設定、要系統管理員權限這類高風險指令，要那台電腦的人在現場同意，沒人同意就不會執行；不要嘗試繞過這個確認。";
+        "關機、格式化、改系統設定、要系統管理員權限這類高風險指令，要那台電腦的人在現場同意，沒人同意就不會執行；不要嘗試繞過這個確認。" +
+        "要通知其他對話（這台或其他電腦的）的代理：`myriagent-remote conversations [<電腦>]` 列出對話所在的電腦、對話 ID（每台電腦都一樣）與標題，" +
+        "`myriagent-remote send <電腦> <對話 ID> -- <訊息>` 把訊息送進那個對話（單向；對方要回覆會用同一個指令送回來）。" +
+        "這個對話自己的 ID 在環境變數 MYRIAGENT_AGENT_CONVERSATION。";
 
     /// <summary>把 <paramref name="directory"/> 放到 PATH 的最前面（已經在第一個就不重複）</summary>
     public static string PrependPath(string directory, string? path)

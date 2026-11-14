@@ -38,7 +38,7 @@ internal static class Program
             parsed = parsed with { Command = input.ReadToEnd().TrimEnd('\r', '\n') };
             if (string.IsNullOrWhiteSpace(parsed.Command))
             {
-                stderr.WriteLine("myriagent-remote：--stdin 讀到的指令是空的");
+                stderr.WriteLine(parsed.Op == CliArgs.OpSend ? "myriagent-remote：--stdin 讀到的訊息是空的" : "myriagent-remote：--stdin 讀到的指令是空的");
                 return ExitCodes.Usage;
             }
         }
@@ -137,6 +137,15 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
 
     public const string OpRun = "run";
 
+    /// <summary>列出找得到的對話與對話 ID（2026-11-15：對話之間互送訊息）</summary>
+    public const string OpConversations = "conversations";
+
+    /// <summary>把訊息送進某台電腦的某個對話（<see cref="Command"/> 是訊息）</summary>
+    public const string OpSend = "send";
+
+    /// <summary>send 的對話（對話 ID 或標題）</summary>
+    public string? Target { get; init; }
+
     public const string Usage =
         "myriagent-remote：在其他已配對的電腦執行主控台指令（只能在 Clode Myriagent 的對話裡用）\n" +
         "\n" +
@@ -149,6 +158,12 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
         "      --shell    預設 powershell（Windows PowerShell 5.1）；pwsh 要那台裝了 PowerShell 7\n" +
         "      --cwd      那台的工作資料夾（預設是那台使用者的家目錄）\n" +
         "      --timeout  上限秒數（預設 600、最多 86400），超過就停止\n" +
+        "  myriagent-remote conversations [<電腦>] [--json]\n" +
+        "      列出找得到的對話：在哪台電腦、對話 ID（每台電腦都一樣）、狀態、標題；<電腦> 寫「這台」只列這台的\n" +
+        "  myriagent-remote send <電腦> <對話> [--] <訊息…>\n" +
+        "  myriagent-remote send <電腦> <對話> --stdin     （訊息從標準輸入讀）\n" +
+        "      把訊息送進那台電腦的那個對話，交給它的代理（前面會註明是哪台、哪個對話送的，與怎麼回覆）。\n" +
+        "      <對話> 是對話 ID 或完整的標題；<電腦> 寫「這台」是這台。那台要開「可以對話」；對話執行中時插進那一輪或排隊\n" +
         "\n" +
         "高風險的指令（關機、格式化、改系統設定、要系統管理員權限…）要那台電腦的人按同意才會執行；\n" +
         "需要系統管理員的操作另外會在那台跳出 Windows 的 UAC。那台要在設定頁開啟「允許其他電腦的代理在這台執行指令」。\n" +
@@ -158,7 +173,7 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
     public static CliArgs Parse(IReadOnlyList<string> args)
     {
         if (args.Count == 0)
-            return Fail("少了 list 或 run");
+            return Fail("少了 list、run、conversations 或 send");
         var first = args[0];
         if (first is "-h" or "--help" or "help" or "/?")
             return new CliArgs(string.Empty, null, null, null, null, null, false, false, true, null);
@@ -178,8 +193,12 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
             return new CliArgs(OpList, null, null, null, null, null, false, json, false, null);
         }
 
+        if (first == OpConversations)
+            return ParseConversations(args);
+        if (first == OpSend)
+            return ParseSend(args);
         if (first != OpRun)
-            return Fail($"不認得的操作 {first}（只有 list、run）");
+            return Fail($"不認得的操作 {first}（只有 list、run、conversations、send）");
 
         string? device = null, shell = null, cwd = null;
         int? timeout = null;
@@ -248,6 +267,83 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
         return new CliArgs(OpRun, device, shell, cwd, timeout, stdin ? null : text, stdin, json2, false, null);
     }
 
+    private static CliArgs ParseConversations(IReadOnlyList<string> args)
+    {
+        string? device = null;
+        var json = false;
+        foreach (var a in args.Skip(1))
+        {
+            if (a == "--json")
+                json = true;
+            else if (a is "-h" or "--help")
+                return new CliArgs(OpConversations, null, null, null, null, null, false, false, true, null);
+            else if (a.StartsWith("--", StringComparison.Ordinal))
+                return Fail($"conversations 不認得選項 {a}");
+            else if (device is null)
+                device = a;
+            else
+                return Fail($"conversations 只收一台電腦（多了 {a}）");
+        }
+
+        return new CliArgs(OpConversations, device, null, null, null, null, false, json, false, null);
+    }
+
+    private static CliArgs ParseSend(IReadOnlyList<string> args)
+    {
+        string? device = null, target = null;
+        var stdin = false;
+        var json = false;
+        var words = new List<string>();
+        var i = 1;
+        for (; i < args.Count; i++)
+        {
+            var a = args[i];
+            if (a == "--")
+            {
+                i++;
+                break;
+            }
+
+            if (target is not null && !a.StartsWith("--", StringComparison.Ordinal))
+                break;
+            switch (a)
+            {
+                case "--stdin":
+                    stdin = true;
+                    break;
+                case "--json":
+                    json = true;
+                    break;
+                case "-h":
+                case "--help":
+                    return new CliArgs(OpSend, null, null, null, null, null, false, false, true, null);
+                default:
+                    if (a.StartsWith("--", StringComparison.Ordinal))
+                        return Fail($"send 不認得選項 {a}");
+                    if (device is null)
+                        device = a;
+                    else
+                        target = a;
+                    break;
+            }
+        }
+
+        for (; i < args.Count; i++)
+            words.Add(args[i]);
+        if (device is null)
+            return Fail("少了要送的電腦（「這台」或 myriagent-remote list 列出的電腦）");
+        if (target is null)
+            return Fail("少了要送的對話（對話 ID 或標題；myriagent-remote conversations 列出）");
+        var text = string.Join(" ", words);
+        if (stdin && text.Length > 0)
+            return Fail("--stdin 和訊息只能擇一");
+        if (!stdin && string.IsNullOrWhiteSpace(text))
+            return Fail("少了要送的訊息");
+        if (text.Length > 15_000)
+            return Fail("訊息超過 15000 字（長的內容先寫成檔案，再告訴對方檔案在哪）");
+        return new CliArgs(OpSend, device, null, null, null, stdin ? null : text, stdin, json, false, null) { Target = target };
+    }
+
     /// <summary>送給 app 的第一行</summary>
     public static string Request(CliArgs a, string conversation, string token)
     {
@@ -268,6 +364,17 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
                 o["cwd"] = a.Cwd;
             if (a.TimeoutSeconds is { } t)
                 o["timeoutSec"] = t;
+        }
+        else if (a.Op == OpConversations)
+        {
+            if (a.Device is not null)
+                o["device"] = a.Device;
+        }
+        else if (a.Op == OpSend)
+        {
+            o["device"] = a.Device;
+            o["target"] = a.Target;
+            o["command"] = a.Command;
         }
 
         return o.ToJsonString();
@@ -303,6 +410,17 @@ internal sealed class ReplyPrinter(TextWriter stdout, TextWriter stderr, bool js
             case "devices":
                 PrintDevices(o);
                 Listed = true;
+                return 0;
+            case "conversations":
+                PrintConversations(o);
+                Listed = true;
+                return 0;
+            case "sent":
+                if (json)
+                    stdout.WriteLine(o.ToJsonString());
+                else
+                    stdout.WriteLine($"已送到「{Str(o, "device")}」的對話「{Str(o, "title")}」（{Str(o, "conversation")}）"
+                                     + (Bool(o, "queued") ? "：它正在執行，會插進這一輪或等這一輪結束" : string.Empty));
                 return 0;
             case "accepted":
                 stderr.WriteLine($"[myriagent-remote] 已送到「{Str(o, "device")}」");
@@ -380,6 +498,32 @@ internal sealed class ReplyPrinter(TextWriter stdout, TextWriter stderr, bool js
             else
                 state = "在線，可以執行";
             stdout.WriteLine($"{name}{machine}\t{state}\t{Str(d, "id")}");
+        }
+    }
+
+    private void PrintConversations(JsonObject o)
+    {
+        var items = o["items"] as JsonArray ?? [];
+        if (json)
+        {
+            stdout.WriteLine(items.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+            return;
+        }
+
+        if (o["paired"] is JsonValue paired && paired.TryGetValue<bool>(out var isPaired) && !isPaired)
+            stderr.WriteLine("[myriagent-remote] 這台還沒有配對：只列得出這台的對話");
+        if (items.Count == 0)
+        {
+            stdout.WriteLine("（沒有找得到的對話）");
+            return;
+        }
+
+        stdout.WriteLine("電腦\t對話 ID\t狀態\t標題");
+        foreach (var c in items.OfType<JsonObject>())
+        {
+            var device = (Str(c, "device") ?? "?") + (Bool(c, "self") ? "（這台）" : string.Empty);
+            var state = Bool(c, "current") ? "就是這個對話" : Bool(c, "waiting") ? "等使用者回應" : Bool(c, "running") ? "執行中" : "閒置";
+            stdout.WriteLine($"{device}\t{Str(c, "id")}\t{state}\t{Str(c, "title")}");
         }
     }
 

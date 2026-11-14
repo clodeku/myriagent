@@ -168,6 +168,9 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
             File.Exists(remoteTool) ? Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory) : null, () => remoteSync.IsPairedSnapshot));
         // 定時訊息（myriagent-schedule，AgentHub.TimedMessages.cs）：同一條管道、同一個對話權杖，在 UI 執行緒處理
         remoteExec.TimedHandler = (conversationId, args) => InvokeOnUiAsync(() => Hub.HandleTimedCli(conversationId, args));
+        // 對話之間互送訊息（myriagent-remote conversations／send，2026-11-15）：在 UI 執行緒開始，等那台結果時不卡住 UI 執行緒
+        remoteExec.ConversationHandler = (conversationId, request, directory)
+            => InvokeOnUiAsync(() => Hub.HandleConversationCli(conversationId, request, directory)).Unwrap();
         Hub.TimedToolAvailable = File.Exists(Path.Combine(AppContext.BaseDirectory, TimedHubRules.ToolFileName));
         remoteExec.StartPipe();
         // 遠端桌面（docs/sync-protocol.md 14.16）：被看時以 GDI 擷取、SendInput 注入，主螢幕上方顯示提示列（不出現在傳出去的畫面）
