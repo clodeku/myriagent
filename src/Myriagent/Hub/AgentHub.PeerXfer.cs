@@ -323,6 +323,9 @@ internal sealed partial class AgentHub
     /// <summary>進度與結果只回發起的那個檢視（檢視關了就丟掉）</summary>
     private void ReplyPeerXfer(string viewId, string transferId, string state, long done, long total, string? path, string? error)
     {
+        // myriagent-remote pull 的下載（AgentHub.CliFiles.cs）：結果交給它，不送給檢視
+        if (TryDeliverCliXfer(transferId, state, path, error))
+            return;
         if (disposed || !views.TryGetValue(viewId, out var view))
             return;
         Post(view, new JObject

@@ -57,7 +57,7 @@ internal sealed partial class AgentHub
     {
         if (view is RemoteResponseView)
             return;
-        var before = monitorViews.Count > 0;
+        var before = monitorViews.Count > 0 || cliStatsDemand > 0;
         var changed = on ? monitorViews.Add(view.Id) : monitorViews.Remove(view.Id);
         if (!changed)
             return;
@@ -72,16 +72,16 @@ internal sealed partial class AgentHub
     /// <summary>視窗關閉或重新載入：不再算開著面板</summary>
     private void ForgetMonitorView(string viewId)
     {
-        var before = monitorViews.Count > 0;
+        var before = monitorViews.Count > 0 || cliStatsDemand > 0;
         if (monitorViews.Remove(viewId))
             ApplyMonitorDemand(before);
     }
 
     private void ApplyMonitorDemand(bool before)
     {
-        var now = monitorViews.Count > 0;
+        var now = monitorViews.Count > 0 || cliStatsDemand > 0;
         if (systemMonitor is { } monitor)
-            monitor.Active = now;
+            monitor.Active = monitorViews.Count > 0;
         if (now != before)
             sync?.OnMonitorWatchChanged(now);
     }

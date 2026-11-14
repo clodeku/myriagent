@@ -54,10 +54,10 @@ public sealed class RemoteExecScenarioTests(ITestOutputHelper output)
         var confirmerB = new ScriptedConfirmer();
         var (dirA, pairedA) = await LongRunDevice.PairAsync(hub, owner, "exec-a");
         await using var a = await LongRunDevice.StartPairedAsync(dirA, pairedA, "exec-a", [AccountA], HubEngine.FastBackoff(0.2, 0.5, 1),
-            remoteExecConfirmer: new ScriptedConfirmer());
+            remoteExecConfirmer: new ScriptedConfirmer(), systemMonitor: new StaticMonitor());
         var (dirB, pairedB) = await LongRunDevice.PairAsync(hub, owner, "exec-b");
         await using var b = await LongRunDevice.StartPairedAsync(dirB, pairedB, "exec-b", [AccountB], HubEngine.FastBackoff(0.2, 0.5, 1),
-            remoteExecConfirmer: confirmerB);
+            remoteExecConfirmer: confirmerB, systemMonitor: new StaticMonitor());
         await a.WaitUntilAsync(v => v.State == SyncEngineState.Live && v.Features.Contains(DeviceFeatureRules.Exec1), Wait, "A 連上、協商出 exec1");
         await b.WaitUntilAsync(v => v.State == SyncEngineState.Live && v.Features.Contains(DeviceFeatureRules.Exec1), Wait, "B 連上、協商出 exec1");
 
@@ -125,6 +125,30 @@ public sealed class RemoteExecScenarioTests(ITestOutputHelper output)
         wrongDevice.ExitCode.Should().Be(125);
         wrongDevice.Stderr.Should().Contain("在「exec-b」");
 
+        // 在電腦之間傳檔案（2026-11-15）：A 把一個檔與一個資料夾 push 到 B 的資料夾（等 B 存好才結束），再把 B 的檔與資料夾 pull 回 A
+        var srcA = Path.Combine(dirA.Root, "push-src");
+        Directory.CreateDirectory(Path.Combine(srcA, "相簿", "2024"));
+        File.WriteAllText(Path.Combine(srcA, "報表.txt"), "報表內容");
+        File.WriteAllText(Path.Combine(srcA, "相簿", "a.txt"), "a");
+        File.WriteAllText(Path.Combine(srcA, "相簿", "2024", "b.txt"), "bb");
+        var inboxB = Path.Combine(dirB.Root, "inbox");
+        Directory.CreateDirectory(inboxB);
+        var pushed = await RunCliAsync(a, "push", "exec-b", Path.Combine(srcA, "報表.txt"), Path.Combine(srcA, "相簿"), "--to", inboxB);
+        output.WriteLine($"push：exit={pushed.ExitCode} stdout={pushed.Stdout} stderr={pushed.Stderr}");
+        pushed.ExitCode.Should().Be(0, pushed.Stdout + pushed.Stderr);
+        File.ReadAllText(Path.Combine(inboxB, "報表.txt")).Should().Be("報表內容");
+        File.ReadAllText(Path.Combine(inboxB, "相簿", "2024", "b.txt")).Should().Be("bb");
+        var inboxA = Path.Combine(dirA.Root, "pulled");
+        var pulled = await RunCliAsync(a, "pull", "exec-b", Path.Combine(inboxB, "報表.txt"), Path.Combine(inboxB, "相簿"), "--to", inboxA);
+        output.WriteLine($"pull：exit={pulled.ExitCode} stdout={pulled.Stdout} stderr={pulled.Stderr}");
+        pulled.ExitCode.Should().Be(0, pulled.Stdout + pulled.Stderr);
+        File.ReadAllText(Path.Combine(inboxA, "報表.txt")).Should().Be("報表內容");
+        File.ReadAllText(Path.Combine(inboxA, "相簿", "a.txt")).Should().Be("a");
+        File.ReadAllText(Path.Combine(inboxA, "相簿", "2024", "b.txt")).Should().Be("bb");
+        var missing = await RunCliAsync(a, "pull", "exec-b", Path.Combine(inboxB, "沒有這個.txt"), "--to", inboxA);
+        missing.ExitCode.Should().Be(1, missing.Stdout);
+        missing.Stdout.Should().Contain("失敗");
+
         // 5. B 關掉開關：之後被拒（A 看到新的政策之前由 B 的閘門拒絕，之後在送出前就擋）
         generation = await b.Inspect(v => v.ConnectionGeneration);
         await b.Runtime.CommandAsync("syncSetPolicy", new JObject { ["allowRemoteExec"] = false });
@@ -133,6 +157,21 @@ public sealed class RemoteExecScenarioTests(ITestOutputHelper output)
         var refused = await WaitForCliAsync(a, r => r.ExitCode == 125 && r.Stderr.Contains("允許其他電腦的代理在這台執行指令"), "B 關掉之後 run 回 125",
             "run", "exec-b", "--shell", "cmd", "--", "echo nope");
         refused.Stdout.Should().NotContain("nope");
+    }
+
+    /// <summary>固定的電腦狀態（B 才會送電腦狀態，push 等的「存好了」在裡面的 xfers）：每次取都是新的一份</summary>
+    private sealed class StaticMonitor : Myriagent.SystemStatus.ISystemMonitor
+    {
+        private long seq;
+
+        public bool Active { get; set; }
+
+        public event Action<Myriagent.SystemStatus.SystemSample>? Sampled { add { } remove { } }
+
+        public Myriagent.SystemStatus.SystemSample? Latest => null;
+
+        public Myriagent.SystemStatus.SystemSample Current(TimeSpan maxAge)
+            => new(Interlocked.Increment(ref seq), Stopwatch.GetTimestamp(), new DeviceStats(10, 4L << 30, 16L << 30, [new DiskStats("C:", 100L << 30, 500L << 30)], 0, 0));
     }
 
     private static bool ListedAllowed(string json, string name)

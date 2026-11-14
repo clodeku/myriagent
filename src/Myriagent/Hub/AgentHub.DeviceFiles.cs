@@ -55,7 +55,7 @@ internal sealed partial class AgentHub
     /// 接收別台送來的（devicePut）、替別台送檔案的分段轉送（FileTransferActivity）。app 自我更新以它擋住自動重啟
     /// （AppRestartBlocker.FileTransfer；2026-11-10：來源那台在下載途中自動換版，正在轉送的那一段被切斷）
     /// </summary>
-    internal bool FileTransferActive => peerXfers.Count > 0 || peerUploads.Count > 0 || deviceXfers.AnyActive() || fileTransferActivity();
+    internal bool FileTransferActive => peerXfers.Count > 0 || peerUploads.Count > 0 || deviceXfers.AnyActive() || CliFileTransferActive || fileTransferActivity();
 
     /// <summary>
     /// 替別台送檔案的分段轉送與同步層的下載、上傳（整個程序共用的 Sync.FileTransferActivity）。中樞預設不看（測試裡別的測試做過的傳輸

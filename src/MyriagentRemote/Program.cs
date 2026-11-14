@@ -146,6 +146,18 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
     /// <summary>send 的對話（對話 ID 或標題）</summary>
     public string? Target { get; init; }
 
+    /// <summary>把這台的檔或資料夾傳到另一台（2026-11-15：代理在電腦之間傳檔案）</summary>
+    public const string OpPush = "push";
+
+    /// <summary>把另一台的檔或資料夾傳回這台</summary>
+    public const string OpPull = "pull";
+
+    /// <summary>push、pull 的路徑（push 已轉成這台的完整路徑；pull 是那台的路徑）</summary>
+    public IReadOnlyList<string>? Paths { get; init; }
+
+    /// <summary>push 是那台的資料夾；pull 是這台的資料夾（已轉成完整路徑，沒給是目前的資料夾）</summary>
+    public string? To { get; init; }
+
     public const string Usage =
         "myriagent-remote：在其他已配對的電腦執行主控台指令（只能在 Clode Myriagent 的對話裡用）\n" +
         "\n" +
@@ -164,6 +176,10 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
         "  myriagent-remote send <電腦> <對話> --stdin     （訊息從標準輸入讀）\n" +
         "      把訊息送進那台電腦的那個對話，交給它的代理（前面會註明是哪台、哪個對話送的，與怎麼回覆）。\n" +
         "      <對話> 是對話 ID 或完整的標題；<電腦> 寫「這台」是這台。那台要開「可以對話」；對話執行中時插進那一輪或排隊\n" +
+        "  myriagent-remote push <電腦> <這台的檔案或資料夾…> --to <那台的資料夾>\n" +
+        "      把這台的檔案（資料夾連子資料夾一起）傳到那台的資料夾，等那台存好才結束；同名的自動改名、不覆寫\n" +
+        "  myriagent-remote pull <電腦> <那台的檔案或資料夾…> [--to <這台的資料夾>]\n" +
+        "      把那台的檔案或資料夾傳回這台（預設放在目前的資料夾）。兩者都要那台開「可以操作」、每個檔不超過 512 MB\n" +
         "\n" +
         "高風險的指令（關機、格式化、改系統設定、要系統管理員權限…）要那台電腦的人按同意才會執行；\n" +
         "需要系統管理員的操作另外會在那台跳出 Windows 的 UAC。那台要在設定頁開啟「允許其他電腦的代理在這台執行指令」。\n" +
@@ -173,7 +189,7 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
     public static CliArgs Parse(IReadOnlyList<string> args)
     {
         if (args.Count == 0)
-            return Fail("少了 list、run、conversations 或 send");
+            return Fail("少了 list、run、conversations、send、push 或 pull");
         var first = args[0];
         if (first is "-h" or "--help" or "help" or "/?")
             return new CliArgs(string.Empty, null, null, null, null, null, false, false, true, null);
@@ -197,8 +213,10 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
             return ParseConversations(args);
         if (first == OpSend)
             return ParseSend(args);
+        if (first is OpPush or OpPull)
+            return ParseFiles(first, args);
         if (first != OpRun)
-            return Fail($"不認得的操作 {first}（只有 list、run、conversations、send）");
+            return Fail($"不認得的操作 {first}（只有 list、run、conversations、send、push、pull）");
 
         string? device = null, shell = null, cwd = null;
         int? timeout = null;
@@ -344,6 +362,64 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
         return new CliArgs(OpSend, device, null, null, null, stdin ? null : text, stdin, json, false, null) { Target = target };
     }
 
+    private static CliArgs ParseFiles(string op, IReadOnlyList<string> args)
+    {
+        string? device = null, to = null;
+        var json = false;
+        var paths = new List<string>();
+        for (var i = 1; i < args.Count; i++)
+        {
+            var a = args[i];
+            switch (a)
+            {
+                case "--to":
+                    if (++i >= args.Count)
+                        return Fail("--to 後面要接資料夾");
+                    to = args[i];
+                    break;
+                case "--json":
+                    json = true;
+                    break;
+                case "-h":
+                case "--help":
+                    return new CliArgs(op, null, null, null, null, null, false, false, true, null);
+                case "--":
+                    paths.AddRange(args.Skip(i + 1));
+                    i = args.Count;
+                    break;
+                default:
+                    if (a.StartsWith("--", StringComparison.Ordinal))
+                        return Fail($"{op} 不認得選項 {a}");
+                    if (device is null)
+                        device = a;
+                    else
+                        paths.Add(a);
+                    break;
+            }
+        }
+
+        if (device is null)
+            return Fail("少了另一台電腦（myriagent-remote list 列出已配對的電腦）");
+        if (paths.Count == 0)
+            return Fail(op == OpPush ? "少了要傳的這台的檔案或資料夾" : "少了要傳回來的那台的檔案或資料夾");
+        if (paths.Count > 100)
+            return Fail("一次最多 100 個路徑");
+        if (op == OpPush)
+        {
+            if (string.IsNullOrWhiteSpace(to))
+                return Fail("少了那台要放檔案的資料夾（--to）");
+            // 這台的路徑轉成完整路徑（相對於目前的資料夾）
+            for (var i = 0; i < paths.Count; i++)
+                paths[i] = Path.GetFullPath(paths[i]);
+        }
+        else
+        {
+            to = Path.GetFullPath(string.IsNullOrWhiteSpace(to) ? Environment.CurrentDirectory : to);
+        }
+
+        return new CliArgs(op, device, null, null, null, null, false, json, false, null) { Paths = paths, To = to };
+    }
+
     /// <summary>送給 app 的第一行</summary>
     public static string Request(CliArgs a, string conversation, string token)
     {
@@ -375,6 +451,12 @@ internal sealed record CliArgs(string Op, string? Device, string? Shell, string?
             o["device"] = a.Device;
             o["target"] = a.Target;
             o["command"] = a.Command;
+        }
+        else if (a.Op is OpPush or OpPull)
+        {
+            o["device"] = a.Device;
+            o["paths"] = new JsonArray((a.Paths ?? []).Select(p => (JsonNode?)JsonValue.Create(p)).ToArray());
+            o["to"] = a.To;
         }
 
         return o.ToJsonString();
@@ -415,6 +497,8 @@ internal sealed class ReplyPrinter(TextWriter stdout, TextWriter stderr, bool js
                 PrintConversations(o);
                 Listed = true;
                 return 0;
+            case "files":
+                return PrintFiles(o);
             case "sent":
                 if (json)
                     stdout.WriteLine(o.ToJsonString());
@@ -499,6 +583,27 @@ internal sealed class ReplyPrinter(TextWriter stdout, TextWriter stderr, bool js
                 state = "在線，可以執行";
             stdout.WriteLine($"{name}{machine}\t{state}\t{Str(d, "id")}");
         }
+    }
+
+    /// <summary>push、pull 的結果：每個檔一行（成功的存在哪裡、失敗的原因）；全部成功回 0、有失敗回 1</summary>
+    private int PrintFiles(JsonObject o)
+    {
+        if (json)
+        {
+            stdout.WriteLine(o.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        }
+        else
+        {
+            foreach (var item in (o["items"] as JsonArray ?? []).OfType<JsonObject>())
+            {
+                if (Str(item, "error") is { Length: > 0 } error)
+                    stdout.WriteLine($"失敗：{Str(item, "source")}：{error}");
+                else
+                    stdout.WriteLine($"完成：{Str(item, "source")} → {Str(item, "saved")}");
+            }
+        }
+
+        return Bool(o, "ok") ? 0 : 1;
     }
 
     private void PrintConversations(JsonObject o)

@@ -27,6 +27,12 @@ internal sealed record DeviceRuntimeOptions
     /// <summary>這台的資料根（sync\、accounts\、conversations\）。<see cref="Persist"/> 時必須就是 AppPaths.Root</summary>
     public required string DataRoot { get; init; }
 
+    /// <summary>
+    /// 這台的電腦狀態來源（沒有＝不送電腦狀態，同沒有接上的 app）。myriagent-remote push 等那台在電腦狀態回報存好，
+    /// 被傳檔案的那台要有它（2026-11-15）
+    /// </summary>
+    public Myriagent.SystemStatus.ISystemMonitor? SystemMonitor { get; init; }
+
     public string MachineName { get; init; } = "FAKE-DEVICE";
 
     public string WindowsUser { get; init; } = "fake";
@@ -303,6 +309,8 @@ internal sealed partial class DeviceRuntime : IAsyncDisposable
         Sync = new SyncCoordinator(Hub, Accounts, Host, Settings, Paths, syncOptions, TimeProvider.System,
             engineFactory, pairingCommit: null, pairingHandler: null, keyFactory: keyFactory);
         Hub.AttachSync(Sync);
+        if (options.SystemMonitor is { } monitor)
+            Hub.AttachSystemMonitor(monitor);
         if (options.RemoteExecConfirmer is { } confirmer)
         {
             RemoteExec = new RemoteExecService(Sync, confirmer, Path.Combine(options.DataRoot, "remote-exec"), RemoteExecPipeRules.PipeName(options.DataRoot),
@@ -311,6 +319,7 @@ internal sealed partial class DeviceRuntime : IAsyncDisposable
             Sync.AttachRemoteExec(RemoteExec);
             // 對話之間互送訊息（myriagent-remote conversations／send，2026-11-15）
             RemoteExec.ConversationHandler = (id, request, directory) => Host.InvokeAsync(() => Hub.HandleConversationCli(id, request, directory)).Unwrap();
+            RemoteExec.FileHandler = (id, request, directory, status, ct) => Hub.HandleFilesCli(id, request, directory, status, ct);
             RemoteExec.StartPipe();
         }
 

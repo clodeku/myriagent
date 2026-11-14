@@ -104,29 +104,13 @@ internal sealed partial class AgentHub
 
         if (!target!.Online)
             return CliError(RemoteExecPipeRules.ErrorOffline, $"「{deviceName}」目前不在線上，訊息沒有送出");
-        if (peerSink is not { } sink || !PeerLive)
+        if (peerSink is null || !PeerLive)
             return CliError(RemoteExecPipeRules.ErrorOffline, "這台目前沒有連上伺服器（或伺服器還不支援跨電腦操作），訊息沒有送出");
 
-        var commandId = SyncIds.NewUlid(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-        var completion = new TaskCompletionSource<JObject?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        PrunePeerPending();
-        peerPending[commandId] = new PeerPending(string.Empty, "send", Environment.TickCount64) { Completion = completion };
-        Log.Info($"對話 {callerId} 經 myriagent-remote send 送訊息到「{deviceName}」的對話 {found.Id}（{commandId}，{request.Command!.Length} 字）");
-        try
-        {
-            sink.SubmitPeerCommand(commandId, new JObject { ["cmd"] = "send", ["conversationId"] = c.Meta.Id, ["text"] = text });
-        }
-        catch (Exception ex)
-        {
-            Log.Error("myriagent-remote send 交給同步失敗", ex);
-            peerPending.Remove(commandId);
-            return CliError(RemoteExecPipeRules.ErrorOffline, "訊息沒有送出：交給同步失敗");
-        }
-
-        var first = await Task.WhenAny(completion.Task, Task.Delay(TimeSpan.FromMilliseconds(PeerHubRules.PendingMs)));
-        // 等完之後可能不在 UI 執行緒（呼叫端沒有同步內容時）：狀態一律交回 UI 執行緒改
-        host.BeginInvoke(() => peerPending.Remove(commandId));
-        if (first != completion.Task || completion.Task.Result is not { } reply)
+        Log.Info($"對話 {callerId} 經 myriagent-remote send 送訊息到「{deviceName}」的對話 {found.Id}（{request.Command!.Length} 字）");
+        var replies = await PeerExchangeAsync(new JObject { ["cmd"] = "send", ["conversationId"] = c.Meta.Id, ["text"] = text },
+            m => m.Value<string>("type") is "commandResult" or "sendRejected", TimeSpan.FromMilliseconds(PeerHubRules.PendingMs));
+        if (replies is not [.., var reply])
             return CliError(RemoteExecPipeRules.ErrorUnknown, $"等不到「{deviceName}」的結果，不知道訊息有沒有送到");
         if (reply.Value<string>("type") == "sendRejected")
             return CliError(RemoteExecPipeRules.ErrorRejected, $"「{deviceName}」沒有送出這則訊息" + (reply.Value<string>("reason") is { Length: > 0 } reason ? "：" + reason : string.Empty));

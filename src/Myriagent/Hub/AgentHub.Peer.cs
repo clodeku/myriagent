@@ -45,10 +45,10 @@ internal sealed partial class AgentHub
         public long? CompletedAt { get; set; }
 
         /// <summary>
-        /// 不是網頁發起、是中樞自己等結果的（myriagent-remote send，AgentHub.ConversationMessages.cs）：<c>commandResult</c> 或 <c>sendRejected</c> 到了就交給它、不轉給任何檢視；
+        /// 不是網頁發起、是中樞自己等結果的（myriagent-remote 的 send、push、pull；<see cref="PeerExchangeAsync"/>）：每則回覆都交給它、不轉給任何檢視；
         /// 被清掉（逾時、解除配對）時給 null
         /// </summary>
-        public TaskCompletionSource<JObject?>? Completion { get; init; }
+        public Action<JObject?>? Listener { get; init; }
     }
 
     /// <summary>協調者在建立引擎時掛上、解除配對時拿掉（UI 執行緒）；拿掉時等結果的一律忘掉（網頁 150 秒後當成結果不明）</summary>
@@ -57,8 +57,8 @@ internal sealed partial class AgentHub
         peerSink = sink;
         if (sink is null)
         {
-            foreach (var p in peerPending.Values)
-                p.Completion?.TrySetResult(null);
+            foreach (var p in peerPending.Values.ToList())
+                p.Listener?.Invoke(null);
             peerPending.Clear();
             peerLive = false;
         }
@@ -125,14 +125,11 @@ internal sealed partial class AgentHub
         }
         if (message.Value<string>("type") == "commandResult")
             pending.CompletedAt ??= Environment.TickCount64;
-        if (pending.Completion is { } completion)
+        if (pending.Listener is { } listener)
         {
-            if (message.Value<string>("type") is "commandResult" or "sendRejected")
-            {
-                peerPending.Remove(commandId);
-                completion.TrySetResult(message);
-            }
-
+            // 下載參照（fileRef、fileRefs）的網址照樣登記成可以轉送的鍵
+            AllowPeerReplyUrls(message);
+            listener(message);
             return;
         }
         // 遠端草稿（AgentHub.PeerDrafts.cs）：peerCreated 不轉給網頁；被拒時還原草稿的文字
@@ -144,6 +141,78 @@ internal sealed partial class AgentHub
             Post(view, message);
         else
             peerPending.Remove(commandId);
+    }
+
+    /// <summary>
+    /// 中樞自己送一個跨電腦的指令並等回覆（myriagent-remote 的 send、push、pull；任何執行緒都能呼叫，登記與送出在 UI 執行緒）：
+    /// 回覆一則一則收進清單，<paramref name="isLast"/> 說是最後一則時回整份；沒有配對、送不出去、被清掉或超過 <paramref name="limit"/>（不超過 160 秒）回 null
+    /// </summary>
+    internal async Task<List<JObject>?> PeerExchangeAsync(JObject cmd, Func<JObject, bool> isLast, TimeSpan limit)
+    {
+        ArgumentNullException.ThrowIfNull(cmd);
+        ArgumentNullException.ThrowIfNull(isLast);
+        var got = new List<JObject>();
+        var done = new TaskCompletionSource<List<JObject>?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var commandId = SyncIds.NewUlid(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        var name = cmd.Value<string>("cmd") ?? string.Empty;
+        var submitted = await UiAsync(() =>
+        {
+            if (disposed || peerSink is not { } sink)
+                return false;
+            PrunePeerPending();
+            peerPending[commandId] = new PeerPending(string.Empty, name, Environment.TickCount64)
+            {
+                Listener = message =>
+                {
+                    if (message is null)
+                    {
+                        done.TrySetResult(null);
+                        return;
+                    }
+
+                    got.Add(message);
+                    if (isLast(message))
+                    {
+                        peerPending.Remove(commandId);
+                        done.TrySetResult(got);
+                    }
+                },
+            };
+            try
+            {
+                sink.SubmitPeerCommand(commandId, cmd);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"中樞自己送的跨電腦指令 {name} 交給同步失敗", ex);
+                peerPending.Remove(commandId);
+                return false;
+            }
+        });
+        if (!submitted)
+            return null;
+        var first = await Task.WhenAny(done.Task, Task.Delay(limit));
+        host.BeginInvoke(() => peerPending.Remove(commandId));
+        return first == done.Task ? done.Task.Result : null;
+    }
+
+    /// <summary>在 UI 執行緒執行並取結果（任何執行緒都能呼叫）</summary>
+    private Task<T> UiAsync<T>(Func<T> func)
+    {
+        var result = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.BeginInvoke(() =>
+        {
+            try
+            {
+                result.TrySetResult(func());
+            }
+            catch (Exception ex)
+            {
+                result.TrySetException(ex);
+            }
+        });
+        return result.Task;
     }
 
     /// <summary><c>files</c> 每一項的 <c>url</c>、<c>thumbUrl</c>，<c>fileRef</c> 的 <c>url</c> 與 <c>fileRefs</c> 每一項的 <c>url</c></summary>
@@ -179,7 +248,7 @@ internal sealed partial class AgentHub
             if (now - p.At > PeerHubRules.PendingMs || p.CompletedAt is { } done && now - done > PeerHubRules.OutputGraceMs)
             {
                 peerPending.Remove(id);
-                p.Completion?.TrySetResult(null);
+                p.Listener?.Invoke(null);
             }
         }
 
@@ -187,7 +256,7 @@ internal sealed partial class AgentHub
         {
             var oldest = peerPending.MinBy(p => p.Value.At);
             peerPending.Remove(oldest.Key);
-            oldest.Value.Completion?.TrySetResult(null);
+            oldest.Value.Listener?.Invoke(null);
         }
     }
 }

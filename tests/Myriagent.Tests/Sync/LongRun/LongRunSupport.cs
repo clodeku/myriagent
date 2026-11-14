@@ -83,7 +83,8 @@ internal sealed class LongRunDevice : IAsyncDisposable
         SyncEngineOptions? options = null,
         Func<SyncEngineCreateArgs, ISyncEngine>? engineFactory = null,
         Myriagent.RemoteExec.IRemoteExecConfirmer? remoteExecConfirmer = null,
-        Func<Myriagent.RemoteDesk.IDeskScreen>? deskScreen = null)
+        Func<Myriagent.RemoteDesk.IDeskScreen>? deskScreen = null,
+        Myriagent.SystemStatus.ISystemMonitor? systemMonitor = null)
     {
         try
         {
@@ -99,6 +100,7 @@ internal sealed class LongRunDevice : IAsyncDisposable
                 EngineFactory = engineFactory ?? (args => SyncEngineLoader.Create(args with { SignerFactory = paired.SignerFactory, Options = options })),
                 RemoteExecConfirmer = remoteExecConfirmer,
                 DeskScreen = deskScreen,
+                SystemMonitor = systemMonitor,
             });
             return new LongRunDevice(dir, paired, runtime, name);
         }

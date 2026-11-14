@@ -123,10 +123,50 @@ public sealed class MyriagentRemoteCliTests
         var stderr = new StringWriter();
         var printer = new ReplyPrinter(stdout, stderr, json: false);
         printer.Handle("{\"t\":\"conversations\",\"paired\":true,\"items\":[{\"id\":\"abc\",\"title\":\"部署\",\"device\":\"PC-B\",\"self\":false,\"running\":true}]}").Should().Be(0);
-        stdout.ToString().Should().Contain("PC-B	abc	執行中	部署");
+        stdout.ToString().Should().Contain("PC-B\tabc\t執行中\t部署");
         printer.Handle("{\"t\":\"sent\",\"device\":\"PC-B\",\"conversation\":\"abc\",\"title\":\"部署\",\"queued\":true}").Should().Be(0);
         stdout.ToString().Should().Contain("已送到「PC-B」的對話「部署」（abc）").And.Contain("正在執行");
         printer.Handle("{\"t\":\"error\",\"code\":\"rejected\",\"message\":\"那台的設定不允許\"}").Should().Be(ExitCodes.NotSent);
         stderr.ToString().Should().Contain("那台的設定不允許");
+    }
+
+    [Fact]
+    public void 傳檔案_push的路徑轉成完整路徑_pull沒給to是目前的資料夾()
+    {
+        var push = CliArgs.Parse(["push", "PC-B", "報表.txt", @"C:\data\相簿", "--to", @"D:\inbox"]);
+        push.Error.Should().BeNull();
+        push.Op.Should().Be("push");
+        push.Device.Should().Be("PC-B");
+        push.Paths.Should().Equal(Path.GetFullPath("報表.txt"), @"C:\data\相簿");
+        push.To.Should().Be(@"D:\inbox");
+        var pull = CliArgs.Parse(["pull", "PC-B", "--to", "out", @"D:\inbox\a.txt"]);
+        pull.Paths.Should().Equal(@"D:\inbox\a.txt");
+        pull.To.Should().Be(Path.GetFullPath("out"));
+        CliArgs.Parse(["pull", "PC-B", @"D:\a.txt"]).To.Should().Be(Environment.CurrentDirectory);
+
+        var o = Newtonsoft.Json.Linq.JObject.Parse(CliArgs.Request(push, "conv", "tok"));
+        o["paths"]!.ToObject<string[]>().Should().Equal(push.Paths);
+        var parsed = Myriagent.RemoteExec.RemoteExecPipeRules.ParseRequest(o.ToString(Newtonsoft.Json.Formatting.None));
+        parsed.Problem.Should().BeNull();
+        parsed.Request!.Paths.Should().Equal(push.Paths);
+        parsed.Request.To.Should().Be(@"D:\inbox");
+    }
+
+    [Theory]
+    [InlineData(new[] { "push" }, "少了另一台電腦")]
+    [InlineData(new[] { "push", "PC-B", "a.txt" }, "--to")]
+    [InlineData(new[] { "pull", "PC-B" }, "少了要傳回來")]
+    [InlineData(new[] { "push", "PC-B", "--bogus" }, "不認得選項")]
+    public void 傳檔案_參數不對(string[] args, string error) => CliArgs.Parse(args).Error.Should().Contain(error);
+
+    [Fact]
+    public void 傳檔案_結果的輸出與結束碼()
+    {
+        var stdout = new StringWriter();
+        var printer = new ReplyPrinter(stdout, new StringWriter(), json: false);
+        printer.Handle("{\"t\":\"files\",\"ok\":true,\"items\":[{\"source\":\"a.txt\",\"saved\":\"in/a.txt\",\"error\":null}]}").Should().Be(0);
+        stdout.ToString().Should().Contain("完成：a.txt → in/a.txt");
+        printer.Handle("{\"t\":\"files\",\"ok\":false,\"items\":[{\"source\":\"x\",\"saved\":null,\"error\":\"找不到\"}]}").Should().Be(1);
+        stdout.ToString().Should().Contain("失敗：x：找不到");
     }
 }

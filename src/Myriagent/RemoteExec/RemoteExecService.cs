@@ -88,6 +88,12 @@ internal sealed class RemoteExecService : IRemoteExecEndpoint, IDisposable
     /// </summary>
     public Func<string, RemoteExecPipeRequest, RemoteExecDirectory, Task<JObject>>? ConversationHandler { get; set; }
 
+    /// <summary>
+    /// myriagent-remote 的 push 與 pull（代理在電腦之間傳檔案；AppController 接到中樞，中樞自己回 UI 執行緒）：
+    /// 發起的對話 id、要求、同步的現況、進度（一行一則）、myriagent-remote 中途結束時取消 → 最後一行的內容；沒接時回錯誤
+    /// </summary>
+    public Func<string, RemoteExecPipeRequest, RemoteExecDirectory, Action<string>, CancellationToken, Task<JObject>>? FileHandler { get; set; }
+
     /// <summary>這個對話的權杖（給對話的 CLI 的環境變數）</summary>
     public string TokenFor(string conversationId) => RemoteExecPipeRules.Token(secret, conversationId);
 
@@ -223,6 +229,25 @@ internal sealed class RemoteExecService : IRemoteExecEndpoint, IDisposable
 
             var directory = await transport.GetDirectoryAsync().ConfigureAwait(false);
 
+            // 在電腦之間傳檔案（myriagent-remote push／pull）：myriagent-remote 中途結束（讀到結尾）就停止
+            if (request.Op is RemoteExecPipeRules.OpPush or RemoteExecPipeRules.OpPull)
+            {
+                if (FileHandler is not { } files)
+                {
+                    output.Writer.TryWrite(RemoteExecPipeRules.Error(RemoteExecPipeRules.ErrorUnknown, "這台的 Clode Myriagent 不支援在電腦之間傳檔案"));
+                    return;
+                }
+
+                using var gone = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                var watcher = WatchEndAsync(reader, gone);
+                var writer = output.Writer;
+                var result = await files(request.Conversation, request, directory,
+                    text => writer.TryWrite(new JObject { ["t"] = "status", ["code"] = "progress", ["text"] = text }.ToString(Newtonsoft.Json.Formatting.None)),
+                    gone.Token).ConfigureAwait(false);
+                writer.TryWrite(result.ToString(Newtonsoft.Json.Formatting.None));
+                return;
+            }
+
             // 對話之間互送訊息（myriagent-remote conversations／send）：未配對也能送給這台的對話
             if (request.Op is RemoteExecPipeRules.OpConversations or RemoteExecPipeRules.OpSend)
             {
@@ -333,6 +358,31 @@ internal sealed class RemoteExecService : IRemoteExecEndpoint, IDisposable
         {
             lock (gate)
                 sessions.Remove(commandId);
+        }
+    }
+
+    /// <summary>push、pull：myriagent-remote 送 cancel、讀到結尾（中途結束）或讀不下去時取消</summary>
+    private static async Task WatchEndAsync(StreamReader reader, CancellationTokenSource gone)
+    {
+        try
+        {
+            while (await reader.ReadLineAsync(gone.Token).ConfigureAwait(false) is { } line)
+            {
+                if (line.Contains("\"" + RemoteExecPipeRules.OpCancel + "\"", StringComparison.Ordinal))
+                    break;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            return;
+        }
+
+        try
+        {
+            gone.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
         }
     }
 

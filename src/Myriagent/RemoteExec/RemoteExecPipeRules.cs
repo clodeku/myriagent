@@ -25,6 +25,12 @@ internal sealed record RemoteExecPipeRequest(string Op, string Conversation, str
 
     /// <summary>op 是 send 時要送的對話（對話 ID 或標題）；訊息內容在 <see cref="Command"/></summary>
     public string? Target { get; init; }
+
+    /// <summary>op 是 push（這台的完整路徑）或 pull（那台的完整路徑）時要傳的檔或資料夾</summary>
+    public IReadOnlyList<string>? Paths { get; init; }
+
+    /// <summary>op 是 push 時那台的資料夾、pull 時這台的資料夾（完整路徑）</summary>
+    public string? To { get; init; }
 }
 
 /// <summary>
@@ -69,6 +75,15 @@ internal static class RemoteExecPipeRules
 
     /// <summary>把訊息送進某個對話（同上）：device、target（對話 ID 或標題）、command（訊息）；結果一行 {t:"sent", device, conversation, title, queued?} 或 {t:"error"}</summary>
     public const string OpSend = "send";
+
+    /// <summary>
+    /// 把這台的檔或資料夾傳到那台的資料夾（2026-11-15：代理在電腦之間傳檔案）：device、paths（這台的完整路徑）、to（那台的資料夾）；
+    /// 過程中一行一行的 {t:"status", text}，最後一行 {t:"files", device, ok, items:[{source, saved?, error?}]} 或 {t:"error"}
+    /// </summary>
+    public const string OpPush = "push";
+
+    /// <summary>把那台的檔或資料夾傳回這台的資料夾（同上）：device、paths（那台的完整路徑）、to（這台的資料夾）</summary>
+    public const string OpPull = "pull";
 
     // 錯誤代碼（{t:"error"}）
     public const string ErrorInvalid = "invalid";
@@ -129,7 +144,7 @@ internal static class RemoteExecPipeRules
         if (o["v"] is not JValue { Type: JTokenType.Integer, Value: long v } || v != Version)
             return (null, "myriagent-remote 與這台的 Clode Myriagent 版本不一致，請在對話裡重新開始（讓 CLI 以新版重開）");
         var op = Str(o, "op");
-        if (op is not (OpList or OpRun or OpTimed or OpConversations or OpSend))
+        if (op is not (OpList or OpRun or OpTimed or OpConversations or OpSend or OpPush or OpPull))
             return (null, "不認得的操作");
         if (Str(o, "conversation") is not { Length: > 0 } conversation || Str(o, "token") is not { Length: > 0 } token)
             return (null, "少了對話或權杖：myriagent-remote 只能在 Clode Myriagent 的對話裡執行");
@@ -145,9 +160,22 @@ internal static class RemoteExecPipeRules
         {
             Timed = o["timed"] as JObject,
             Target = Str(o, "target"),
+            Paths = o["paths"] is JArray paths ? paths.Select(p => p is JValue { Type: JTokenType.String, Value: string s } ? s : null).ToList()! : null,
+            To = Str(o, "to"),
         };
         if (op == OpTimed && request.Timed == null)
             return (null, "少了定時訊息的內容");
+        if (op is OpPush or OpPull)
+        {
+            if (string.IsNullOrWhiteSpace(request.Device))
+                return (null, "少了另一台電腦（myriagent-remote list 列出已配對的電腦）");
+            if (request.Paths is not { Count: > 0 } list || list.Count > Myriagent.Hub.CliFileRules.MaxPaths
+                || list.Any(p => string.IsNullOrWhiteSpace(p) || p.Length > 1024))
+                return (null, $"要傳的路徑要有 1～{Myriagent.Hub.CliFileRules.MaxPaths} 個");
+            if (string.IsNullOrWhiteSpace(request.To) || request.To.Length > 1024)
+                return (null, op == OpPush ? "少了那台要放檔案的資料夾（--to）" : "少了這台要放檔案的資料夾（--to）");
+        }
+
         if (op == OpSend)
         {
             if (string.IsNullOrWhiteSpace(request.Device))
