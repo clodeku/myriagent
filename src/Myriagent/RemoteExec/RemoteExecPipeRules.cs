@@ -152,7 +152,8 @@ internal static class RemoteExecPipeRules
 
     /// <summary>
     /// 找目標電腦：id 完全相同，或名稱、電腦名稱不分大小寫相同，或名稱不分大小寫的唯一開頭；撤銷的不算。
-    /// 找不到或不只一台回 null 與說明
+    /// 同名的不只一台時，只有一台在線上就是它——同一台電腦重新配對之後，舊的那一筆還留在名冊裡（永遠離線、名稱一樣），
+    /// 代理照名稱下指令不該因此被拒。找不到或分不出來回 null 與說明
     /// </summary>
     public static (RemoteExecDevice? Device, string? Problem) Resolve(IReadOnlyList<RemoteExecDevice> devices, string query)
     {
@@ -166,7 +167,12 @@ internal static class RemoteExecPipeRules
         if (exact.Count == 1)
             return (exact[0], null);
         if (exact.Count > 1)
-            return (null, $"有 {exact.Count} 台電腦叫「{q}」，請改用 id（myriagent-remote list）");
+        {
+            var online = exact.Where(d => d.Online).ToList();
+            return online.Count == 1
+                ? (online[0], null)
+                : (null, $"有 {exact.Count} 台電腦叫「{q}」，請改用 id（myriagent-remote list）");
+        }
         var prefix = live.Where(d => d.Name.StartsWith(q, StringComparison.OrdinalIgnoreCase)).ToList();
         if (prefix.Count == 1)
             return (prefix[0], null);

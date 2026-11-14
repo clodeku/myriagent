@@ -422,7 +422,7 @@ export function openVideo(m) {
   const errEl = h('div', { class: 'vp-error', hidden: true, dataset: { field: 'videoError' } }, icon('warning'), h('span', { text: m.errorText || '影片無法播放，可以改用預設程式開啟' }));
   // 有控制列的影片放在 iframe 裡（framedvideo.js）；雙擊開啟時的第二下落在 iframe 裡，由它自己擋
   const fv = framedVideo({ src: m.url, cls: 'vp-video', title: '影片：' + (m.name || ''), autoplay: true, time: m.time, outline: false, guardOpen: true,
-    onError: () => { errEl.hidden = false; }, bindDoc: (doc, v) => bindFrameSwipe(doc, v) });
+    onError: () => { errEl.hidden = false; }, onRecovered: () => { errEl.hidden = true; }, bindDoc: (doc, v) => bindFrameSwipe(doc, v) });
   const pauseVideo = () => { const v = fv.video(); if (v) v.pause(); };
   const media = Object.assign({ kind: 'video' }, m);
   const openBtn = lbBtn('popout', '用預設程式開啟');

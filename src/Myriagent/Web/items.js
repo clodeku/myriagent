@@ -1612,7 +1612,9 @@ export function renderMedia(media, ctx) {
       if (!text || !wrap || wrap.querySelector(':scope > .mvid-note')) return;
       wrap.append(h('div', { class: 'mvid-note', role: 'status', dataset: { field: 'mediaPolicyNote' } }, icon('info'), h('span', { text })));
     } : null;
-    const fv = framedVideo({ src: m.url, title: '影片：' + (m.name || baseName(m.path)), playsinline: true, onError });
+    // 自動重試成功（framedvideo.js）：收掉說明
+    const onRecovered = () => { const note = wrap && wrap.querySelector(':scope > .mvid-note'); if (note) note.remove(); };
+    const fv = framedVideo({ src: m.url, title: '影片：' + (m.name || baseName(m.path)), playsinline: true, onError, onRecovered });
     const cap = h('div', { class: 'mvid-cap' }, icon('video'), h('span', { class: 'mvid-name', text: m.name || baseName(m.path) }),
       iconButton('fit', '放大播放', () => {
         const v = fv.video();

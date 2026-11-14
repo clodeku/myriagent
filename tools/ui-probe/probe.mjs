@@ -4284,6 +4284,54 @@ async function runConversationFixes(vp) {
   const jumpAfter = await visible(page, `${c1} .jump`);
   check('jumpHiddenAfterReload', jumpBefore && !jumpAfter, { jumpBefore, jumpAfter });
 
+  // 影片與圖片載入失敗之後自動重試（framedvideo.js、mediaretry.js；2026-11-14：伺服器重啟、iPhone 選照片時整批影片出錯，
+  // 要重新整理頁面才好）。這裡影片與圖片的第一次要求各給壞掉的內容、之後正常：不必重新整理，影片與圖片自己會好；第一次失敗回報一次
+  // （帶 MediaError 的代碼、會自動重試），救回來了就沒有「重試後仍失敗」那一則
+  if (HAS_VIDEO) {
+    let armed = false;
+    const broken = { video: 0, image: 0 };
+    const breakMedia = (route) => {
+      const u = new URL(route.request().url());
+      const file = u.searchParams.get('path') || '';
+      const target = u.pathname !== '/media' ? null : /\.mp4$/i.test(file) ? 'video' : file.endsWith('用量圖表-本週.png') ? 'image' : null;
+      if (!target || !armed || broken[target] >= 1) return route.fallback();
+      broken[target]++;
+      return route.fulfill({ status: 200, headers: { 'Content-Type': target === 'video' ? 'video/mp4' : 'image/png', 'Cache-Control': 'no-store' }, body: 'broken' });
+    };
+    await page.route(ORIGIN + '/media**', breakMedia);
+    // 圖片已經在瀏覽器的快取裡：關掉快取，重畫時才會重新要
+    const cacheCdp = await context.newCDPSession(page);
+    await cacheCdp.send('Network.enable');
+    await cacheCdp.send('Network.setCacheDisabled', { cacheDisabled: true });
+    const postedBefore = await page.evaluate(() => window.__posted.length);
+    armed = true;
+    host.sendConversation('c1'); // 整個對話重畫：影片與圖片重新載入
+    await sleep(200);
+    await scrollItem(page, 'c1', 'i15', 'center'); // 圖片是捲到才載入的
+    const mediaState = () => page.evaluate((sel) => {
+      const item = document.querySelector(sel + ' .it[data-id="i15"]');
+      const f = item && item.querySelector('.mvid iframe.vframe');
+      const v = f && f.contentDocument && f.contentDocument.querySelector('video');
+      const img = item && Array.from(item.querySelectorAll('img')).find((i) => decodeURIComponent(i.currentSrc || i.src || '').includes('用量圖表-本週.png'));
+      return { video: v ? { ready: v.readyState, error: v.error ? v.error.code : 0 } : null, image: img ? { complete: img.complete, width: img.naturalWidth } : null };
+    }, c1);
+    const failedFirst = await until(async () => { const m = await mediaState(); return m.video && m.video.error && m.image && m.image.complete && m.image.width === 0 ? m : null; }, 3000);
+    const recovered = await until(async () => {
+      const m = await mediaState();
+      return m.video && m.video.ready >= 1 && !m.video.error && m.image && m.image.width > 0 ? m : null;
+    }, 12000);
+    await page.unroute(ORIGIN + '/media**', breakMedia);
+    await cacheCdp.send('Network.setCacheDisabled', { cacheDisabled: false });
+    await cacheCdp.detach();
+    const mediaReports = await page.evaluate((n) => window.__posted.slice(n).filter((m) => m.cmd === 'clientError' && m.kind === 'media')
+      .map((m) => ({ message: m.message, detail: m.detail || '' })), postedBefore);
+    check('mediaRetryRecovers', broken.video > 0 && broken.image > 0 && !!failedFirst && !!recovered
+      && mediaReports.some((r) => r.message === 'video 載入失敗' && /MediaError \d/.test(r.detail) && r.detail.includes('會自動重試'))
+      && mediaReports.some((r) => r.message === 'img 載入失敗' && r.detail.includes('會自動重試'))
+      && !mediaReports.some((r) => r.message.includes('重試後仍失敗')),
+    { broken, failedFirst, recovered, mediaReports });
+  }
+
   // 回覆裡的影片播放中切到別的分頁：暫停（隱藏不會讓影片停下來）
   if (HAS_VIDEO) {
     await scrollItem(page, 'c1', 'i15', 'center');

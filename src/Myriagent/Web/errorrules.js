@@ -55,13 +55,15 @@ export function fromRejection(reason) {
 
 /**
  * 載入失敗的媒體元素 → 回報：tag 是元素名稱（img、video、audio、source），url 是它要載入的網址。
- * 沒有網址、網址就是頁面本身（src 清空時會解析成頁面網址）不回報；data:、blob: 只寫通訊協定（內容可能很長）
+ * 沒有網址、網址就是頁面本身（src 清空時會解析成頁面網址）不回報；data:、blob: 只寫通訊協定（內容可能很長）。
+ * detail（選用）：失敗當下的情況（MediaError 的代碼、頁面看不看得到、會不會重試；mediaretryrules.describeMediaError），寫進記錄；
+ * note（選用）：接在訊息後面的一段（「重試後仍失敗」）——訊息不同，和第一次失敗的那一則分開算節流
  */
-export function fromMedia(tag, url, pageUrl) {
+export function fromMedia(tag, url, pageUrl, detail = null, note = null) {
   if (typeof url !== 'string' || !url || url === pageUrl) return null;
   const lower = url.slice(0, 5).toLowerCase();
   const source = lower === 'data:' ? 'data:…' : lower === 'blob:' ? 'blob:…' : url;
-  return report('media', `${tag} 載入失敗`, source, null);
+  return report('media', `${tag} 載入失敗` + (note ? `（${note}）` : ''), source, detail);
 }
 
 /** 節流：回傳 (回報) => 要不要送；同一則 WINDOW_MS 內只送一次、總共最多 MAX_REPORTS 則（now 給測試換時鐘） */

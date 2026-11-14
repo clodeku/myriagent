@@ -158,6 +158,26 @@ public sealed class RemoteExecRunRulesTests
     }
 
     [Fact]
+    public void 找目標電腦_同名的不只一台_只有一台在線上就是它()
+    {
+        // 同一台電腦重新配對之後，舊的那一筆還在名冊裡（離線、名稱一樣）
+        var devices = new[]
+        {
+            Device("d_01J9QZ3K8M5R7T2V4W6X8Y0A2A", "Shop", machine: "SHOP-PC") with { Online = false },
+            Device("d_01J9QZ3K8M5R7T2V4W6X8Y0A2B", "Shop", machine: "SHOP-PC"),
+        };
+        RemoteExecPipeRules.Resolve(devices, "shop").Device!.Id.Should().Be("d_01J9QZ3K8M5R7T2V4W6X8Y0A2B");
+        RemoteExecPipeRules.Resolve(devices, "SHOP-PC").Device!.Id.Should().Be("d_01J9QZ3K8M5R7T2V4W6X8Y0A2B");
+        RemoteExecPipeRules.Resolve(devices, "d_01J9QZ3K8M5R7T2V4W6X8Y0A2A").Device!.Online.Should().BeFalse("指定 id 照樣找得到舊的那一筆");
+
+        // 兩台都在線上、或都不在：分不出來，請改用 id
+        var bothOnline = devices.Select(d => d with { Online = true }).ToArray();
+        RemoteExecPipeRules.Resolve(bothOnline, "shop").Problem.Should().Contain("2 台").And.Contain("id");
+        var bothOffline = devices.Select(d => d with { Online = false }).ToArray();
+        RemoteExecPipeRules.Resolve(bothOffline, "shop").Problem.Should().Contain("2 台");
+    }
+
+    [Fact]
     public void 送出之前的檢查()
     {
         RemoteExecPipeRules.Precheck(Device(DeviceB, "B")).Should().BeNull();

@@ -8,9 +8,13 @@
 // 行為不變：iframe 裡的事件不會穿出來，頁面靠它們的在 iframe 元素上重新派送一份——按鍵（Esc 關閉播放器、Ctrl 的快捷鍵）、
 // 指標按下（收起選單、換焦點窗格）、滾輪（往上捲停下自動捲到底）、右鍵（不出瀏覽器的選單）、拖放（拖檔案進來照樣出附加遮罩，iframe 不開檔），
 // 頁面的處理者 preventDefault 時 iframe 裡的也取消；媒體的 error 交給 onError 並照常回報（errorreport.js）。
+// 載入失敗會自動重試（mediaretryrules.js：接著試三次、頁面看不到時等看得到才試；都不行之後頁面回到前景、重新連上伺服器時再試）：
+// 伺服器重啟那幾十秒裡載入的影片、iPhone 選照片時整頁一起出錯的影片，不必重新整理頁面就會好。救回來時呼叫 onRecovered
 // 焦點移進 iframe 時頁面的 window 會收到 blur：theme.js 看焦點是不是在這裡的 iframe；iframe 失焦而整個視窗也沒焦點時轉一個 blur 給頁面
 import { h } from './util.js';
 import { reportMediaError } from './errorreport.js';
+import { awaitSignal } from './mediaretry.js';
+import * as MR from './mediaretryrules.js';
 import { longPressAsContextMenu } from './longpress.js';
 
 /** 開啟時的連點（雙擊開啟播放器的第二下）落在 iframe 裡的影片上會切換播放：這段時間內 iframe 裡的點按不算 */
@@ -18,7 +22,8 @@ const OPEN_GUARD_MS = 500;
 
 /**
  * 建立放在 iframe 裡的影片。o：src、cls（iframe 的 class）、title、autoplay、playsinline、time（從哪一秒開始）、
- * outline（false：影片不畫焦點框）、guardOpen（開啟時的連點不算）、onError(video)、bindDoc(doc, video)（每次建好影片時呼叫：在 iframe 的文件上掛自己的事件）。
+ * outline（false：影片不畫焦點框）、guardOpen（開啟時的連點不算）、onError(video)（載入失敗：一回只叫一次，之後照樣自動重試）、
+ * onRecovered(video)（叫過 onError 之後重試成功）、bindDoc(doc, video)（每次建好影片時呼叫：在 iframe 的文件上掛自己的事件）。
  * 觸控長按影片一律轉成右鍵（longpress.js：在 iframe 裡派送 contextmenu，再照下面的轉送到 iframe 元素上），頁面的媒體選單照常處理
  * 回傳 { el: iframe, video(): 目前的影片（還沒建立時 null）, currentTime() }
  */
@@ -27,6 +32,87 @@ export function framedVideo(o) {
   const created = performance.now();
   let video = null;
   let time = o.time || 0;
+
+  // ── 載入失敗的自動重試 ──
+  const retry = MR.newRetryState();
+  let retryTimer = 0;
+  /** 該重試的時候頁面看不到：等看得到（訊號）再試 */
+  let wantRetry = false;
+  /** 重新載入之後要回到的播放位置 */
+  let resume = 0;
+  /** 這一回已經叫過 onError（重試成功時要叫 onRecovered） */
+  let shownError = false;
+  let unwait = null;
+
+  function stopWaiting() {
+    clearTimeout(retryTimer);
+    retryTimer = 0;
+    wantRetry = false;
+    if (unwait) { unwait(); unwait = null; }
+  }
+
+  function reload(v) {
+    resume = time;
+    // load() 照現有的 src 重新載入（再指派一次 src 也會觸發載入，兩個一起做就是載入兩次、前一次白白中止）
+    v.load();
+  }
+
+  function timedRetry() {
+    retryTimer = 0;
+    const v = video;
+    // 影片已經不在頁面上（對話關了）：不再管它
+    if (!v || !el.isConnected) { stopWaiting(); return; }
+    if (document.hidden) { wantRetry = true; return; }
+    wantRetry = false;
+    MR.noteRetry(retry, Date.now());
+    reload(v);
+  }
+
+  /** 外面的訊號（mediaretry.js）：頁面回到前景、重新連上伺服器、電腦上下線 */
+  function signal() {
+    const v = video;
+    if (!v || !el.isConnected) { stopWaiting(); return; }
+    if (document.hidden) return;
+    if (wantRetry) { timedRetry(); return; }
+    if (retryTimer) return;
+    if (MR.onSignal(retry, Date.now())) reload(v);
+  }
+
+  function onVideoError(v) {
+    if (v !== video) return;
+    const step = MR.onMediaError(retry, Date.now());
+    const detail = MR.describeMediaError({
+      code: v.error ? v.error.code : undefined, message: v.error ? v.error.message : undefined, networkState: v.networkState,
+      hidden: document.hidden, online: navigator.onLine, attempt: retry.attempt, willRetry: step.kind === 'retry',
+    });
+    const url = v.currentSrc || v.src || '';
+    if (step.kind === 'retry') {
+      if (step.first) reportMediaError('video', url, detail);
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(timedRetry, step.delay);
+    } else if (step.first) {
+      reportMediaError('video', url, detail, MR.FINAL_NOTE);
+    }
+    if (!shownError) {
+      shownError = true;
+      if (o.onError) o.onError(v);
+    }
+    if (!unwait) unwait = awaitSignal({ signal });
+  }
+
+  function onVideoLoaded(v) {
+    if (v !== video) return;
+    if (resume) {
+      try { v.currentTime = resume; } catch { /* 忽略 */ }
+      resume = 0;
+    }
+    MR.onMediaLoaded(retry);
+    stopWaiting();
+    if (shownError) {
+      shownError = false;
+      if (o.onRecovered) o.onRecovered(v);
+    }
+  }
 
   function build() {
     const doc = el.contentDocument;
@@ -51,10 +137,8 @@ export function framedVideo(o) {
       if (time) { try { v.currentTime = time; } catch { /* 忽略 */ } }
     }, { once: true });
     v.addEventListener('timeupdate', () => { if (v.readyState) time = v.currentTime; });
-    v.addEventListener('error', () => {
-      reportMediaError('video', v.currentSrc || v.src || '');
-      if (o.onError) o.onError(v);
-    });
+    v.addEventListener('error', () => onVideoError(v));
+    v.addEventListener('loadedmetadata', () => onVideoLoaded(v));
     forwardEvents(el, doc);
     longPressAsContextMenu(doc, (t) => t === v);
     if (o.guardOpen) {
