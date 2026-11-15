@@ -145,6 +145,10 @@ internal static class RemoteExecRiskRules
     {
         if (string.IsNullOrWhiteSpace(command))
             return null;
+        // 長的 Base64 資料（傳檔案時寫進指令的內容）先遮起來：它的 + 與 / 會被當成字的邊界，
+        // 字串裡剛好出現的 /iex+、+shutdown/ 之類的片段會被當成指令（2026-11-15 使用者回報傳圖片被誤擋）。
+        // 遮成一段夠長的英數字，-EncodedCommand 後面接的照樣認得出來
+        command = Base64Blob.Replace(command, m => LooksLikeData(m.Value) ? MaskedBlob : m.Value);
         var plain = command.ToLowerInvariant().Replace("^", string.Empty, StringComparison.Ordinal).Replace("`", string.Empty, StringComparison.Ordinal);
         var unquoted = plain.Replace("\"", string.Empty, StringComparison.Ordinal).Replace("'", string.Empty, StringComparison.Ordinal);
         return Check(plain) ?? (unquoted == plain ? null : Check(unquoted));
@@ -167,6 +171,33 @@ internal static class RemoteExecRiskRules
         if (delete.Success && ProtectedPath.Match(text) is { Success: true } path)
             return new RemoteExecRisk(Delete, Clip(delete.Value.Trim() + " … " + path.Value.Trim()));
         return null;
+    }
+
+    /// <summary>可能是 Base64 資料的一段（只有 Base64 的字元、至少 64 個）</summary>
+    private static readonly Regex Base64Blob = new(@"[A-Za-z0-9+/]{64,}={0,2}", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    /// <summary>遮掉之後的樣子（英數字，不含任何會被比對的字）</summary>
+    private const string MaskedBlob = "b64data0b64data0b64data0";
+
+    /// <summary>
+    /// 看起來是資料而不是路徑或指令：大小寫字母與數字都有不少，斜線不密集（路徑每幾個字就一個斜線；Base64 平均 64 個字才一個 / 一個 +）
+    /// </summary>
+    private static bool LooksLikeData(string run)
+    {
+        int upper = 0, lower = 0, digit = 0, sep = 0;
+        foreach (var ch in run)
+        {
+            if (ch is >= 'A' and <= 'Z')
+                upper++;
+            else if (ch is >= 'a' and <= 'z')
+                lower++;
+            else if (ch is >= '0' and <= '9')
+                digit++;
+            else if (ch is '/' or '+')
+                sep++;
+        }
+
+        return upper >= run.Length / 8 && lower >= run.Length / 8 && digit >= run.Length / 32 && sep * 12 <= run.Length;
     }
 
     private static Regex R(string pattern) => new(pattern, Options, TimeSpan.FromSeconds(1));
