@@ -843,6 +843,8 @@ export class ConvView {
     this.composer.setComposer(msg.composer || null);
     this.settleQueued(msg.composer);
     if (msg.draft) this.composer.restoreText(msg.draft); // app 更新前沒送出的字（宿主只送一次；輸入框是空的才填入）
+    // 重新整理、重連之前就被別處送出的上傳晶片（只比晶片附加之後的訊息：liverules.uploadsSentWith）
+    this.composer.uploadsSentElsewhere(list, false);
     this.composer.draftSync.loaded(); // 其他電腦、瀏覽器版打到一半的字（draftsync.js）
     this.afterChange(true);
     this.setStick(true); // 經過 setStick 才會一併收起「最新」鈕（重送整個對話時可能正顯示著）
@@ -1126,11 +1128,20 @@ export class ConvView {
     const node = createItem(item, this.ctx);
     this.nodes.set(item.id, node);
     this.order.push(item.id);
+    // 別處送出的訊息帶走了輸入欄已附加的上傳晶片（電腦本機的視窗按的送出）：晶片跟著拿掉（liverules.uploadsSentWith）
+    if (item.kind === 'User' && this.composer) this.composer.uploadsSentElsewhere([item], true);
     this.itemsEl.append(node);
     if (node._autofocus) this.pendingFocus = node;
     // 又清除了一次：之前按過「顯示清除前的對話」也重新藏起來（applyBatch 處理完這一批再套）
     if (clearBoundary([item]) === 0) { this.showCleared = false; this.clearDirty = true; }
     return true;
+  }
+
+  /** 載入的項目裡最後一筆的 seq（輸入欄的上傳晶片記下附加當時的位置）；沒有項目是 -1 */
+  lastSeq() {
+    let max = -1;
+    for (const it of this.items.values()) if (it && typeof it.seq === 'number' && it.seq > max) max = it.seq;
+    return max;
   }
 
   remove(id) {

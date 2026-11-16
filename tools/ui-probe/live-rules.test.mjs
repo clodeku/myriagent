@@ -995,6 +995,33 @@ test('storedUploads_只收形狀對的_去重_最多20筆_壞字串回空', () =
   assert.equal(L.uploadsKey(CONV_A), 'myriagent.app.uploaded.v1:' + CONV_A);
 });
 
+test('storedUploads_帶回附加當時的afterSeq', () => {
+  const sha = 'cd'.repeat(32);
+  const e = { uploadId: 'u1', name: 'a.png', size: 3, sha256: sha };
+  assert.deepEqual(L.storedUploads(JSON.stringify([Object.assign({}, e, { afterSeq: 41 })])), [Object.assign({}, e, { afterSeq: 41 })]);
+  assert.deepEqual(L.storedUploads(JSON.stringify([Object.assign({}, e, { afterSeq: 'x' })])), [e], '不是整數不帶');
+});
+
+test('uploadsSentWith_別處送出的訊息帶走了已附加的晶片', () => {
+  const chip = (name, size, o = {}) => Object.assign({ state: 'attached', name, size, afterSeq: 10 }, o);
+  const a = chip('IMG_9267.jpeg', 2867939);
+  const b = chip('IMG_9266.jpeg', 2927902);
+  const up = chip('IMG_1.jpeg', 100, { state: 'uploading' });
+  const user = (seq, atts) => ({ kind: 'User', seq, attachments: atts.map(([name, size]) => ({ name, size })) });
+  // 剛收到的新訊息：同名、大小相近（宿主寫 2.7 MB）就拿掉；上傳中的不動
+  assert.deepEqual(L.uploadsSentWith([a, b, up], [user(12, [['IMG_9267.jpeg', '2.7 MB']])], true), [a]);
+  assert.deepEqual(L.uploadsSentWith([a], [user(12, [['IMG_9267.jpeg', '9 MB']])], true), [], '大小差太多不算');
+  assert.deepEqual(L.uploadsSentWith([a], [user(12, [['IMG_9267.jpeg', null]])], true), [a], '讀不出大小只比名稱');
+  assert.deepEqual(L.uploadsSentWith([a], [{ kind: 'Assistant', seq: 12, attachments: [{ name: 'IMG_9267.jpeg', size: '2.7 MB' }] }], true), [], '代理的訊息不算');
+  // 載入整份對話：只比附加之後的訊息（重新附加同一張圖不會被舊的訊息配走）；沒有 afterSeq 的（舊的存檔）不比
+  assert.deepEqual(L.uploadsSentWith([a], [user(9, [['IMG_9267.jpeg', '2.7 MB']])], false), []);
+  assert.deepEqual(L.uploadsSentWith([a], [user(11, [['IMG_9267.jpeg', '2.7 MB']])], false), [a]);
+  assert.deepEqual(L.uploadsSentWith([chip('IMG_9267.jpeg', 2867939, { afterSeq: undefined })], [user(11, [['IMG_9267.jpeg', '2.7 MB']])], false), []);
+  // 一個附件只配一個晶片
+  const a2 = chip('IMG_9267.jpeg', 2867939);
+  assert.equal(L.uploadsSentWith([a, a2], [user(12, [['IMG_9267.jpeg', '2.7 MB']])], true).length, 1);
+});
+
 test('attachGate_新對話也能附加_副本唯讀_離線與政策照擋', () => {
   const hub = (over) => L.attachGate(Object.assign({ mode: 'hub', origin: 'remote', device: dev(), live: true }, over));
   assert.deepEqual(hub({}), { enabled: true, reason: null });

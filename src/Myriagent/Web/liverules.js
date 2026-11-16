@@ -1083,6 +1083,39 @@ export function chipsAfter(chips, event) {
   return event === 'sendDone' || event === 'closed' ? [] : list;
 }
 
+/**
+ * 已附加的上傳晶片被別處一起送出了（2026-11-17 使用者回報：手機上傳的照片已經跟著訊息送出，輸入欄的晶片卻一直留著——
+ * 那則是在電腦本機的視窗按送出的，會把電腦上所有待送的附件一起帶走，手機的 send 沒有送出、晶片等不到 done）。
+ * 新的使用者訊息帶了同名、大小相近的附件（大小是宿主寫的「2.7 MB」，捨入方式不同，差 10% 或 1 KB 內都算）就算送出了。
+ * <live>：剛收到的新項目（一定在晶片附加之後）；載入整份對話時（重新整理、重連）要項目的 seq 比晶片附加當時的 afterSeq 新才算，
+ * 免得重新附加同一張圖時被舊的訊息配走。回要拿掉的晶片
+ */
+export function uploadsSentWith(chips, items, live) {
+  const list = (Array.isArray(chips) ? chips : []).filter((c) => isObj(c) && c.state === 'attached' && typeof c.name === 'string');
+  if (!list.length) return [];
+  const gone = new Set();
+  for (const it of Array.isArray(items) ? items : []) {
+    if (!isObj(it) || it.kind !== 'User' || !Array.isArray(it.attachments) || !it.attachments.length) continue;
+    for (const a of it.attachments) {
+      if (!isObj(a) || typeof a.name !== 'string') continue;
+      const hit = list.find((c) => !gone.has(c) && c.name === a.name && sizeClose(a.size, c.size)
+        && (live || (typeof it.seq === 'number' && typeof c.afterSeq === 'number' && it.seq > c.afterSeq)));
+      if (hit) gone.add(hit);
+    }
+  }
+  return list.filter((c) => gone.has(c));
+}
+
+/** 宿主寫的大小（「2.7 MB」）和位元組差不多：讀不出來的不比 */
+function sizeClose(text, bytes) {
+  if (typeof bytes !== 'number') return true;
+  const m = typeof text === 'string' ? /^([\d.]+)\s*(B|KB|MB|GB)$/i.exec(text.trim()) : null;
+  if (!m) return true;
+  const unit = { B: 1, KB: 1024, MB: MB, GB: 1024 * MB }[m[2].toUpperCase()];
+  const shown = parseFloat(m[1]) * unit;
+  return Math.abs(shown - bytes) <= Math.max(shown * 0.1, 1024);
+}
+
 /** fileRef 的預覽對話框資料（D34）：error 不是 null、或網址不是 /f/ 開頭的合格相對網址，一律回固定的錯誤文字 */
 export function fileRefView(msg) {
   const m = isObj(msg) ? msg : {};
@@ -1190,6 +1223,8 @@ export function storedUploads(raw) {
   for (const x of v) {
     const e = isObj(x) ? uploadEntry(x.uploadId, x.name, x.size, x.sha256) : null;
     if (!e || seen.has(e.uploadId)) continue;
+    // 附加當時對話最後一筆的 seq（2026-11-17，uploadsSentWith）：舊的存檔沒有
+    if (Number.isInteger(x.afterSeq)) e.afterSeq = x.afterSeq;
     seen.add(e.uploadId);
     out.push(e);
     if (out.length >= MAX_UPLOADS) break;

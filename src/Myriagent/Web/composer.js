@@ -10,7 +10,7 @@ import { openCodexMenu, refreshCodexPanel } from './codexcontrols.js';
 import { attachmentTile, planRow } from './items.js';
 import { uploadFile } from './hubapi.js';
 import {
-  permissionChoices, sendRestorePlan, settleText, replicaWebUrl, isConversationId, isDraftId, chipsAfter, uploadBatch, uploadName, uploadResult,
+  permissionChoices, sendRestorePlan, settleText, replicaWebUrl, isConversationId, isDraftId, chipsAfter, uploadsSentWith, uploadBatch, uploadName, uploadResult,
   uploadsKey, storedUploads, UPLOAD_LIMIT_TEXT, controllable,
 } from './liverules.js';
 import { track } from './cmdtrack.js';
@@ -1849,7 +1849,7 @@ export class Composer {
       for (const c of chips) {
         inFlight.delete(c);
         if (c.state !== 'adding') continue;
-        if (st === 'done' || st === 'unknown') c.state = 'attached';
+        if (st === 'done' || st === 'unknown') { c.state = 'attached'; c.afterSeq = this.conv.lastSeq ? this.conv.lastSeq() : null; }
         else { c.state = 'error'; c.error = NOT_ADDED_TEXT; }
       }
       if (this.destroyed) return;
@@ -1875,6 +1875,20 @@ export class Composer {
     this.updateSend();
   }
 
+  /**
+   * 新的使用者訊息（或載入整份對話）帶走了已附加的上傳晶片（別處按的送出：電腦本機的視窗、另一個分頁；uploadsSentWith）：
+   * 從輸入欄拿掉，不另外說明
+   */
+  uploadsSentElsewhere(items, live) {
+    const gone = uploadsSentWith(this.uploads, items, live);
+    if (!gone.length) return;
+    this.uploads = this.uploads.filter((u) => !gone.includes(u));
+    this.saveUploads();
+    if (this.destroyed) return;
+    this.renderUploads();
+    this.updateSend();
+  }
+
   /** 〔遠端〕伺服器關閉了這個對話（conversationClosed，D32）：還在上傳的中止、晶片清空、sessionStorage 的也刪 */
   uploadsClosed() {
     this.cancelUploads(this.uploads);
@@ -1887,7 +1901,7 @@ export class Composer {
   /** 已附加的晶片存進 sessionStorage（myriagent.app.uploaded.v1:{conversationId}）；不能用時略過（重新載入後看不到，6.6 的限制） */
   saveUploads() {
     if (!isHub || !isConversationId(this.conv.id)) return;
-    const list = this.attachedUploads().map((c) => c.entry);
+    const list = this.attachedUploads().map((c) => (typeof c.afterSeq === 'number' ? Object.assign({}, c.entry, { afterSeq: c.afterSeq }) : c.entry));
     try {
       const key = uploadsKey(this.conv.id);
       if (list.length) window.sessionStorage.setItem(key, JSON.stringify(list));
@@ -1905,7 +1919,8 @@ export class Composer {
       raw = null;
     }
     for (const e of storedUploads(raw)) {
-      this.uploads.push({ id: e.uploadId, uploadId: e.uploadId, file: null, name: e.name, size: e.size, state: 'attached', loaded: 0, total: 0, error: null, entry: e });
+      const { afterSeq, ...entry } = e;
+      this.uploads.push({ id: e.uploadId, uploadId: e.uploadId, file: null, name: e.name, size: e.size, state: 'attached', loaded: 0, total: 0, error: null, entry, afterSeq });
     }
     this.renderUploads();
   }

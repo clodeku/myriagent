@@ -4320,6 +4320,24 @@ async function runUploadKept() {
   await HP.closePage(app);
 }
 
+async function runUploadSentElsewhere() {
+  const id = LF.CONV.idle;
+  const app = await openUploadConv('upload-elsewhere');
+  const { hub } = app;
+  await chooseFiles(app, id, [fileOf('IMG_9267.jpeg', 'x'.repeat(3000), 'image/jpeg'), fileOf('另一張.txt', '還沒送')]);
+  await untilChips(app, id, allState('attached', 2));
+  // 電腦本機的視窗按了送出（2026-11-17 使用者回報）：手機沒送 send，電腦那則帶走了這張照片 → 晶片跟著拿掉，另一張留著
+  const sends = hub.cmds('send').length;
+  hub.push({ type: 'item', conversationId: id, item: { id: 'u-elsewhere', kind: 'User', status: 'Done', seq: 999999, time: Date.now(),
+    html: '<p>在電腦上送出的</p>', attachments: [{ id: 'att-x', name: 'IMG_9267.jpeg', kind: 'Image', size: '2.9 KB', thumbUrl: null, url: null }] } });
+  const left = await until(async () => { const st = await uploadState(app, id); return st && st.chips.length === 1 ? st : null; }, 3000);
+  const stored = await storedOf(app, id);
+  check('hubUploadChipsSentElsewhere', !!left && left.chips[0].name.includes('另一張') && !!stored && JSON.parse(stored).length === 1
+    && JSON.parse(stored)[0].name === '另一張.txt' && hub.cmds('send').length === sends,
+  { chips: left && left.chips, stored });
+  await HP.closePage(app);
+}
+
 async function runUploadRestore() {
   const id = LF.CONV.idle;
   const app = await openUploadConv('upload-restore');
@@ -6326,6 +6344,7 @@ const SCENARIOS = [
   { checks: ['hubUploadProgressAndAddUploaded', 'hubUploadReadout', 'hubUploadChipsCountForSend'], run: runUploadBasic },
   { checks: ['hubUpload409', 'hubUpload413', 'hubUpload507', 'hubUploadTooLargeLocal', 'hubUploadAddRejected'], run: runUploadErrors },
   { checks: ['hubUploadChipsKeptOnSendRejected'], run: runUploadKept },
+  { checks: ['hubUploadChipsSentElsewhere'], run: runUploadSentElsewhere },
   { checks: ['hubUploadChipsRestoredAfterReload', 'hubUploadChipsClearedOnClose'], run: runUploadRestore },
   { checks: ['hubUploadBlocksBuildReload'], run: runUploadBlocksReload },
   { checks: ['hubDraftAttach'], run: runDraftAttach },
