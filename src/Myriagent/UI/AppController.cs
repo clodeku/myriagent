@@ -168,6 +168,8 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
             File.Exists(remoteTool) ? Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory) : null, () => remoteSync.IsPairedSnapshot));
         // 定時訊息（myriagent-schedule，AgentHub.TimedMessages.cs）：同一條管道、同一個對話權杖，在 UI 執行緒處理
         remoteExec.TimedHandler = (conversationId, args) => InvokeOnUiAsync(() => Hub.HandleTimedCli(conversationId, args));
+        // 電腦選單的喇叭音量、立即關閉螢幕（2026-11-17，AgentHub.DeviceControl.cs）
+        Hub.AttachDeviceControls(new Myriagent.SystemStatus.WindowsDeviceControls());
         // 對話之間互送訊息（myriagent-remote conversations／send，2026-11-15）：在 UI 執行緒開始，等那台結果時不卡住 UI 執行緒
         remoteExec.ConversationHandler = (conversationId, request, directory)
             => InvokeOnUiAsync(() => Hub.HandleConversationCli(conversationId, request, directory)).Unwrap();

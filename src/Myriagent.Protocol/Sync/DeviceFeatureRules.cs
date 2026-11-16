@@ -134,6 +134,12 @@ internal static class DeviceFeatureRules
     public const string Timed1 = "timed1";
 
     /// <summary>
+    /// 電腦狀態面板的電腦選單：喇叭音量、靜音、立即關閉螢幕（2026-11-17）：協商出它的連線收 <c>deviceControl</c>。
+    /// 不對應任何 hub 方法；桌面接上了調整的來源才宣告，伺服器只把這個指令送給協商出它的電腦
+    /// </summary>
+    public const string Ctl1 = "ctl1";
+
+    /// <summary>
     /// 遠端桌面輸入的端對端加密（docs/sync-protocol.md 14.16；2026-11-13）：協商出它的連線收帶 <c>viewerKey</c> 的 <c>deskOpen</c>
     /// （看的一方這個工作階段的公鑰），並在第一個封包回自己的公鑰，之後的輸入是密文。不對應任何 hub 方法；
     /// 舊版的桌面不認得 <c>viewerKey</c>（閘門會回 invalid），伺服器送給它們之前把這一欄拿掉——照舊以明文操作
@@ -141,7 +147,7 @@ internal static class DeviceFeatureRules
     public const string DeskE2e1 = "deske2e1";
 
     /// <summary>這版認得的功能（不認得的名稱照收、不啟用：交集裡不會有它）</summary>
-    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1, Xfer1, Xfer2, Desk1, Draft1, Quick1, Att1, Timed1, DeskE2e1];
+    public static IReadOnlyList<string> Known { get; } = [Conv1, Live1, Live2, Cmd1, Media1, Update1, Peer1, Prov1, Stat1, Tok1, Tok2, Log1, Hand1, Exec1, Sched1, Collab1, Xfer1, Xfer2, Desk1, Draft1, Quick1, Att1, Timed1, DeskE2e1, Ctl1];
 
     public const int MaxFeatures = 32;
 

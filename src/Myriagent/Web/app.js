@@ -58,6 +58,7 @@ import { onPeerUpload } from './composer.js';
 import { openFileLink } from './filelinks.js';
 import * as mon from './monitor.js';
 import * as devfiles from './devicefiles.js';
+import * as devcontrol from './devicecontrol.js';
 import * as remoteDesk from './remotedesk.js';
 import { installErrorReporting } from './errorreport.js';
 import { startFlash, isFlashing, forgetFlash } from './attnflash.js';
@@ -640,6 +641,7 @@ function handle(m) {
     // 電腦狀態面板的檔案傳輸（devicefiles.js）：deviceFetch 的 fileRef、桌面代傳的進度、下載進這台的進度、挑這台的資料夾
     case 'fileRef': if (!devfiles.onFileRef(m)) live.handle(m); break;
     case 'desk': remoteDesk.onDesk(m); break; // 遠端桌面（remotedesk.js）：影格、狀態、結束
+    case 'deviceControlState': devcontrol.onState(m); break; // 電腦選單的喇叭音量、關閉螢幕（2026-11-17）
     case 'fileTree': devfiles.onFileTree(m); break; // 整個資料夾的下載：deviceTree 的檔案清單
     case 'fileRefs': devfiles.onFileRefs(m); break; // 整個資料夾的下載：deviceFetchMany 的一批下載參照
     case 'peerUploadProgress': devfiles.onPeerUploadProgress(m); break;

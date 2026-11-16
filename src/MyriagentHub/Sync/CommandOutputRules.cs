@@ -64,6 +64,8 @@ internal static class CommandOutputRules
             // 整個資料夾的傳輸（2026-11-09）：遞迴的檔案清單、一次多個檔的下載參照
             CommandOutputFileRules.FileTree => CommandOutputFileRules.ProjectFileTree(message, context),
             CommandOutputFileRules.FileRefs => CommandOutputFileRules.ProjectFileRefs(message, context),
+            // 喇叭音量、立即關閉螢幕（2026-11-17）
+            DeviceControlRules.StateType => DeviceControlRules.Project(message),
             _ => null,
         };
     }

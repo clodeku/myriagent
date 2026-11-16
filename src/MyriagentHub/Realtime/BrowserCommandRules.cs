@@ -126,7 +126,7 @@ internal static class BrowserCommandRules
         "cliCheck", "cliInstall", "cliUpdate",
         "addUploaded", "fileFetch", "accountLoginDevice", "accountLoginCode", "voiceMessage", "takeover", "handoffCancel",
         // 排程頁（S3）：由那台電腦執行（型錄的 Device 指令，伺服器轉送）；定時訊息的新增、編輯與操作（2026-11-13，目標要協商出 timed1）
-        "scheduleAction", "scheduleAgent", "timedSave", "timedAction",
+        "scheduleAction", "scheduleAgent", "timedSave", "timedAction", "deviceControl",
         // 電腦狀態面板的檔案傳輸（2026-11-09）：由那台電腦執行（型錄的 Device 指令，伺服器轉送；目標要協商出 xfer1）
         "deviceBrowse", "deviceFetch", "devicePut", "deviceTree", "deviceFetchMany",
         // 遠端桌面（desk1，sync-protocol 14.16）：由那台執行（型錄的 Device 指令；之後的封包走伺服器處理的 desk）

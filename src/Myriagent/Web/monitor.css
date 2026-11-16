@@ -370,6 +370,16 @@
 .df-dock-close .ic { width: 12px; height: 12px; }
 .df-sel { font-size: 12px; color: var(--text-2); align-self: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .df-dlg .dlg-foot { align-items: center; flex-wrap: wrap; }
+/* 電腦選單的喇叭音量（devicecontrol.js，2026-11-17）：靜音鈕＋滑桿＋數字 */
+.dc-body { display: flex; flex-direction: column; gap: 10px; padding-bottom: 6px; }
+.dc-vol { display: flex; align-items: center; gap: 12px; }
+.dc-slider { flex: 1; min-width: 0; accent-color: var(--accent, var(--green)); }
+.dc-val { min-width: 3.4em; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-hi); }
+.dc-mute { flex: none; }
+.dc-mute .ic { width: 14px; height: 14px; }
+.dc-mute.on { color: var(--amber, var(--text-hi)); }
+.dc-status { min-height: 1.3em; font-size: 12px; color: var(--text-2); }
+.dc-status:empty { display: none; }
 .df-dlg .dlg-foot .grow { flex: 1; }
 .df-dest { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .df-dest .ic, .df-dlg .dlg-foot .btn .ic { width: 13px; height: 13px; }

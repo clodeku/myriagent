@@ -46,6 +46,14 @@ export async function runDeviceFiles(ctx, vp, m) {
       host.onCmd = (c, h) => {
         monitorCmd(c, h);
         const done = () => host.send({ type: 'commandResult', commandId: c.commandId, state: 'done' });
+        if (c.cmd === 'deviceControl') {
+          // 電腦選單的喇叭音量與螢幕（2026-11-17）：其他電腦的帶 commandId，這台的不帶
+          if (c.commandId) done();
+          host.ctlVolume = c.action === 'audioSet' && c.volume ? Number(c.volume) : host.ctlVolume ?? 40;
+          host.send({ type: 'deviceControlState', requestId: c.requestId, action: c.action, volume: c.action === 'screenOff' ? null : host.ctlVolume,
+            muted: c.action === 'screenOff' ? null : !!c.mute, error: null });
+          return;
+        }
         if (c.cmd === 'deviceBrowse' && c.path === '\\\\') {
           // 網路芳鄰的「網路」找不到電腦：帶路徑與 error
           done();
@@ -124,20 +132,50 @@ export async function runDeviceFiles(ctx, vp, m) {
   }, name);
   const menuItems = () => page.evaluate(() => Array.from(document.querySelectorAll('.menu.df-menu .menu-item')).map((b) => ({ label: b.querySelector('.mi-label').textContent, disabled: b.disabled })));
 
-  // 這台與 Hub 主機沒有選單；離線的停用
+  // 這台只有喇叭音量與關閉螢幕（2026-11-17）；Hub 主機沒有選單；離線的停用
   await page.click('#monitor .mon-dev[data-self="true"] .mon-name', { button: 'right' });
-  const selfMenu = await page.evaluate(() => !!document.querySelector('.menu.df-menu'));
+  const selfMenu = await until(menuItems, 1500);
+  await page.keyboard.press('Escape');
   await page.click('#monitor .mon-dev[data-kind="hub"] .mon-name', { button: 'right' });
   const hubMenu = await page.evaluate(() => !!document.querySelector('.menu.df-menu'));
   await page.click((await cardSel('HOME-PC')) + ' .mon-name', { button: 'right' });
   const offline = await until(menuItems, 1500);
-  check('devfilesMenuScope', !selfMenu && !hubMenu && !!offline && offline.length === 3 && offline.every((x) => x.disabled), { selfMenu, hubMenu, offline });
+  check('devfilesMenuScope', !!selfMenu && selfMenu.map((x) => x.label).join('|') === '喇叭音量…|立即關閉螢幕' && !hubMenu && !!offline && offline.length === 5
+    && offline.every((x) => x.disabled), { selfMenu, hubMenu, offline });
   await page.keyboard.press('Escape');
 
   await page.click((await cardSel('LAB-WORKSTATION')) + ' .mon-name', { button: 'right' });
   const items = await until(menuItems, 1500);
-  check('devfilesMenuItems', !!items && items.map((x) => x.label).join('|') === '瀏覽與下載檔案…|上傳檔案到這台…|遠端桌面…' && items.every((x) => !x.disabled), items);
+  check('devfilesMenuItems', !!items && items.map((x) => x.label).join('|') === '瀏覽與下載檔案…|上傳檔案到這台…|遠端桌面…|喇叭音量…|立即關閉螢幕' && items.every((x) => !x.disabled), items);
   await shot(page, 'devfiles-menu-dark');
+  // 喇叭音量（2026-11-17）：「喇叭音量…」→ audioGet（帶 deviceId、commandId）→ 滑桿顯示那台的音量 → 拖到 70 → audioSet 的 volume 是 "70"
+  await page.click('.menu.df-menu .menu-item:has-text("喇叭音量")');
+  const vGet = await until(() => host.last('deviceControl', (c) => c.action === 'audioGet'), 2000);
+  const vShown = await until(() => page.evaluate(() => {
+    const sl = document.querySelector('.dc-dlg .dc-slider');
+    return sl && !sl.disabled ? { value: sl.value, label: document.querySelector('.dc-dlg .dc-val').textContent } : null;
+  }), 2000);
+  await page.evaluate(() => {
+    const sl = document.querySelector('.dc-dlg .dc-slider');
+    sl.value = '70';
+    sl.dispatchEvent(new Event('input', { bubbles: true }));
+    sl.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const vSet = await until(() => host.last('deviceControl', (c) => c.action === 'audioSet'), 2000);
+  const vAfter = await until(() => page.evaluate(() => (document.querySelector('.dc-dlg .dc-val').textContent === '70%' ? true : null)), 2000);
+  await shot(page, 'devfiles-volume-dark');
+  check('devfilesVolume', !!vGet && vGet.deviceId === m.LAB && /^[0-9A-Z]{26}$/.test(vGet.commandId || '') && !!vShown && vShown.value === '40' && vShown.label === '40%'
+    && !!vSet && vSet.volume === '70' && vSet.deviceId === m.LAB && !!vAfter, { vGet, vShown, vSet, vAfter });
+  await page.click('.dc-dlg .dlg-x');
+  // 這台：立即關閉螢幕（不帶 deviceId，宿主自己做）→ 成功的提示
+  await page.click('#monitor .mon-dev[data-self="true"] .mon-name', { button: 'right' });
+  await until(menuItems, 1500);
+  await page.click('.menu.df-menu .menu-item:has-text("立即關閉螢幕")');
+  const offCmd = await until(() => host.last('deviceControl', (c) => c.action === 'screenOff'), 2000);
+  const offToast = await until(() => page.evaluate(() => (Array.from(document.querySelectorAll('.toast')).some((t) => /已關閉「.+」的螢幕/.test(t.textContent)) ? true : null)), 2000);
+  check('devfilesScreenOffSelf', !!offCmd && !('deviceId' in offCmd) && !!offToast, { offCmd, offToast });
+  await page.click((await cardSel('LAB-WORKSTATION')) + ' .mon-name', { button: 'right' });
+  await until(menuItems, 1500);
   await page.click('.menu.df-menu .menu-item');
 
   const rootBrowse = await until(() => host.last('deviceBrowse'), 2000);

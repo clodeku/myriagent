@@ -126,6 +126,8 @@ internal sealed partial class SyncEngine : ISyncEngineCommands
             // 電腦狀態面板的檔案傳輸（2026-11-09）：deviceBrowse、deviceFetch、devicePut（AgentHub.DeviceFiles.cs）
             into.Add(DeviceFeatureRules.Xfer1);
             into.Add(DeviceFeatureRules.Xfer2);
+            // 電腦選單的喇叭音量、立即關閉螢幕（2026-11-17，AgentHub.DeviceControl.cs；沒接上調整的來源時中樞回 unsupported）
+            into.Add(DeviceFeatureRules.Ctl1);
             // 遠端桌面（14.16）：宿主接得住才宣告（SyncEngine.Desk.cs）
             if (DeskPort is not null)
             {

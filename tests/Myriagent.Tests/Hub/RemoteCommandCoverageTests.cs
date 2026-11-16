@@ -53,7 +53,7 @@ public sealed class RemoteCommandCoverageTests
         RemoteCommandCatalog.DeviceTree, RemoteCommandCatalog.DeviceFetchMany];
 
     /// <summary>遠端桌面（AgentHub.RemoteDesk.cs）：HubHarness 沒接遠端桌面，處理者回 unsupported</summary>
-    private static readonly string[] DeskHandled = [RemoteCommandCatalog.DeskOpen];
+    private static readonly string[] DeskHandled = [RemoteCommandCatalog.DeskOpen, RemoteCommandCatalog.DeviceControl];
 
     private static readonly string[] DeviceTransferNeedingTransfer = [RemoteCommandCatalog.DeviceFetch, RemoteCommandCatalog.DevicePut, RemoteCommandCatalog.DeviceFetchMany];
 
@@ -131,7 +131,7 @@ public sealed class RemoteCommandCoverageTests
         outcomes.Keys.Should().BeEquivalentTo(fallback.Concat(Handled).Concat(Files).Concat(AccountHandled).Concat(Unsupported).Concat(ExecHandled).Concat(ScheduleHandled).Concat(DeviceTransferHandled).Concat(DeskHandled),
             "退路＋處理者＋檔案＋帳戶＋unsupported＋遠端執行指令＋排程頁＝型錄裡電腦執行的全部（契約:647）");
         (fallback.Length, Handled.Length, Files.Length, AccountHandled.Length, Unsupported.Length, ExecHandled.Length, ScheduleHandled.Length, DeviceTransferHandled.Length, outcomes.Count)
-            .Should().Be((10, 10, 5, 6, 1, 1, 4, 5, 43));
+            .Should().Be((10, 10, 5, 6, 1, 1, 4, 5, 44));
         outcomes.Where(p => p.Value is { State: RemoteResultStates.Rejected, Code: RemoteResultCodes.Unsupported, Step: RemoteGateSteps.Handler })
             .Select(p => p.Key).Should().BeEquivalentTo(Unsupported.Concat(FilesNeedingTransfer).Concat(NeedingVoice).Concat(ExecHandled).Concat(ScheduleHandled).Concat(DeviceTransferNeedingTransfer).Concat(DeskHandled),
                 "回 unsupported 而且 step 是 handler 的恰好是 accountAdd、要傳輸的 2 個、沒掛辨識器的語音訊息、沒接執行者的遠端執行指令、沒掛排程讀取器的排程頁");

@@ -27,6 +27,10 @@ export const ICONS = {
   // 電腦狀態（右側面板）：螢幕裡一條心跳線
   pulse: svg('<rect x="1.8" y="2.6" width="12.4" height="9" rx="1.6"/><path d="M4 7.4h1.7l1-2.1 1.6 4 1-1.9H12M5.6 14h4.8"/>'),
   // 伺服器（電腦狀態面板的 MyriagentHub 主機）：兩層機櫃
+  // 喇叭（電腦選單的音量，2026-11-17）
+  speaker: svg('<path d="M2.4 6.2h2.4L8 3.4v9.2L4.8 9.8H2.4z"/><path d="M10.6 5.6a3.4 3.4 0 0 1 0 4.8M12.4 3.8a6 6 0 0 1 0 8.4"/>'),
+  // 月亮（電腦選單的立即關閉螢幕）
+  moon: svg('<path d="M12.8 9.6A5.4 5.4 0 0 1 6.4 3.2a5.4 5.4 0 1 0 6.4 6.4z"/>'),
   desktop: svg('<rect x="1.8" y="2.4" width="12.4" height="8.4" rx="1.3"/><path d="M5.4 13.6h5.2M8 10.8v2.8"/>'),
   server: svg('<rect x="2.4" y="2.2" width="11.2" height="4.8" rx="1.2"/><rect x="2.4" y="9" width="11.2" height="4.8" rx="1.2"/><path d="M5 4.6h.1M5 11.4h.1M8.2 4.6h3M8.2 11.4h3"/>'),
   gear: svg(`<path d="${gearPath()}"/><circle cx="8" cy="8" r="2.1"/>`),

@@ -1128,6 +1128,13 @@ Claude 帳戶已對應或宣告了邏輯帳戶、這台**沒有發布過**這個
 - **功能**：`timed1` 不對應任何 hub 方法。桌面跟著 `sched1` 宣告；伺服器宣告，只把 `timedSave`、`timedAction` 送給協商出它的電腦（舊版在閘門 5a 回 invalid，使用者看不懂），沒有就立即拒絕 `unsupported`「版本太舊，還不能從其他電腦設定定時訊息」。
 - **指令**（型錄的 Device、層級 2，同排程的快速操作要「可以操作」）：`timedSave {deviceId, id?, conversation, newConversation?, whenKind, whenValue, text?, label?}`（`whenKind` 是 daily／weekdays／every／at／cron；`conversation` 是那台的對話的線上 id——不叫 `conversationId`：路由 Device 的指令沒有對話；`text` 省略＝修改時保留原文）、`timedAction {deviceId, id, action}`（run／pause／resume／delete）。那台的處理者（`AgentHub.ScheduleRemote.cs` 的 `TimedRemoteHandler`）照排程頁本機的同一條路（`SaveTimed`、`TimedAction`）；不合格回 `invalid`、找不到回 `conflict`，都帶原因。
 - **摘要**：`ScheduleSyncRules.ForSync` 的定時訊息另帶 `cron`、`at`、`folder`、`conversationExists` 與 `textPartial`（摘要的文字截到 300 字、秘密遮蔽，和原文不同時是 true）：網頁以 `cron`／`at` 還原時間的欄位，`textPartial` 的沒改文字就不帶 `text`。
+
+### 14.21 電腦選單的喇叭音量與螢幕（`ctl1`；2026-11-17）
+
+- **為什麼**：使用者要求電腦狀態面板的電腦選單可以控制那台的喇叭音量與讓螢幕休眠（選了「立即關閉螢幕」）。
+- **功能**：`ctl1` 不對應任何 hub 方法。桌面一律宣告（沒接上調整的來源時中樞回 `unsupported`）；伺服器宣告，只把 `deviceControl` 送給協商出它的電腦，沒有就立即拒絕 `unsupported`「版本太舊，還不能調整喇叭與螢幕」。
+- **指令**（型錄的 Device、層級 2，同檔案傳輸要「可以操作」）：`deviceControl {deviceId, requestId, action, volume?, mute?}`，`action` 是 `audioGet`／`audioSet`／`screenOff`，`volume` 是 0～100 的字串（型錄沒有整數欄位）。那台的處理者（`Hub/AgentHub.DeviceControl.cs`）在背景執行緒以 Core Audio 調預設播放裝置（`SystemStatus/DeviceControls.cs`，一般權限、同工作列的音量），關螢幕是廣播 `WM_SYSCOMMAND`／`SC_MONITORPOWER`（不鎖定）；做完以 `context.Complete` 回 `deviceControlState`（`DeviceControlRules.State`），失敗與沒有播放裝置以 `error` 說明。
+- **輸出**：`deviceControlState {requestId, action, volume, muted, error}`，伺服器以 `DeviceControlRules.Project` 投影（只留這些鍵、形狀不對丟掉）。
 ## 15. app 下載端點（app 自我更新 U2）
 
 桌面以存取權杖取得最新版與套件（U3 的 `HubReleaseSource`）。路由是 `AppReleaseRoutes`（`Update/AppReleaseMessages.cs`）的常數，回應以 `SyncJson` 序列化（1.2），形狀只加選用欄位（1.4 的不變式）。

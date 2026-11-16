@@ -87,6 +87,9 @@ internal static class RemoteCommandCatalog
     /// <summary>排程頁的交給代理（S3）</summary>
     public const string ScheduleAgent = "scheduleAgent";
 
+    /// <summary>電腦狀態面板的電腦選單：喇叭音量、靜音、立即關閉螢幕（2026-11-17；那台要協商出 ctl1，DeviceControlRules）</summary>
+    public const string DeviceControl = "deviceControl";
+
     /// <summary>Myriagent 的定時訊息：新增、修改（2026-11-13 使用者要求：跨電腦也能設定與編輯；那台要協商出 timed1）</summary>
     public const string TimedSave = "timedSave";
 
@@ -337,6 +340,15 @@ internal static class RemoteCommandCatalog
             Text(DevicePutSubfolder, 1024, required: false, nullable: true)]);
         // 整個資料夾（2026-11-09）：列遞迴的檔案清單、一次要多個檔的下載參照（pathsJson 是相對路徑的 JSON 陣列字串）
         yield return ForDevice(DeviceTree, 2, [Device(required: true), RequestId(), Text("path")], ["fileTree", "toast"]);
+        // 喇叭音量、靜音、立即關閉螢幕（2026-11-17）：同檔案傳輸要「可以操作」；volume 是 0～100 的字串（型錄沒有整數欄位）
+        yield return ForDevice(DeviceControl, 2,
+        [
+            Device(required: true),
+            RequestId(),
+            Choice("action", true, false, DeviceControlRules.AudioGet, DeviceControlRules.AudioSet, DeviceControlRules.ScreenOff),
+            Text("volume", 3, required: false, nullable: true),
+            new("mute", RemoteFieldKind.Bool, Required: false),
+        ], [DeviceControlRules.StateType, "toast"]);
         yield return ForDevice(DeviceFetchMany, 2, [Device(required: true), RequestId(), Text("root"), Text("pathsJson", 60_000)], ["fileRefs", "toast"]);
         // 遠端桌面（2026-11-09）：看與操作那台的畫面（同遠端執行指令，要「可以操作」）；requestId 是工作階段 id
         // viewerKey（2026-11-13，選用）：看的一方這個工作階段的公鑰，輸入端對端加密用（DeskSealRules；目標沒有 deske2e1 時伺服器拿掉）

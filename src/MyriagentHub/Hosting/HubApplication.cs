@@ -117,6 +117,8 @@ internal static class HubApplication
         // 電腦狀態面板的檔案傳輸（2026-11-09）：只把 deviceBrowse、deviceFetch、devicePut 送給協商出 xfer1 的連線
         builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Xfer1);
         builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Xfer2);
+        // 電腦選單的喇叭音量、立即關閉螢幕（2026-11-17）：deviceControl 只送給協商出 ctl1 的電腦（CommandRouter）
+        builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Ctl1);
         // 遠端桌面（sync-protocol 14.16）：deskOpen、DeskUp／DeskDown（Sync/DeskRelays.cs）
         builder.Services.AddDeviceHubFeature(Myriagent.Sync.DeviceFeatureRules.Desk1);
         // 遠端桌面輸入的端對端加密（14.16）：伺服器只轉密文；deskOpen 的 viewerKey 只送給協商出它的電腦（CommandRouter 替舊版拿掉）

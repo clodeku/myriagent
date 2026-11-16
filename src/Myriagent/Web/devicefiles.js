@@ -11,6 +11,7 @@ import { uploadFile, fetchTransfer } from './hubapi.js';
 import { uploadResult, peerOf } from './liverules.js';
 import * as R from './devicefilesrules.js';
 import { openRemoteDesk } from './remotedesk.js';
+import { controlMenuItems } from './devicecontrol.js';
 import { isHandheld } from './voicemsgrules.js';
 
 const FOLDER_KEY = 'myriagent.app.xfer.folder.v1';
@@ -39,6 +40,8 @@ let browserDownloadAt = 0;
 
 /** 卡片的選單項目（這台與 Hub 主機回 null：沒有選單） */
 export function cardMenuItems(row) {
+  // 這台（桌面）：只有喇叭音量與關閉螢幕（2026-11-17，devicecontrol.js；宿主自己做）
+  if (row && row.self && !row.hub && !isHub) return [{ type: 'header', label: row.name || '這台' }, ...controlMenuItems(null, row.name || '這台')];
   const device = deviceOf(row && row.id);
   const avail = R.transferMenu({ row, device, hub: isHub, peer: peerOf(state.remote, isHub ? 'hub' : 'desktop') });
   if (!avail) return null;
@@ -49,6 +52,9 @@ export function cardMenuItems(row) {
     { label: '上傳檔案到這台…', icon: 'arrowUp', disabled: !avail.enabled, desc: why, onSelect: () => openDeviceFiles(row.id, { upload: true }) },
     // 遠端桌面（2026-11-09）：條件同檔案傳輸（那台的「可以操作」）；版本太舊的由伺服器說明
     { label: '遠端桌面…', icon: 'desktop', disabled: !avail.enabled, desc: why, onSelect: () => openRemoteDesk(row.id, row.name || nameOf(row.id)) },
+    // 喇叭音量、立即關閉螢幕（2026-11-17）：條件同檔案傳輸（那台的「可以操作」）；版本太舊的由伺服器說明
+    { type: 'sep' },
+    ...controlMenuItems(row.id, row.name || nameOf(row.id), !avail.enabled, why),
     // 檔案傳輸（2026-11-10）：所有電腦的傳輸，可以暫停、繼續、中止；有傳輸時才列
     transfers.length && { type: 'sep' },
     transfers.length && { label: '檔案傳輸…', icon: 'download', desc: R.dockText(R.dockSummary(summaryRows(Date.now()))) || '看傳輸的進度、暫停或中止', onSelect: () => openTransfers() },

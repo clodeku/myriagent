@@ -262,6 +262,10 @@ internal sealed partial class CommandRouter(
         if (name == RemoteCommandCatalog.RemoveAttachment && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.Att1))
             return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false,
                 "「" + (string.IsNullOrWhiteSpace(devices.Get(target)?.Name) ? PeerRules.UnnamedDevice : devices.Get(target)!.Name!.Trim()) + "」的 Clode Myriagent 版本太舊，還不能移除已附加的檔案；請先更新那台"), cancellationToken);
+        // 喇叭音量、立即關閉螢幕（2026-11-17）：舊版的桌面在閘門 5a 回 invalid（不在型錄），說明那台要先更新
+        if (name == RemoteCommandCatalog.DeviceControl && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.Ctl1))
+            return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false,
+                "「" + (string.IsNullOrWhiteSpace(devices.Get(target)?.Name) ? PeerRules.UnnamedDevice : devices.Get(target)!.Name!.Trim()) + "」的 Clode Myriagent 版本太舊，還不能調整喇叭與螢幕；請先更新那台"), cancellationToken);
         // 電腦狀態面板的檔案傳輸（2026-11-09）：目標要協商出 xfer1（舊版的桌面在閘門 5a 回 invalid，使用者看不懂）
         if (RemoteCommandCatalog.DeviceTransferCommands.Contains(name) && !DeviceFeatureRules.Has(device.Features, DeviceFeatureRules.Xfer1))
             return await RejectAsync(route, new RouteRejection(RemoteResultCodes.Unsupported, CmdError: false,

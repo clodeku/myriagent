@@ -145,6 +145,7 @@ internal static class RemoteNotifyRules
         RemoteCommandCatalog.ScheduleAgent => ("把排程交給代理", false),
         RemoteCommandCatalog.TimedSave => ("設定了定時訊息", false),
         RemoteCommandCatalog.TimedAction => ("操作了定時訊息", false),
+        RemoteCommandCatalog.DeviceControl => ("調整了這台的喇叭或螢幕", false),
         RemoteCommandCatalog.DeviceBrowse => ("瀏覽了這台的資料夾", false),
         RemoteCommandCatalog.DeviceFetch => ("下載了這台的檔案", false),
         RemoteCommandCatalog.DevicePut => ("把檔案傳到這台", false),
