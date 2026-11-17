@@ -55,6 +55,8 @@ public sealed class SecureDeskScreenTests
 
         public void SendSecureInput(string sessionId, long n, string ct) => Forwarded.Add((sessionId, n, ct));
 
+        public bool Installed { get; set; } = true;
+
         public void Dispose() => Disposed = true;
     }
 
@@ -151,6 +153,9 @@ public sealed class SecureDeskScreenTests
         inner.Locked = false;
         inner.Secure = true;
         screen.Capture(Bounds, 320, 240, buffer, force: false).Should().Be(DeskCapture.Failed);
+        screen.ServiceState.Should().Be(DeskServiceState.Unavailable, "裝了但用不了");
+        secure.Installed = false;
+        screen.ServiceState.Should().Be(DeskServiceState.NotInstalled, "沒裝：給看的一方的說明要說怎麼裝");
     }
 
     [Fact]

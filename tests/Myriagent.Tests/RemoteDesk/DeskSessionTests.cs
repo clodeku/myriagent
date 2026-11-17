@@ -402,6 +402,13 @@ public sealed class DeskSessionTests
         DeskScreenRules.StatusText(DeskCapture.Retry, DeskScreenRules.RetryStatusAfter - 1).Should().BeNull();
         DeskScreenRules.StatusText(DeskCapture.Retry, DeskScreenRules.RetryStatusAfter).Should().Be(DeskScreenRules.RetryText);
         DeskScreenRules.StatusText(DeskCapture.Ok, 99).Should().BeNull();
+        // 這台的鎖定畫面支援（2026-11-17）：沒裝就說怎麼裝，裝了但連不上說正在重試
+        DeskScreenRules.StatusText(DeskCapture.Locked, 0, DeskServiceState.NotInstalled).Should().Be(DeskScreenRules.LockedNoServiceText)
+            .And.Contain("安裝…").And.Contain("多電腦同步");
+        DeskScreenRules.StatusText(DeskCapture.Failed, 0, DeskServiceState.NotInstalled).Should().Be(DeskScreenRules.SecureDesktopNoServiceText).And.Contain("安裝…");
+        DeskScreenRules.StatusText(DeskCapture.Locked, 0, DeskServiceState.Unavailable).Should().Be(DeskScreenRules.LockedServiceDownText).And.Contain("重試");
+        DeskScreenRules.StatusText(DeskCapture.Failed, 0, DeskServiceState.Unavailable).Should().Be(DeskScreenRules.SecureDesktopServiceDownText);
+        DeskScreenRules.StatusText(DeskCapture.Retry, DeskScreenRules.RetryStatusAfter, DeskServiceState.NotInstalled).Should().Be(DeskScreenRules.RetryText);
         DeskScreenRules.StatusText(DeskCapture.Unchanged, 99).Should().BeNull();
     }
 

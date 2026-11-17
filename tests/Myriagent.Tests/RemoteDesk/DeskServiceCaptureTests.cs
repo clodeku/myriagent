@@ -360,6 +360,7 @@ public sealed class DeskServiceCaptureTests
         for (var i = 0; i < 50; i++)
             capture.Capture(new DeskRect(0, 0, 64, 64), 32, 32, new byte[32 * 32 * 4], force: true).Should().BeNull();
         asked.Should().Be(1, "沒裝的時候隔一陣子才再看一次安裝紀錄");
+        capture.Installed.Should().BeFalse("看過安裝紀錄：沒裝");
         watch.ElapsedMilliseconds.Should().BeLessThan(1000, "不能讓擷取迴圈每一格都等連線逾時");
     }
 

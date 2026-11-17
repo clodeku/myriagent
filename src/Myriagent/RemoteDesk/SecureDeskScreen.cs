@@ -24,6 +24,9 @@ internal interface ISecureDeskCapture : IDisposable
 
     /// <summary>把一包以服務的金鑰加密的輸入轉給幫手（這裡解不開）。任何執行緒；會等幫手回覆，不要在同步的執行緒直接呼叫</summary>
     void SendSecureInput(string sessionId, long n, string ct);
+
+    /// <summary>最近一次 <see cref="Capture"/> 回 null 時的原因：沒裝，或裝了但用不了（給看的一方的說明用）</summary>
+    bool Installed { get; }
 }
 
 /// <summary>畫面來源現在只能看、不能操作（<see cref="DeskSession"/> 把說明告訴看的一方）</summary>
@@ -58,7 +61,7 @@ internal interface IDeskSecureInput
 /// 兩個來源各自記得「上一張」：換來源的那一次一律要整張，不然一邊說「沒變」時工作階段手上的其實是另一邊的畫面。
 /// 安全桌面的輸入見 <see cref="IDeskSecureInput"/>：幫手驗過信封、回了公鑰才能操作，否則只能看（<see cref="ViewOnlyNote"/>）
 /// </summary>
-internal sealed class SecureDeskScreen(IDeskScreen inner, ISecureDeskCapture secure) : IDeskScreen, IDeskViewOnly, IDeskSecureInput
+internal sealed class SecureDeskScreen(IDeskScreen inner, ISecureDeskCapture secure) : IDeskScreen, IDeskViewOnly, IDeskSecureInput, IDeskServiceStateSource
 {
     public const string ViewOnlyText = "那台目前是鎖定畫面或系統管理員確認畫面：看得到，但這次不能操作（那台的鎖定畫面支援要重新安裝或更新，或這裡的網頁太舊）";
 
@@ -80,6 +83,9 @@ internal sealed class SecureDeskScreen(IDeskScreen inner, ISecureDeskCapture sec
     public string? ViewOnlyNote => secureActive && servicePublic is null ? ViewOnlyText : null;
 
     public bool SecureActive => secureActive;
+
+    /// <summary>擷取不到時（幫手用不了）的說明依據：沒裝就告訴看的一方怎麼裝</summary>
+    public DeskServiceState ServiceState => secure.Installed ? DeskServiceState.Unavailable : DeskServiceState.NotInstalled;
 
     public string? ServicePublicKey => servicePublic;
 
@@ -220,6 +226,10 @@ internal sealed class SecureDeskCapture(Func<bool> installed, string servicePipe
     private (DeskRect Bounds, int W, int H) quietFor;
     private string? lastDesktop;
     private string? lastSecureProblem;
+    private volatile bool lastInstalled = true;
+
+    /// <summary>最近一次看安裝紀錄的結果（還沒看過當成裝了：只影響說明的說法）</summary>
+    public bool Installed => lastInstalled;
 
     public DeskCapture? Capture(DeskRect bounds, int width, int height, byte[] bgra, bool force)
     {
@@ -232,7 +242,8 @@ internal sealed class SecureDeskCapture(Func<bool> installed, string servicePipe
             {
                 if (now < retryAtTick)
                     return null;
-                if (!installed())
+                lastInstalled = installed();
+                if (!lastInstalled)
                 {
                     retryAtTick = now + RetryNotInstalledMs;
                     return null;

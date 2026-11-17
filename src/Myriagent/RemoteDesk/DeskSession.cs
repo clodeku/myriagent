@@ -365,7 +365,7 @@ internal sealed class DeskSession : IDisposable
                     retries = captured == DeskCapture.Retry ? retries + 1 : 0;
                     inputBlocked = captured != DeskCapture.Retry;
                     // 同一個原因每隔一陣子重送：這段期間兩邊都沒有別的封包，伺服器太久沒有封包會忘掉工作階段（等別人解除鎖定可能很久）
-                    if (DeskScreenRules.StatusText(captured, retries) is { } text
+                    if (DeskScreenRules.StatusText(captured, retries, (screen as IDeskServiceStateSource)?.ServiceState ?? DeskServiceState.Unknown) is { } text
                         && (text != statusShown || NowMs() - statusSentMs >= DeskScreenRules.StatusRepeatMs))
                     {
                         statusShown = text;
