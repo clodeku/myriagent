@@ -1190,6 +1190,14 @@ const mediaMenuState = (app) => app.page.evaluate(() => {
   return m ? [...m.querySelectorAll('.menu-item')].map((n) => ({ label: n.querySelector('.mi-label').textContent, disabled: n.disabled })) : null;
 });
 const menuLabels = (m) => (m || []).map((x) => x.label);
+/**
+ * 手機的媒體選單：前幾項照 want，瀏覽器能分享檔案時最後多一項「分享到其他 App…」（share.js，2026-11-18；探針的 Chrome 在 Windows 上能分享）
+ */
+const mobileMenuIs = (m, want) => {
+  const got = menuLabels(m);
+  return JSON.stringify(got.slice(0, want.length)) === JSON.stringify(want)
+    && (got.length === want.length || (got.length === want.length + 1 && got[want.length] === '分享到其他 App…'));
+};
 
 /** CDP 的觸控（Playwright 的 touchscreen 只有 tap）：drag 每一步隔 stepMs、拖到一半時呼叫 mid()；hold 按著 ms 毫秒、放開前呼叫 during() */
 async function touchKit(page) {
@@ -1375,13 +1383,110 @@ async function runMobileMediaTouch() {
     r.closedBySwipe = !!(await until(() => page.evaluate(() => (document.querySelector('.vp') ? null : true)), 2000));
   }
   await k.detach();
-  check('hubMobileMediaLongPress', JSON.stringify(menuLabels(r.imageMenu)) === JSON.stringify(['複製圖片', '下載']) && r.lightboxAfterImageHold === false
-    && JSON.stringify(menuLabels(r.videoMenu)) === JSON.stringify(['複製影片', '下載']) && r.videoMenu[0].disabled && /下載/.test(r.videoMenuDesc || ''),
+  check('hubMobileMediaLongPress', mobileMenuIs(r.imageMenu, ['複製圖片', '下載']) && r.lightboxAfterImageHold === false
+    && mobileMenuIs(r.videoMenu, ['複製影片', '下載']) && r.videoMenu[0].disabled && /下載/.test(r.videoMenuDesc || ''),
   { imageMenu: r.imageMenu, lightbox: r.lightboxAfterImageHold, videoMenu: r.videoMenu, desc: r.videoMenuDesc, img });
   check('hubMobileVideoSwipe', closeBtnOk(r.close) && !!r.short && r.short.open && !r.short.transform && !r.short.bg
-    && JSON.stringify(menuLabels(r.playerMenu)) === JSON.stringify(['複製影片', '下載'])
+    && mobileMenuIs(r.playerMenu, ['複製影片', '下載'])
     && !!r.mid && r.mid.dx > 60 && r.closedBySwipe,
   { close: r.close, short: r.short, playerMenu: r.playerMenu, mid: r.mid, closed: r.closedBySwipe });
+  await HP.closePage(app);
+}
+
+/**
+ * 手機上的儲存與分享（share.js，2026-11-18 使用者回報：手機上無法直接下載影片；要能把圖片、影片、檔案轉發到其他 app）。
+ * iPhone 的使用者代理＋觸控，navigator.share／canShare 換成假的（記下分享的檔案，不開真的分享選單）；userActivation 由探針控制：
+ * 1. 長按圖片：選單是「複製圖片、儲存到手機、分享到其他 App…」；選「儲存到手機」→ 框裡抓完檔，點按的效力已過 → 出現「儲存」鈕，按了才叫出分享選單（PNG、檔名照顯示的名稱）
+ * 2. 長按影片：同樣三項（第一項停用）；選「分享到其他 App…」→ 點按的效力還在就直接叫出分享選單（video/mp4、操作錄影.mp4）
+ * 3. 影片播放器的工具列有「儲存」「分享」
+ * 4. 檔案（季報.xlsx，手機給「用裝置上的程式開啟」）旁邊有「分享到其他 App」，按了分享 /f/ 的檔案
+ */
+async function runMobileShare() {
+  const id = LF.CONV.idle;
+  const items = MEDIA_ITEMS(NOW).concat([{ id: 'v3', kind: 'Approval', status: 'Done', time: NOW - LF.MIN, toolKind: 'edit', toolName: '編輯檔案', title: '更新季報',
+    filePath: 'C:\\repo\\demo\\季報.xlsx', detail: null, canAllowForSession: false, decision: 'allow', seq: 3 }]);
+  const shareStub = () => {
+    window.__shares = [];
+    window.__activation = false;
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: (d) => !!(d && Array.isArray(d.files) && d.files.length) });
+    Object.defineProperty(navigator, 'share', { configurable: true, value: async (d) => {
+      window.__shares.push((d.files || []).map((f) => ({ name: f.name, type: f.type, size: f.size })));
+    } });
+    Object.defineProperty(navigator, 'userActivation', { configurable: true, get: () => ({ isActive: window.__activation, hasBeenActive: true }) });
+  };
+  const VIDEO = Buffer.alloc(40000, 7);
+  const app = await openWithLayout('mobile-share', layoutOf([[[id], id]]), {
+    open: {
+      vp: { w: 390, h: 844 }, hasTouch: true, userAgent: IPHONE_UA, initScript: shareStub,
+      media: (p) => (p.startsWith('/m/d_A-vid1') ? { status: 200, headers: { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' }, body: VIDEO } : null),
+      hub: (hub) => hub.onCmd('open', (cmd) => ({ push: [LF.conversationMessage(NOW, cmd.conversationId, TITLE_OF[cmd.conversationId] || '對話', { items })] })),
+    },
+  });
+  app.expect((m) => /\/m\/d_A-vid1/.test(m.text || '') || /\/m\/d_A-vid1/.test(m.url || ''), '探針的影片不是真的 mp4，放不出來');
+  const { page, hub } = app;
+  await waitLoaded(app, [id]);
+  await page.click('#btnSidebar');
+  await sleep(300);
+  const shares = () => page.evaluate(() => window.__shares.slice());
+  const k = await touchKit(page);
+  const r = {};
+  // 1. 圖片：儲存到手機（點按的效力已過 → 框裡的「儲存」鈕）
+  await page.evaluate((q) => document.querySelector(q).scrollIntoView({ block: 'center' }), itemSel(id, 'v2') + ' .media');
+  await sleep(200);
+  const imgAt = await frameRect(app, itemSel(id, 'v2') + ' .media .mimg');
+  if (imgAt) {
+    await k.hold({ x: imgAt.x + imgAt.w / 2, y: imgAt.y + imgAt.h / 2 }, 700);
+    await sleep(400);
+    r.imageMenu = await mediaMenuState(app);
+    await shot(app, 'hub-mobile-share-menu');
+    if (r.imageMenu) await page.locator('.media-menu .menu-item', { hasText: '儲存到手機' }).tap();
+    r.goShown = await until(() => page.evaluate(() => { const b = document.querySelector('.share-dlg [data-field="shareGo"]'); return b && !b.hidden ? true : null; }), 3000);
+    r.hint = await page.evaluate(() => { const s = document.querySelector('.share-dlg [data-field="shareStatus"]'); return s ? s.textContent : null; });
+    await shot(app, 'hub-mobile-share-ready');
+    r.beforeTap = (await shares()).length;
+    if (r.goShown) await page.tap('.share-dlg [data-field="shareGo"]');
+    r.image = await until(async () => { const x = await shares(); return x.length ? x[0] : null; }, 3000);
+    r.imageDlgClosed = !!(await until(() => page.evaluate(() => (document.querySelector('.share-dlg:not(.leaving)') ? null : true)), 2000));
+  }
+  // 2. 影片：分享到其他 App（點按的效力還在 → 直接叫出分享選單）
+  await page.evaluate(() => { window.__activation = true; });
+  const vf = await frameRect(app, itemSel(id, 'v2') + ' .mvid iframe.vframe');
+  if (vf) {
+    await k.hold({ x: vf.x + vf.w / 2, y: vf.y + vf.h * 0.35 }, 700);
+    await sleep(400);
+    r.videoMenu = await mediaMenuState(app);
+    if (r.videoMenu) await page.locator('.media-menu .menu-item', { hasText: '分享到其他 App' }).tap();
+    r.video = await until(async () => { const x = await shares(); return x.length > 1 ? x[1] : null; }, 3000);
+  }
+  // 3. 影片播放器的工具列
+  await page.tap(itemSel(id, 'v2') + ' .mvid-cap button[aria-label="放大播放"]');
+  await page.waitForSelector('.vp:not(.leaving) iframe.vframe');
+  r.playerTools = await page.evaluate(() => [...document.querySelectorAll('.vp .lb-tools .lb-btn')].filter((b) => !b.hidden && !b.disabled).map((b) => b.getAttribute('aria-label')));
+  await page.keyboard.press('Escape');
+  await sleep(300);
+  // 4. 檔案：「用裝置上的程式開啟」旁的「分享到其他 App」
+  hub.onCmd('fileFetch', (cmd, arg) => ({ push: [serverResult(arg.commandId, 'done'), { type: 'fileRef', requestId: cmd.requestId, conversationId: cmd.conversationId,
+    url: '/f/d_A-ref4', name: '季報.xlsx', size: 52011, expiresAt: NOW + 15 * LF.MIN, error: null }] }));
+  const link = itemSel(id, 'v3') + ' [data-field="fileFetch"]';
+  if (await page.waitForSelector(link, { timeout: 3000 }).then(() => true, () => false)) {
+    await page.tap(link);
+    r.fileShareBtn = await until(() => page.evaluate(() => (document.querySelector('.dlg-file-ref [data-field="fileRefShare"]') ? true : null)), 3000);
+    await shot(app, 'hub-mobile-share-file');
+    if (r.fileShareBtn) await page.tap('.dlg-file-ref [data-field="fileRefShare"]');
+    r.file = await until(async () => { const x = await shares(); return x.length > 2 ? x[2] : null; }, 3000);
+  }
+  await k.detach();
+  const img = r.image && r.image[0], vid = r.video && r.video[0], file = r.file && r.file[0];
+  check('hubMobileShareImageSave', JSON.stringify(menuLabels(r.imageMenu)) === JSON.stringify(['複製圖片', '儲存到手機', '分享到其他 App…'])
+    && r.goShown === true && /儲存影像/.test(r.hint || '') && r.beforeTap === 0 && !!img && img.name === '畫面.png' && img.type === 'image/png' && img.size > 0 && r.imageDlgClosed,
+  { imageMenu: r.imageMenu, goShown: r.goShown, hint: r.hint, beforeTap: r.beforeTap, image: r.image, closed: r.imageDlgClosed });
+  check('hubMobileShareVideo', JSON.stringify(menuLabels(r.videoMenu)) === JSON.stringify(['複製影片', '儲存到手機', '分享到其他 App…'])
+    && !!vid && vid.name === '操作錄影.mp4' && vid.type === 'video/mp4' && vid.size === 40000
+    && JSON.stringify(r.playerTools) === JSON.stringify(['儲存', '分享']),
+  { videoMenu: r.videoMenu, video: r.video, playerTools: r.playerTools });
+  // 類型照伺服器回的（探針的 /f/ 一律回 text/plain）
+  check('hubMobileShareFile', r.fileShareBtn === true && !!file && file.name === '季報.xlsx' && file.type === 'text/plain' && file.size > 0,
+  { fileShareBtn: r.fileShareBtn, file: r.file });
   await HP.closePage(app);
 }
 
@@ -6309,6 +6414,7 @@ const SCENARIOS = [
   { checks: ['hubMobileLightboxSwipeMenu'], run: runMobileLightboxSwipeMenu },
   { checks: ['desktopLightboxSwipeMenu'], run: runDesktopLightboxSwipeMenu },
   { checks: ['hubMobileMediaLongPress', 'hubMobileVideoSwipe'], run: runMobileMediaTouch },
+  { checks: ['hubMobileShareImageSave', 'hubMobileShareVideo', 'hubMobileShareFile'], run: runMobileShare },
   { checks: ['desktopMediaContextMenu', 'desktopViewerCloseTopRight'], run: runDesktopMediaMenu },
   { checks: ['hubPhoneAcctsFolded', 'hubPhoneSwipeLeftCloses', 'hubPhoneSwipeLeftMonitor', 'hubPhoneSwipeIgnored', 'hubPhoneDragFollowsFinger', 'hubPhoneSwipeRightOpens', 'hubPhoneTapChatCloses', 'hubPhonePickCloses', 'hubPhoneDrawerNoHScroll', 'hubPhoneSearchBottomLeft', 'hubPhoneWideUnchanged', 'hubPhoneBrandRunMatches'], run: runPhoneDrawer },
   { checks: ['hubSendTrackedDone', 'hubRttReadout'], run: runSendDone },

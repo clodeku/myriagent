@@ -134,3 +134,11 @@
 /* 圖片與影片上的長按交給媒體選單（longpress.js、mediamenu.js）：不出 iOS 的「儲存影像」浮出選單、不選取文字 */
 :is(.mimg, .att-img, .att-vid, .md-img, .mvid > .vframe, .lb-img) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 @media (pointer: coarse) { .media-menu .menu-item { min-height: 40px; } }
+
+/* 手機上的儲存與分享（share.js，2026-11-18）：檔名、進度條（填色以 scaleX 伸長，不做轉場）、狀態文字 */
+.share-body { display: flex; flex-direction: column; gap: 10px; }
+.share-name { font-weight: 600; color: var(--text-hi); overflow-wrap: anywhere; }
+.share-bar { height: 6px; border-radius: 3px; background: var(--bg-raised); box-shadow: var(--edge-hi), 0 0 0 1px var(--border-2); overflow: hidden; }
+.share-fill { height: 100%; background: var(--acc); transform: scaleX(0); transform-origin: left center; }
+.share-status { color: var(--text-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.share-dlg .dlg-foot .btn .ic { width: 14px; height: 14px; }

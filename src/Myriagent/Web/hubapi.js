@@ -146,6 +146,37 @@ export function uploadFile(uploadId, file, onProgress, signal) {
 }
 
 /**
+ * 手機上的儲存與分享（share.js，2026-11-18）：把本站的媒體或檔案（/m/、/t/、/f/ 的相對網址）整個抓成 Blob，邊抓邊回報進度。
+ * 回 { blob, type }（type 是伺服器回的 Content-Type）；超過 maxBytes 丟錯（不抓完）；401（登入失效）→ location.replace('/')
+ */
+export async function fetchMediaBlob(url, { signal, onProgress, maxBytes } = {}) {
+  if (typeof url !== 'string' || !/^\/(m|t|f)\//.test(url)) throw new Error('網址不合格');
+  const res = await fetch(url, { credentials: 'same-origin', signal });
+  if (res.status === 401) { location.replace('/'); throw new Error('登入已失效'); }
+  if (!res.ok) throw new Error('伺服器回 ' + res.status);
+  const type = res.headers.get('Content-Type') || '';
+  const total = Number(res.headers.get('Content-Length')) || 0;
+  if (maxBytes && total > maxBytes) throw new Error('too-large');
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    const blob = await res.blob();
+    if (onProgress) onProgress(blob.size, blob.size);
+    return { blob, type };
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+    if (maxBytes && loaded > maxBytes) { try { await reader.cancel(); } catch { /* 忽略 */ } throw new Error('too-large'); }
+    if (onProgress) onProgress(loaded, total);
+  }
+  return { blob: new Blob(chunks, type ? { type } : undefined), type };
+}
+
+/**
  * 〔電腦狀態〕瀏覽器版下載整個資料夾的一個檔：GET 本站的 /f/{key}（fileRefs 給的網址），回 Response（呼叫端以 body 串流寫進選的資料夾）。
  * 只收本站 /f/ 開頭的相對網址；401（登入失效）→ location.replace('/')
  */

@@ -9,7 +9,8 @@ import { calmMotion } from './theme.js';
 import { zoomRange, tapSlop, pinchStart, pinchMove, snapBackAfterPinch, isDoubleTap, imageInfoLabel,
   canSwipeDismiss, dismissProgress, shouldDismiss, releaseVelocity, flingOffset } from './viewerrules.js';
 import { framedVideo } from './framedvideo.js';
-import { mediaPathCmd as pathCmd, openMediaMenu, canSaveMedia, saveMedia } from './mediamenu.js';
+import { mediaPathCmd as pathCmd, openMediaMenu, canSaveMedia, saveMedia, canShareMedia, shareMediaItem } from './mediamenu.js';
+import { saveViaShare } from './share.js';
 
 // ───── 共用 ─────
 /** 拖曳關閉時背景跟著變淡、工具列與左右鈕跟著收（progress 0～1；null＝還原） */
@@ -90,14 +91,16 @@ function createLightbox() {
   const prev = h('button', { type: 'button', class: 'lb-nav prev', title: '上一張（←）', 'aria-label': '上一張' }, icon('chevLeft'));
   const next = h('button', { type: 'button', class: 'lb-nav next', title: '下一張（→）', 'aria-label': '下一張' }, icon('chevRight'));
   const openBtn = lbBtn('popout', '用預設程式開啟');
-  const saveBtn = lbBtn('download', isHub ? '下載' : '另存新檔', 'mediaSave');
+  const saveBtn = lbBtn('download', isHub ? (saveViaShare() ? '儲存' : '下載') : '另存新檔', 'mediaSave');
+  // 分享到其他 App（瀏覽器版的手機與平板，2026-11-18）
+  const shareBtn = lbBtn('share', '分享', 'mediaShare');
   const revealBtn = lbBtn('folderOpen', '在檔案總管顯示');
   const bar = h('div', { class: 'lb-bar' },
     h('div', { class: 'lb-info' }, nameEl, countEl, resEl),
     h('div', { class: 'lb-tools' },
       iconButton('zoomOut', '縮小（-）', () => S.zoomBy(1 / 1.25), 'lb-zbtn'), zoomLabel, iconButton('zoomIn', '放大（+）', () => S.zoomBy(1.25), 'lb-zbtn'),
       iconButton('fit', '符合視窗（0）', () => S.fit(), 'lb-zbtn'),
-      h('span', { class: 'lb-div' }), saveBtn, openBtn, revealBtn),
+      h('span', { class: 'lb-div' }), saveBtn, shareBtn, openBtn, revealBtn),
     closeButton(() => S.close()));
   const el = h('div', { class: 'lb', role: 'dialog', 'aria-modal': 'true', 'aria-label': '圖片檢視', tabIndex: -1 }, bar, stage, loadingEl, errEl, prev, next);
   const fading = [bar, prev, next];
@@ -135,6 +138,7 @@ function createLightbox() {
       prev.hidden = next.hidden = S.list.length < 2;
       openBtn.disabled = revealBtn.disabled = !it.path;
       saveBtn.hidden = !canSaveMedia(it);
+      shareBtn.hidden = !canShareMedia(it);
       errEl.hidden = true;
       resEl.textContent = '';
       loadingEl.hidden = false;
@@ -389,6 +393,7 @@ function createLightbox() {
   zoomLabel.addEventListener('click', () => { const st = S.stageSize(); S.toggleZoom(st.w / 2, st.h / 2); });
   openBtn.addEventListener('click', () => { const it = S.list[S.index]; if (it.path) post(pathCmd('openPath', it.path, it.conversationId)); });
   saveBtn.addEventListener('click', () => saveMedia(S.list[S.index]));
+  shareBtn.addEventListener('click', () => shareMediaItem(S.list[S.index]));
   // 圖片上按右鍵或觸控長按（longpress.js 轉成 contextmenu）：媒體選單。長按時這一串手勢不再拖曳、放開也不算點一下
   el.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -426,16 +431,19 @@ export function openVideo(m) {
   const pauseVideo = () => { const v = fv.video(); if (v) v.pause(); };
   const media = Object.assign({ kind: 'video' }, m);
   const openBtn = lbBtn('popout', '用預設程式開啟');
-  const saveBtn = lbBtn('download', isHub ? '下載' : '另存新檔', 'mediaSave');
+  const saveBtn = lbBtn('download', isHub ? (saveViaShare() ? '儲存' : '下載') : '另存新檔', 'mediaSave');
+  const shareBtn = lbBtn('share', '分享', 'mediaShare');
   const revealBtn = lbBtn('folderOpen', '在檔案總管顯示');
   openBtn.disabled = revealBtn.disabled = !m.path;
   saveBtn.hidden = !canSaveMedia(media);
+  shareBtn.hidden = !canShareMedia(media);
+  shareBtn.addEventListener('click', () => { pauseVideo(); shareMediaItem(media); });
   openBtn.addEventListener('click', () => { pauseVideo(); post(pathCmd('openPath', m.path, m.conversationId)); });
   saveBtn.addEventListener('click', () => saveMedia(media));
   revealBtn.addEventListener('click', () => post(pathCmd('revealPath', m.path, m.conversationId)));
   const stage = h('div', { class: 'vp-stage' }, fv.el, errEl);
   const bar = h('div', { class: 'lb-bar' }, h('div', { class: 'lb-info' }, icon('video', 'vp-ic'), h('span', { class: 'lb-name', text: m.name || '', title: m.path || '' })),
-    h('div', { class: 'lb-tools' }, saveBtn, openBtn, revealBtn), closeButton(() => close()));
+    h('div', { class: 'lb-tools' }, saveBtn, shareBtn, openBtn, revealBtn), closeButton(() => close()));
   const el = h('div', { class: 'vp', role: 'dialog', 'aria-modal': 'true', 'aria-label': '影片播放', tabIndex: -1 }, bar, stage);
   guardOpeningClicks(el);
   const prevFocus = document.activeElement;

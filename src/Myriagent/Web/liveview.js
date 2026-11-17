@@ -15,6 +15,7 @@ import { uploadsInProgress } from './composer.js';
 import * as voice from './voice.js';
 import { fileRefAction } from './filelinkrules.js';
 import { isHandheld } from './voicemsgrules.js';
+import { shareMedia, shareAvailable } from './share.js';
 
 /** app.js 不認得的宿主訊息；commandResult 以外的只有瀏覽器版有，遠端操作紀錄與回收區只有桌面有（設定頁的對話框，synclog.js） */
 export function handle(m) {
@@ -354,9 +355,12 @@ function onFileRef(m) {
   if (action === 'deviceOpen') {
     const open = h('a', { class: 'btn primary', href: v.url, download: v.name, rel: 'noopener noreferrer', dataset: { field: 'fileRefDeviceOpen' } }, icon('popout'), h('span', { text: '用裝置上的程式開啟' }));
     open.addEventListener('click', () => setTimeout(() => e.dialog.close(), 0));
+    // 分享到其他 App（2026-11-18）：抓下來交給系統的分享選單（share.js）
+    const share = shareAvailable() ? h('button', { type: 'button', class: 'btn', dataset: { field: 'fileRefShare' } }, icon('share'), h('span', { text: '分享到其他 App' })) : null;
+    if (share) share.addEventListener('click', () => { e.dialog.close(); shareMedia({ url: v.url, name: v.name, kind: 'file', mode: 'share' }); });
     e.body.append(h('div', { class: 'file-ref-result' },
       h('p', { class: 'confirm-detail', dataset: { field: 'fileRefInfo' }, text: (v.sizeText ? v.sizeText + '・' : '') + '交給這台裝置上能開這個檔案的程式（15 分鐘內有效）。' }),
-      h('div', { class: 'file-ref-acts' }, open)));
+      h('div', { class: 'file-ref-acts' }, share, open)));
     return;
   }
   if (!isHub) {

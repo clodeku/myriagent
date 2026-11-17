@@ -4,6 +4,8 @@
 // 寫不進去而且是這台的檔案時交給宿主（copyMedia，剪貼簿放檔案）。複製影片：瀏覽器的剪貼簿放不了影片，只有桌面這台的檔案能複製（copyMedia）
 import { post, isHub } from './store.js';
 import { openMenu, toast } from './ui.js';
+import { shareMedia, saveViaShare, shareAvailable } from './share.js';
+import { shareableUrl } from './sharerules.js';
 
 /**
  * openPath／revealPath／saveFile／copyMedia 的訊息：對話裡開的帶 conversationId（WP4.6 步 10），
@@ -36,12 +38,29 @@ export function canSaveMedia(m) {
   return !!m && (!!m.onDownload || (isHub ? !!m.url : !!m.path));
 }
 
-/** 另存新檔（桌面：宿主的另存對話框）／下載（瀏覽器版） */
+/**
+ * 另存新檔（桌面：宿主的另存對話框）／下載（瀏覽器版）。iPhone、iPad 的瀏覽器版改交給分享選單（2026-11-18：主畫面 app 的
+ * <a download> 點了沒反應，影片下載不了；分享選單有「儲存影片」「儲存到檔案」）
+ */
 export function saveMedia(m) {
   if (!m) return;
   if (m.onDownload) m.onDownload();
-  else if (isHub) { if (m.url) downloadUrl(m.url, m.name); }
+  else if (isHub) {
+    if (!m.url) return;
+    if (saveViaShare() && shareableUrl(m.url)) shareMedia({ url: m.url, name: m.name, kind: m.kind || 'image', mode: 'save' });
+    else downloadUrl(m.url, m.name);
+  }
   else if (m.path) post(mediaPathCmd('saveFile', m.path, m.conversationId));
+}
+
+/** 分享到其他 App（瀏覽器版的手機與平板，share.js） */
+export function shareMediaItem(m) {
+  if (m && m.url) shareMedia({ url: m.url, name: m.name, kind: m.kind || 'image', mode: 'share' });
+}
+
+/** 能不能分享：瀏覽器版的手機、平板，有網址 */
+export function canShareMedia(m) {
+  return !!m && isHub && shareableUrl(m.url) && !m.onDownload && shareAvailable();
 }
 
 /** 瀏覽器版下載同站網址：沒掛進文件的 <a download>，點擊不會冒泡到 app.js 的連結處理 */
@@ -64,7 +83,11 @@ export function mediaMenuItems(m) {
   } else {
     items.push({ label: '複製圖片', icon: 'copy', onSelect: () => copyImage(m) });
   }
-  if (canSaveMedia(m)) items.push({ label: isHub ? '下載' : '另存新檔', icon: 'download', cls: 'mi-save', onSelect: () => saveMedia(m) });
+  if (canSaveMedia(m)) {
+    const viaShare = isHub && !m.onDownload && shareableUrl(m.url) && saveViaShare();
+    items.push({ label: viaShare ? '儲存到手機' : isHub ? '下載' : '另存新檔', icon: 'download', cls: 'mi-save', onSelect: () => saveMedia(m) });
+  }
+  if (canShareMedia(m)) items.push({ label: '分享到其他 App…', icon: 'share', cls: 'mi-share', onSelect: () => shareMediaItem(m) });
   if (local) {
     items.push({ type: 'sep' });
     items.push({ label: '用預設程式開啟', icon: 'popout', onSelect: () => post(mediaPathCmd('openPath', m.path, m.conversationId)) });
