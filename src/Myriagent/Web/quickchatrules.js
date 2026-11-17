@@ -9,6 +9,29 @@ export const QUICK_RECT_KEY = 'myriagent.quickChat.rect.v1';
 /** 上次用的帳戶 */
 export const QUICK_ACCOUNT_KEY = 'myriagent.quickChat.account.v1';
 
+/** 自動朗讀回覆（2026-11-17 使用者要求：預設開；每個瀏覽器、桌面各自記，只記關掉的 '0'） */
+export const QUICK_AUTO_SPEAK_KEY = 'myriagent.quickChat.autoSpeak.v1';
+
+/** 自動朗讀開著嗎：沒存過（null）就是開 */
+export function autoSpeakEnabled(stored) {
+  return stored !== '0';
+}
+
+/**
+ * 一輪結束時自動朗讀哪一則：最後一則使用者訊息之後的最後一則代理回覆（有文字的）；中間的「我查一下」不念，只念最後的回答。
+ * items 是依順序的項目（{ id, kind, text?, html? }）；沒有回覆回 null
+ */
+export function turnReplyId(items) {
+  if (!Array.isArray(items)) return null;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (!it) continue;
+    if (it.kind === 'User') return null;
+    if (it.kind === 'Assistant' && ((typeof it.html === 'string' && it.html.trim()) || (typeof it.text === 'string' && it.text.trim()))) return it.id || null;
+  }
+  return null;
+}
+
 export const QUICK_MIN_W = 320;
 export const QUICK_MIN_H = 360;
 

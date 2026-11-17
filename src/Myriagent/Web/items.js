@@ -319,11 +319,14 @@ function createAssistant(item, ctx) {
     replayClass(n, 'fx-copied', COPY_FX_MS); // 整則的四角括號亮綠、閃兩下（同程式碼框的複製）
   });
   n._copy = copy;
-  // 朗讀（臨時對話，quickchat.js）：只有臨時對話顯示（.conv.quick 的樣式），桌面交給宿主念、瀏覽器版用瀏覽器的語音
-  const speak = h('button', { type: 'button', class: 'code-copy it-speak', title: '朗讀這則回覆', dataset: { field: 'speakItem' } }, icon('audio'), h('span', { text: '朗讀' }));
-  speak.addEventListener('click', () => { if (ctx.speakItem) ctx.speakItem(item.id, n._md); });
-  n._acts = h('div', { class: 'it-acts' }, copy, speak);
-  n.append(n._md, n._acts, timeEl(item));
+  // 朗讀（臨時對話，quickchat.js）：只有臨時對話顯示（.conv.quick 的樣式），放在回覆下方一直看得到（手機沒有滑過，2026-11-17）；
+  // 桌面交給宿主念、瀏覽器版用瀏覽器的語音（念的時候再按一次是停止）
+  const speak = h('button', { type: 'button', class: 'it-speak', title: '朗讀這則回覆', 'aria-label': '朗讀這則回覆', dataset: { field: 'speakItem' } },
+    icon('speaker'), h('span', { text: '朗讀' }));
+  speak.addEventListener('click', () => { if (ctx.speakItem) ctx.speakItem(item.id, n._md, speak); });
+  n._speak = speak;
+  n._acts = h('div', { class: 'it-acts' }, copy);
+  n.append(n._md, n._acts, h('div', { class: 'it-foot' }, speak, timeEl(item)));
   fillAssistant(n, item, null, ctx);
   return n;
 }
@@ -337,6 +340,7 @@ function fillAssistant(n, item, prev, ctx) {
   else if (!running) n.classList.remove('fx-typing');
   if (prev && prev.status === 'Running' && !running) flushMermaid(n._md);
   setHidden(n._acts, running || !item.html); // 串流中還不完整，完成後才給複製
+  if (n._speak) setHidden(n._speak, !item.html); // 沒有文字的回覆（只有圖片）不給朗讀
   if (!prev || !sameJson(prev.media, item.media)) {
     if (n._media) { n._media.remove(); n._media = null; }
     if (item.media && item.media.length) { n._media = renderMedia(item.media, ctx); n.insertBefore(n._media, n._acts); }

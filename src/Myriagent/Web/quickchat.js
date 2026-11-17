@@ -8,10 +8,10 @@ import { h, setHidden } from './util.js';
 import { icon } from './icons.js';
 import { post, state, isHub, isCollaborator } from './store.js';
 import { toast } from './ui.js';
-import { readAloud, stopReadAloud } from './voice.js';
+import { readAloud, stopReadAloud, primeSpeech, setSpeakFilter } from './voice.js';
 import { isDraftId } from './liverules.js';
 import * as ws from './workspace.js';
-import { QUICK_DOCK, QUICK_RECT_KEY, QUICK_ACCOUNT_KEY, QUICK_MIN_W, QUICK_MIN_H, panelRect, speechChunks, CODE_BLOCK_SPOKEN } from './quickchatrules.js';
+import { QUICK_DOCK, QUICK_RECT_KEY, QUICK_ACCOUNT_KEY, QUICK_AUTO_SPEAK_KEY, QUICK_MIN_W, QUICK_MIN_H, panelRect, speechChunks, CODE_BLOCK_SPOKEN, autoSpeakEnabled } from './quickchatrules.js';
 
 let panel = null;
 let open = false;
@@ -56,13 +56,26 @@ function build() {
   btnNew.addEventListener('click', () => restart(currentAccountId()));
   const btnStop = h('button', { type: 'button', class: 'ibtn sm', title: '停止朗讀', 'aria-label': '停止朗讀', dataset: { field: 'quickStopSpeak' } }, icon('stop'));
   btnStop.addEventListener('click', () => stopSpeaking());
+  // 自動朗讀回覆（2026-11-17 使用者要求，預設開）：每一輪回答完自動念最後的回答
+  const btnAuto = h('button', { type: 'button', class: 'ibtn sm qc-auto', dataset: { field: 'quickAutoSpeak' } }, icon('speaker'));
+  btnAuto.addEventListener('click', () => {
+    const on = !autoSpeakOn();
+    write(QUICK_AUTO_SPEAK_KEY, on ? null : '0');
+    paintAuto(btnAuto);
+    if (on) primeSpeech(); else stopSpeaking();
+  });
+  paintAuto(btnAuto);
   const btnClose = h('button', { type: 'button', class: 'ibtn sm', title: '關掉（刪掉這段對話，不留紀錄）', 'aria-label': '關閉', dataset: { field: 'quickClose' } }, icon('x'));
   btnClose.addEventListener('click', () => closePanel());
-  const head = h('div', { class: 'qc-head' }, icon('chat', 'qc-ic'), title, h('span', { class: 'grow' }), btnNew, btnStop, btnClose);
+  const head = h('div', { class: 'qc-head' }, icon('chat', 'qc-ic'), title, h('span', { class: 'grow' }), btnAuto, btnNew, btnStop, btnClose);
   const body = h('div', { class: 'qc-body' });
   const empty = h('div', { class: 'qc-empty', hidden: true, dataset: { field: 'quickEmpty' } });
   const el = h('div', { class: 'qc', hidden: true, role: 'dialog', 'aria-label': '臨時對話', dataset: { field: 'quickChat' } }, head, body, empty);
   document.body.append(el);
+  // 瀏覽器版的自動朗讀：在面板裡點按或按鍵（送出問題的那一下）時先解開發聲的限制（iPhone 要在點按當下念過一句，voice.primeSpeech）
+  const prime = () => { if (isHub && autoSpeakOn()) primeSpeech(); };
+  el.addEventListener('pointerdown', prime, { capture: true, passive: true });
+  el.addEventListener('keydown', prime, { capture: true });
   ws.registerDock(QUICK_DOCK, body, onDock);
   dragHead(el, head);
   const ro = new ResizeObserver(() => { if (open && !el.classList.contains('full')) saveRect(el); });
@@ -194,18 +207,60 @@ function dragHead(el, head) {
 
 // ───── 朗讀 ─────
 
-/** 回覆的「朗讀」鈕（items.js 經 ConvView 的 ctx 呼叫）：桌面交給宿主念，瀏覽器版自己念畫面上的文字 */
-export function speakItem(conversationId, itemId, mdEl) {
+export function autoSpeakOn() {
+  return autoSpeakEnabled(read(QUICK_AUTO_SPEAK_KEY));
+}
+
+function paintAuto(btn) {
+  const on = autoSpeakOn();
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  const label = on ? '自動朗讀回覆：開（按一下關掉）' : '自動朗讀回覆：關（按一下打開）';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+}
+
+/** 面板上嵌著的就是這個對話嗎 */
+function isQuick(conversationId) {
+  const cv = ws.dockedConv(QUICK_DOCK);
+  return !!cv && cv.id === conversationId;
+}
+
+// 臨時對話不念語音通知的「完成」「失敗」：回覆自己會念（或使用者自己按朗讀），兩個聲音會疊在一起（桌面由宿主自己不念）
+setSpeakFilter(isQuick);
+
+let speakingBtn = null; // 瀏覽器版正在念的那則回覆的朗讀鈕（念完換回來）
+
+function paintSpeaking(btn) {
+  if (speakingBtn && speakingBtn !== btn) speakingBtn.classList.remove('speaking');
+  speakingBtn = btn || null;
+  if (btn) btn.classList.add('speaking');
+}
+
+/**
+ * 回覆的「朗讀」鈕（items.js 經 ConvView 的 ctx 呼叫）：桌面交給宿主念，瀏覽器版自己念畫面上的文字（念的時候再按一次是停止）。
+ * auto＝一輪結束時的自動朗讀（念不出來不跳提示）
+ */
+export function speakItem(conversationId, itemId, mdEl, btn, auto = false) {
   if (!isHub) {
     post({ cmd: 'speakItem', conversationId, itemId });
     return;
   }
+  if (btn && btn === speakingBtn && !auto) { stopSpeaking(); return; }
   const text = textOf(mdEl);
-  if (!text) { toast('這則沒有可以朗讀的文字'); return; }
-  if (!readAloud(speechChunks(text))) toast('這個瀏覽器不能朗讀', 'error');
+  if (!text) { if (!auto) toast('這則沒有可以朗讀的文字'); return; }
+  const started = readAloud(speechChunks(text), () => { if (speakingBtn === btn) paintSpeaking(null); });
+  if (!started) { if (!auto) toast('這個瀏覽器不能朗讀', 'error'); return; }
+  paintSpeaking(btn || null);
+}
+
+/** 臨時對話的一輪正常結束了（ConvView.scheduleTurnEnd）：自動朗讀開著就念這一輪最後的回答 */
+export function quickTurnEnded(conversationId, itemId, mdEl, btn) {
+  if (!open || !autoSpeakOn() || !isQuick(conversationId)) return;
+  speakItem(conversationId, itemId, mdEl, btn, true);
 }
 
 function stopSpeaking() {
+  paintSpeaking(null);
   if (isHub) stopReadAloud(); else post({ cmd: 'speakStop' });
 }
 

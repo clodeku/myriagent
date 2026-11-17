@@ -76,6 +76,27 @@ public sealed class AgentHubQuickChatTests
     }
 
     [Fact]
+    public async Task 完成與失敗都不念語音通知_回覆由網頁自動朗讀()
+    {
+        using var h = new HubHarness();
+        h.OnUi(() => h.Settings.VoiceNotifications).Should().BeTrue();
+        var id = Open(h).Value<string>("conversationId")!;
+        var before = h.Sessions.Count;
+        h.Send(h.Main, id, "今天適合穿什麼？");
+        await h.WaitUntilAsync(() => h.Sessions.Count == before + 1 && h.Sessions[^1].Sent.All.Count == 1, "送出");
+        var s = h.Sessions[^1];
+
+        h.Raise(s, new AgentTextCompletedEvent("b1", "今天 18 度，帶件薄外套。"));
+        h.CompleteTurn(s);
+        h.Host.Spoken.Count.Should().Be(0, "臨時對話的「完成」會和自動朗讀疊在一起");
+
+        h.Send(h.Main, id, "那明天呢？");
+        await h.WaitUntilAsync(() => s.Sent.All.Count == 2, "第二則");
+        h.CompleteTurn(s, AgentTurnOutcome.Failed, "連線中斷");
+        h.Host.Spoken.Count.Should().Be(0, "失敗也不念");
+    }
+
+    [Fact]
     public async Task 關掉就刪掉_不進回收區_一般對話不收()
     {
         using var h = new HubHarness();

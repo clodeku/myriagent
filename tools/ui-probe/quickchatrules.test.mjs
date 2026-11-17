@@ -31,6 +31,24 @@ test('視窗太小（手機）：鋪滿頂端列以下', () => {
   assert.deepEqual(Q.panelRect({ x: 10, y: 10, w: 400, h: 400 }, 360, 700, 48), { x: 0, y: 48, w: 360, h: 652, full: true });
 });
 
+test('自動朗讀：預設開，只有存了 0 才關', () => {
+  assert.equal(Q.autoSpeakEnabled(null), true);
+  assert.equal(Q.autoSpeakEnabled('1'), true);
+  assert.equal(Q.autoSpeakEnabled('0'), false);
+});
+
+test('自動朗讀念這一輪最後的回答：最後一則使用者訊息之後、有文字的最後一則回覆', () => {
+  const U = (id) => ({ id, kind: 'User', text: '問' });
+  const A = (id, html = '<p>答</p>') => ({ id, kind: 'Assistant', html });
+  const T = (id) => ({ id, kind: 'Tool' });
+  assert.equal(Q.turnReplyId([U('u1'), A('a1'), T('t1'), A('a2'), T('t2')]), 'a2');
+  assert.equal(Q.turnReplyId([U('u1'), A('a1'), U('u2'), T('t1')]), null, '這一輪沒有回覆，不念上一輪的');
+  assert.equal(Q.turnReplyId([U('u1'), A('a1'), A('a2', '  ')]), 'a1', '空的不算');
+  assert.equal(Q.turnReplyId([A('a0')]), 'a0');
+  assert.equal(Q.turnReplyId([]), null);
+  assert.equal(Q.turnReplyId(null), null);
+});
+
 test('朗讀的分段：照句子切、每段不超過上限、空白的丟掉', () => {
   const chunks = Q.speechChunks('第一句。第二句！\n\n第三句？', 160);
   assert.deepEqual(chunks, ['第一句。 第二句！ 第三句？']);

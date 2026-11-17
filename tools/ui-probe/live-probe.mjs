@@ -893,6 +893,25 @@ async function runQuickChat() {
   const swapped = await until(() => page.evaluate((id) => !!document.querySelector('.qc .conv[data-conv="' + id + '"]') || null, LF.CONV.unlisted), 4000);
   const opened = hub.cmds('open').map((c) => c.cmd.conversationId).includes(LF.CONV.unlisted);
   const inPane = await page.evaluate((id) => !!document.querySelector('#workspace .conv[data-conv="' + id + '"]'), LF.CONV.unlisted);
+  // 自動朗讀（預設開，2026-11-17）：一輪正常結束時，瀏覽器以自己的語音念這一輪最後的回答；語音通知的「完成」不念（不會疊在一起）；
+  // 朗讀鈕不用滑過就看得到，念的時候亮著、念完換回來
+  const Q = LF.CONV.unlisted;
+  const REPLY = '今天十八度，帶一件薄外套就好。';
+  const before = (await HP.speech(app)).spoken.length;
+  await page.click('.qc .cinput'); // 面板裡的點按：先解開發聲的限制（iPhone 要在點按當下念過一句）
+  hub.push(LF.conversationMessage(NOW, Q, '臨時對話', { paneId: 'quick:dock', header: { ephemeral: true, running: true },
+    items: [{ id: 'qu1', kind: 'User', status: 'Done', time: NOW, seq: 1, html: '<p>今天適合穿什麼</p>', attachments: [] }] }));
+  await until(() => page.evaluate((id) => document.querySelector('.qc .conv[data-conv="' + id + '"].quick.running') ? true : null, Q), 3000);
+  hub.push({ type: 'item', conversationId: Q, item: { id: 'qa1', kind: 'Assistant', status: 'Done', seq: 2, time: NOW, html: '<p>' + REPLY + '</p>' } });
+  hub.push({ type: 'header', conversationId: Q, header: LF.conversationMessage(NOW, Q, '臨時對話', { header: { ephemeral: true, running: false } }).header });
+  hub.push({ type: 'speak', conversationId: Q, id: 901, text: '「臨時對話」已完成' });
+  const spokenReply = await until(async () => { const sp = (await HP.speech(app)).spoken.slice(before); return sp.some((x) => x.text.includes('十八度')) ? sp : null; }, 4000);
+  const lit = await page.evaluate(() => { const b = document.querySelector('.qc .it-assistant .it-speak'); return b ? { shown: getComputedStyle(b).display !== 'none' && !b.closest('.it-acts'), lit: b.classList.contains('speaking') } : null; });
+  await sleep(300);
+  const after = (await HP.speech(app)).spoken.slice(before).map((x) => x.text);
+  const unlit = await page.evaluate(() => !document.querySelector('.qc .it-assistant .it-speak.speaking'));
+  check('hubQuickChatAutoSpeak', !!spokenReply && !!lit && lit.shown && unlit && !after.some((t) => t.includes('已完成')),
+    { after, lit, unlit });
   await page.click('.qc [data-field="quickClose"]');
   await sleep(300);
   const del = hub.cmds('delete').map((c) => c.cmd);
@@ -6327,7 +6346,7 @@ const SCENARIOS = [
   { checks: ['hubVoiceDictationMeter'], run: runVoiceDictationMeter },
   { checks: ['hubPaneZoom'], run: runPaneZoom },
   { checks: ['hubComposerDraft'], run: runComposerDraft },
-  { checks: ['hubQuickChat'], run: runQuickChat },
+  { checks: ['hubQuickChat', 'hubQuickChatAutoSpeak'], run: runQuickChat },
   { checks: ['hubComposerDraftSentStaysCleared'], run: runComposerDraftSent },
   { checks: ['hubVoiceDictationDiag', 'hubVoiceDictationDiagMode'], run: runVoiceDictationDiag },
   { checks: ['hubResyncReopens', 'hubResyncNullNoop'], run: runResync },

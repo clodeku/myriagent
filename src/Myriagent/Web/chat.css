@@ -366,9 +366,18 @@
 .it-acts { position: absolute; top: 0; right: 0; z-index: 2; opacity: 0; pointer-events: none; transition: opacity 120ms; }
 .it-acts .code-copy { background: var(--bg-raised); box-shadow: 0 0 0 1px var(--border-2); }
 .it-acts .code-copy:hover { background: var(--bg-hover); }
-/* 朗讀（臨時對話，quickchat.js）：只有臨時對話的回覆顯示 */
-.it-acts .it-speak { display: none; }
-.conv.quick .it-acts .it-speak { display: inline-flex; }
+/* 朗讀（臨時對話，quickchat.js）：只有臨時對話的回覆顯示，放在回覆下方的時間前面、一直看得到（手機沒有滑過）；寫回覆中不顯示 */
+.it-foot { display: flex; align-items: center; gap: 8px; }
+.it-assistant > .it-foot { padding-top: 4px; }
+.it-assistant > .it-foot > .it-time { padding-top: 0; }
+.it-speak { display: none; align-items: center; gap: 4px; height: 24px; padding: 0 9px 0 7px; border-radius: 12px; color: var(--text-2); font-size: 12px;
+  background: var(--bg-raised); box-shadow: var(--edge-hi), 0 0 0 1px var(--border-2); }
+.it-speak .ic { width: 14px; height: 14px; }
+.it-speak:hover { background: var(--bg-hover); color: var(--text-hi); }
+.conv.quick .it-assistant:not(.running) .it-speak { display: inline-flex; }
+.it-speak.speaking { color: var(--acc); box-shadow: var(--edge-hi), 0 0 0 1px var(--acc); }
+/* 臨時對話標題列的「自動朗讀」開關 */
+.qc-auto[aria-pressed="true"] { color: var(--acc); }
 /* 臨時對話用不到的：工作資料夾、git、檔案瀏覽器、彈出、放大、更多動作（延伸、刪除都由面板處理） */
 .conv.quick .ch-folder, .conv.quick .ch-git, .conv.quick .ch-drawer, .conv.quick .ch-pop, .conv.quick .ch-zoom, .conv.quick .ch-more { display: none !important; }
 

@@ -727,7 +727,7 @@ internal sealed partial class AgentHub
         {
             host.RequestAttention(c.ViewIds);
             // 使用者按停止（或拒絕操作）結束的那一輪不念
-            if (turn.Outcome == AgentTurnOutcome.Failed)
+            if (turn.Outcome == AgentTurnOutcome.Failed && c.Meta.Ephemeral != true)
                 AnnounceAttention(c, VoiceNotifyRules.Failed(c.Meta.Title, turn.ErrorMessage));   // 網頁版念伺服器以 conv.turn 帶出的失敗組的句子
         }
     }
@@ -792,6 +792,9 @@ internal sealed partial class AgentHub
     /// </summary>
     private void NotifyAttention(ConversationState c, string title, string? detail, string? kind = null, string? itemId = null, VoiceLine? speech = null)
     {
+        // 臨時對話不念語音通知（2026-11-17）：回覆在網頁上自動朗讀（預設開）或使用者自己按朗讀，「完成」的通知只會和它疊在一起
+        if (c.Meta.Ephemeral == true)
+            speech = null;
         if (speech is { IsSilent: false })
             AnnounceAttention(c, speech.Full);
         bool seen = c.VisibleViewIds.Any(host.IsViewForeground);

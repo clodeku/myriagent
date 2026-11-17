@@ -2103,8 +2103,8 @@ function paneZoomState() {
 
 // 輸入框草稿的同步（draftsync.js、web-protocol 的 composerDraft／composerDrafts）：打字停下會送；沒改過的換上別處的；
 // 正在打的不蓋掉、在輸入框上方提示，「換成它」換上；別處清掉了跟著清；送出之後送空字串
-// 臨時對話（quickchat.js）：右上角的對話鈕開浮動面板、嵌一個草稿（標頭 ephemeral）；送出後回覆有「朗讀」（一般對話沒有）、
-// 按了送 speakItem；關掉面板送 quickChatEnd；再開是新的一個
+// 臨時對話（quickchat.js）：右上角的對話鈕開浮動面板、嵌一個草稿（標頭 ephemeral）；送出後回覆下方一直看得到「朗讀」（一般對話沒有）、
+// 一輪結束自動朗讀（預設開，送 speakItem）、按了也送 speakItem；標題列的開關關掉自動朗讀（記在 localStorage）；關掉面板送 quickChatEnd；再開是新的一個
 async function runQuickChat(vp) {
   const app = await openApp('quick-chat', { vp, layout: { panes: [{ id: 'p1', tabs: ['c2'], active: 'c2' }], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' } });
   const { page, host } = app;
@@ -2138,17 +2138,38 @@ async function runQuickChat(vp) {
   const s2 = await page.evaluate(() => {
     const speak = document.querySelector('.qc .it-assistant .it-speak');
     const other = document.querySelector('.conv[data-conv="c2"] .it-assistant .it-speak');
-    return { speak: !!speak && getComputedStyle(speak).display !== 'none', other: !other || getComputedStyle(other).display === 'none' };
+    const r = speak && speak.getBoundingClientRect();
+    // 不用滑過就看得到（手機沒有滑過）：不在 .it-acts 裡、透明度是 1、有大小
+    return { speak: !!speak && getComputedStyle(speak).display !== 'none', visible: !!r && r.width > 0 && r.height > 0 && !speak.closest('.it-acts')
+      && getComputedStyle(speak.parentElement).opacity === '1', other: !other || getComputedStyle(other).display === 'none',
+    auto: document.querySelector('.qc [data-field="quickAutoSpeak"]').getAttribute('aria-pressed') };
   });
-  check('quickChatSpeakButton', s2.speak && s2.other && sent('send').some((m) => m.conversationId === qid), { s2, qid });
+  check('quickChatSpeakButton', s2.speak && s2.visible && s2.other && sent('send').some((m) => m.conversationId === qid), { s2, qid });
+  // 一輪結束自動朗讀（預設開）：送 speakItem 念這一輪最後的回答
+  const auto = sent('speakItem');
+  const replyId = await page.evaluate(() => { const n = document.querySelector('.qc .it-assistant'); return n ? n.dataset.id : null; });
+  check('quickChatAutoSpeak', s2.auto === 'true' && auto.length === 1 && auto[0].conversationId === qid && auto[0].itemId === replyId, { auto, replyId, s2 });
   await page.evaluate(() => document.querySelector('.qc .it-assistant .it-speak').click());
   await settle(page, 100);
   const sp = sent('speakItem');
-  check('quickChatSpeak', sp.length === 1 && sp[0].conversationId === qid && typeof sp[0].itemId === 'string', { sp });
+  check('quickChatSpeak', sp.length === 2 && sp[1].conversationId === qid && sp[1].itemId === replyId, { sp });
   await page.click('.qc [data-field="quickStopSpeak"]');
   await settle(page, 100);
   check('quickChatStopSpeak', sent('speakStop').length === 1, {});
   await shot(page, 'quick-chat-' + vp.w);
+  // 關掉自動朗讀：停下正在念的、記在 localStorage；下一輪結束不念
+  await page.click('.qc [data-field="quickAutoSpeak"]');
+  await settle(page, 100);
+  const off = await page.evaluate(() => ({ pressed: document.querySelector('.qc [data-field="quickAutoSpeak"]').getAttribute('aria-pressed'),
+    stored: localStorage.getItem('myriagent.quickChat.autoSpeak.v1') }));
+  await page.click('.qc .cinput');
+  await page.keyboard.type('那明天呢');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelectorAll('.qc .it-assistant:not(.running)').length >= 2, null, { timeout: 4000 }).catch(() => {});
+  await settle(page, 300);
+  check('quickChatAutoSpeakOff', off.pressed === 'false' && off.stored === '0' && sent('speakStop').length === 2 && sent('speakItem').length === 2, { off, stops: sent('speakStop').length, speaks: sent('speakItem').length });
+  await page.click('.qc [data-field="quickAutoSpeak"]');
+  await settle(page, 50);
   const listed = await page.evaluate((id) => !!document.querySelector('#sidebar [data-id="' + id + '"], #sidebar [data-conv="' + id + '"]'), qid);
   await page.click('.qc [data-field="quickClose"]');
   await settle(page, 200);

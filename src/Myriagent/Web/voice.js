@@ -164,6 +164,7 @@ export async function onSpeak(m) {
   const conversationId = typeof m.conversationId === 'string' ? m.conversationId : null;
   if (conversationId) startFlash(conversationId);
   if (!voiceSupported() || !voiceOn()) return;
+  if (conversationId && speakFilter && speakFilter(conversationId)) return;
   if (!(await claim(speakKey(m)))) return;
   if (held) {
     defer({ text, conversationId, at: Date.now() });
@@ -247,34 +248,80 @@ function say(text, conversationId, tuning = voiceTuning(), resume = true) {
  * 臨時對話的「朗讀」（quickchat.js）：先停下正在念的，再依序念這幾段（使用者按了鈕，發聲限制已解開；不受語音通知的開關與佇列上限影響）。
  * 回傳 false＝這個瀏覽器不能念
  */
-export function readAloud(chunks) {
+export function readAloud(chunks, onDone) {
   if (!voiceSupported() || !Array.isArray(chunks) || !chunks.length) return false;
   unlocked = true;
   const synth = window.speechSynthesis;
-  synth.cancel();
+  finishReading();
+  // 沒在念就不 cancel：iOS 的 Safari 在 cancel 之後馬上 speak，有時新的那句會被一起丟掉
+  if (synth.speaking || synth.pending) synth.cancel();
   queued = 0;
   inFlight.clear();
+  const token = ++readToken;
+  readDone = typeof onDone === 'function' ? onDone : null;
   const tuning = voiceTuning();
   const voice = pickVoice(synth.getVoices());
-  for (const text of chunks) {
+  chunks.forEach((text, i) => {
     const u = new window.SpeechSynthesisUtterance(text);
     u.lang = 'zh-TW';
     if (voice) u.voice = voice;
     u.rate = tuning.speed;
     u.pitch = webPitch(tuning.pitch);
     u.onstart = () => { plays++; };
+    // 念完最後一段（或念不出來）：告訴呼叫端（朗讀鈕換回來）；被下一次朗讀或停止取代的不算
+    if (i === chunks.length - 1) u.onend = u.onerror = () => { if (token === readToken) finishReading(); };
     synth.speak(u);
-  }
+  });
   return true;
+}
+
+let readToken = 0;
+let readDone = null; // 這次朗讀念完時叫（readAloud 的 onDone）
+
+function finishReading() {
+  const done = readDone;
+  readDone = null;
+  if (done) done();
 }
 
 /** 停止朗讀（也停下正在念的語音通知） */
 export function stopReadAloud() {
   if (!voiceSupported()) return;
+  readToken++;
+  finishReading();
   window.speechSynthesis.cancel();
   queued = 0;
   inFlight.clear();
 }
+
+/**
+ * 臨時對話的自動朗讀（2026-11-17）：回覆是收到之後才念的、不在點按當下，iPhone／iPad 的 Safari 要這一頁先在點按當下念過一句才肯出聲。
+ * 在臨時對話的面板裡點按或按鍵時（送出問題的那一下）念一句聽不到的，之後的自動朗讀才念得出來。每一頁只做一次
+ */
+export function primeSpeech() {
+  if (primed || !isHub || !voiceSupported()) return;
+  primed = true;
+  unlocked = true;
+  const synth = window.speechSynthesis;
+  if (synth.speaking || synth.pending) return;
+  const u = new window.SpeechSynthesisUtterance(' ');
+  u.lang = 'zh-TW';
+  u.volume = 0;
+  // 算成出過聲：iPhone 的聽寫以它判斷要不要換一個新的辨識器（speechPlays）
+  u.onstart = () => { plays++; };
+  synth.speak(u);
+}
+
+let primed = false;
+
+/**
+ * 語音通知不念這個對話（臨時對話：回覆會自動朗讀、或使用者自己按朗讀，語音通知的「完成」只會蓋過它）；fn(conversationId) 回 true 就不念
+ */
+export function setSpeakFilter(fn) {
+  speakFilter = typeof fn === 'function' ? fn : null;
+}
+
+let speakFilter = null;
 
 /** 第一次點畫面或按鍵：解開發聲限制，補念被擋下的那一句（太久以前的就不念了） */
 function unlock() {

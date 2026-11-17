@@ -38,7 +38,8 @@ import { openCodexPanel } from './codexcontrols.js';
 import { openRewind } from './rewind.js';
 import { openTaskDetail } from './taskdetail.js';
 import { reportIssue } from './errorreport.js';
-import { speakItem } from './quickchat.js';
+import { speakItem, quickTurnEnded } from './quickchat.js';
+import { turnReplyId } from './quickchatrules.js';
 
 /**
  * 項目照實際高度排版的瀏覽器（同 chat.css 的 .it：觸控裝置、不支援捲動錨定的）。每次載入時才問（平板接上或拆下鍵盤會變）
@@ -153,7 +154,7 @@ export class ConvView {
       // 〔遠端〕Assistant 的「複製」：送 copyItem、等伺服器回 clipboard（D7、D42；結果由 markCopied 畫）；沒送出回 false
       copyItem: (itemId) => requestCopy(id, itemId),
       // 臨時對話的「朗讀」（quickchat.js）：桌面送 speakItem 讓宿主念，瀏覽器版從畫面上的回覆取文字自己念
-      speakItem: (itemId, mdEl) => speakItem(id, itemId, mdEl),
+      speakItem: (itemId, mdEl, btn) => speakItem(id, itemId, mdEl, btn),
       // 使用者訊息的「回溯」（rewind.js）：只有桌面這台的 Claude 對話、不在執行中
       rewind: isHub ? null : (itemId) => this.openRewindFor(itemId),
       // 子代理的即時用量（Header.subagents）：Agent 工具卡上的 token 晶片（items.paintAgentUsage）
@@ -735,6 +736,13 @@ export class ConvView {
    * 一輪結束（執行中→停下）：輸入框的燈閃一下（fxrules.turnEndTone 決定綠、紅或不閃）。
    * 下一個影格才看最後一個項目：錯誤項目可能和標頭分開、稍後才到；那時已經開始下一輪（佇列接著送出）就不閃
    */
+  /** 臨時對話：念這一輪最後的回答（quickchatrules.turnReplyId） */
+  autoSpeakTurn() {
+    const replyId = turnReplyId(this.order.map((itemId) => this.items.get(itemId)));
+    const node = replyId ? this.nodes.get(replyId) : null;
+    if (node && node._md) quickTurnEnded(this.id, replyId, node._md, node._speak || null);
+  }
+
   scheduleTurnEnd() {
     cancelAnimationFrame(this.turnEndRaf);
     this.turnEndRaf = requestAnimationFrame(() => {
@@ -745,6 +753,8 @@ export class ConvView {
       this.showTurnSummary(tone);
       // 背景工作還在跑：還沒真的完成，不播「完成」的餘暉（失敗照播）
       if (tone === 'ok' && this.root.classList.contains('bg-wait')) return;
+      // 臨時對話的自動朗讀（2026-11-17，quickchat.js）：正常結束才念這一輪最後的回答（按停止、失敗不念）
+      if (tone === 'ok' && this.root.classList.contains('quick')) this.autoSpeakTurn();
       if (tone) replayClass(this.root, tone === 'err' ? 'fx-turn-err' : 'fx-turn-ok', TURN_FX_MS);
       // 這個對話現在看不到（背景分頁、另一個窗格藏著）：分頁本身閃一下綠或紅（workspace.js 的 turn-end）
       if (tone && !this.visible) emit('turn-end', { id: this.id, tone });
