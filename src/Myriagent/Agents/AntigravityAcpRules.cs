@@ -308,7 +308,7 @@ internal static class AntigravityAcpRules
     // ───────────────────────────── 即時切換模式、模型與推理強度 ─────────────────────────────
 
     /// <summary>
-    /// Clode 權限模式對應 Antigravity ACP 的 <c>modeId</c>：
+    /// app 的權限模式對應 Antigravity ACP 的 <c>modeId</c>：
     /// <list type="bullet">
     /// <item><see cref="AgentPermissionMode.Ask"/> → <c>default</c>（檔案編輯與執行指令皆透過 <c>session/request_permission</c> 詢問）</item>
     /// <item><see cref="AgentPermissionMode.AcceptEdits"/> → <c>accept-edits</c>（自動接受工作區內編輯，指令詢問）</item>
@@ -403,7 +403,7 @@ internal static class AntigravityAcpRules
 
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(instructions))
-            parts.Add($"<clode_instructions>\n{instructions.Trim()}\n</clode_instructions>");
+            parts.Add($"<myriagent_instructions>\n{instructions.Trim()}\n</myriagent_instructions>");
         if (!string.IsNullOrWhiteSpace(historyRecap))
             parts.Add(historyRecap.Trim());
         parts.Add((text ?? string.Empty) + AgentAttachmentRules.BuildAttachmentNote(attachments, imagesInline: inlinedAnyImage));
