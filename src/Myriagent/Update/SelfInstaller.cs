@@ -40,6 +40,33 @@ internal static class SelfInstaller
     /// 時例外往上丟，由呼叫端記錄並顯示
     /// </summary>
     public static string Install(string sourceDirectory, InstallLayout layout, ReleaseIdentity identity, bool registerShell)
+        => Install(sourceDirectory, layout, identity, registerShell, package: false);
+
+    /// <summary>安裝失敗時寫在來源資料夾裡的檔（<see cref="WriteSetupError"/>）：安裝程式（tools/setup）讀它顯示原因</summary>
+    public const string SetupErrorFileName = "install-error.txt";
+
+    /// <summary>
+    /// 安裝程式用（Program 的 --install-package）：sourceDirectory 是安裝程式剛解開的資料夾，裡面全部是這個發佈的檔——整個資料夾都複製
+    /// （不靠 deps.json 推：自帶 .NET 的發佈有 deps.json 沒列的檔，例如輔助程式自己的 runtimeconfig）。其餘同 <see cref="Install(string, InstallLayout, ReleaseIdentity, bool)"/>。
+    /// 重裝同一版時先把原本的版本資料夾整個改名讓開再換上新的；改不了（那一版正在執行）就沿用原本的檔案——絕不逐檔刪除正在執行的那一版
+    /// </summary>
+    public static string InstallPackage(string sourceDirectory, InstallLayout layout, ReleaseIdentity identity, bool registerShell)
+        => Install(sourceDirectory, layout, identity, registerShell, package: true);
+
+    /// <summary>把安裝失敗的原因寫給安裝程式（UTF-8；寫不進去只記錄：原因已經在記錄檔裡）</summary>
+    public static void WriteSetupError(string sourceDirectory, string message)
+    {
+        try
+        {
+            File.WriteAllText(Path.Combine(sourceDirectory, SetupErrorFileName), message);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warn($"安裝失敗的原因寫不進 {SetupErrorFileName}：{ex.Message}");
+        }
+    }
+
+    private static string Install(string sourceDirectory, InstallLayout layout, ReleaseIdentity identity, bool registerShell, bool package)
     {
         var release = identity.Release;
         var target = layout.VersionDirectory(release);
@@ -47,16 +74,23 @@ internal static class SelfInstaller
         var source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceDirectory));
         var copy = !string.Equals(source, target, StringComparison.OrdinalIgnoreCase);
         // 先決定要複製哪些檔：不是完整的發佈資料夾、或和 manifest 不符時在這裡就丟，安裝位置什麼都還沒動
-        var files = copy ? ReleaseFilesIn(source, release) : Array.Empty<string>();
+        var files = copy ? (package ? PackageFilesIn(source) : ReleaseFilesIn(source, release)) : Array.Empty<string>();
         Directory.CreateDirectory(layout.VersionsDirectory);
         if (copy)
         {
             if (Directory.Exists(partial))
                 Directory.Delete(partial, recursive: true);
             CopyFiles(source, partial, files);
-            if (Directory.Exists(target))
-                Directory.Delete(target, recursive: true);
-            Directory.Move(partial, target);
+            if (package)
+            {
+                SwapIn(partial, target, Path.Combine(layout.VersionsDirectory, ".old-" + release));
+            }
+            else
+            {
+                if (Directory.Exists(target))
+                    Directory.Delete(target, recursive: true);
+                Directory.Move(partial, target);
+            }
         }
 
         var previous = CurrentTargetName(layout);
@@ -179,6 +213,57 @@ internal static class SelfInstaller
         if (SelfInstallRules.RequiredFiles.FirstOrDefault(f => !files.Contains(f, StringComparer.OrdinalIgnoreCase)) is { } missing)
             throw new InvalidDataException($"找不到 {missing}，這不是完整的發佈資料夾；{hint}");
         return files;
+    }
+
+    /// <summary>
+    /// 安裝程式解開的資料夾裡的全部檔（相對路徑、斜線分隔；<see cref="SetupErrorFileName"/> 不算）。少了啟動要的檔
+    /// （<see cref="SelfInstallRules.RequiredFiles"/>）、有不合法的路徑時丟 InvalidDataException
+    /// </summary>
+    private static IReadOnlyList<string> PackageFilesIn(string source)
+    {
+        var files = Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories)
+            .Select(f => Path.GetRelativePath(source, f).Replace(Path.DirectorySeparatorChar, '/'))
+            .Where(f => !string.Equals(f, SetupErrorFileName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (SelfInstallRules.RequiredFiles.FirstOrDefault(f => !files.Contains(f, StringComparer.OrdinalIgnoreCase)) is { } missing)
+            throw new InvalidDataException($"找不到 {missing}，安裝程式解開的檔案不完整；請重新下載安裝程式");
+        if (files.FirstOrDefault(f => !ReleaseManifestRules.IsValidPath(f)) is { } invalid)
+            throw new InvalidDataException($"安裝程式解開的檔案裡有不合法的路徑：{invalid}");
+        return files;
+    }
+
+    /// <summary>
+    /// 把複製好的 partial 換成 target。target 已經在（重裝同一版）時先整個改名讓開（aside）：改得了就換上新的、刪掉舊的；
+    /// 改不了（那一版正在執行：資料夾裡有開著的檔）就留著原本那一份、丟掉新複製的——逐檔刪除會刪掉沒被鎖住的那一半，把正在執行的 app 弄壞
+    /// </summary>
+    private static void SwapIn(string partial, string target, string aside)
+    {
+        if (Directory.Exists(aside))
+            Directory.Delete(aside, recursive: true);
+        if (Directory.Exists(target))
+        {
+            try
+            {
+                Directory.Move(target, aside);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Log.Info($"{Path.GetFileName(target)} 已經安裝而且正在使用：沿用原本的檔案（{ex.Message}）");
+                Directory.Delete(partial, recursive: true);
+                return;
+            }
+        }
+
+        Directory.Move(partial, target);
+        try
+        {
+            if (Directory.Exists(aside))
+                Directory.Delete(aside, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warn($"重裝前的那一份刪不掉（{aside}）：{ex.Message}");
+        }
     }
 
     private static string Sha256Of(string path)

@@ -50,6 +50,21 @@ public sealed class SyncCoordinatorRulesTests
         SyncCoordinatorRules.ParseNotifyRemoteActions(new JObject { ["remoteControlLevel"] = "Admin" }, off).Should().BeFalse("只看自己的欄位；政策的欄位由 ParsePolicy 判斷");
     }
 
+    [Theory]
+    [InlineData("syncPair", true)]
+    [InlineData("syncUnpair", true)]
+    [InlineData("syncSetConversationPolicy", true)]
+    [InlineData("syncListTrash", true)]
+    [InlineData("syncLoadRemoteAudit", true)]
+    [InlineData("deviceRename", true)]
+    [InlineData("send", false)]
+    [InlineData("setting", false)]
+    [InlineData("Sync", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsSyncCommand_sync開頭的與deviceRename(string? type, bool expected)
+        => SyncCoordinatorRules.IsSyncCommand(type).Should().Be(expected);
+
     [Fact]
     public void PairServer_沒給或不合格null()
     {

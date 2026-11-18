@@ -106,6 +106,9 @@ internal sealed partial class AgentHub
     /// <summary>網頁的 app 更新指令交給誰（AppUpdateCoordinator 建立時設定；沒有時忽略）</summary>
     internal IAppUpdateCommands? AppUpdateCommands { get; set; }
 
+    /// <summary>init 的 edition：這份組建的版本（<see cref="AppEdition"/>；單機版是 "standalone"，一般的建置 null）。測試可以換掉</summary>
+    internal string? Edition { get; set; } = AppEdition.Name;
+
     /// <summary>app 更新的狀態（設定頁區塊與橫幅；docs/web-protocol.md 的 AppUpdateView）：送給所有視窗，init 帶最新的</summary>
     internal void SetAppUpdateState(JObject state)
     {

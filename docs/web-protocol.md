@@ -28,6 +28,9 @@
   "popoutConversationId": null,         // mode=popout 時要顯示的對話
   "app": { "version": "0.2.0", "build": "ab12cd3", "release": "0.2.0-ab12cd3", "commitAt": 1792732512000 | null },   // 組件的 InformationalVersion；build＝提交前 7 碼，沒有提交雜湊（在 git 外建置）時是 "dev"（release＝"0.2.0-dev"）；
                                         // commitAt＝這一版的提交時間（Unix 毫秒；建置時以 git 讀 HEAD 的 committer date 寫進組件中繼資料 MyriagentCommitTime，CommitTimeRules），建置時沒有 git 是 null，舊宿主沒有這個鍵
+  "edition": "standalone" | null,       // 只有桌面：這份組建的版本（建置時的 -p:AppEdition，Core/AppEdition.cs）。"standalone"＝單機版的安裝檔：宿主不讀配對資料、不同步、
+                                        // sync 開頭的指令與 deviceRename 一律不做；網頁（store.js 的 isStandalone）不顯示設定頁的「多電腦同步」「協作人」、自動更新的開關與橫幅、
+                                        // 電腦狀態面板的延遲與配對提示。一般的建置是 null；瀏覽器版與舊宿主沒有這個鍵
   "settings": Settings,
   "accounts": [AccountView],
   "conversations": [ConversationSummary],

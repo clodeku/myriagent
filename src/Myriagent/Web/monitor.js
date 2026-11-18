@@ -6,7 +6,7 @@
 // 文字一律 textContent、SVG 一律 createElementNS（CSP 與 live-rules.test.mjs 的 HTML 寫入點掃描）。
 import { h, setHidden } from './util.js';
 import { icon } from './icons.js';
-import { state, post, isHub } from './store.js';
+import { state, post, isHub, isStandalone } from './store.js';
 import { showTip, hideTip } from './ui.js';
 import { calmMotion, onMotionChange } from './theme.js';
 import * as R from './monitorrules.js';
@@ -151,7 +151,7 @@ function render(now, changedKeys = null) {
   const sum = R.onlineSummary(rows);
   setText(countEl, sum.text);
   let foot = '';
-  if (!isHub && !(state.remote && state.remote.deviceId)) foot = '配對之後，這裡也會顯示其他電腦的狀態。';
+  if (!isHub && !(state.remote && state.remote.deviceId)) foot = isStandalone() ? '' : '配對之後，這裡也會顯示其他電腦的狀態。';
   else if (isHub && !rows.length) foot = state.ready ? '還沒有已配對的電腦。' : '';
   setText(footEl, foot);
   setHidden(footEl, !foot);
@@ -178,7 +178,8 @@ function createCard(hubCard) {
   c.diskRows = new Map();
   c.hw = h('div', { class: 'mon-hw' });
   c.hwRows = new Map();
-  c.body = h('div', { class: 'mon-body' }, h('div', { class: 'mon-gauges' }, c.cpu.el, c.mem.el, (c.lat || c.conn).el), c.hw, c.net.el, c.rtt && c.rtt.el, c.disks);
+  c.gauges = h('div', { class: 'mon-gauges' }, c.cpu.el, c.mem.el, (c.lat || c.conn).el);
+  c.body = h('div', { class: 'mon-body' }, c.gauges, c.hw, c.net.el, c.rtt && c.rtt.el, c.disks);
   c.el = h('section', { class: 'mon-dev', role: 'listitem', dataset: { kind: hubCard ? 'hub' : 'device' } },
     h('div', { class: 'mon-dev-head' }, c.led, hubCard ? icon('server', 'mon-kind') : null, c.name, c.badge, c.meta), c.sub, c.msg, c.body);
   // 電腦狀態面板的檔案傳輸（devicefiles.js）：其他電腦的卡片按右鍵（觸控長按）開「瀏覽與下載檔案」「上傳檔案到這台」
@@ -232,7 +233,14 @@ function updateCard(c, row, now, redrawCharts) {
   setGauge(c.cpu, s.cpu, cpuLv, s.cores ? s.cores + ' 核心' : '', 'CPU 使用率');
   const memPct = R.pct(s.memUsed, s.memTotal);
   setGauge(c.mem, memPct, R.memLevel(memPct), R.fmtPair(s.memUsed, s.memTotal), '記憶體使用率');
-  if (c.lat) setLatency(c.lat, s.rttMs, row.self && !row.paired);
+  // 單機版（store.js 的 isStandalone）沒有伺服器：不顯示「與伺服器的延遲」的量表與走勢，CPU 與記憶體排成兩欄（monitor.css 的 .mon-gauges.two）。
+  // 每次更新才決定（卡片可能在 init 之前、還不知道是哪一種版本時就建好了）
+  const solo = isStandalone();
+  if (c.lat) {
+    setHidden(c.lat.el, solo);
+    c.gauges.classList.toggle('two', solo);
+    if (!solo) setLatency(c.lat, s.rttMs, row.self && !row.paired);
+  }
   if (c.conn) setConnections(c.conn, s);
 
   // CPU 溫度、顯示卡、磁碟
@@ -251,8 +259,8 @@ function updateCard(c, row, now, redrawCharts) {
   setText(c.net.legend.tx, R.fmtRate(s.netTx));
   refreshHover(c.net, now);
   if (c.rtt) {
-    // 從來沒有延遲（未配對的這台、一直沒連上）：不畫空的延遲走勢
-    setHidden(c.rtt.el, s.rttMs === null && !points.some((p) => p.rtt !== null && p.rtt !== undefined));
+    // 從來沒有延遲（未配對的這台、一直沒連上）：不畫空的延遲走勢；單機版一律不畫
+    setHidden(c.rtt.el, solo || (s.rttMs === null && !points.some((p) => p.rtt !== null && p.rtt !== undefined)));
     setText(c.rtt.legend.rtt, s.rttMs === null ? R.latencyLevel(null, row.self && !row.paired).text : R.fmtRtt(s.rttMs) + ' ms');
     refreshHover(c.rtt, now);
   }

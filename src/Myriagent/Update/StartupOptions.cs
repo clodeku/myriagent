@@ -7,6 +7,7 @@ namespace Myriagent.Update;
 /// <summary>
 /// 命令列：--data &lt;資料夾&gt;；換版幫手 --apply-update --to &lt;release&gt; --wait-pid &lt;pid&gt; --token &lt;token&gt; [--no-relaunch]；
 /// 換版後 --after-update &lt;token&gt;、退回後 --after-update-failed &lt;token&gt;、較舊的實例交棒後 --handed-over &lt;token&gt;；--uninstall；--install-here（端到端測試：不問就安裝）；
+/// --install-package [--no-relaunch]（安裝程式 tools/setup 解開發佈後執行：整個資料夾安裝、再啟動裝好的那一份）；
 /// 登入 Windows 時由 Run 機碼啟動 --autostart（AutoStartRules）
 /// </summary>
 internal sealed record StartupOptions
@@ -36,6 +37,9 @@ internal sealed record StartupOptions
     public bool Uninstall { get; init; }
 
     public bool InstallHere { get; init; }
+
+    /// <summary>--install-package：安裝程式（tools/setup）解開發佈後執行這一份，把它所在的整個資料夾安裝到受管理的位置（Program.InstallPackage）</summary>
+    public bool InstallPackage { get; init; }
 
     /// <summary>--autostart：登入 Windows 時由 Run 機碼啟動（設定頁「開機時自動啟動」）；主視窗要不要藏著見 AutoStartRules.StartHidden</summary>
     public bool AutoStart { get; init; }
@@ -69,6 +73,7 @@ internal sealed record StartupOptions
             NoRelaunch = Flag("--no-relaunch"),
             Uninstall = Flag("--uninstall"),
             InstallHere = Flag("--install-here"),
+            InstallPackage = Flag("--install-package"),
             AutoStart = Flag(AutoStartRules.Argument),
             AfterUpdateToken = Value("--after-update") is { } after && IsValidToken(after) ? after : null,
             AfterUpdateFailedToken = Value("--after-update-failed") is { } failed && IsValidToken(failed) ? failed : null,

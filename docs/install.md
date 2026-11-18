@@ -76,6 +76,17 @@ dotnet run --project src/Myriagent -c Release -- --data D:\myriagent-test
 
 `out\desktop` 資料夾安裝完就可以刪掉。
 
+### 做成一個安裝檔（給別台電腦或別人）
+
+要把 app 給別台電腦或別人安裝，可以包成**一個 exe 的安裝程式**：自帶 .NET，對方不必先裝任何東西，也不需要系統管理員權限。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/setup/New-Setup.ps1                 # 單機版：不配對、不同步、不自動更新
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/setup/New-Setup.ps1 -Edition full   # 一般的 app（可以配對 Hub）
+```
+
+輸出在 `out\setup\`（安裝檔與 `setup.json`）。對方執行安裝檔、按「安裝」就好；已經裝過的話會換成這一版，帳戶與對話都保留。安裝檔沒有程式碼簽章，第一次執行時 Windows SmartScreen 會警告。兩種版本的差別、運作方式與測試方法見 [tools/setup/README.md](../tools/setup/README.md)；要放在自己的 Hub 給人下載，見 [hub-setup.md](hub-setup.md) 的「放安裝檔給人下載」。
+
 ## 5. 更新
 
 ### 有 MyriagentHub 的話：自動更新

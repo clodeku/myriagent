@@ -93,6 +93,8 @@ export const state = {
   schedules: null,
   /** 多人協作（collab.js）：init.viewer（{ role: 'owner'|'collaborator', name?, userName? }）；舊宿主沒有，是 null（當成擁有者） */
   viewer: null,
+  /** 這份組建的版本（init.edition）：單機版是 'standalone'（不顯示多電腦同步、協作人與自動更新）；一般的建置、瀏覽器版是 null */
+  edition: null,
   /** 多人協作：擁有者看的協作人清單與分享（init.collaborators、collaborators 訊息：{ list, shares }）；未配對、協作人、舊宿主是 null */
   collaborators: null,
   /** 儀表板各 Claude 帳戶的 MCP 伺服器（mcp 訊息，web-protocol 的 mcp）：只有桌面，宿主還沒送過或瀏覽器版是 null */
@@ -132,6 +134,8 @@ export const providerInfo = (key) => state.providers.find((p) => p.key === key) 
 export const accountOf = (id) => (id ? state.accountMap.get(id) : null) || null;
 /** 多人協作：這份網頁的使用者是協作人（init.viewer.role；只看分享給他的對話與自己的介面設定，collab.js） */
 export const isCollaborator = () => !!state.viewer && state.viewer.role === 'collaborator';
+/** 單機版（init.edition === 'standalone'）：只有這台電腦的多帳戶與對話，宿主不配對、不同步、沒有更新來源——同步、協作人、自動更新的入口都不顯示 */
+export const isStandalone = () => state.edition === 'standalone';
 export const summaryOf = (id) => state.convMap.get(id) || null;
 
 // ───── 簡易事件匯流排 ─────

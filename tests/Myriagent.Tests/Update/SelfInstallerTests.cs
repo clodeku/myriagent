@@ -89,6 +89,94 @@ public sealed class SelfInstallerTests
         UpdaterStateStore.Load(layout).Current.Should().Be("0.2.5-abcdef1");
     }
 
+    /// <summary>安裝程式（tools/setup）解開的資料夾：自帶 .NET 的發佈有 deps.json 沒列的檔（輔助程式的 runtimeconfig、執行階段的檔），全部都要裝</summary>
+    [Fact]
+    public void 安裝程式的資料夾_整個資料夾都複製_不靠deps推()
+    {
+        using var temp = new TempDirectory("install");
+        var source = WriteRelease(temp, "setup", "exe");
+        string[] extra = { "myriagent-remote.exe", "myriagent-remote.runtimeconfig.json", "coreclr.dll", "zh-Hant/System.Windows.Forms.resources.dll" };
+        foreach (var file in extra)
+            temp.WriteFile(Path.Combine("setup", file.Replace('/', Path.DirectorySeparatorChar)), file);
+        // 上一次失敗留下的原因檔不是發佈的檔
+        temp.WriteFile(Path.Combine("setup", SelfInstaller.SetupErrorFileName), "上次失敗");
+        var layout = new InstallLayout(temp.Combine("Programs", "Myriagent"));
+
+        var installed = SelfInstaller.InstallPackage(source, layout, Id("0.2.5-abcdef1"), registerShell: false);
+
+        installed.Should().Be(layout.CurrentExecutable);
+        var dir = layout.VersionDirectory("0.2.5-abcdef1");
+        FilesIn(dir).Should().BeEquivalentTo(ReleaseFiles.Concat(extra));
+        Junction.GetTarget(layout.Current).Should().BeEquivalentTo(dir);
+        UpdaterStateStore.Load(layout).Current.Should().Be("0.2.5-abcdef1");
+        Directory.Exists(layout.PartialVersionDirectory("0.2.5-abcdef1")).Should().BeFalse();
+    }
+
+    [Fact]
+    public void 安裝程式的資料夾_少了啟動要的檔_什麼都不動()
+    {
+        using var temp = new TempDirectory("install");
+        var source = WriteRelease(temp, "setup", "exe");
+        File.Delete(Path.Combine(source, "Myriagent.runtimeconfig.json"));
+        var layout = new InstallLayout(temp.Combine("Programs", "Myriagent"));
+
+        var act = () => SelfInstaller.InstallPackage(source, layout, Id("0.2.5-abcdef1"), registerShell: false);
+
+        act.Should().Throw<InvalidDataException>().WithMessage("*Myriagent.runtimeconfig.json*");
+        Directory.Exists(layout.Root).Should().BeFalse();
+    }
+
+    [Fact]
+    public void 安裝程式重裝同一版_沒在執行_換成新複製的那一份()
+    {
+        using var temp = new TempDirectory("install");
+        var layout = new InstallLayout(temp.Combine("Programs", "Myriagent"));
+        SelfInstaller.InstallPackage(WriteRelease(temp, "first", "first"), layout, Id("0.2.5-abcdef1"), registerShell: false);
+        var dir = layout.VersionDirectory("0.2.5-abcdef1");
+        File.WriteAllText(Path.Combine(dir, "壞掉留下的.tmp"), "x");
+
+        SelfInstaller.InstallPackage(WriteRelease(temp, "second", "second"), layout, Id("0.2.5-abcdef1"), registerShell: false);
+
+        File.ReadAllText(Path.Combine(dir, "Myriagent.exe")).Should().Be("second");
+        FilesIn(dir).Should().BeEquivalentTo(ReleaseFiles, "整個資料夾換掉，不是蓋在上面");
+        Directory.EnumerateDirectories(layout.VersionsDirectory).Select(Path.GetFileName).Should().Equal("0.2.5-abcdef1");
+        var state = UpdaterStateStore.Load(layout);
+        state.Current.Should().Be("0.2.5-abcdef1");
+        state.Previous.Should().BeNull("重裝同一版不是換版");
+    }
+
+    /// <summary>那一版正在執行（資料夾裡有開著的檔）：整個資料夾改不了名，就沿用原本的——逐檔刪除會刪掉沒被鎖住的那一半</summary>
+    [Fact]
+    public void 安裝程式重裝同一版_正在執行_原本的檔案一個都不動()
+    {
+        using var temp = new TempDirectory("install");
+        var layout = new InstallLayout(temp.Combine("Programs", "Myriagent"));
+        SelfInstaller.InstallPackage(WriteRelease(temp, "first", "first"), layout, Id("0.2.5-abcdef1"), registerShell: false);
+        var dir = layout.VersionDirectory("0.2.5-abcdef1");
+
+        using (new FileStream(Path.Combine(dir, "Myriagent.dll"), FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            var installed = SelfInstaller.InstallPackage(WriteRelease(temp, "second", "second"), layout, Id("0.2.5-abcdef1"), registerShell: false);
+            installed.Should().Be(layout.CurrentExecutable);
+        }
+
+        File.ReadAllText(Path.Combine(dir, "Myriagent.exe")).Should().Be("first", "正在執行的那一份留著");
+        FilesIn(dir).Should().BeEquivalentTo(ReleaseFiles);
+        Directory.EnumerateDirectories(layout.VersionsDirectory).Select(Path.GetFileName).Should().Equal("0.2.5-abcdef1");
+        Junction.GetTarget(layout.Current).Should().BeEquivalentTo(dir);
+    }
+
+    [Fact]
+    public void 安裝失敗的原因_寫給安裝程式()
+    {
+        using var temp = new TempDirectory("install");
+        var dir = temp.CreateDirectory("setup");
+
+        SelfInstaller.WriteSetupError(dir, "找不到 X，安裝程式解開的檔案不完整");
+
+        File.ReadAllText(Path.Combine(dir, SelfInstaller.SetupErrorFileName)).Should().Be("找不到 X，安裝程式解開的檔案不完整");
+    }
+
     [Fact]
     public void 已有舊版安裝_改指向新版_舊版成為前一版()
     {

@@ -115,6 +115,7 @@ tests/                    單元與整合測試（xUnit）
 tools/hub                 Hub 主機的安裝與更新腳本
 tools/deploy              Hub 發佈套件的打包與安裝（健康閘門、自動回滾）
 tools/release、release-tool  桌面版的打包、簽章與送件
+tools/setup               把桌面 app 包成一個 exe 的安裝程式（自帶 .NET；單機版或一般版）
 tools/ui-probe、hub-e2e…   介面探針與端到端測試
 ```
 

@@ -28,8 +28,9 @@ public sealed class SyncCoordinatorTests
         /// <param name="realCommit">配對提交用正式的 SyncEngineLoader.CompletePairing（建 sync.db、寫 device.json）</param>
         /// <param name="remoteOnly">remoteOnly 合成卡片的開關（null＝照 SyncFeatures）</param>
         /// <param name="conversations">假引擎的對話盒子（null＝不支援對話發布的引擎）</param>
+        /// <param name="standalone">單機版的組建（SyncCoordinatorOptions.Standalone）</param>
         public Rig(bool paired = false, Action<SyncPaths>? beforeCreate = null, bool realCommit = false, Func<bool>? remoteOnly = null,
-            ConversationChangeBox? conversations = null)
+            ConversationChangeBox? conversations = null, bool standalone = false)
         {
             Engine = new RecordingSyncEngine { Conversations = conversations };
             H = new HubHarness(alwaysPost: true);
@@ -44,7 +45,7 @@ public sealed class SyncCoordinatorTests
 
             beforeCreate?.Invoke(Paths);
             Coordinator = H.OnUi(() => new SyncCoordinator(H.Hub, H.Accounts, H.Host, H.Settings, Paths,
-                new SyncCoordinatorOptions(false, null, false, "0.5.0", "OFFICE-PC", "user"), Time,
+                new SyncCoordinatorOptions(false, null, false, "0.5.0", "OFFICE-PC", "user") { Standalone = standalone }, Time,
                 args =>
                 {
                     Created.Add(args);
@@ -648,6 +649,50 @@ public sealed class SyncCoordinatorTests
         rig.Signers.Should().BeEmpty();
         rig.OnUi(() => rig.Coordinator.Status).Should().Be(status);
         rig.Main.Messages("toast").Should().BeEmpty();
+    }
+
+    // ───────────────────────────── 單機版（Core/AppEdition.cs） ─────────────────────────────
+
+    /// <summary>同一個資料夾以前配對過（別的版本留下的 device.json）：單機版連讀都不讀，一律當成未配對；檔案留著不動</summary>
+    [Fact]
+    public async Task 單機版_以前配對過也當成未配對_不建引擎()
+    {
+        using var rig = new Rig(paired: true, standalone: true);
+        var before = File.ReadAllBytes(rig.Paths.DeviceFile);
+        rig.H.Command(rig.Main, "ready");
+        rig.Main.Last("init")!.Value<bool>("syncStarting").Should().BeTrue("還沒啟動時和一般的建置一樣");
+
+        await rig.StartAsync();
+
+        rig.Created.Should().BeEmpty("單機版不建同步引擎");
+        rig.OnUi(() => rig.Coordinator.IsPaired).Should().BeFalse();
+        rig.OnUi(() => rig.Coordinator.IsStarting).Should().BeFalse("啟動完成：網頁不會一直停在啟動中");
+        rig.OnUi(() => rig.Coordinator.Status).Should().BeNull();
+        rig.Main.Messages("sync").Should().ContainSingle().Subject["sync"]!.Type.Should().Be(JTokenType.Null, "送過 syncStarting 的 init 之後要有一則 sync:null 收尾");
+        File.ReadAllBytes(rig.Paths.DeviceFile).Should().Equal(before, "不是這一版的東西：不讀、不改、不刪");
+    }
+
+    [Fact]
+    public async Task 單機版_配對與其他同步指令一律不做()
+    {
+        using var rig = new Rig(standalone: true);
+        await rig.StartAsync();
+
+        rig.Command("syncPair", new { deviceName = "OFFICE-PC", server = PairingTestData.Server });
+        rig.Command("syncUnpair");
+        rig.Command("syncPause", new { paused = true });
+        rig.Command("syncSetPolicy", new { remoteControlLevel = "Control" });
+        rig.Command("syncListTrash");
+        rig.Command("deviceRename", new { name = "新名稱" });
+        await rig.H.Ui.DrainAsync();
+
+        rig.Http.Requests.Should().BeEmpty("不連任何伺服器");
+        rig.Signers.Should().BeEmpty("沒有建金鑰");
+        rig.Created.Should().BeEmpty();
+        rig.Main.Messages("sync").Should().BeEmpty();
+        rig.OnUi(() => rig.H.Settings.Sync.Paused).Should().BeFalse("設定沒有被改");
+        rig.Main.Messages("toast").Should().ContainSingle("只有配對會說明").Subject.Value<string>("text").Should().Contain("不支援多電腦同步");
+        File.Exists(rig.Paths.DeviceFile).Should().BeFalse();
     }
 
     [Fact]

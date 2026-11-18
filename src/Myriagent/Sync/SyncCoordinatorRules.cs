@@ -85,6 +85,13 @@ internal static class SyncCoordinatorRules
         _ => null,
     };
 
+    /// <summary>
+    /// 協調者處理的網頁指令（SyncCoordinator.HandleCommand 與 HandleLocalViewCommand 的那些：sync 開頭的與 deviceRename）：
+    /// 單機版一律不做（連遠端操作紀錄、回收區這些讀本機 sync.db 的也是：單機版不開同步的資料庫）
+    /// </summary>
+    public static bool IsSyncCommand(string? type) =>
+        type is not null && (type.StartsWith("sync", StringComparison.Ordinal) || type == "deviceRename");
+
     /// <summary>給人看的伺服器網址（只有 scheme、host、port）：MYRIAGENT_SYNC_SERVER 覆寫時是覆寫的</summary>
     public static string ShownServer(Uri? serverOverride, string pairedServer) =>
         (serverOverride ?? new Uri(pairedServer)).GetLeftPart(UriPartial.Authority);

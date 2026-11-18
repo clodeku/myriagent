@@ -10,7 +10,7 @@
 // 代理、伺服器與其他電腦給的文字一律以 textContent 放入（h() 的 text 與字串子節點），這個檔案不把任何字串當成 HTML 解析。
 import { h, reconcile, copyToClipboard, fmtRelative, fmtElapsed, replayClass, setHidden } from './util.js';
 import { icon, providerMark } from './icons.js';
-import { post, state, onHostMessage, EFFORT_LABEL, EFFORT_DESC, permissionTone } from './store.js';
+import { post, state, onHostMessage, EFFORT_LABEL, EFFORT_DESC, permissionTone, isStandalone } from './store.js';
 import { openDialog, openMenu, segmented, switchControl, confirmDialog, spinner } from './ui.js';
 import { confirmFullAccess, toneColor, continueLocal, setContinueLocal } from './composer.js';
 import { CONTINUE_TEXT, CONTINUE_MAX, continueTextOf } from './sendrules.js';
@@ -43,7 +43,7 @@ const TABS = [
   { id: 'defaults', label: '模型設定', icon: 'sparkle', desc: '新對話開始時的模型、權限模式與推理強度，每種代理各自設定；在對話裡改只影響那個對話。', secs: ['defaults'] },
   { id: 'cli', label: 'CLI', icon: 'terminal', desc: '這台電腦的 Claude Code、Codex、Antigravity 與 Grok Build：版本、更新方式與共用的設定。', secs: ['cli', 'cliUpdate', 'cliShare'] },
   { id: 'sync', label: '多電腦同步', icon: 'link', desc: '透過你自己架設的 MyriagentHub 在多台電腦與網頁之間同步帳戶、用量與對話；登入憑證不會離開這台電腦。', secs: ['sync'] },
-  { id: 'app', label: '版本與更新', icon: 'download', desc: 'Clode Myriagent 的版本與自動更新。', secs: ['app'] },
+  { id: 'app', label: '版本與更新', icon: 'download', desc: 'Clode Myriagent 的版本與自動更新。', standaloneLabel: '版本', standaloneDesc: '目前安裝的版本。', secs: ['app'] },
   // 多人協作（collab.js）：擁有者管理協作人（桌面要已配對）；協作人自己的帳號（改密碼、登出）
   { id: 'collab', label: '協作人', icon: 'user', desc: '建立協作人的帳號密碼，在對話的「⋯」選單把對話分享給他們；協作人從網頁版登入，只看得到分享給他的對話。', secs: ['collab'] },
   { id: 'account', label: '我的帳號', icon: 'shield', desc: '你的協作人帳號：改密碼、登出。', secs: ['account'] },
@@ -153,9 +153,11 @@ export function openSettings(opts = {}) {
   // CLI 版本與「立即檢查」是這台的 CLI；同步狀態只有桌面宿主有（瀏覽器模式沒有 SyncStatus）
   const cliGrid = browser ? null : h('div', { class: 'cli-grid compact' });
   const checkBtn = browser ? null : cliCheckButton();
-  const sync = browser ? null : syncSection();
+  // 單機版（store.js 的 isStandalone）沒有多電腦同步與協作人這兩頁：宿主不配對、不同步
+  const standalone = isStandalone();
+  const sync = browser || standalone ? null : syncSection();
   // 多人協作：擁有者（有協作人狀態時：瀏覽器版、已配對的桌面）管理協作人；協作人看自己的帳號
-  const collab = !isCollaborator() && (canManageCollaborators() || !browser) ? collaboratorsSection() : null;
+  const collab = !standalone && !isCollaborator() && (canManageCollaborators() || !browser) ? collaboratorsSection() : null;
   const account = isCollaborator() ? myAccountSection() : null;
   // app 自我更新（版本、自動更新開關、狀態與按鈕）只有桌面宿主有（瀏覽器模式沒有 AppUpdateView）
   const appSec = has('autoUpdateApp') ? appSection(set, row) : null;
@@ -217,7 +219,10 @@ export function openSettings(opts = {}) {
   putBare('account', null, account && account.node);
 
   // 只留有區塊的分頁（桌面六個都在；瀏覽器模式剩「一般」與「對話」）
-  const tabList = TABS.map((t) => ({ id: t.id, label: t.label, icon: t.icon, desc: (browser && t.browserDesc) || t.desc, secs: t.secs.filter((id) => secs[id]) })).filter((t) => t.secs.length > 0);
+  const tabList = TABS.map((t) => ({
+    id: t.id, label: (standalone && t.standaloneLabel) || t.label, icon: t.icon,
+    desc: (browser && t.browserDesc) || (standalone && t.standaloneDesc) || t.desc, secs: t.secs.filter((id) => secs[id]),
+  })).filter((t) => t.secs.length > 0);
   const target = opts.section ? tabList.find((t) => t.secs.includes(opts.section)) : null;
   const tabs = settingsTabs(tabList, target ? target.id : lastTab, secs, defaults);
   const body = h('div', { class: 'settings' }, tabs.nav, tabs.scroller);

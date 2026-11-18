@@ -66,6 +66,12 @@ internal sealed class HubPaths
     /// <summary>發佈收件的回執 {"id","ok","release","message","processedAt"}：送件腳本等這個 id（runner 對 status\ 只有讀取權）</summary>
     public string AppReleaseAckFile => Path.Combine(StatusDir, "app-release.json");
 
+    /// <summary>
+    /// 給任何人下載的安裝檔（Downloads/PublicDownloadEndpoints.cs 的 /myriagent）：說明檔 latest.json 與它寫的那一個 exe，由管理員手動放進來、服務只讀。
+    /// 只放目前的那一版（換版時刪掉舊的）；每日備份不含
+    /// </summary>
+    public string PublicDownloadsDir => Path.Combine(Root, "downloads", "myriagent");
+
     public string BackupsDir => Path.Combine(Root, "backups");
 
     public string DailyBackupsDir => Path.Combine(BackupsDir, "daily");
@@ -86,7 +92,7 @@ internal sealed class HubPaths
     /// </summary>
     public void EnsureCreated()
     {
-        foreach (var dir in new[] { Root, ConfigDir, DbDir, SecretsDir, DataProtectionKeysDir, StatusDir, AdminInboxDir, AdminResultsDir, AdminInboxDeployDir, AdminInboxAppReleaseDir, AppReleasesDir, BackupsDir, DailyBackupsDir, DiagDir, TmpDir, BlobsDir, ThumbCacheDir })
+        foreach (var dir in new[] { Root, ConfigDir, DbDir, SecretsDir, DataProtectionKeysDir, StatusDir, AdminInboxDir, AdminResultsDir, AdminInboxDeployDir, AdminInboxAppReleaseDir, AppReleasesDir, PublicDownloadsDir, BackupsDir, DailyBackupsDir, DiagDir, TmpDir, BlobsDir, ThumbCacheDir })
             Directory.CreateDirectory(dir);
     }
 }

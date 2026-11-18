@@ -13,8 +13,14 @@ namespace Myriagent.Sync;
 /// <param name="TryTpm">配對時先試 TPM（MYRIAGENT_SYNC_NO_TPM=1 時 false）</param>
 internal sealed record SyncCoordinatorOptions(bool DevTrustEnv, Uri? ServerOverride, bool TryTpm, string AppVersion, string? MachineName, string? WindowsUser)
 {
+    /// <summary>
+    /// 單機版（<see cref="AppEdition"/>）：不讀配對資料（以前配對過也一律當成未配對）、不建引擎、不接受配對與其他同步指令。
+    /// 其餘照未配對的路走，所以中樞與網頁不必另外處理「沒有同步元件」
+    /// </summary>
+    public bool Standalone { get; init; }
+
     public static SyncCoordinatorOptions FromEnvironment(string appVersion) =>
-        FromVariables(Environment.GetEnvironmentVariable, appVersion, Environment.MachineName, Environment.UserName);
+        FromVariables(Environment.GetEnvironmentVariable, appVersion, Environment.MachineName, Environment.UserName) with { Standalone = AppEdition.IsStandalone };
 
     internal static SyncCoordinatorOptions FromVariables(Func<string, string?> env, string appVersion, string? machineName, string? windowsUser)
     {
@@ -151,6 +157,13 @@ internal sealed partial class SyncCoordinator : ISyncBridge, IUsagePollPolicy, I
     private async Task LoadAsync()
     {
         (DeviceFileStatus Status, DeviceFileData? Data) result;
+        if (options.Standalone)
+        {
+            // 單機版：連 device.json 都不讀（也不清配對到一半的殘留：那些不是這一版的東西），照「沒有配對資料」收尾
+            host.BeginInvoke(() => OnLoaded(DeviceFileStatus.Missing, null));
+            return;
+        }
+
         try
         {
             result = await Task.Run(() =>
@@ -269,6 +282,16 @@ internal sealed partial class SyncCoordinator : ISyncBridge, IUsagePollPolicy, I
     {
         if (disposed || view is null || msg is null || view is SyncMirrorView || view.Id == AgentHub.SyncViewId)
             return false;
+        if (options.Standalone)
+        {
+            // 單機版的網頁沒有這些入口；真的送來（探針、別的版本留下的網頁）也不做，配對另外說一聲
+            if (!SyncCoordinatorRules.IsSyncCommand(type))
+                return false;
+            if (type == "syncPair")
+                hub.SyncToast("這個版本只在這台電腦使用，不支援多電腦同步", view);
+            return true;
+        }
+
         if (HandleLocalViewCommand(view, type, msg))
             return true;
         switch (type)

@@ -263,6 +263,8 @@ class FakeHost {
             ...(this.opts.replicasPending !== undefined ? { replicasPending: this.opts.replicasPending } : {}),
             ...(this.tokens ? { tokens: this.tokens } : {}),
             ...(this.opts.remote !== undefined ? { remote: this.opts.remote, devicesCli: this.opts.devicesCli ?? null } : {}),
+            // 單機版（init.edition）：opts.edition 有給才帶
+            ...(this.opts.edition !== undefined ? { edition: this.opts.edition } : {}),
             // 輸入區的語音訊息：這台有辨識程序（opts.voiceInput 是 false 時模擬沒有）
             voiceInput: this.opts.voiceInput !== false,
             // 排程頁：opts.schedules 有給才帶（沒給＝宿主沒掛排程讀取器，不顯示排程鈕）

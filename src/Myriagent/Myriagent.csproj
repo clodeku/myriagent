@@ -71,6 +71,8 @@
   <ItemGroup>
     <!-- 換版端到端（tools/update-e2e）以 -p:MyriagentUpdateTestKeySpki=<spki> 注入測試金鑰；app 只在 MYRIAGENT_UPDATE_E2E=1 時認它（ReleaseKeys），一般建置沒有這筆 -->
     <AssemblyMetadata Include="MyriagentUpdateTestKeySpki" Value="$(MyriagentUpdateTestKeySpki)" Condition="'$(MyriagentUpdateTestKeySpki)' != ''" />
+    <!-- 單機版的安裝檔（tools/setup）以 -p:AppEdition=standalone 建置：不配對、不同步、不自動更新（Core/AppEdition.cs）；一般建置沒有這筆 -->
+    <AssemblyMetadata Include="AppEdition" Value="$(AppEdition)" Condition="'$(AppEdition)' != ''" />
   </ItemGroup>
 
   <!-- 移除 WebView2 的 WPF 參考（避免 MSB3277）寫在根目錄的 Directory.Build.targets，測試專案也適用 -->

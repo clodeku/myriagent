@@ -280,6 +280,32 @@ export async function runMonitor(ctx, vp) {
   clearInterval(un.host.statsTimer);
   await closeApp(un);
 
+  // ── 單機版（init.edition === 'standalone'）：只有這台；沒有「與伺服器的延遲」的量表與走勢（CPU、記憶體排成兩欄）、不提配對 ──
+  const solo = await openApp('monitor-standalone', { vp: { w: 1100, h: 700 }, layout: LAYOUT, edition: 'standalone', hostSetup: pumpSetup({ paired: false }) });
+  await solo.page.click('#btnMonitor');
+  await until(() => solo.page.evaluate(() => document.querySelector('#monitor .mon-dev[data-state="live"]')), 4000);
+  await sleep(1200);
+  const soloView = await solo.page.evaluate(() => {
+    const f = document.querySelector('#monitor .mon-foot');
+    const g = document.querySelector('#monitor .mon-dev .mon-gauges');
+    // 看得到的才算：藏起來的量表與走勢還在 DOM 裡
+    const seen = (n) => { const r = n.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const cells = Array.from(g.children).filter(seen).map((n) => n.getBoundingClientRect());
+    const lat = document.querySelector('#monitor .mon-lat');
+    return {
+      cards: document.querySelectorAll('#monitor .mon-dev').length, lat: !!lat && seen(lat),
+      rtt: Array.from(document.querySelectorAll('#monitor .mon-chart-title')).some((n) => n.textContent === '延遲走勢' && seen(n)),
+      two: g.classList.contains('two'), gauges: cells.length, fills: cells.length === 2 && Math.abs(cells[1].right - g.getBoundingClientRect().right) < 2,
+      foot: f.hidden ? '' : f.textContent, text: document.getElementById('monitor').innerText,
+    };
+  });
+  check('monitorStandalone', soloView.cards === 1 && !soloView.lat && !soloView.rtt && soloView.two && soloView.gauges === 2 && soloView.fills
+    && soloView.foot === '' && !/配對|延遲/.test(soloView.text), soloView);
+  check('monitorNoOverflowStandalone', (await overflowOf(solo.page)).length === 0, await overflowOf(solo.page));
+  await shot(solo.page, 'monitor-standalone-1100');
+  clearInterval(solo.host.statsTimer);
+  await closeApp(solo);
+
   // ── 窄視窗（700）：抽屜疊在右邊，預設收起 ──
   const narrow = await openApp('monitor-narrow', { vp: { w: 700, h: 760 }, layout: Object.assign({}, LAYOUT, { monitor: 'open' }), remote, hostSetup: pumpSetup({ paired: true }) });
   const narrowStart = await narrow.page.evaluate(() => document.getElementById('monitor').hidden);

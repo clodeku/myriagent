@@ -31,6 +31,8 @@ internal static class Program
             return RunApplier(options);
         if (options.InstallHere)
             return InstallHere();
+        if (options.InstallPackage)
+            return InstallPackage(options);
 
         var layout = InstallLayout.Resolve();
         var managedRelease = InstallLayoutRules.ManagedRelease(AppContext.BaseDirectory, layout, Junction.GetTarget(layout.Current));
@@ -135,6 +137,45 @@ internal static class Program
         catch (Exception ex)
         {
             Log.Error("換版幫手失敗", ex);
+            return 1;
+        }
+        finally
+        {
+            Log.Flush();
+        }
+    }
+
+    /// <summary>
+    /// --install-package：安裝程式（tools/setup）把發佈解到一個空的暫存資料夾後執行這一份——整個資料夾都是這個發佈的檔，全部安裝到受管理的位置、
+    /// 建捷徑與移除項目（端到端時不建），再啟動安裝好的那一份（--no-relaunch 不啟動；已經有比較舊的在執行時它會自己交棒給新版）。
+    /// 這個程序沒有主控台：失敗的原因寫進資料夾裡的 <see cref="SelfInstaller.SetupErrorFileName"/> 給安裝程式顯示。結束碼 0 成功、1 失敗、2 開發版
+    /// </summary>
+    private static int InstallPackage(StartupOptions options)
+    {
+        var source = AppContext.BaseDirectory;
+        var identity = AppVersionInfo.Current;
+        try
+        {
+            if (identity.IsDev)
+            {
+                Log.Warn("開發版不能安裝");
+                SelfInstaller.WriteSetupError(source, "這是開發版的組建，不能安裝");
+                return 2;
+            }
+
+            var layout = InstallLayout.Resolve();
+            var installed = SelfInstaller.InstallPackage(source, layout, identity, registerShell: !UpdateEnvironment.IsE2E);
+            if (!options.NoRelaunch)
+            {
+                // 工作目錄設在安裝位置：沿用這個程序的（安裝程式的暫存資料夾）會讓安裝程式刪不掉它
+                using var started = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(installed) { WorkingDirectory = layout.Current, UseShellExecute = false });
+            }
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("安裝失敗", ex);
+            SelfInstaller.WriteSetupError(source, ex.Message);
             return 1;
         }
         finally

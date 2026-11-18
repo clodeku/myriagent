@@ -394,4 +394,27 @@ export async function runSettings(ctx, vp) {
     check('settingsContrast_' + theme, Object.values(c).every((r) => r !== null && r >= 4.5), c);
     await closeApp(app);
   }
+
+  // ── 單機版（init.edition === 'standalone'）：沒有「多電腦同步」「協作人」兩頁；「版本」那一頁只有版本與怎麼更新，沒有自動更新的開關與按鈕 ──
+  {
+    const app = await openApp('settings-standalone', { vp, layout: onePane('c1'), edition: 'standalone' });
+    const { page } = app;
+    await page.click('#btnSettings');
+    await page.waitForSelector('.dlg-settings .set-nav');
+    await sleep(250);
+    const tabs = await page.evaluate(() => Array.from(document.querySelectorAll('.dlg-settings .set-tab')).map((t) => t.dataset.tab));
+    await page.click('.dlg-settings .set-tab[data-tab="app"]');
+    await sleep(150);
+    const appPage = await page.evaluate(pageOf);
+    const appPanel = await page.evaluate(() => {
+      const p = Array.from(document.querySelectorAll('.dlg-settings .set-panel')).find((x) => !x.hidden);
+      return { auto: !!p.querySelector('[data-setting="autoUpdateApp"]'), buttons: p.querySelectorAll('button').length, text: p.textContent, value: (p.querySelector('.set-value') || {}).textContent || '' };
+    });
+    await shot(page, `settings-standalone-${tag}`);
+    check('settingsStandalone', !tabs.includes('sync') && !tabs.includes('collab') && tabs.includes('general') && tabs.includes('cli') && tabs.includes('app')
+      && appPage.title === '版本' && appPage.label === '版本' && appPage.out.length === 0
+      && !appPanel.auto && appPanel.buttons === 0 && appPanel.text.includes('不會自動更新') && appPanel.value.includes('0.1.0'),
+    { tabs, appPage, appPanel });
+    await closeApp(app);
+  }
 }

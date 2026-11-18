@@ -161,6 +161,16 @@ C:\Services\MyriagentHub\current\MyriagentHub.exe admin <指令>
 | `…\diag\myriagenthub-yyyyMMdd.log` | 服務記錄（JSON 行，保留 14 天） |
 | Windows 事件檢視器 → 應用程式 | 來源 `MyriagentHub` 的啟動、停止與錯誤 |
 
+### 放安裝檔給人下載（選用）
+
+Hub 可以把 `tools/setup/New-Setup.ps1` 建出來的安裝檔（見 [install.md](install.md) 的「做成一個安裝檔」）放在 `https://<你的網域>/myriagent` 給人下載，不用登入：
+
+1. 以系統管理員把安裝檔複製到 `C:\ProgramData\MyriagentHub\downloads\myriagent\`（資料夾由服務啟動時建立）。
+2. 再把同一次建置的 `setup.json` 放進去、檔名改成 `latest.json`。**先放 exe、最後才放 `latest.json`**：兩者對得上（檔名、大小）服務才給下載。
+3. 刪掉資料夾裡舊版的安裝檔。
+
+不必重啟服務。`/myriagent` 是下載頁（寫版本、大小、SHA-256 與安裝方式），`/myriagent/latest.json` 是目前的版本資訊，`/myriagent/download/<檔名>` 是安裝檔本身（支援續傳；同時最多 4 個下載，超過的回 503 請對方稍後再試）。三個都是匿名的；沒有放檔、或 `latest.json` 不合格時都回 404。要撤下就刪掉 `latest.json`。
+
 ### 常用設定
 
 設定寫在 `C:\ProgramData\MyriagentHub\config\appsettings.Production.json` 的 `Hub` 區段，改完重新啟動服務（`Restart-Service MyriagentHub`）。完整清單見 [src/MyriagentHub/README.md](../src/MyriagentHub/README.md)。

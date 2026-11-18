@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    安裝程式（單一個 exe）：內含一份自帶 .NET 的發佈（payload.zip），解到暫存資料夾後執行裡面的 app 的 install-package 模式。
+    用 .NET Framework 4.8：Windows 10（1903 起）與 11 內建，使用者什麼都不必先裝。
+    不單獨建置：由 New-Setup.ps1 以 -p:PayloadZip=<zip> -p:Version=<版本> 建置（沒給 PayloadZip 也建得起來，只是執行時說沒有內含程式）。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <!-- 根目錄的 Directory.Build.props 開了 ImplicitUsings：net48 沒有 System.Net.Http 的預設參考，這裡關掉 -->
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>MyriagentSetup</RootNamespace>
+    <AssemblyName>MyriagentSetup</AssemblyName>
+    <Product>Clode Myriagent</Product>
+    <AssemblyTitle>Clode Myriagent Setup</AssemblyTitle>
+    <Company></Company>
+    <Copyright></Copyright>
+    <ApplicationIcon>..\..\src\Myriagent\app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- 不要把建置時的來源路徑寫進 exe -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(PayloadZip)' != ''">
+    <EmbeddedResource Include="$(PayloadZip)" LogicalName="payload.zip" Link="payload.zip" />
+  </ItemGroup>
+
+</Project>

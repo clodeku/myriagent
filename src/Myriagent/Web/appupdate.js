@@ -2,7 +2,7 @@
 import { byteRate, fmtByteRate, drainProgress, forceCountdown, FORCE_CELLS } from './fxrules.js';
 import { h, replayClass } from './util.js';
 import { icon } from './icons.js';
-import { post, state } from './store.js';
+import { post, state, isStandalone } from './store.js';
 import { switchControl } from './ui.js';
 import { versionWithTime } from './versionrules.js';
 
@@ -91,7 +91,8 @@ export function bannerOf(a, dismissed) {
     case 'blocked':
       return dismissed ? null : { tone: 'warn', text: `新版 ${a.available || ''} 無法安裝：${a.detail || ''}`, actions: [], dismissible: true };
     default:
-      return installable(a) && !dismissed
+      // 單機版沒有更新來源：不提自動更新（它本來就是安裝檔裝的）
+      return installable(a) && !dismissed && !isStandalone()
         ? { tone: 'info', text: '要讓 Clode Myriagent 自動更新，請先把它安裝到這台電腦。', actions: [{ label: '安裝到這台電腦', cmd: 'appInstallHere' }], dismissible: true }
         : null;
   }
@@ -196,6 +197,15 @@ export function renderAppBanner() {
 
 /** 設定頁的區塊：版本、自動更新開關、狀態與上次檢查、最近結果、按鈕。row＝settings.js 的 row(label, desc, control, setting) */
 export function appSection(set, row) {
+  if (isStandalone()) {
+    // 單機版：宿主不配對伺服器、沒有更新來源——只寫版本與怎麼更新，不放自動更新的開關、狀態與按鈕
+    const shown = h('span', { class: 'set-value' });
+    const node = h('div', null,
+      row('目前版本', '這個版本不會自動更新。要更新時，下載新版的安裝檔再安裝一次，帳戶與對話都會保留。', shown));
+    const refresh = () => { setText(shown, versionWithTime(state.app.version, state.app.commitAt)); };
+    refresh();
+    return { node, refresh };
+  }
   const autoSw = switchControl({ checked: state.settings.autoUpdateApp !== false, label: '自動更新 Clode Myriagent', onChange: (v) => set('autoUpdateApp', v) });
   const version = h('span', { class: 'set-value' });
   const status = h('div', { class: 'set-desc app-status' });

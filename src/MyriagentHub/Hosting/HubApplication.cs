@@ -3,6 +3,7 @@ using System.Security.Authentication;
 using MyriagentHub.Audit;
 using MyriagentHub.Auth;
 using MyriagentHub.Data;
+using MyriagentHub.Downloads;
 using MyriagentHub.Handoff;
 using MyriagentHub.Logs;
 using MyriagentHub.Media;
@@ -126,6 +127,8 @@ internal static class HubApplication
         // 第 5 階段（sync-protocol 第 16 節）：log1、hand1 排在 tok1 之後，各自依開關登記（預設都關）
         builder.Services.AddHubLogs(options);
         builder.Services.AddHubHandoff(options);
+        // 安裝檔的下載頁（/myriagent，匿名）：資料夾裡有放安裝檔才有這一頁
+        builder.Services.AddHubDownloads();
         builder.WebHost.ConfigureHubKestrel(options);
 
         configure?.Invoke(builder);
@@ -142,6 +145,7 @@ internal static class HubApplication
         app.MapHubReleases();
         app.MapHubLogs();
         app.MapHubHandoff();
+        app.MapHubDownloads();
         app.MapHubFallbacks();
         return app;
     }

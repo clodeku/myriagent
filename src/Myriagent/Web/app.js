@@ -702,6 +702,7 @@ function onInit(m) {
   if (m.popoutConversationId) state.popoutId = m.popoutConversationId;
   state.windowRole = m.windowRole === 'primary' || m.windowRole === 'extra' ? m.windowRole : null;
   state.app = m.app || {};
+  state.edition = typeof m.edition === 'string' ? m.edition : null; // 單機版（store.js 的 isStandalone）：後面套用的各區塊都可能看它，最先設
   state.settings = Object.assign({}, state.settings, m.settings || {});
   applySettings(state.settings);
   // 開機掃描（fx.css 的 .app.fx-boot：網格淡出、一道掃描光由上往下掃過一次，約 0.9 秒）：app 打開時播一次，設定套用之後才判斷要不要動

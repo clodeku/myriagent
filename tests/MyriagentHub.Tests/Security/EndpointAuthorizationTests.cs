@@ -10,13 +10,16 @@ public sealed class EndpointAuthorizationTests
 {
     /// <summary>
     /// 匿名允許清單（8.3）：靜態網頁（不是端點）、/healthz、帳號密碼登入（設計 14.4；限流與退避）、
-    /// 裝置配對的 start／token（第 3 階段；限流、deviceCode 只存雜湊），
+    /// 裝置配對的 start／token（第 3 階段；限流、deviceCode 只存雜湊），安裝檔的下載頁（/myriagent：給任何人下載，只讀管理員放的那一個檔），
     /// 以及其他未對應路徑一律回 404 的 catch-all（MapFallback，沒有方法限制；列舉時當成 GET）
     /// </summary>
     private static readonly HashSet<string> AnonymousAllowList =
     [
         "GET /{**path}",
         "GET /healthz",
+        "GET /myriagent",
+        "GET /myriagent/latest.json",
+        "GET /myriagent/download/{file}",
         "POST /api/v1/auth/login",
         "POST /api/v1/pair/start",
         "POST /api/v1/pair/token",

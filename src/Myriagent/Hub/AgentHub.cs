@@ -841,6 +841,8 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             ["windowRole"] = WindowRules.RoleOf(view),
             ["popoutConversationId"] = view is IPopoutView p ? p.ConversationId : null,
             ["app"] = new JObject { ["version"] = AppVersionInfo.VersionText, ["build"] = AppVersionInfo.Current.Build, ["release"] = AppVersionInfo.Current.Release, ["commitAt"] = AppVersionInfo.CommitAtMs },
+            // 單機版（Core/AppEdition.cs）是 "standalone"：網頁不顯示多電腦同步、協作人與自動更新；一般的建置是 null
+            ["edition"] = Edition,
             ["settings"] = RenderSettings(),
             ["accounts"] = RenderAccounts(),
             ["conversations"] = RenderConversationList(),

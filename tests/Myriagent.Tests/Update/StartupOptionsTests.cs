@@ -14,6 +14,17 @@ public sealed class StartupOptionsTests
     }
 
     [Fact]
+    public void 安裝程式解開後的安裝()
+    {
+        var o = StartupOptions.Parse(new[] { "--install-package" });
+        o.InstallPackage.Should().BeTrue();
+        o.NoRelaunch.Should().BeFalse("預設裝好就啟動");
+        o.InstallHere.Should().BeFalse();
+        StartupOptions.Parse(new[] { "--install-package", "--no-relaunch" }).NoRelaunch.Should().BeTrue();
+        StartupOptions.Parse(new[] { "--install-here" }).InstallPackage.Should().BeFalse();
+    }
+
+    [Fact]
     public void 換版幫手的參數()
     {
         var o = StartupOptions.Parse(new[] { "--apply-update", "--to", "0.2.2-bbbbbb2", "--wait-pid", "1234", "--token", Token, "--no-relaunch" });

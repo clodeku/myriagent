@@ -124,6 +124,8 @@
 
 /* ───── 環形量表（CPU、記憶體）與延遲雷達：一列三格 ───── */
 .mon-gauges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; }
+/* 單機版沒有第三個量表（與伺服器的延遲） */
+.mon-gauges.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mon-g { --sev: var(--mon-ok); display: flex; flex-direction: column; align-items: center; min-width: 0; text-align: center; }
 .mon-g[data-sev="warn"] { --sev: var(--sev-warn); }
 .mon-g[data-sev="max"] { --sev: var(--sev-max); }
