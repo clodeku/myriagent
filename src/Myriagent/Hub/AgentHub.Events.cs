@@ -81,6 +81,8 @@ internal sealed partial class AgentHub
                     if (!item.MediaPaths.Contains(media, StringComparer.OrdinalIgnoreCase))
                         item.MediaPaths.Add(media);
                 }
+                // 以 Markdown 圖片語法寫在內文裡的本機圖片也記進媒體：其他電腦與瀏覽器版靠它才看得到（AgentHub.MediaKeep.cs 的 AddInlineMedia）
+                AddInlineMedia(c, item, fileExists);
                 MarkItemDirty(c, item);
                 // 回覆完成：要顯示的媒體（含 Markdown 引用的本機圖片）在背景留一份（AgentHub.MediaKeep.cs）
                 KeepMediaLater(c, item, markdown: true);

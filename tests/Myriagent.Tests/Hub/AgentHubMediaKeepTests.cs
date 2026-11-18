@@ -99,7 +99,10 @@ public sealed class AgentHubMediaKeepTests
         WaitKept(h);
 
         var item = Item(h, id, i => i.Kind == AgentItemKind.Assistant);
-        item.MediaPaths.Should().BeEmpty("Markdown 的圖片直接畫在回覆裡，不另外列");
+        item.MediaPaths.Should().ContainSingle().Which.Should().BeEquivalentTo(chart, "也記進媒體：其他電腦與瀏覽器版拿不到本機路徑，靠它才看得到這張圖");
+        var local = h.OnUi(() => h.Hub.RenderItemForTests(id, item.Id));
+        local.Value<string>("html").Should().Contain("<img");
+        local["media"].Should().BeNull("這台已經由 Markdown 畫在回覆裡，不在下面重複");
         var kept = MediaKeepRules.KeptPath(item.KeptMedia, h.Store.GetConversationDirectory(id), chart)!;
         File.Exists(kept).Should().BeTrue();
 
@@ -217,6 +220,63 @@ public sealed class AgentHubMediaKeepTests
 
         keeper.Drain(TimeSpan.FromSeconds(10)).Should().BeTrue();
         result!.Keys.Should().Equal(small);
+    }
+
+    [Fact]
+    public void 回覆內文的Markdown圖片_記進媒體給別處看_這台不重複_不存在與網址的不記()
+    {
+        // 2026-11-18 使用者回報：其他電腦載入對話時有些圖片沒顯示——以 Markdown 圖片語法寫的本機圖片以前不在 MediaPaths，
+        // 同步、媒體參照、遠端取檔都只認 MediaPaths，別處只看得到說明文字
+        using var h = new HubHarness();
+        var inline = WritePng(h, @"out\inline.png");
+        var listed = WritePng(h, @"out\listed.png");
+        var missing = Path.Combine(Path.GetDirectoryName(inline)!, "missing.png");
+        var (id, s) = h.StartConversation(h.Main, h.Claude);
+
+        h.Raise(s, new AgentTextCompletedEvent("m:1",
+            $"對照 ![內嵌](<{inline.Replace('\\', '/')}>) 與 ![不在](<{missing.Replace('\\', '/')}>) ![外部](https://example.com/a.png)\n\n另一張在 {listed}"));
+
+        var item = Item(h, id, i => i.Kind == AgentItemKind.Assistant);
+        item.MediaPaths.Should().BeEquivalentTo(new[] { listed, inline }, "完整路徑寫出的照舊，Markdown 內嵌而且檔案在的也記；不在的、網址的不記");
+        // 這台：內嵌的畫在內文裡，下面只列另外寫出路徑的那一張
+        var local = h.OnUi(() => h.Hub.RenderItemForTests(id, item.Id));
+        ((JArray)local["media"]!).Select(m => m.Value<string>("path")).Should().Equal(listed);
+        local.Value<string>("html").Should().Contain(Uri.EscapeDataString(inline));
+        // 上線：兩張都帶（其他電腦與瀏覽器版接在訊息下方）
+        var online = new AgentChatItem { Id = "i1", Ord = 1, Kind = AgentItemKind.Assistant, Status = AgentItemStatus.Done, Text = item.Text, MediaPaths = item.MediaPaths.ToList() };
+        ConversationWire.TryItem(online, 1, out var wire).Should().BeTrue();
+        wire!.ToString().Should().Contain("listed.png").And.Contain("inline.png");
+    }
+
+    [Fact]
+    public void 修正之前的回覆_載入紀錄時_留了副本的Markdown圖片補進媒體_沒留的不補_只看一次()
+    {
+        var id = Guid.NewGuid().ToString("N");
+        const string keptOriginal = @"C:\probe\out\kept.png";
+        const string goneOriginal = @"C:\probe\out\gone.png";
+        using var h = new HubHarness(seedStore: store =>
+        {
+            store.SaveConversation(new AgentConversation { Id = id, AccountId = "acc-claude", Provider = AgentProvider.Claude, Title = "以前的對話", SessionId = "s0" });
+            store.SaveItems(id,
+            [
+                new AgentChatItem { Id = "u1", Kind = AgentItemKind.User, Status = AgentItemStatus.Done, Text = "截圖給我看" },
+                new AgentChatItem
+                {
+                    Id = "a1", Kind = AgentItemKind.Assistant, Status = AgentItemStatus.Done, Text = "![留了](C:/probe/out/kept.png) ![沒留](C:/probe/out/gone.png)",
+                    KeptMedia = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [keptOriginal] = @"attachments\.kept\0123456789abcdef\kept.png" },
+                },
+                new AgentChatItem { Id = "a2", Kind = AgentItemKind.Assistant, Status = AgentItemStatus.Done, Text = "![沒留副本的](C:/probe/out/other.png)" },
+            ]);
+        });
+
+        var items = h.Items(id);
+
+        items.Single(i => i.Id == "a1").MediaPaths.Should().Equal([keptOriginal], "留了副本的補進媒體（遠端取檔給的是副本）；沒留的原檔在不在不知道，不補");
+        items.Single(i => i.Id == "a2").MediaPaths.Should().BeEmpty();
+        _ = goneOriginal;
+        // 補了要存：重讀紀錄檔也有
+        h.OnUi(() => h.Hub.ItemsWriterForTests)?.Drain(TimeSpan.FromSeconds(10)).Should().BeTrue();
+        h.Store.TryLoadItems(id).Items.Single(i => i.Id == "a1").MediaPaths.Should().Equal([keptOriginal]);
     }
 
     /// <summary>修正之前延伸出來的對話（2026-11-01 實機）：載入紀錄時補留其他對話資料夾裡的媒體，每次執行只看一次</summary>

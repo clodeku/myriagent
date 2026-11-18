@@ -81,7 +81,7 @@
 .tip { --fx-inset: 2px; --fx-arm: 6px; --fx-radius: 4px; --fx-led-at: 2px; }
 /* 整則回覆複製成功（items.js 的 .fx-copied，0.9 秒）：外圍出現一圈綠色括號與四顆燈，閃兩下後淡掉（動畫在下面的一次性段落）；
    畫在回覆外側 6px，這段時間拿掉 .it 的 content-visibility（繪製限制會裁掉框外的部分），同卡片出現的鎖定 */
-.it-assistant.fx-copied { content-visibility: visible; --fx-inset: -6px; --fx-radius: 8px; --fx-bracket: var(--green); --fx-led: var(--green); --fx-led-at: 0px; }
+.it-assistant.fx-copied { content-visibility: visible; contain: layout style; --fx-inset: -6px; --fx-radius: 8px; --fx-bracket: var(--green); --fx-led: var(--green); --fx-led-at: 0px; }
 /* 卡片有了結果（conversation.js 的 .fx-c-*，fxrules.cardSettleFx）：角框與四顆燈鎖定成結果的顏色（允許綠、拒絕紅、略過琥珀），閃兩下後回到平常的顏色 */
 .it-card.fx-c-ok { --fx-bracket: var(--green); --fx-led: var(--green); }
 .it-card.fx-c-no { --fx-bracket: var(--red); --fx-led: var(--red); }
@@ -815,7 +815,7 @@
 
   /* 等你作答的卡片出現：括號從外面收進來、閃兩下，一道掃描線由上往下掃過一次（之後接回上面的呼吸）。
      .it 的 content-visibility 帶來的繪製限制會裁掉收進來之前超出卡片的括號：鎖定的這一下先拿掉（新出現的卡片本來就在畫面上，不會少省繪製） */
-  .it-card.fx-in { content-visibility: visible; }
+  .it-card.fx-in { content-visibility: visible; contain: layout style; }
   .it-card.fx-in::after { animation: fx-lock-blink 520ms steps(1) both, fx-lock-in 320ms var(--ease-out) both; }
   .it-card.fx-in::before {
     content: ""; position: absolute; left: 0; right: 0; top: 0; height: 38%; z-index: 1; pointer-events: none; border-radius: 8px;
@@ -1288,7 +1288,8 @@ textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
 .turn-sum[data-state="err"] { --fx-sum: var(--red); }
 .turn-sum[data-state="stop"], .turn-sum[data-state="bg"] { --fx-sum: var(--amber); }
 .turn-sum > span { white-space: nowrap; }
-.turn-sum > span + span::before { content: "・"; color: var(--text-3); }
+/* 第二段起前面的分隔點（不寫成 span + span：見 chat.css 的 .md th:not(:first-child)） */
+.turn-sum > span:not(:first-child)::before { content: "・"; color: var(--text-3); }
 .turn-sum > .ts-state { display: inline-flex; align-items: center; gap: 5px; color: var(--fx-sum, var(--green)); font-weight: 600; }
 .turn-sum > .ts-state::after { content: ""; order: -1; width: 5px; height: 5px; border-radius: 1px; background: currentColor; box-shadow: 0 0 5px currentColor; }
 .turn-sum > .ts-tok { color: var(--mx-soft); }
@@ -1447,7 +1448,8 @@ textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
 /* 後面一段刻度（固定 96px、不淡出）：不用 mask——每一條都要另外合成遮罩，長對話裡有幾十條 */
 .turn-rule::after { content: ""; flex: 0 1 96px; min-width: 0; height: 5px; margin-left: 9px;
   background: repeating-linear-gradient(90deg, var(--hud-line) 0 1px, transparent 1px 6px); }
-.turn-rule > span + span::before { content: ""; display: inline-block; width: 1px; height: 8px; margin: 0 7px; vertical-align: -1px; background: var(--hud-line); }
+/* 第二段起前面的分隔線（不寫成 span + span：同上） */
+.turn-rule > span:not(:first-child)::before { content: ""; display: inline-block; width: 1px; height: 8px; margin: 0 7px; vertical-align: -1px; background: var(--hud-line); }
 .turn-rule b { font-weight: 600; }
 .turn-rule .add { color: var(--green); }
 .turn-rule .del { color: var(--red); }

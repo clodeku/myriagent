@@ -161,6 +161,12 @@ function decoratePaths(root) {
   }
 }
 
+/**
+ * 圖片要不要延遲載入（loading）：平常是 lazy（捲到附近才載）。ctx.eagerMedia（conversation.js 在觸控裝置預先建好、之後才放進畫面的項目）
+ * 是 eager——在文件外就開始載，載好、尺寸定了才放進去，之後不會把下面看著的內容往下推
+ */
+const imgLoading = (ctx) => (ctx && ctx.eagerMedia ? 'eager' : 'lazy');
+
 export function enhanceMarkdown(root, _ctx, opts) {
   decoratePaths(root);
   for (const pre of root.querySelectorAll('pre')) {
@@ -196,7 +202,7 @@ export function enhanceMarkdown(root, _ctx, opts) {
     w.append(t);
   }
   for (const img of root.querySelectorAll('img')) {
-    img.loading = 'lazy';
+    img.loading = imgLoading(_ctx);
     img.decoding = 'async';
     img.classList.add('md-img');
     fadeInImg(img);
@@ -1547,7 +1553,7 @@ export function attachmentTile(a, ctx, opts = {}) {
   let tile;
   if (a.kind === 'Image' && (a.thumbUrl || a.url)) {
     tile = h('button', { type: 'button', class: 'att att-img', title });
-    tile.append(fadeInImg(h('img', { src: a.thumbUrl || a.url, alt: a.name || '', loading: 'lazy', decoding: 'async', draggable: 'false' })));
+    tile.append(fadeInImg(h('img', { src: a.thumbUrl || a.url, alt: a.name || '', loading: imgLoading(ctx), decoding: 'async', draggable: 'false' })));
     tile.dataset.lbUrl = a.url || a.thumbUrl;
     tile.dataset.lbName = a.name || '';
     if (a.path) tile.dataset.lbPath = a.path;
@@ -1555,7 +1561,7 @@ export function attachmentTile(a, ctx, opts = {}) {
   } else if (a.kind === 'Video') {
     tile = h('button', { type: 'button', class: 'att att-vid', title });
     markVideo(tile, a.url, a.name, a.path);
-    if (a.thumbUrl) tile.append(fadeInImg(h('img', { src: a.thumbUrl, alt: '', loading: 'lazy', decoding: 'async', draggable: 'false' })));
+    if (a.thumbUrl) tile.append(fadeInImg(h('img', { src: a.thumbUrl, alt: '', loading: imgLoading(ctx), decoding: 'async', draggable: 'false' })));
     tile.append(h('span', { class: 'att-play' }, icon('play')));
     const info = a.videoInfo || a.size;
     if (info) tile.append(h('span', { class: 'att-badge', text: info }));
@@ -1599,7 +1605,7 @@ export function renderMedia(media, ctx) {
     const grid = h('div', { class: 'mgrid n' + Math.min(imgs.length, 4) });
     for (const m of imgs) {
       const b = h('button', { type: 'button', class: 'mimg', title: m.name || m.path || '' },
-        fadeInImg(h('img', { src: m.url, alt: m.name || '', loading: 'lazy', decoding: 'async', draggable: 'false' })));
+        fadeInImg(h('img', { src: m.url, alt: m.name || '', loading: imgLoading(ctx), decoding: 'async', draggable: 'false' })));
       b.dataset.lbUrl = m.url;
       b.dataset.lbName = m.name || baseName(m.path);
       if (m.path) b.dataset.lbPath = m.path;

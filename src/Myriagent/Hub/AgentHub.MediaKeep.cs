@@ -69,6 +69,78 @@ internal sealed partial class AgentHub
     }
 
     /// <summary>
+    /// 回覆內文以 Markdown 圖片語法（<c>![說明](路徑)</c>）引用的本機圖片也記進 <see cref="AgentChatItem.MediaPaths"/>
+    /// （2026-11-18 使用者回報：其他電腦載入對話時，有些圖片沒顯示）：這台由 Markdown 自己畫在內文裡，但其他電腦與瀏覽器版拿不到本機路徑、
+    /// 內文只剩說明文字——同步、媒體參照、遠端取檔都只認 MediaPaths，以前這種圖在別處完全看不到。
+    /// 記進去之後別處接在訊息下方顯示；這台渲染時不重複（<see cref="WithoutInlineMedia"/>）。只收可顯示的媒體、本機磁碟、
+    /// <paramref name="exists"/> 說在的；回傳有沒有加
+    /// </summary>
+    private bool AddInlineMedia(ConversationState c, AgentChatItem item, Func<string, bool> exists)
+    {
+        if (item.Kind != AgentItemKind.Assistant || item.Text is not { } text || !text.Contains("![", StringComparison.Ordinal))
+            return false;
+        var added = false;
+        foreach (var path in AgentMarkdownRenderer.LocalImagePaths(text, GetWorkingDirectory(c)))
+        {
+            if (!AgentAttachmentRules.IsDisplayableMedia(path) || !AgentAttachmentRules.IsLocalDrivePath(path)
+                || item.MediaPaths.Contains(path, StringComparer.OrdinalIgnoreCase) || !exists(path))
+                continue;
+            item.MediaPaths.Add(path);
+            added = true;
+        }
+
+        return added;
+    }
+
+    /// <summary>這次執行看過的對話（每個對話只補一次）</summary>
+    private readonly HashSet<string> inlineMediaChecked = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 修正之前的回覆（2026-11-18）：載入紀錄時，內文以 Markdown 圖片語法引用、而且留了副本（<see cref="AgentChatItem.KeptMedia"/>）的本機圖片
+    /// 補進 MediaPaths（<see cref="AddInlineMedia"/>），照項目變了的掛鉤發布出去、在背景存紀錄。只看留了副本的（不碰磁碟：原檔在不在不查，
+    /// 遠端取檔給的是副本）；執行中的不看（完成時自己會加）。每次執行每個對話只看一次
+    /// </summary>
+    private void BackfillInlineMedia(ConversationState c)
+    {
+        if (disposed || c.IsDraft || c.IsReplica || !inlineMediaChecked.Add(c.Meta.Id))
+            return;
+        List<AgentChatItem>? changed = null;
+        foreach (var item in c.Items)
+        {
+            if (item is null || item.Kind != AgentItemKind.Assistant || item.Status == AgentItemStatus.Running || item.KeptMedia is not { Count: > 0 } kept)
+                continue;
+            var keys = new HashSet<string>(kept.Keys.Select(MediaKeepRules.Normalize).OfType<string>(), StringComparer.OrdinalIgnoreCase);
+            if (AddInlineMedia(c, item, path => MediaKeepRules.Normalize(path) is { } key && keys.Contains(key)))
+                (changed ??= []).Add(item);
+        }
+
+        if (changed is null)
+            return;
+        c.ItemsUnsaved = true;
+        foreach (var item in changed)
+            HookItemChanged(c, item);
+        if (!c.Running)
+            SaveItemsInBackground(c);
+    }
+
+    /// <summary>
+    /// 這台渲染用的項目：內文裡由 Markdown 畫出來的本機圖片（<see cref="AddInlineMedia"/> 也記進了 MediaPaths）不在訊息下方重複。
+    /// 沒有這種圖片回原本那一筆
+    /// </summary>
+    private static AgentChatItem WithoutInlineMedia(AgentChatItem item, string workingDirectory)
+    {
+        if (item.Kind != AgentItemKind.Assistant || item.MediaPaths is not { Count: > 0 } media || item.Text is not { } text
+            || !text.Contains("![", StringComparison.Ordinal))
+            return item;
+        var inline = AgentMarkdownRenderer.LocalImagePaths(text, workingDirectory);
+        if (inline.Count == 0 || !media.Any(p => inline.Contains(p, StringComparer.OrdinalIgnoreCase)))
+            return item;
+        var shown = ChatItemCopyRules.Copy(item);
+        shown.MediaPaths = media.Where(p => !inline.Contains(p, StringComparer.OrdinalIgnoreCase)).ToList();
+        return shown;
+    }
+
+    /// <summary>
     /// 背景留好了（UI 執行緒）：記進項目、重送給開著的畫面（網址換成副本；線上的內容沒變，不經同步的掛鉤），這一輪結束了就在背景存紀錄
     /// （執行中的由定期維護存）。對話已經刪掉、項目已經不在或紀錄沒載入就不記（副本留在資料夾裡，跟著對話一起刪）
     /// </summary>
@@ -122,6 +194,8 @@ internal sealed partial class AgentHub
     /// </summary>
     private JObject RenderLocalItem(ConversationState c, AgentChatItem item, string workingDirectory)
     {
+        // 內文裡已經由 Markdown 畫出來的圖不在訊息下方重複（MediaPaths 裡有它是給其他電腦與瀏覽器版看的）
+        item = WithoutInlineMedia(item, workingDirectory);
         if (item.KeptMedia is not { Count: > 0 } kept)
             return Renderer.Render(item, workingDirectory);
         var directory = store.GetConversationDirectory(c.Meta.Id);

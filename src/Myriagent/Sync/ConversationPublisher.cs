@@ -482,6 +482,15 @@ internal sealed class ConversationPublisher : IConversationChangeSink, IConversa
         });
     }
 
+    public void ReplicaMediaReady()
+    {
+        hub.BeginInvoke(() =>
+        {
+            if (!disposed)
+                hub.ReplicaMediaReady();
+        });
+    }
+
     public void ApplyReplicaDelta(ReplicaDelta delta)
     {
         // UI 執行緒（拉取那一頁的 UI 套用裡、或引擎的 RunOnUiAsync）：轉給中樞；中樞的例外照常丟回引擎（那一頁不提交、游標不前進）

@@ -303,4 +303,6 @@ internal sealed partial class AgentHub : IConversationPublishSource
     }
 
     void IConversationPublishSource.ApplyReplicaDelta(ReplicaDelta delta) => ApplyReplicaDelta(delta);
+
+    void IConversationPublishSource.ReplicaMediaReady() => ReplicaMediaReady();
 }

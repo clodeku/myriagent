@@ -49,6 +49,11 @@ internal interface IConversationPublishSource
 
     /// <summary>其他電腦的對話（複本）的變化（WP4.3 計畫步 15；AgentHub.Replica.cs）：中樞不顯示複本時什麼都不做；例外照常丟出</summary>
     void ApplyReplicaDelta(ReplicaDelta delta);
+
+    /// <summary>複本的媒體來源掛上了（UI 執行緒）：先前沒有來源時畫出去的複本項目補上媒體網址。預設不做事（測試的替身）</summary>
+    void ReplicaMediaReady()
+    {
+    }
 }
 
 /// <summary>彙總提示的種類（<see cref="IConversationPublishSource.ShowPublishNotice"/>）</summary>

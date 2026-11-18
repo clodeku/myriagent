@@ -1809,6 +1809,115 @@ test('anchorShift_變動前整則在上緣以上的才補_依文件順序扣掉�
   assert.equal(L.anchorShift([{ bottom: 0, delta: 5 }], undefined), 0);
 });
 
+// ───── 觸控裝置往上滑看歷史：預留空間（2026-11-18） ─────
+test('olderPlan_照畫面上方還有多少內容決定放、建、預載、向宿主要', () => {
+  const view = 600;
+  const base = { view, pending: 50, built: 0, hasMore: true, loading: false, userScrolled: true, blocked: false };
+  const far = L.olderPlan({ ...base, gap: 20 * view });
+  assert.deepEqual(far, { insert: false, build: false, preload: false, fetch: false }, '離上面還很遠：什麼都不做');
+  assert.equal(L.olderPlan({ ...base, gap: L.OLDER_INSERT_SCREENS * view - 1 }).insert, true);
+  assert.equal(L.olderPlan({ ...base, gap: L.OLDER_INSERT_SCREENS * view }).insert, false);
+  const mid = L.olderPlan({ ...base, gap: L.OLDER_BUILD_SCREENS * view - 1 });
+  assert.deepEqual([mid.insert, mid.build, mid.preload], [false, true, true], '還不必放，先在文件外建、先載圖片');
+  assert.equal(L.olderPlan({ ...base, gap: 0, built: L.OLDER_BUILD_AHEAD }).build, false, '建好沒放的夠多了');
+  assert.equal(L.olderPlan({ ...base, gap: 0, pending: 3, built: 3 }).build, false, '都建好了');
+  assert.equal(L.olderPlan({ ...base, gap: -500 }).insert, true, '畫面已經進到預留空間');
+  // 向宿主要：上方（放進 DOM 的＋還沒放的估計）不夠多、使用者往上捲過、沒有在等、沒有被 /clear 擋著
+  const low = { ...base, gap: view, pending: 10 };
+  assert.equal(L.olderPlan(low).fetch, true);
+  assert.equal(L.olderPlan({ ...low, pending: Math.ceil(L.OLDER_FETCH_SCREENS * view / L.OLDER_EST_ITEM_PX) }).fetch, false, '還沒放的還很多');
+  for (const off of [{ hasMore: false }, { loading: true }, { userScrolled: false }, { blocked: true }]) assert.equal(L.olderPlan({ ...low, ...off }).fetch, false, JSON.stringify(off));
+  assert.equal(L.olderPlan({ ...low, userScrolled: false, gap: -40 }).fetch, true, '還沒往上捲過，但內容不滿一個畫面、看得到預留空間：照樣要');
+  assert.equal(L.olderPlan({ ...low, pending: 0 }).insert, false);
+  assert.equal(L.olderPlan({ ...low, pending: 0 }).fetch, true, '都放完了、宿主還有：照樣要');
+  // 壞的輸入
+  assert.deepEqual(L.olderPlan(null), { insert: false, build: false, preload: false, fetch: false });
+  assert.deepEqual(L.olderPlan({ ...base, view: 0, gap: 0 }), { insert: false, build: false, preload: false, fetch: false });
+  assert.equal(L.olderPlan({ ...base, gap: NaN, pending: 2.5, built: -1 }).insert, false, '則數不是正整數當成 0');
+});
+
+test('olderPadTarget_宿主還有就留整段_只剩還沒放的照平均高度估_都沒有是0', () => {
+  assert.equal(L.olderPadTarget({ pending: 0, hasMore: true, blocked: false }), L.OLDER_RUNWAY_PX);
+  assert.equal(L.olderPadTarget({ pending: 30, hasMore: true, blocked: false, avg: 10 }), L.OLDER_RUNWAY_PX);
+  assert.equal(L.olderPadTarget({ pending: 0, hasMore: true, blocked: true }), 0, '藏著 /clear 之前的項目：不往前載入');
+  assert.equal(L.olderPadTarget({ pending: 0, hasMore: false }), 0);
+  assert.equal(L.olderPadTarget({ pending: 10, hasMore: false, avg: 200 }), Math.ceil(10 * 200 * L.OLDER_TAIL_FACTOR) + L.OLDER_TAIL_SLACK_PX);
+  assert.equal(L.olderPadTarget({ pending: 10, hasMore: true, blocked: true, avg: 200 }), Math.ceil(10 * 200 * L.OLDER_TAIL_FACTOR) + L.OLDER_TAIL_SLACK_PX, '被擋著但分界之後還有沒放的');
+  assert.equal(L.olderPadTarget({ pending: 5000, hasMore: false, avg: 400 }), L.OLDER_RUNWAY_PX, '不超過整段');
+  assert.ok(L.olderPadTarget({ pending: 4, hasMore: false }) > L.OLDER_TAIL_SLACK_PX, '沒有平均高度時用估計的');
+  assert.equal(L.olderPadTarget(null), 0);
+});
+
+test('olderPadSettle_沒有更早的就收掉_該有時差很多才調', () => {
+  assert.equal(L.olderPadSettle(500, 0, 600), 0);
+  assert.equal(L.olderPadSettle(0, 0, 600), null);
+  assert.equal(L.olderPadSettle(0.4, 0, 600), null);
+  const t = L.OLDER_RUNWAY_PX;
+  assert.equal(L.olderPadSettle(t, t, 600), null);
+  assert.equal(L.olderPadSettle(t * 0.8, t, 600), null, '少一點點不調（每調一次都要改 scrollTop）');
+  assert.equal(L.olderPadSettle(t * 0.7, t, 600), t);
+  assert.equal(L.olderPadSettle(0, t, 600), t);
+  assert.equal(L.olderPadSettle(4000, 2000, 600), 2000, '多出一半再加一個畫面：縮回來');
+  assert.equal(L.olderPadSettle(3500, 2000, 600), null);
+  assert.equal(L.olderPadSettle(NaN, 10, 600), null);
+});
+
+test('olderPadAfter_預留空間吸收項目區長高的量_不夠回null', () => {
+  assert.equal(L.olderPadAfter(1000, 300), 700);
+  assert.equal(L.olderPadAfter(1000, 1000), 0);
+  assert.equal(L.olderPadAfter(1000, 1000.5), null);
+  assert.equal(L.olderPadAfter(1000, -200), 1200, '上方變矮：預留空間跟著變高');
+  assert.equal(L.olderPadAfter(0, 0), 0);
+  assert.equal(L.olderPadAfter(NaN, 1), null);
+  assert.equal(L.olderPadAfter(1, undefined), null);
+});
+
+test('olderBatchNext_太久減半_很快多放一則_快露出空白時用比較寬的時間', () => {
+  assert.equal(L.olderBatchNext(4, L.OLDER_STEP_MS + 1), 2);
+  assert.equal(L.olderBatchNext(1, 999), 1);
+  assert.equal(L.olderBatchNext(4, L.OLDER_STEP_MS / 2 - 0.1), 5);
+  assert.equal(L.olderBatchNext(L.OLDER_BATCH_MAX, 0), L.OLDER_BATCH_MAX);
+  assert.equal(L.olderBatchNext(4, L.OLDER_STEP_MS * 0.75), 4);
+  assert.equal(L.olderBatchNext(4, L.OLDER_STEP_MS + 1, L.OLDER_RUSH_MS), 4, '趕的時候照趕的時間算');
+  assert.equal(L.olderBatchNext(4, L.OLDER_RUSH_MS + 1, L.OLDER_RUSH_MS), 2);
+  assert.equal(L.olderBatchNext(0, 1), 2);
+  assert.equal(L.olderBatchNext(3, NaN), 3);
+});
+
+test('olderRush與olderSnapWanted與touchRestIn', () => {
+  assert.equal(L.olderRush(599, 600), true);
+  assert.equal(L.olderRush(600, 600), false);
+  assert.equal(L.olderRush(-10, 600), true);
+  assert.equal(L.olderRush(NaN, 600), false);
+  // 整個畫面都在預留空間裡才帶回去；還看得到訊息時就地填
+  assert.equal(L.olderSnapWanted(-601, 600), true);
+  assert.equal(L.olderSnapWanted(-600, 600), false);
+  assert.equal(L.olderSnapWanted(-289, 550), false, '撞到頂、預留空間剩一點點：不跳');
+  assert.equal(L.olderSnapWanted(100, 600), false);
+  assert.equal(L.olderSnapWanted(-700, 0), false);
+  // 還要多久才算停下
+  assert.equal(L.touchRestIn({ touching: true, touchEndAt: 0, lastScrollAt: 0 }, 10), null, '手指還按著：放開時另外會叫');
+  assert.equal(L.touchRestIn({ touching: false, touchEndAt: 1000, lastScrollAt: 1100 }, 1150), L.SCROLL_IDLE_MS - 50);
+  assert.equal(L.touchRestIn({ touching: false, touchEndAt: 1000, lastScrollAt: 1100 }, 1100 + L.SCROLL_IDLE_MS + 5), 0);
+  assert.equal(L.touchRestIn({ touching: false, touchEndAt: 1000, lastScrollAt: 3990 }, 1000 + L.MOMENTUM_MAX_MS - 20), 20, '放開太久就不算慣性了');
+  assert.equal(L.touchRestIn({ touching: false, touchEndAt: null, lastScrollAt: null }, 5), 0);
+  assert.equal(L.touchRestIn(null, 5), null);
+});
+
+test('itemImageUrls_代理的圖片_附件的縮圖_回覆裡的img_不重複_不取data', () => {
+  const item = {
+    html: '<p>看圖 <img src="/m/k1?s=160&amp;v=1" alt="a"></p><p><img alt="b" src="/m/k2"><img src="data:image/png;base64,AAAA"><img src="/m/k2"></p>',
+    media: [{ url: '/m/k3', kind: 'image' }, { url: '/m/vid', kind: 'video' }, null, { url: '/m/k3', kind: 'image' }],
+    attachments: [{ kind: 'Image', thumbUrl: '/t/a1?s=320', url: '/m/a1' }, { kind: 'Image', url: '/m/a2' }, { kind: 'Video', thumbUrl: '/t/v1?s=320', url: '/m/v1' }, { kind: 'File', url: '/f/x' }, null],
+  };
+  assert.deepEqual(L.itemImageUrls(item), ['/m/k3', '/t/a1?s=320', '/m/a2', '/t/v1?s=320', '/m/k1?s=160&v=1', '/m/k2']);
+  assert.deepEqual(L.itemImageUrls({ html: '<img src="https://myriagent.local/media?path=C%3A%5Ca.png">', media: [{ url: 'blob:x', kind: 'image' }, { url: '//evil.example/a.png', kind: 'image' }, { url: 'javascript:1', kind: 'image' }] }),
+    ['https://myriagent.local/media?path=C%3A%5Ca.png']);
+  assert.deepEqual(L.itemImageUrls({ html: '<p>沒有圖</p>' }), []);
+  assert.deepEqual(L.itemImageUrls(null), []);
+  assert.deepEqual(L.itemImageUrls({ media: 'x', attachments: 3, html: 5 }), []);
+});
+
 // ───── 第十批：延伸與委派的關聯（liverules.nestFamilies、originLink） ─────
 test('liverules：側欄的子對話掛在主對話底下，一家子排在最上面那一列的位置；主對話不在清單裡、搜尋中照原本的順序', () => {
   const rows = [

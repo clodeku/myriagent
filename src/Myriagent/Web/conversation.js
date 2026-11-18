@@ -8,7 +8,7 @@ import { openMenu, openDialog, confirmDialog, choiceDialog, toast, spinner } fro
 import {
   originOf, deviceOf, deviceLine, statusLine, composerGate, cardGate, deleteConfirmText, deleteProgramsCheckbox, policyChoices, needsLocalOnlyConfirm, LOCAL_ONLY_CONFIRM_TEXT, loadChunks, LAZY_BATCH, loadRetryDelay, LOAD_RETRY_MS,
   attachGate, folderPickerGate, ownerRunning, mediaPolicyNote, peerOf, controllable, peerDraftDevices, peerDraftAccount, clearBoundary,
-  latestPrompt, promptHistory, promptLine, itemTimeText, itemTimeTitle, dayKey, backgroundLine, backgroundStopMenu, detailTasks, programsView, mergeHeaderLists, missingHeaderLists, HEADER_LISTS_REOPEN_MS, touchUnsticks, touchScrolling,
+  latestPrompt, promptHistory, promptLine, itemTimeText, itemTimeTitle, dayKey, backgroundLine, backgroundStopMenu, detailTasks, programsView, mergeHeaderLists, missingHeaderLists, HEADER_LISTS_REOPEN_MS, touchUnsticks, touchScrolling, olderPlan, olderPadTarget, olderPadSettle, olderPadAfter, olderBatchNext, olderSnapWanted, olderRush, touchRestIn, itemImageUrls, OLDER_PRELOAD_ITEMS, OLDER_STEP_MS, OLDER_RUSH_MS, OLDER_IMAGE_WAIT_MS, OLDER_RUSH_IMAGE_WAIT_MS,
   remoteAccountMenu, headerAccountId, findAccount, originLink,
 } from './liverules.js';
 import { track } from './cmdtrack.js';
@@ -98,6 +98,21 @@ export class ConvView {
     this.lazyNodes = null;
     this.lazyRaf = 0;
     this.lazyLoad = false;
+    // 觸控裝置往上滑看歷史（liverules 的「預留空間」，2026-11-18）：runway＝這次載入用這個做法；pending＝order 最前面幾則資料已經有、
+    // 節點還沒放進 DOM（節點可能已經在文件外建好：nodes 裡有、isConnected 是 false）；padH＝項目區上方預留空間（padEl）目前的高度；
+    // olderBatch＝一個影格放幾則；padStarved＝預留空間用完了、捲動中不能再放（等靜止補滿）
+    this.runway = false;
+    this.pending = 0;
+    this.padH = 0;
+    this.pumpRaf = 0;
+    this.pumpTimer = 0;
+    this.olderBatch = 2;
+    this.padStarved = false;
+    this.padDone = false;
+    this.lastOlderDelta = 0;
+    // 圖片已經先載進快取的較早項目（id）與還在載的 Image（留著參照，載完就放掉）
+    this.preloaded = new Set();
+    this.preloading = new Set();
     this.hasMore = false;
     this.loadingOlder = false;
     // /clear 的分界（liverules.clearBoundary；order 的索引，-1＝沒有藏）與這個分頁按過「顯示清除前的對話」（applyClear）
@@ -148,7 +163,7 @@ export class ConvView {
       rtt: (ms) => { if (this.composer) this.composer.showRtt(ms); },
       gate: () => this.gate(),
       cardGate: () => this.cardGate(),
-      nodeOf: (itemId) => { this.flushChunks(); return this.nodes.get(itemId) || null; },
+      nodeOf: (itemId) => this.nodeOf(itemId),
       // texts：核准卡「告訴代理改怎麼做」與計畫卡「要調整的地方」打到一半的字（項目 id → 字；重新載入項目時照它還原）
       cards: { pending: new Set(), notes: new Map(), texts: new Map() },
       // 〔遠端〕Assistant 的「複製」：送 copyItem、等伺服器回 clipboard（D7、D42；結果由 markCopied 畫）；沒送出回 false
@@ -466,6 +481,10 @@ export class ConvView {
     this.olderBtn = h('button', { type: 'button', class: 'older-btn' }, h('span', { text: '載入較早的訊息' }));
     this.olderBtn.addEventListener('click', () => { if (this.clearHiding()) this.revealCleared(); else this.loadOlder(); });
     this.olderRow = h('div', { class: 'older', hidden: true }, this.olderBtn);
+    // 觸控裝置：項目區上方的預留空間（較早的項目放進來時它跟著縮，看著的內容不動；liverules 的「預留空間」）。
+    // 滑得比載入快、畫面進到這一段時，黏在畫面上緣的那一行說明正在載入
+    this.padNote = h('div', { class: 'older-pad-note', role: 'status' }, h('span', { text: '載入較早的訊息…' }));
+    this.padEl = h('div', { class: 'older-pad', hidden: true }, this.padNote);
     this.empty = h('div', { class: 'draft', hidden: true });
     this.itemsEl = h('div', { class: 'items' });
     this.runText = h('span', { class: 'run-text' });
@@ -502,7 +521,7 @@ export class ConvView {
     this.loadWatch = 0;
     // 送出中的訊息另放一層、排在所有項目之後：等待期間代理新增的項目（插入這一輪時）不會排到它後面
     this.sendingEl = h('div', { class: 'sending-list' });
-    this.thread = h('div', { class: 'thread' }, this.olderRow, this.loadingEl, this.empty, this.itemsEl, this.sendingEl, this.runEl);
+    this.thread = h('div', { class: 'thread' }, this.olderRow, this.loadingEl, this.empty, this.padEl, this.itemsEl, this.sendingEl, this.runEl);
     this.buildPromptBar();
     this.scroller = h('div', { class: 'scroller' }, this.thread);
     this.jumpLabel = h('span', { text: '最新' });
@@ -551,7 +570,7 @@ export class ConvView {
     this.scroller.addEventListener('touchend', (e) => this.onTouch(e, 'end'), { passive: true });
     this.scroller.addEventListener('touchcancel', (e) => this.onTouch(e, 'end'), { passive: true });
     // 沒有捲動錨定的瀏覽器（iOS Safari 26 以前）：上方的項目變高（延遲載入的圖片、圖表）時自己補，看著的內容不跳（scrollanchor.js）
-    this.anchor = new ScrollAnchor(this.scroller, this.itemsEl, () => !this.stick && this.visible);
+    this.anchor = new ScrollAnchor(this.scroller, this.itemsEl, () => !this.stick && this.visible, (shift) => this.absorbShift(shift));
     // 內容長高（串流、圖片載入、展開、執行列的輸出打開）或窗格變矮（分割、抽屜）時，貼底的對話維持在最底。
     // ResizeObserver 在瀏覽器排完版之後才呼叫，這時讀 scrollHeight 不必再排一次版。串流的更新另由 app.js 提早套用後先貼好
     // （pinTarget／pinTo：在影格之前捲，捲動事件才不用多等一格），到這裡已經在最底、什麼都不做；影格先到的那幾次照舊靠它
@@ -563,7 +582,7 @@ export class ConvView {
     this.headObs.observe(this.root);
     this.headObs.observe(this.titleText);
     this.olderObs = new IntersectionObserver((ents) => {
-      if (ents.some((e) => e.isIntersecting) && this.hasMore && !this.loadingOlder && this.visible && this.loaded && this.userScrolled) this.loadOlder();
+      if (ents.some((e) => e.isIntersecting) && this.hasMore && !this.loadingOlder && this.visible && this.loaded && this.userScrolled && !this.runway) this.loadOlder();
     }, { root: this.scroller, rootMargin: '200px 0px 0px 0px' });
     this.olderObs.observe(this.olderRow);
 
@@ -573,6 +592,7 @@ export class ConvView {
       if (!t || !this.root.contains(t)) return;
       e.preventDefault();
       this.flushChunks(); // 分批載入還沒補完時，燈箱的清單也要含較早的圖片
+      this.flushOlder();
       const scope = this.composer.el.contains(t) ? this.composer.el : this.thread;
       const list = Array.from(scope.querySelectorAll('[data-lb-url]'));
       openLightbox(list.map((n) => ({ url: n.dataset.lbUrl, name: n.dataset.lbName || '', path: n.dataset.lbPath || null, conversationId: this.id })), Math.max(0, list.indexOf(t)), t);
@@ -635,6 +655,7 @@ export class ConvView {
     this.minimap.request();
     this.tick(Date.now());
     this.scheduleLazy(); // 在背景載入的分頁：切過來才把先不排版的項目換回實際高度
+    this.requestOlderPump(); // 觸控裝置：看不到的期間沒放進 DOM 的較早項目接著放
     this.armLoadWatch();
   }
 
@@ -715,6 +736,7 @@ export class ConvView {
     clearTimeout(this.turnSumTimer);
     cancelAnimationFrame(this.turnEndRaf);
     cancelAnimationFrame(this.olderRaf);
+    this.cancelOlderPump();
     this.anchor.destroy();
     this.cancelChunks();
     this.cancelLazy();
@@ -820,6 +842,21 @@ export class ConvView {
     // 觸控的瀏覽器版（項目一律照實際高度排版，chat.css）：載入時新建的項目先帶 it-lazy（content-visibility: auto，畫面外的先不排版），
     // 第一個畫面不必等整批排版完；之後 nextLazy 逐批換回實際高度
     this.lazyLoad = isHub && fullLayout();
+    // 觸控裝置（同上：每次載入時才問）往上滑看歷史用預留空間的做法（liverules 的「預留空間」）
+    this.cancelOlderPump();
+    const runway = fullLayout();
+    if (runway !== this.runway) {
+      // 換了做法：捲動容器的原生錨定跟著開關（chat.css 的 .scroller.runway），自己的錨定重新判斷要不要做（它只在第一次回呼時看一次）
+      this.runway = runway;
+      this.scroller.classList.toggle('runway', runway);
+      this.anchor.destroy();
+      this.anchor = new ScrollAnchor(this.scroller, this.itemsEl, () => !this.stick && this.visible, (shift) => this.absorbShift(shift));
+    }
+    this.pending = 0;
+    this.padStarved = false;
+    this.olderBatch = 2;
+    this.preloaded.clear();
+    this.preloading.clear();
     this.stopPeek();
     this.items.clear();
     this.nodes.clear();
@@ -838,8 +875,18 @@ export class ConvView {
     // 桌面（與小對話）一次建完；瀏覽器版的大對話先建最後一批（畫面看得到的），較早的每個影格往前補一批，
     // 免得收到整個對話的那一個工作卡住主執行緒（D39）。項目資料與順序一開始就完整，只有節點晚建
     const ranges = loadChunks(list.length, isHub ? 'hub' : 'desktop');
-    if (ranges.length) this.itemsEl.append(this.buildNodes(list, ranges[0]));
-    if (ranges.length > 1) this.chunks = { list, ranges: ranges.slice(1) };
+    // 觸控裝置：第一批的圖片馬上載（不等捲到附近：之後往上滑時尺寸已經定了，不會把看著的內容往下推）
+    this.ctx.eagerMedia = this.runway;
+    try {
+      if (ranges.length) this.itemsEl.append(this.buildNodes(list, ranges[0]));
+    } finally {
+      this.ctx.eagerMedia = false;
+    }
+    if (ranges.length > 1) {
+      // 觸控裝置：第一批之前的不在這裡每個影格補，由 pumpOlder 照捲動的位置一小批一小批放（和之後載入的較早一頁同一條路）
+      if (this.runway) this.pending = ranges[0][0];
+      else this.chunks = { list, ranges: ranges.slice(1) };
+    }
     this.hasMore = !!msg.hasMore;
     // 整份重建：還在路上的 olderItems 是舊視窗的（loadOlder 之後先到整份 conversation），到了也不採用（合併前審查 LIVE-2）
     this.loadingOlder = false;
@@ -857,12 +904,14 @@ export class ConvView {
     this.composer.uploadsSentElsewhere(list, false);
     this.composer.draftSync.loaded(); // 其他電腦、瀏覽器版打到一半的字（draftsync.js）
     this.afterChange(true);
+    this.setPad(this.padTarget());
     this.setStick(true); // 經過 setStick 才會一併收起「最新」鈕（重送整個對話時可能正顯示著）
     this.scrollToBottom();
     requestAnimationFrame(() => { if (this.stick) this.scrollToBottom(); });
     this.maybeFocusCard();
     if (this.chunks) this.chunkRaf = requestAnimationFrame(() => this.nextChunk());
     this.scheduleLazy();
+    this.requestOlderPump();
   }
 
   /** 建 list[start, end) 的節點（登記到 nodes），回傳待插入的片段 */
@@ -933,6 +982,334 @@ export class ConvView {
     if (this.lazyRaf) cancelAnimationFrame(this.lazyRaf);
     this.lazyRaf = 0;
     this.lazyNodes = null;
+  }
+
+  // ───── 觸控裝置往上滑看歷史：預留空間（規則與由來在 liverules.js 的「預留空間」一節） ─────
+
+  /** 這則項目的節點（要在畫面上的：還沒放進 DOM 的較早項目先整批放進去）；不認得的 id 回 null */
+  nodeOf(itemId) {
+    const node = this.nodes.get(itemId);
+    if (node && node.isConnected) return node;
+    if (!this.items.has(itemId)) return node || null;
+    this.flushChunks();
+    this.flushOlder();
+    return this.nodes.get(itemId) || null;
+  }
+
+  /** 還沒放進 DOM、而且放得進去的較早項目有幾則（/clear 分界之前的藏著，不放） */
+  olderAvail() {
+    return Math.max(0, this.pending - Math.max(0, this.clearAt));
+  }
+
+  /** 預留空間該多高（liverules.olderPadTarget）；宿主沒有更早的時要 DOM 裡平均一則多高（讀版面：只在靜止、載入、整批放完時叫） */
+  padTarget() {
+    if (!this.runway) return 0;
+    const pending = this.olderAvail();
+    const tail = pending > 0 && !this.hasMore;
+    const shown = tail ? this.itemsEl.childElementCount : 0;
+    const avg = shown ? this.itemsEl.getBoundingClientRect().height / shown : 0;
+    return olderPadTarget({ pending, hasMore: this.hasMore, blocked: this.clearAt >= 0, avg });
+  }
+
+  setPad(height) {
+    const v = Math.max(0, height);
+    if (v === this.padH) return;
+    this.padH = v;
+    this.padEl.style.height = v + 'px';
+    setHidden(this.padEl, v <= 0);
+  }
+
+  /** 預留空間裡的說明：還有更早的才寫「載入較早的訊息…」（都放完了、只是還沒收掉的那一段不寫） */
+  markPadDone() {
+    const done = this.olderAvail() === 0 && !(this.hasMore && this.clearAt < 0);
+    if (done !== this.padDone) { this.padDone = done; this.padEl.classList.toggle('done', done); }
+  }
+
+  /**
+   * 捲動錨定要補的位移（scrollanchor.js：上方的項目變高變矮）先由預留空間吸收：它跟著縮放，捲動內容的高度不變，不必改 scrollTop。
+   * 沒有預留空間、或不夠縮時回 false（照舊寫 scrollTop）
+   */
+  absorbShift(shift) {
+    if (!this.runway || this.padH <= 0) return false;
+    const next = olderPadAfter(this.padH, shift);
+    if (next === null) return false;
+    this.setPad(next);
+    return true;
+  }
+
+  /** 做一件會改變項目區高度的事，高度的變化由預留空間吸收；吸收不了、又不在觸控捲動中就照原本離底的距離補回 scrollTop */
+  withPad(change) {
+    const sc = this.scroller;
+    const scrolling = this.isTouchScrolling();
+    const fromBottom = scrolling ? 0 : sc.scrollHeight - sc.scrollTop;
+    const before = this.itemsEl.getBoundingClientRect().height;
+    change();
+    const delta = this.itemsEl.getBoundingClientRect().height - before;
+    if (Math.abs(delta) < 0.01) return;
+    this.anchor.resync();
+    const next = this.padH > 0 ? olderPadAfter(this.padH, delta) : null;
+    if (next !== null) { this.setPad(next); return; }
+    if (scrolling) return;
+    if (this.stick) this.scrollToBottom();
+    else sc.scrollTop = sc.scrollHeight - fromBottom;
+  }
+
+  /**
+   * 靜止時（手指放開、慣性停下）把預留空間調回該有的高度：還有更早的就補滿，沒有就收掉。這時改 scrollTop 是安全的，
+   * 看著的內容照原本離底的距離留在原位
+   */
+  settlePad() {
+    const sc = this.scroller;
+    const next = olderPadSettle(this.padH, this.padTarget(), sc.clientHeight);
+    if (next === null) return;
+    const fromBottom = sc.scrollHeight - sc.scrollTop;
+    this.setPad(next);
+    if (this.stick) this.scrollToBottom();
+    else sc.scrollTop = sc.scrollHeight - fromBottom;
+  }
+
+  /** order 第 index 則的節點：還沒建就在文件外建好（圖片馬上開始載，載好了再叫一次 pumpOlder） */
+  olderNode(index) {
+    const id = this.order[index];
+    let node = this.nodes.get(id);
+    if (node) return node;
+    this.ctx.eagerMedia = true;
+    try {
+      node = createItem(this.items.get(id), this.ctx);
+    } finally {
+      this.ctx.eagerMedia = false;
+    }
+    if (index < this.clearAt) node.classList.add('pre-clear');
+    this.nodes.set(id, node);
+    const imgs = Array.from(node.querySelectorAll('img'));
+    node._preImgs = imgs;
+    node._waitImgs = imgs.filter((img) => !img.complete);
+    node._builtAt = performance.now();
+    const wake = () => this.requestOlderPump();
+    for (const img of node._waitImgs) {
+      img.addEventListener('load', wake, { once: true });
+      img.addEventListener('error', wake, { once: true });
+    }
+    return node;
+  }
+
+  /**
+   * 還沒放進 DOM 的較早項目裡最接近的 OLDER_PRELOAD_ITEMS 則：圖片先載進瀏覽器的快取（只發請求、不建節點）。
+   * 之後在文件外建節點時多半已經有了，不必為了等圖片（尺寸定了才放）停下來
+   */
+  preloadOlderImages() {
+    const floor = Math.max(0, this.clearAt);
+    const to = Math.max(floor, this.pending - OLDER_PRELOAD_ITEMS);
+    for (let i = this.pending - 1; i >= to; i--) {
+      const id = this.order[i];
+      if (this.preloaded.has(id) || this.nodes.has(id)) continue;
+      this.preloaded.add(id);
+      for (const url of itemImageUrls(this.items.get(id))) {
+        const img = new Image();
+        const done = () => this.preloading.delete(img);
+        img.decoding = 'async';
+        img.addEventListener('load', done, { once: true });
+        img.addEventListener('error', done, { once: true });
+        this.preloading.add(img);
+        img.src = url;
+      }
+    }
+  }
+
+  /** 文件外建好的節點可以放進 DOM 了沒：圖片都有結果了（尺寸定了），或已經等了 wait 毫秒 */
+  olderReady(node, now, wait) {
+    const waiting = node._waitImgs;
+    if (!waiting || !waiting.length) return true;
+    node._waitImgs = waiting.filter((img) => !img.complete);
+    return !node._waitImgs.length || now - node._builtAt >= wait;
+  }
+
+  /** 還沒放進 DOM 的較早項目裡，從最接近 DOM 的那一則起連續有幾則已經建好節點 */
+  olderBuilt() {
+    const floor = Math.max(0, this.clearAt);
+    let n = 0;
+    for (let i = this.pending - 1; i >= floor && this.nodes.has(this.order[i]); i--) n++;
+    return n;
+  }
+
+  requestOlderPump() {
+    if (!this.runway || this.pumpRaf || !this.loaded || !this.visible) return;
+    // 沒有更早的要放、宿主也沒有了、預留空間已經收掉：沒事可做（歷史全部在 DOM 裡的對話捲動時不必每個影格進來看一次）
+    if (this.padH <= 0 && this.olderAvail() === 0 && !(this.hasMore && this.clearAt < 0)) return;
+    this.pumpRaf = requestAnimationFrame(() => this.pumpOlder());
+  }
+
+  /** 過一會兒再看一次（等觸控捲動停下、等圖片）：不必每個影格都看 */
+  pumpLater(ms) {
+    if (this.pumpTimer) return;
+    this.pumpTimer = setTimeout(() => { this.pumpTimer = 0; this.requestOlderPump(); }, ms);
+  }
+
+  cancelOlderPump() {
+    if (this.pumpRaf) cancelAnimationFrame(this.pumpRaf);
+    this.pumpRaf = 0;
+    clearTimeout(this.pumpTimer);
+    this.pumpTimer = 0;
+  }
+
+  /**
+   * 每個影格一小段（OLDER_STEP_MS）：把建好的較早項目放進項目區最前面、在文件外建接下來的節點、快沒有了就向宿主要更早的一頁
+   * （liverules.olderPlan 照畫面上方還有多少內容決定）。靜止時先把預留空間補滿，停在預留空間裡的畫面帶回第一則訊息。
+   * 捲動、圖片載好、較早的一頁到了、對話顯示出來時叫它（requestOlderPump）；有事還沒做完自己排下一格
+   */
+  pumpOlder() {
+    this.pumpRaf = 0;
+    if (!this.runway || !this.loaded || !this.visible) return;
+    const sc = this.scroller;
+    const view = sc.clientHeight;
+    if (!view) return;
+    const scrolling = this.isTouchScrolling();
+    if (!scrolling) {
+      this.padStarved = false;
+      this.settlePad();
+    }
+    let gap = sc.getBoundingClientRect().top - this.itemsEl.getBoundingClientRect().top;
+    if (!scrolling && this.padH > 0 && !this.stick && olderSnapWanted(gap, view)) {
+      sc.scrollTop -= gap;
+      gap = 0;
+    }
+    const t0 = performance.now();
+    const blocked = this.clearAt >= 0;
+    // 快要露出預留空間時這一格多做一點、圖片少等一點
+    const rush = olderRush(gap, view);
+    const budget = rush ? OLDER_RUSH_MS : OLDER_STEP_MS;
+    const state = () => ({ gap, view, pending: this.olderAvail(), built: this.olderBuilt(), hasMore: this.hasMore, loading: this.loadingOlder, userScrolled: this.userScrolled, blocked });
+    let plan = olderPlan(state());
+    let again = false;
+    if (plan.insert && !(scrolling && this.padStarved)) {
+      const placed = this.insertOlder(scrolling, budget, rush ? OLDER_RUSH_IMAGE_WAIT_MS : OLDER_IMAGE_WAIT_MS);
+      if (placed > 0) { again = true; gap += this.lastOlderDelta; plan = olderPlan(state()); }
+    }
+    // 在文件外建接下來的節點：這一格還有時間就一則一則建（已經放了一批、時間用完就留到下一格；什麼都還沒做的那一格至少建一則）
+    let built = 0;
+    while (plan.build && ((built === 0 && !again) || performance.now() - t0 < budget)) {
+      this.olderNode(this.pending - this.olderBuilt() - 1);
+      built++;
+      plan = olderPlan(state());
+    }
+    if (built) again = true;
+    if (plan.preload) this.preloadOlderImages();
+    if (plan.fetch) this.loadOlder();
+    this.markPadDone();
+    if (again) { this.requestOlderPump(); return; }
+    // 要放、但最接近的那一則還在等圖片：過一會兒再看
+    if (plan.insert && !(scrolling && this.padStarved)) { this.pumpLater(100); return; }
+    // 捲動中預留空間不對（用完了、該補該收）：等停下來的那一刻（手指還按著就等放開，onTouch 會叫）
+    if (scrolling && (this.padStarved || this.padOff())) {
+      const rest = touchRestIn(this.touch, performance.now());
+      if (rest !== null) this.pumpLater(rest + 8);
+    }
+  }
+
+  /** 預留空間的高度和該有的差很多（不讀版面的粗略判斷：捲動中只用來決定要不要等靜止再調） */
+  padOff() {
+    const more = this.olderAvail() > 0 || (this.hasMore && this.clearAt < 0);
+    return more ? this.padH < 1 : this.padH >= 1;
+  }
+
+  /**
+   * 把建好、圖片也有結果的下一批（最多 olderBatch 則）放進項目區最前面：長高多少、預留空間就縮多少，看著的內容不動、不改 scrollTop。
+   * 預留空間不夠時：捲動中先把這一批拿回來（等靜止補滿再放），靜止時照原本離底的距離補回 scrollTop。回放了幾則
+   */
+  insertOlder(scrolling, budget, imageWait) {
+    const floor = Math.max(0, this.clearAt);
+    const now = performance.now();
+    const nodes = []; // 新到舊
+    for (let i = this.pending - 1; i >= floor && nodes.length < this.olderBatch; i--) {
+      const node = this.nodes.get(this.order[i]);
+      if (!node || !this.olderReady(node, now, imageWait)) break;
+      nodes.push(node);
+    }
+    this.lastOlderDelta = 0;
+    if (!nodes.length) return 0;
+    const sc = this.scroller;
+    const fromBottom = scrolling ? 0 : sc.scrollHeight - sc.scrollTop;
+    const before = this.itemsEl.getBoundingClientRect().height;
+    const frag = document.createDocumentFragment();
+    for (let k = nodes.length - 1; k >= 0; k--) frag.append(nodes[k]);
+    this.itemsEl.prepend(frag);
+    this.pending -= nodes.length;
+    this.paintTurnRules(); // 同載入較早的訊息：量高度之前畫（原本最上面那一則這時才有前一段）
+    const delta = this.itemsEl.getBoundingClientRect().height - before;
+    const next = olderPadAfter(this.padH, delta);
+    if (next === null && scrolling) {
+      for (const n of nodes) n.remove();
+      this.pending += nodes.length;
+      this.padStarved = true;
+      return 0;
+    }
+    this.anchor.resync();
+    this.lastOlderDelta = delta;
+    if (next !== null) {
+      this.setPad(next);
+    } else {
+      this.setPad(0);
+      if (this.stick) this.scrollToBottom();
+      else sc.scrollTop = sc.scrollHeight - fromBottom;
+    }
+    // 在文件外載入失敗的圖片（error 事件到不了 window）：放進來之後重新指派網址，照常走自動重試與回報（mediaretry.js）
+    for (const node of nodes) {
+      for (const img of node._preImgs || []) if (img.complete && !img.naturalWidth && img.getAttribute('src')) img.src = img.getAttribute('src');
+      node._preImgs = null;
+      node._waitImgs = null;
+    }
+    this.olderBatch = olderBatchNext(nodes.length, performance.now() - now, budget);
+    this.minimap.request();
+    return nodes.length;
+  }
+
+  /**
+   * 還沒放進 DOM 的較早項目一次放完（要找某一則的節點、要整份圖片清單、正在往前找最近的指令：使用者按了東西在等，不是在捲動）；
+   * 看著的內容照原本離底的距離留在原位
+   */
+  flushOlder() {
+    const floor = Math.max(0, this.clearAt);
+    if (!this.runway || this.pending <= floor) return;
+    const sc = this.scroller;
+    const fromBottom = sc.scrollHeight - sc.scrollTop;
+    const frag = document.createDocumentFragment();
+    for (let i = floor; i < this.pending; i++) {
+      const node = this.olderNode(i);
+      node._preImgs = null;
+      node._waitImgs = null;
+      frag.append(node);
+    }
+    this.itemsEl.prepend(frag);
+    this.pending = floor;
+    this.paintTurnRules();
+    this.setPad(this.padTarget());
+    if (this.stick) this.scrollToBottom();
+    else sc.scrollTop = sc.scrollHeight - fromBottom;
+    this.anchor.resync();
+    this.minimap.request();
+  }
+
+  /**
+   * 觸控裝置：較早的這一頁只先記資料、排在 order 最前面（pending），節點由 pumpOlder 照捲動的位置一小批一小批建好、放進 DOM
+   */
+  queueOlder(msg) {
+    this.loadingOlder = false;
+    this.olderBefore = null;
+    const ids = [];
+    for (const it of msg.items || []) {
+      if (!it || !it.id || this.items.has(it.id)) continue;
+      this.items.set(it.id, it);
+      ids.push(it.id);
+    }
+    this.order = ids.concat(this.order);
+    this.pending += ids.length;
+    this.hasMore = !!msg.hasMore;
+    // 分界的索引跟著往後移、可能多了清除提示；每一輪的分隔線也可能變（原本最前面那一則有了前一段）：高度的變化由預留空間吸收
+    this.withPad(() => { this.applyClear(); this.paintTurnRules(); });
+    this.renderPrompt();
+    // 正在往前找最近的指令（按了「捲到這則訊息」）：整頁直接放進去再接著找
+    if (this.promptSeek) { this.flushOlder(); this.continuePromptSeek(); }
+    this.requestOlderPump();
   }
 
   /** 把較早的節點插到最前面：貼底的照舊貼底，往上捲過的停在原本看的位置 */
@@ -1119,6 +1496,8 @@ export class ConvView {
     this.items.set(item.id, item);
     if (prev) {
       const node = this.nodes.get(item.id);
+      // 觸控裝置還沒建節點的較早項目（pending）：資料已經換了，放進 DOM 時照最新的建
+      if (!node) return false;
       const next = updateItem(node, item, prev, this.ctx);
       if (next !== node) {
         if (node.classList.contains('pre-clear')) next.classList.add('pre-clear');
@@ -1159,7 +1538,11 @@ export class ConvView {
     if (node) node.remove();
     this.nodes.delete(id);
     if (clearBoundary([this.items.get(id)]) === 0) this.clearDirty = true;
-    if (this.items.delete(id)) this.order = this.order.filter((x) => x !== id);
+    if (this.items.delete(id)) {
+      const at = this.order.indexOf(id);
+      if (at >= 0 && at < this.pending) this.pending--;
+      this.order = this.order.filter((x) => x !== id);
+    }
   }
 
   /**
@@ -1168,6 +1551,8 @@ export class ConvView {
    */
   prependOlder(msg) {
     if (!this.loadingOlder || (typeof msg.beforeId === 'string' && msg.beforeId !== this.olderBefore)) return;
+    // 觸控裝置：只先記資料，節點由 pumpOlder 一小批一小批放（捲動中也放，不必等停下來）
+    if (this.runway) { this.queueOlder(msg); return; }
     // 觸控捲動中（往上滑到頂端附近自動載入的那一頁多半在這時到）：等停下來再插，到時候再檢查一次是不是還在等這一頁
     if (this.isTouchScrolling()) { this.deferOlder(msg); return; }
     this.flushChunks();
@@ -1229,7 +1614,8 @@ export class ConvView {
 
   renderOlder() {
     const hiding = this.clearHiding();
-    this.olderRow.hidden = !this.hasMore && !hiding;
+    // 觸控裝置（預留空間）：較早的自己會接著放，不必按；只有藏著 /clear 之前的項目時留著「顯示清除前的對話」
+    this.olderRow.hidden = this.runway ? !hiding : !this.hasMore && !hiding;
     // 載入中：按鈕上方一條分格的載入列（fx.css 的 .older.loading，只在真的在等宿主回應的期間）
     this.olderRow.classList.toggle('loading', !!this.loadingOlder);
     this.olderBtn.disabled = this.loadingOlder;
@@ -1252,6 +1638,7 @@ export class ConvView {
     this.order.forEach((id, i) => { const n = this.nodes.get(id); if (n) n.classList.toggle('pre-clear', i < this.clearAt); });
     this.renderOlder();
     this.minimap.request();
+    this.requestOlderPump(); // 觸控裝置：分界變了（藏起來、或按了顯示），能放進 DOM 的較早項目跟著變
   }
 
   /** 「顯示清除前的對話」：藏起來的照舊顯示（停在原本看的位置）；清除提示就是載入的第一則時直接往前載入 */
@@ -1489,7 +1876,7 @@ export class ConvView {
    */
   paintTurnRules() {
     const order = this.order;
-    const sig = order.length + '|' + this.nodes.size + '|' + (order[0] || '') + '|' + (order[order.length - 1] || '');
+    const sig = order.length + '|' + this.nodes.size + '|' + this.pending + '|' + (order[0] || '') + '|' + (order[order.length - 1] || '');
     if (sig === this.turnRuleSig) return;
     this.turnRuleSig = sig;
     const rules = new Map(turnRules(order.map((id) => this.items.get(id))).map((r) => [r.id, r.parts]));
@@ -1583,6 +1970,7 @@ export class ConvView {
     // 自己捲到最底引起的那一次捲動事件：一定在最底，不必再讀捲動位置（讀了又要排一次版）
     if (this.autoScrolled) { this.autoScrolled = false; return; }
     this.touch.lastScrollAt = performance.now();
+    this.requestOlderPump();
     const sc = this.scroller;
     const dist = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
     if (dist <= NEAR_BOTTOM) this.setStick(true);
@@ -1594,6 +1982,7 @@ export class ConvView {
    * POS_SHOW_MS 後淡掉。只在停下的那一刻找一次最上面的項目（elementFromPoint），捲動中不讀版面
    */
   onScrollEnd() {
+    this.requestOlderPump(); // 觸控裝置：停下來了（預留空間該補該收）
     clearTimeout(this.posTimer);
     if (this.stick || !this.visible) { setHidden(this.posEl, true); return; }
     const sc = this.scroller;
@@ -1630,6 +2019,7 @@ export class ConvView {
     t.touching = false;
     t.startY = null;
     t.touchEndAt = performance.now();
+    this.requestOlderPump(); // 觸控裝置：放開了，停下來時把預留空間補滿
   }
 
   isTouchScrolling() { return touchScrolling(this.touch, performance.now()); }
@@ -1892,14 +2282,14 @@ export class ConvView {
     const seek = this.promptSeek;
     if (!seek) return;
     const p = this.prompt;
-    const found = !!(p && !p.older && this.nodes.has(p.id));
+    const found = !!(p && !p.older && this.items.has(p.id));
     if (!found && p && this.hasMore) {
       this.loadOlder();
       if (this.loadingOlder) return;
     }
     this.promptSeek = null;
     this.renderPrompt();
-    if (found && seek.jump) this.scrollToItem(this.nodes.get(p.id));
+    if (found && seek.jump) this.scrollToItem(this.nodeOf(p.id));
   }
 
   // ───── 標題列的行數與標題的跑馬燈 ─────
@@ -2501,7 +2891,7 @@ export class ConvView {
   restoreText(text) { this.composer.restoreText(text); }
 
   /** 〔遠端〕copyItem 的結果（liveview）：寫進剪貼簿了標「已複製」；沒寫進去（開了退路框）、被拒或等不到時回到「複製」 */
-  markCopied(itemId, ok = true) { this.flushChunks(); markItemCopied(this.nodes.get(itemId), ok); }
+  markCopied(itemId, ok = true) { markItemCopied(this.nodeOf(itemId), ok); }
 }
 
 function tip(iconName, key, text) {

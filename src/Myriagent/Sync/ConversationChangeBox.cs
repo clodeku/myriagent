@@ -125,6 +125,14 @@ internal interface IConversationUiPort
     /// 實作直接改中樞、不再排隊；丟出的例外讓那一頁的游標不前進（下次重拉）
     /// </summary>
     void ApplyReplicaDelta(ReplicaDelta delta);
+
+    /// <summary>
+    /// 複本的媒體來源掛上了（協商出 media1，<see cref="ConversationChangeBox.ReplicaMedia"/>；任何執行緒）：中樞把先前還沒有來源時
+    /// 畫出去的複本項目補上圖片與影片的網址。預設不做事（測試的替身不必實作）
+    /// </summary>
+    void ReplicaMediaReady()
+    {
+    }
 }
 
 /// <summary>

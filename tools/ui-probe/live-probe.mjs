@@ -17,6 +17,7 @@ import * as HP from './hub-page.mjs';
 import * as LF from './live-fixtures.mjs';
 import * as RF from './remote-fixtures.mjs';
 import { runCollaboratorView, runOwnerCollaborators } from './live-collab.mjs';
+import { runHistoryScroll, installMeter } from './older-scroll.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(here, 'out', 'live');
@@ -4798,6 +4799,35 @@ async function runDesktopReplicaMedia() {
   await HP.closePage(app);
 }
 
+/**
+ * 副本的媒體網址晚到（2026-11-18 使用者回報：桌面載入其他電腦的對話時，圖片影片有時沒顯示）：app 剛啟動時，分頁常在同步連線協商出媒體之前
+ * 就先畫好了，那一批項目沒有媒體網址（附件只有檔名、代理產出的圖片整個不出現）。宿主在來源掛上之後以 item 補送帶網址的同一則
+ * （AgentHub.ReplicaMediaReady），網頁要就地補上圖片、順序不變、不多出項目
+ */
+async function runDesktopReplicaMediaLate() {
+  const id = LF.CONV.running;
+  const key = 'd_B-0f3c9a52b7e94d0c8a61f2d4e5b6c7da';
+  const m1 = { id: 'm1', kind: 'User', status: 'Done', time: NOW - 2 * LF.MIN, html: '<p>看這張</p>', seq: 1,
+    attachments: [{ id: 'x1', name: 'screen.png', kind: 'Image', size: '1 KB', url: null, thumbUrl: null, path: '' }] };
+  const m2 = { id: 'm2', kind: 'Assistant', status: 'Done', time: NOW - LF.MIN, html: '<p>收到</p>', seq: 2 };
+  const app = await openDesktopLive('desktop-replica-media-late', { init: { layout: desktopLayout([id]) }, host: { replica: () => ({ items: [m1, m2] }) } });
+  const { page } = app;
+  const state = () => page.evaluate((sel) => ({
+    order: [...document.querySelectorAll(sel + ' .items > .it')].map((n) => n.dataset.id),
+    imgs: [...document.querySelectorAll(sel + ' .items img')].map((i) => ({ src: i.getAttribute('src'), ok: i.complete && i.naturalWidth > 0 })),
+  }), convSel(id));
+  await until(async () => ((await state()).order.length === 2 ? true : null), 5000);
+  const before = await state();
+  app.host.send({ type: 'item', conversationId: id, item: Object.assign({}, m1, { attachments: [{ id: 'x1', name: 'screen.png', kind: 'Image', size: '1 KB',
+    url: 'https://myriagent.local/m/' + key, thumbUrl: 'https://myriagent.local/t/' + key + '?s=320', path: '' }] }) });
+  app.host.send({ type: 'item', conversationId: id, item: Object.assign({}, m2, { media: [{ url: 'https://myriagent.local/m/' + key, kind: 'image', name: 'screen.png', path: null }] }) });
+  const after = await until(async () => { const st = await state(); return st.imgs.length === 2 && st.imgs.every((i) => i.ok) ? st : null; }, 5000);
+  check('desktopReplicaMediaLate', before.imgs.length === 0 && !!after && after.order.join() === 'm1,m2'
+    && after.imgs.some((i) => i.src === 'https://myriagent.local/t/' + key + '?s=320') && after.imgs.some((i) => i.src === 'https://myriagent.local/m/' + key) && app.csp.length === 0,
+  { before, after, csp: app.csp });
+  await HP.closePage(app);
+}
+
 // ───── 步 12：長工作門檻（S6、D39）與兩種寬度的截圖 ─────
 
 const BIG = LF.convId(31);
@@ -5286,40 +5316,10 @@ async function runMobileRunningScroll() {
     }
   })();
 
-  // 逐影格記錄畫面上緣往下 200px 的那一則在捲動內容裡的位置（畫面位置＋scrollTop）：手指捲動不會改變它，只有上方的排版變了才會；
-  // 程式自己補的 scrollTop（插入較早的項目時停在原位）另外記，扣掉之後還有的位移＝看得到的跳動
-  await page.evaluate((s) => {
-    const sc = document.querySelector(s + ' .scroller');
-    const desc = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
-    const w = window.__jump = { list: [], frames: 0, stop: false, comp: 0 };
-    Object.defineProperty(sc, 'scrollTop', {
-      configurable: true,
-      get() { return desc.get.call(this); },
-      set(v) { const before = desc.get.call(this); desc.set.call(this, v); w.comp += desc.get.call(this) - before; },
-    });
-    let ref = null, prev = 0, compAt = 0;
-    const content = () => ref.getBoundingClientRect().top + desc.get.call(sc);
-    const pick = () => {
-      const r = sc.getBoundingClientRect();
-      let el = document.elementFromPoint(r.left + r.width / 2, r.top + 200);
-      while (el && !(el.classList && el.classList.contains('it'))) el = el.parentElement;
-      ref = el;
-      if (ref) { prev = content(); compAt = w.comp; }
-    };
-    // 在 ResizeObserver 的階段量（這個觀察者比對話的 ScrollAnchor 晚建立，同一格排在它後面）：量到的是這一格補完、要畫出來的樣子。
-    // 上方有東西變高變矮，捲動內容的高度一定跟著變，所以觀察 thread 就不會漏
-    const measure = () => {
-      if (w.stop) return;
-      w.frames++;
-      if (ref && ref.isConnected) {
-        const c = content();
-        const shift = (c - prev) - (w.comp - compAt);
-        if (Math.abs(shift) > 1.5) w.list.push({ id: ref.dataset.id, shift: Math.round(shift), scrollTop: Math.round(desc.get.call(sc)) });
-      }
-      pick();
-    };
-    new ResizeObserver(measure).observe(sc.querySelector('.thread'));
-  }, sel);
+  // 看得到的訊息自己移動（Layout Instability API 的 layout-shift：使用者捲動與同一格補回來的都不算，算到的就是畫面真的跳了）、
+  // 觸控捲動中程式改了幾次 scrollTop（older-scroll.mjs 的 installMeter）。2026-11-18 以前是逐影格比「那一則在捲動內容裡的位置」，
+  // 項目區上方的預留空間縮放時那個位置本來就會變（畫面上沒動），會誤報
+  await page.evaluate(installMeter, [sel, items.length + older.length]);
 
   // 手指慢慢往下拖（內容往上捲）：每拖 90px 停住 220ms，拖到下緣附近停住再放開（不會有慣性），再從上面重新按下
   const box = await page.evaluate((s) => { const r = document.querySelector(s + ' .scroller').getBoundingClientRect(); return { x: r.left + r.width / 2, top: r.top, bottom: r.bottom }; }, sel);
@@ -5341,11 +5341,23 @@ async function runMobileRunningScroll() {
   await cdp.detach().catch(() => {});
   streaming = false;
   await stream;
-  const jumps = await page.evaluate(() => { window.__jump.stop = true; return { list: window.__jump.list, frames: window.__jump.frames }; });
+  const jumps = await page.evaluate(() => { const m = window.__os; m.stop = true; return { list: m.shifts, frames: m.frames, writes: m.writes }; });
   const olderIn = await page.evaluate((s) => !!document.querySelector(s + ' .it[data-id="mo00"]'), sel);
-  check('hubMobileRunningSteady', gestures > 3 && jumps.frames > 100 && jumps.list.length === 0 && olderIn,
-    { gestures, frames: jumps.frames, jumps: jumps.list.length, first: jumps.list.slice(0, 12), olderIn });
+  check('hubMobileRunningSteady', gestures > 3 && jumps.frames > 100 && jumps.list.length === 0 && jumps.writes.length === 0 && olderIn,
+    { gestures, frames: jumps.frames, jumps: jumps.list.length, first: jumps.list.slice(0, 12), writes: jumps.writes.slice(0, 8), olderIn });
   await HP.closePage(app);
+}
+
+/**
+ * 手機一路往上滑過好幾頁歷史（手機往前滑載入歷史訊息時很卡、會跳動閃爍；量法見 older-scroll.mjs）：3 頁共 240 則、圖片晚 80 ms 才回、連續滑不停。較早的項目要在觸控捲動中就放進 DOM（以前要等停下來）、
+ * 全部放得進去、滑得到最前面；捲動中不改 scrollTop、看得到的訊息不自己移動、沒有長時間卡住主執行緒、沒有停在頂端等
+ */
+async function runMobileOlderRunway() {
+  const r = await runHistoryScroll(H, { anchor: 'native', pages: 2, cpu: 1, latency: 120, img: 80, limit: 40000 });
+  check('hubMobileOlderRunway', r.reachedTop && r.shown === r.total && r.placedWhileScrolling >= 100 && r.writesWhileScrolling === 0 && r.shiftsWhileScrolling === 0
+    && r.longMax < 200 && r.wallMs < 1500 && r.errors.length === 0,
+  { shown: r.shown, total: r.total, topAt: r.topAt, flicks: r.flicks, placedWhileScrolling: r.placedWhileScrolling, writesWhileScrolling: r.writesWhileScrolling,
+    shifts: r.shifts, shiftsWhileScrolling: r.shiftsWhileScrolling, shiftList: r.shiftList.slice(0, 4), longTasks: r.longTasks, longMax: r.longMax, wallMs: r.wallMs, blankMs: r.blankMs, errors: r.errors });
 }
 
 /**
@@ -5387,7 +5399,19 @@ async function runMobileScrollSteady() {
   await until(() => page.evaluate((s) => !document.querySelector(s + ' .it-lazy')), 3000);
   const cv = await page.evaluate((s) => [...document.querySelectorAll(s + ' .items > .it')].map((n) => getComputedStyle(n).contentVisibility), sel);
   const lazy = await page.evaluate((s) => document.querySelectorAll(s + ' .it-lazy').length, sel);
-  check('hubMobileItemsFullHeight', cv.length === items.length && cv.every((v) => v === 'visible') && lazy === 0, { count: cv.length, values: [...new Set(cv)], lazy });
+  // 第一批（最後 20 則）之外的較早項目照捲動的位置才放進 DOM（預留空間的做法，2026-11-18）：放進去的都照實際高度，而且每一則自成一塊
+  // （contain：放進較早的項目時後面的不必整批重算繪製位置）；捲動容器關掉原生的捲動錨定、項目區上方有預留空間
+  const shape = await page.evaluate((s) => {
+    const root = document.querySelector(s);
+    const first = root.querySelector('.items > .it');
+    const pad = root.querySelector('.older-pad');
+    const sc = root.querySelector('.scroller');
+    return { contain: getComputedStyle(first).contain, anchor: getComputedStyle(sc).overflowAnchor, runway: sc.classList.contains('runway'), pad: pad && !pad.hidden ? pad.offsetHeight : 0,
+      olderRowHidden: root.querySelector('.older').hidden };
+  }, sel);
+  check('hubMobileItemsFullHeight', cv.length >= 20 && cv.length <= items.length && cv.every((v) => v === 'visible') && lazy === 0
+    && (shape.contain === 'content' || (/layout/.test(shape.contain) && /paint/.test(shape.contain))) && shape.anchor === 'none' && shape.runway && shape.pad > 10000 && shape.olderRowHidden,
+  { count: cv.length, values: [...new Set(cv)], lazy, shape });
   const sawLazy = await page.evaluate(() => window.__sawLazy);
   check('hubMobileLazyLoad', sawLazy > 0, { sawLazy });
 
@@ -5403,21 +5427,47 @@ async function runMobileScrollSteady() {
   check('hubTouchUnsticks', held.dist > 4 && held.dist <= 80 && held.jump && afterStream.top === held.top && afterStream.dist > held.dist,
     { held, afterStream });
 
-  // 三：手指還按著，較早的一頁到了：先不插；放開、停下來才插，看著的那一則停在原位
-  await page.evaluate((s) => document.querySelector(s + ' .older-btn').click(), sel);
-  const req = await until(() => hub.cmds('loadOlder')[0] || null, 3000);
-  const anchor = (await order()).at(-3);
-  const anchorTop = await topOf(anchor);
-  hub.push({ type: 'olderItems', conversationId: id, beforeId: req ? req.cmd.beforeId : undefined, items: OLDER_ITEMS, hasMore: false });
-  await sleep(400);
-  const whileHeld = await order();
-  const anchorWhileHeld = await topOf(anchor);
+  // 三：手指還按著，較早的一頁到了：就地放進項目區最前面（預留空間跟著縮，整個內容的高度不變），看著的那一則不動，
+  // 而且沒有改 scrollTop（iOS Safari 在觸控捲動中被改捲動位置會跳一下）；放開、停下來之後也還在原位、預留空間收掉。
+  // 以前是等放開、停下來才插（hubTouchOlderDeferred）：一路往上滑時每一頁都要撞到頂、停下來等
   await release();
-  const inserted = await until(async () => { const o = await order(); return o[0] === OLDER_ITEMS[0].id ? o : null; }, 3000);
+  await sleep(300);
+  // 先捲到已經放進 DOM 的內容頂端附近：第一批之前的 10 則接著放進來，快沒有了就自己向宿主要更早的一頁（不必按鈕）
+  await page.evaluate((s) => { const r = document.querySelector(s); r.querySelector('.scroller').scrollTop = r.querySelector('.older-pad').offsetHeight + 200; }, sel);
+  const req = await until(() => hub.cmds('loadOlder')[0] || null, 4000);
+  await until(async () => ((await order()).length === items.length + 1 ? true : null), 4000);
+  await sleep(300);
+  await page.evaluate((s) => {
+    const sc = document.querySelector(s + ' .scroller');
+    const desc = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+    window.__heldWrites = [];
+    Object.defineProperty(sc, 'scrollTop', { configurable: true, get() { return desc.get.call(this); },
+      set(v) { const before = desc.get.call(this); desc.set.call(this, v); const d = desc.get.call(this) - before; if (Math.abs(d) >= 1) window.__heldWrites.push(Math.round(d)); } });
+    window.__heldRestore = () => { delete sc.scrollTop; };
+  }, sel);
+  const release3 = await swipe(page, { x: box.x, y: box.y }, { x: box.x, y: box.y + 30 }, { end: false, holdMs: 250 });
+  const anchor = await page.evaluate((s) => {
+    const sc = document.querySelector(s + ' .scroller');
+    const r = sc.getBoundingClientRect();
+    let el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    while (el && !(el.classList && el.classList.contains('it'))) el = el.parentElement;
+    return el ? el.dataset.id : null;
+  }, sel);
+  const anchorTop = await topOf(anchor);
+  const sizeOf = () => page.evaluate((s) => { const r = document.querySelector(s); const pad = r.querySelector('.older-pad'); return { sh: r.querySelector('.scroller').scrollHeight, pad: pad.hidden ? 0 : pad.offsetHeight, writes: window.__heldWrites.slice() }; }, sel);
+  const sizeBefore = await sizeOf();
+  hub.push({ type: 'olderItems', conversationId: id, beforeId: req ? req.cmd.beforeId : undefined, items: OLDER_ITEMS, hasMore: false });
+  const whileHeld = await until(async () => { const o = await order(); return o.includes(OLDER_ITEMS[0].id) ? o : null; }, 3000);
+  const anchorWhileHeld = await topOf(anchor);
+  const sizeHeld = await sizeOf();
+  await release3();
+  await sleep(600);
   const anchorAfter = await topOf(anchor);
-  check('hubTouchOlderDeferred', !!req && !whileHeld.includes(OLDER_ITEMS[0].id) && anchorWhileHeld === anchorTop && !!inserted
-    && anchorAfter !== null && Math.abs(anchorAfter - anchorTop) <= 1,
-  { beforeId: req && req.cmd.beforeId, whileHeld: whileHeld.slice(0, 2), inserted: inserted && inserted.slice(0, 4), anchor, anchorTop, anchorWhileHeld, anchorAfter });
+  const after = await page.evaluate((s) => { window.__heldRestore(); const r = document.querySelector(s); const pad = r.querySelector('.older-pad'); return { pad: pad.hidden ? 0 : pad.offsetHeight, count: r.querySelectorAll('.items > .it').length }; }, sel);
+  check('hubTouchOlderInPlace', !!req && req.cmd.beforeId === items[0].id && !!whileHeld && whileHeld[0] === OLDER_ITEMS[0].id && anchorTop !== null && anchorWhileHeld === anchorTop
+    && sizeHeld.writes.length === 0 && Math.abs(sizeHeld.sh - sizeBefore.sh) <= 1 && sizeHeld.pad < sizeBefore.pad
+    && anchorAfter !== null && Math.abs(anchorAfter - anchorTop) <= 1 && after.pad === 0 && after.count === items.length + 1 + OLDER_ITEMS.length,
+  { beforeId: req && req.cmd.beforeId, whileHeld: whileHeld && whileHeld.slice(0, 4), anchor, anchorTop, anchorWhileHeld, anchorAfter, sizeBefore, sizeHeld, after });
 
   // 四：安全區域（CDP 模擬 iPhone 的狀態列與手勢列）
   const cdp = await page.context().newCDPSession(page);
@@ -6478,6 +6528,7 @@ const SCENARIOS = [
   { checks: ['hubFileFetchDialog', 'hubFileRefErrorFixedText', 'hubFileRefAbsoluteRejected', 'hubOfficeFileDownloads'], run: runFileFetch },
   { checks: ['hubVideoPolicyOff'], run: runVideoPolicyOff },
   { checks: ['desktopReplicaMedia'], run: runDesktopReplicaMedia },
+  { checks: ['desktopReplicaMediaLate'], run: runDesktopReplicaMediaLate },
   { checks: ['hubLongTasks'], run: runLongTasks },
   { checks: ['hubLoadChunkedOrder'], run: runLoadChunked },
   { checks: ['hubClearHidesEarlier'], run: runClearHidesEarlier },
@@ -6487,8 +6538,9 @@ const SCENARIOS = [
   // 合併前審查的回歸
   { checks: ['hubCardGateUnlistedOnLoad'], run: runReviewCardGateUnlisted },
   { checks: ['hubOlderStaleIgnored'], run: runReviewOlderStale },
-  { checks: ['hubMobileItemsFullHeight', 'hubMobileLazyLoad', 'hubTouchUnsticks', 'hubTouchOlderDeferred', 'hubMobileSafeArea'], run: runMobileScrollSteady },
+  { checks: ['hubMobileItemsFullHeight', 'hubMobileLazyLoad', 'hubTouchUnsticks', 'hubTouchOlderInPlace', 'hubMobileSafeArea'], run: runMobileScrollSteady },
   { checks: ['hubMobileRunningSteady'], run: runMobileRunningScroll },
+  { checks: ['hubMobileOlderRunway'], run: runMobileOlderRunway },
   { checks: ['hubUnsolicitedConversationAfterClose'], run: runReviewUnsolicitedAfterClose },
   { checks: ['hubCardTextsKeptOnReload'], run: runReviewCardTexts },
   { checks: ['hubCardInputBlocksBuildReload'], run: runReviewCardInputBlocksReload },

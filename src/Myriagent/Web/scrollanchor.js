@@ -8,11 +8,14 @@ export class ScrollAnchor {
    * @param {HTMLElement} scroller 捲動的容器
    * @param {HTMLElement} list 項目的容器（直接的子元素是一則一則的項目）
    * @param {() => boolean} active 現在要不要補（貼底時不補：最底由 ConvView 的 ResizeObserver 維持）
+   * @param {(shift: number) => boolean} [absorb] 先問呼叫端能不能自己吸收這段位移（ConvView 的預留空間跟著縮放：捲動內容的高度不變、
+   *   不必改 scrollTop——iOS Safari 在捲動中被改捲動位置會跳一下）；回 true 就不寫 scrollTop
    */
-  constructor(scroller, list, active) {
+  constructor(scroller, list, active, absorb) {
     this.scroller = scroller;
     this.list = list;
     this.active = active;
+    this.absorb = absorb || null;
     this.native = null; // 第一次回呼時才看（元素要在文件裡，getComputedStyle 才有值）
     this.heights = new WeakMap();
     this.ro = new ResizeObserver((entries) => this.onResize(entries));
@@ -73,6 +76,6 @@ export class ScrollAnchor {
     changes.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
     const top = this.scroller.getBoundingClientRect().top;
     const shift = anchorShift(changes.map((c) => ({ bottom: c.el.getBoundingClientRect().bottom, delta: c.delta })), top);
-    if (shift) this.scroller.scrollTop += shift;
+    if (shift && !(this.absorb && this.absorb(shift))) this.scroller.scrollTop += shift;
   }
 }

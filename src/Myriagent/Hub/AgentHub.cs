@@ -1135,6 +1135,8 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         }
         // 修正之前延伸出來的對話：其他對話資料夾裡的媒體補留一份（AgentHub.MediaKeep.cs）
         RepairForkMediaLater(c);
+        // 修正之前的回覆：內文以 Markdown 圖片語法引用、留了副本的本機圖片補進媒體，其他電腦與瀏覽器版才看得到
+        BackfillInlineMedia(c);
 
         return c.Items;
     }

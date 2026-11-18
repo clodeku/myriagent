@@ -16,6 +16,24 @@ public class AgentMarkdownRendererTests
     }
 
     [Fact]
+    public void LocalImagePaths_圖片語法引用的本機圖片_同ToHtml的解析_網址與連結不算()
+    {
+        const string markdown = "前後對照：![前](C:/out/before.png) ![後](<C:/out/after one.png>) ![相對](shots/home.png) ![重複](C:/out/before.png)\n"
+            + "![外部](https://example.com/a.png) [報表](C:\\out\\r.xlsx) `C:\\out\\code.png`";
+        AgentMarkdownRenderer.LocalImagePaths(markdown, @"C:\repo\proj").Should().Equal(
+            @"C:\out\before.png", @"C:\out\after one.png", @"C:\repo\proj\shots\home.png");
+        // 和轉 HTML 時找到的一樣（中樞靠這個決定哪些媒體已經畫在內文裡）
+        var found = new List<string>();
+        AgentMarkdownRenderer.ToHtml(markdown, found, @"C:\repo\proj");
+        AgentMarkdownRenderer.LocalImagePaths(markdown, @"C:\repo\proj").Should().Equal(found.Distinct(StringComparer.OrdinalIgnoreCase));
+        // 沒有基準資料夾：相對路徑不當本機檔案
+        AgentMarkdownRenderer.LocalImagePaths("![相對](shots/home.png)", null).Should().BeEmpty();
+        AgentMarkdownRenderer.LocalImagePaths("沒有圖片語法 C:\\out\\a.png", @"C:\repo").Should().BeEmpty();
+        AgentMarkdownRenderer.LocalImagePaths(null, null).Should().BeEmpty();
+        AgentMarkdownRenderer.LocalImagePaths("![", null).Should().BeEmpty();
+    }
+
+    [Fact]
     public void Javascript與Data連結被中和()
     {
         var html = AgentMarkdownRenderer.ToHtml("[點我](javascript:alert(1)) [資料](data:text/html,hi) <javascript:alert(2)> ![x](javascript:alert(3))");

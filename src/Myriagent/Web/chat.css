@@ -190,8 +190,12 @@
 /* 觸控裝置（手機、平板）與不支援捲動錨定的瀏覽器（iOS Safari 26 以前）：項目一律照實際的高度排版。content-visibility: auto 讓畫面外的項目
    先用估計的高度（120px），往上捲到才換成真的高度；沒有捲動錨定（或錨定在捲動中補得慢一拍）時，上方的項目一長高，看著的內容就整個往下跳
    （2026-10-25 使用者回報：手機、平板往上滑一直閃、不順暢）。桌面照舊省下畫面外項目的排版與繪製 */
-@media (pointer: coarse) { .it { content-visibility: visible; } }
-@supports not (overflow-anchor: auto) { .it { content-visibility: visible; } }
+@media (pointer: coarse) { .it { content-visibility: visible; contain: layout paint style; } }
+@supports not (overflow-anchor: auto) { .it { content-visibility: visible; contain: layout paint style; } }
+/* 上面兩條的 contain：content-visibility: auto 自帶 layout、paint、style 的隔離，改成 visible 之後就沒有了——
+   項目區最前面放進較早的項目時，後面每一則相對項目區的位置都變了（預留空間跟著縮，畫面上的位置其實沒動），沒有隔離的話瀏覽器要把
+   每一則裡面的每個元素都重算一次繪製位置（PrePaint）、重畫一次。contain 只隔離、不估高度（不會像 content-visibility: auto 那樣
+   捲到才換成真的高度）；paint 的裁切和桌面一樣（桌面本來就有：畫到框外的效果另外拿掉，見 fx.css 的 .it-card.fx-in、.it-assistant.fx-copied） */
 /* 例外：載入對話的那一下（conversation.js 的 it-lazy，只有觸控的瀏覽器版）。剛建的項目先不排版畫面外的，第一個畫面不必等整批排版完
    ；畫好之後不在觸控捲動時逐批拿掉，往上滑之前項目已經是實際的高度 */
 .it.it-lazy { content-visibility: auto; }
@@ -304,7 +308,12 @@
 .md table { border-collapse: collapse; min-width: 100%; font-size: .93em; }
 .md th, .md td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 .md th { background: var(--bg-raised); color: var(--text-hi); font-weight: 600; white-space: nowrap; }
-.md th + th, .md td + td { border-left: 1px solid var(--border); }
+/* 第二格起的左框線。不寫成 th + th、td + td：兄弟組合子左邊只有標籤（沒有 class、id、屬性）的規則，Chrome 把它當成「任何元素插入都可能
+   影響」——有相鄰規則的父元素底下插入或移除一個子元素，那個父元素整個子樹裡所有同名標籤都要重算樣式。
+   項目區每插入一則（新項目、載入較早的訊息）整個對話的 span、th、td 都重算（各有這種規則：這裡與 fx.css 的 .turn-rule、.turn-sum）；
+   手機的項目照實際高度排版、沒有 content-visibility 擋著，每次都付全額。
+   WebCssPerfTests 擋下這種寫法 */
+.md th:not(:first-child), .md td:not(:first-child) { border-left: 1px solid var(--border); }
 .md tr:last-child td { border-bottom: 0; }
 .code { margin: 0 0 .8em; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-sunken); overflow: hidden; }
 .code-head { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--text-2); }
@@ -730,6 +739,17 @@
 .older { display: flex; justify-content: center; padding: 0 0 18px; }
 .older-btn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-2); color: var(--text-2); font-size: 12px; }
 .older-btn:hover:not(:disabled) { color: var(--text-hi); background: var(--bg-hover); }
+/* 觸控裝置：項目區上方的預留空間（conversation.js 的 padEl，高度由程式設；liverules.js 的「預留空間」）。較早的項目放進項目區時它跟著縮，
+   整個捲動內容的高度不變、看著的內容不動。平常整段在畫面上方看不到；滑得比載入快、畫面進到這一段時，說明黏在畫面上緣。
+   overflow: clip（不是 hidden）：只剩幾 px 高時說明不蓋到第一則訊息，又不會變成黏住的基準 */
+.older-pad { position: relative; overflow: clip; }
+/* 沒有更早的了、只是還沒收掉的那一段（等靜止才收）：不寫「載入中」 */
+.older-pad.done > .older-pad-note { display: none; }
+/* 用預留空間的對話關掉瀏覽器自己的捲動錨定，一律由 scrollanchor.js 補（補的位移先由預留空間吸收）：較早的項目放進來時是「先長高、
+   量好、預留空間再縮」，中間那一下瀏覽器的錨定會插手多補一次（Chrome 實測：預留空間補滿的那一格整個畫面跳了一下）；
+   各瀏覽器也因此走同一條路（Safari 27 才有的原生錨定在慣性捲動中的表現沒有實機驗過） */
+.scroller.runway { overflow-anchor: none; }
+.older-pad-note { position: sticky; top: 10px; display: flex; justify-content: center; padding: 8px 0; color: var(--text-3); font-size: 12px; }
 .draft { display: flex; flex-direction: column; gap: 22px; max-width: 560px; padding: 9vh 0 20px; }
 .draft-title { font-family: var(--font-display); font-size: 21px; font-weight: 600; color: var(--text-hi); line-height: 1.3; }
 .draft-sub { margin-top: 6px; color: var(--text-2); line-height: 1.6; }

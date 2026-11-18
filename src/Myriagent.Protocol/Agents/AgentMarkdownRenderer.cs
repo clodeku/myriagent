@@ -131,6 +131,41 @@ internal static partial class AgentMarkdownRenderer
         return writer.ToString();
     }
 
+    /// <summary>
+    /// Markdown 圖片語法（<c>![說明](路徑)</c>）引用的本機圖片路徑，解析方式同 <see cref="ToHtml(string?, ICollection{string}?, string?, IMediaUrlBuilder?)"/>
+    /// （相對路徑以 <paramref name="baseDirectory"/> 解析；網址的不算）。不看檔案在不在、不重複、依出現順序；
+    /// 文字裡沒有圖片語法時不解析、回空清單。巢狀過深解析不了的也回空清單
+    /// </summary>
+    public static IReadOnlyList<string> LocalImagePaths(string? markdown, string? baseDirectory)
+    {
+        if (string.IsNullOrEmpty(markdown) || !markdown.Contains("![", StringComparison.Ordinal))
+            return [];
+        MarkdownDocument document;
+        try
+        {
+            document = Markdown.Parse(markdown, Pipeline);
+        }
+        catch (ArgumentException)
+        {
+            return [];
+        }
+
+        var result = new List<string>();
+        foreach (var link in document.Descendants<LinkInline>())
+        {
+            if (!link.IsImage || link.IsAutoLink || link is LocalPathLinkInline)
+                continue;
+            var url = link.Url?.Trim();
+            if (IsAllowedWebUrl(url))
+                continue;
+            var localPath = ResolveLocalPath(SourceUrl(markdown, link), baseDirectory) ?? ResolveLocalPath(url, baseDirectory);
+            if (localPath != null && !result.Contains(localPath, StringComparer.OrdinalIgnoreCase))
+                result.Add(localPath);
+        }
+
+        return result;
+    }
+
     /// <summary>純文字轉 HTML（使用者訊息：保留換行、不解讀 Markdown）</summary>
     public static string PlainToHtml(string? text)
         => WebUtility.HtmlEncode(text ?? string.Empty).Replace("\r\n", "\n").Replace("\n", "<br>");

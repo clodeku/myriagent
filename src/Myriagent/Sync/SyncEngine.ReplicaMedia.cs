@@ -34,6 +34,9 @@ internal sealed partial class SyncEngine
         replicaMedia ??= new ReplicaMediaSource(
             new DeviceHttpClient(server, pairedServer, args.DevTrustEnv, accessTokens, RefreshAccessTokenForHttpAsync, time, MediaHttpHandlerForTest), time);
         box.ReplicaMedia = replicaMedia;
+        // 中樞把先前沒有來源時畫出去的複本項目補上媒體網址（app 剛啟動時，分頁常在協商完成之前就先畫好了）；每次協商出來都叫，
+        // 中樞只處理記下「畫的時候沒有來源」的對話
+        box.UiPort?.ReplicaMediaReady();
     }
 
     /// <summary>引擎停止（CloseMedia）：從盒子拿下來（只拿自己掛的）、取消進行中的請求與預取</summary>

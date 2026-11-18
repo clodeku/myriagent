@@ -1427,6 +1427,164 @@ export function anchorShift(changes, viewTop) {
   return shift;
 }
 
+// ───── 觸控裝置往上滑看歷史：預留空間（conversation.js 的 pumpOlder） ─────
+//
+// 手機往前滑載入歷史訊息時很卡、會跳動閃爍的原因（量法：tools/ui-probe/older-scroll.mjs）：
+//   一、要捲到離頂端 200px 才向宿主要較早的一頁，到的那一頁又要等手指放開、慣性停下才插入——一路滑上去每 80 則撞一次頂、停在那裡等；
+//   二、插入時一整頁 80 則一次建好、一次排版（觸控裝置的項目照實際高度排版），主執行緒卡住一大段；
+//   三、插入之後圖片才陸續載入，把下面的內容往下推：有原生捲動錨定的瀏覽器自己補得回來，沒有的（iOS Safari 26 以前）跨在畫面上緣的
+//       那一則不補（畫面自己跳），補的那些又是在捲動中改 scrollTop（iOS 會跳一下、慣性中斷）。
+// 做法：項目區上方留一段空的預留空間（.older-pad）。較早的項目先在文件外建好節點、圖片載好（尺寸定了）才放進項目區最前面，
+// 放進去長高多少、預留空間就縮多少——整個捲動內容的高度不變、看著的內容不動，所以捲動中也能放，而且不必改 scrollTop。
+// 每個影格只做一小段（OLDER_STEP_MS），提早在離看得到的地方還有幾個畫面時就建、就放、就向宿主要下一頁。
+// 預留空間只在靜止（手指放開、慣性停下）時補回 OLDER_RUNWAY_PX、沒有更早的就收掉，那時改 scrollTop 是安全的。
+
+/** 預留空間的高度：兩次靜止之間最多能放進這麼高的內容（一路不停地滑超過這麼遠才會撞到頂、停一下補滿） */
+export const OLDER_RUNWAY_PX = 48000;
+/** 宿主沒有更早的了、只剩已經拿到還沒放進 DOM 的：預留空間照「剩幾則 × 平均一則多高 × 這個倍數」再加這麼多 px 留（不留整段：放完之後剩下的是空白） */
+export const OLDER_TAIL_FACTOR = 1.5;
+export const OLDER_TAIL_SLACK_PX = 1200;
+/** 畫面上緣以上已經放進 DOM 的內容不到幾個畫面高，就把下一批放進去 */
+export const OLDER_INSERT_SCREENS = 5;
+/** 不到幾個畫面高，就先在文件外建好節點、開始載入圖片 */
+export const OLDER_BUILD_SCREENS = 9;
+/** 上方還有的（放進 DOM 的＋還沒放的估計）不到幾個畫面高，就向宿主要更早的一頁 */
+export const OLDER_FETCH_SCREENS = 16;
+/** 還沒放進 DOM 的項目估計一則多高（寧可估矮：早一點要下一頁） */
+export const OLDER_EST_ITEM_PX = 120;
+/** 建好、還沒放進 DOM 的節點最多幾個 */
+export const OLDER_BUILD_AHEAD = 24;
+/** 一個影格裡建節點與放進 DOM 合計做多久（毫秒；超過就留到下一格） */
+export const OLDER_STEP_MS = 6;
+/** 快要露出預留空間時（上方放進 DOM 的內容不到一個畫面高）一個影格做多久：寧可這幾格慢一點，也不要讓畫面露出空白 */
+export const OLDER_RUSH_MS = 14;
+/** 快要露出預留空間時，建好的節點最多等圖片多久（平常是 OLDER_IMAGE_WAIT_MS） */
+export const OLDER_RUSH_IMAGE_WAIT_MS = 300;
+/** 一個影格最多放幾則 */
+export const OLDER_BATCH_MAX = 8;
+/** 建好的節點最多等圖片多久（毫秒；過了照樣放，晚到的圖由捲動錨定補） */
+export const OLDER_IMAGE_WAIT_MS = 1500;
+/** 還沒建節點的較早項目，最接近 DOM 的幾則先把圖片載進快取（只發請求；建節點時多半已經有了，不必停下來等） */
+export const OLDER_PRELOAD_ITEMS = 40;
+
+const olderPx = (v) => (Number.isFinite(v) ? v : 0);
+const olderCount = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
+
+/**
+ * 這個影格該做什麼。s＝{
+ *   gap：畫面上緣以上已經放進 DOM 的內容有多高（px；畫面在預留空間裡是負的）、view：畫面的高度、
+ *   pending：資料已經有、還沒放進 DOM 而且放得進去的項目數（/clear 分界之前的不算）、built：其中已經建好節點的（從最接近 DOM 的那一則連續算）、
+ *   hasMore：宿主還有更早的、loading：正在等宿主回、userScrolled：使用者往上捲過（還沒捲過不主動要，除非畫面已經看得到預留空間：
+ *   內容不滿一個畫面，觸控裝置又沒有「載入較早的訊息」鈕可以按）、blocked：藏著 /clear 之前的項目（不往前載入） }
+ * 回 { insert, build, preload, fetch }（preload：把接下來幾則的圖片先載進快取）
+ */
+export function olderPlan(s) {
+  const o = s || {};
+  const view = olderPx(o.view);
+  if (view <= 0) return { insert: false, build: false, preload: false, fetch: false };
+  const gap = olderPx(o.gap);
+  const pending = olderCount(o.pending);
+  const built = Math.min(olderCount(o.built), pending);
+  return {
+    insert: pending > 0 && gap < OLDER_INSERT_SCREENS * view,
+    build: pending > built && built < OLDER_BUILD_AHEAD && gap < OLDER_BUILD_SCREENS * view,
+    preload: pending > 0 && gap < OLDER_BUILD_SCREENS * view,
+    fetch: o.hasMore === true && o.loading !== true && (o.userScrolled === true || gap < 0) && o.blocked !== true
+      && Math.max(0, gap) + pending * OLDER_EST_ITEM_PX < OLDER_FETCH_SCREENS * view,
+  };
+}
+
+/**
+ * 預留空間該多高。宿主還有更早的（而且沒有被 /clear 擋著）：OLDER_RUNWAY_PX。宿主沒有了、只剩已經拿到還沒放進 DOM 的 pending 則：
+ * 照已經在 DOM 裡的平均高度 avg 估（估高一點；不超過 OLDER_RUNWAY_PX）——全部放完之後預留空間剩下的是第一則訊息上面的一段空白，
+ * 要等靜止才收得掉，所以不留整段。都沒有：0。s＝{ pending, hasMore, blocked, avg }
+ */
+export function olderPadTarget(s) {
+  const o = s || {};
+  if (o.hasMore === true && o.blocked !== true) return OLDER_RUNWAY_PX;
+  const pending = olderCount(o.pending);
+  if (!pending) return 0;
+  const avg = Number.isFinite(o.avg) && o.avg > 0 ? o.avg : OLDER_EST_ITEM_PX * 2;
+  return Math.min(OLDER_RUNWAY_PX, Math.ceil(pending * avg * OLDER_TAIL_FACTOR) + OLDER_TAIL_SLACK_PX);
+}
+
+/**
+ * 靜止時預留空間要不要調、調成多高（回新的高度；不必調回 null）。該是 0（沒有更早的了）就收掉；該有的時候只在差很多時才調
+ * （不到該有的四分之三、或多出一半再加一個畫面）：每調一次都要改 scrollTop，剛放進幾則、差一點點就不調
+ */
+export function olderPadSettle(pad, target, view) {
+  if (!Number.isFinite(pad) || !Number.isFinite(target)) return null;
+  if (target <= 0) return pad >= 1 ? 0 : null;
+  const screen = Number.isFinite(view) && view > 0 ? view : 0;
+  return pad < target * 0.75 || pad > target * 1.5 + screen ? target : null;
+}
+
+/**
+ * 放進 DOM 的那一批讓項目區長高了 delta：預留空間夠就由它吸收，回它的新高度（看著的內容不動、不必改 scrollTop）；
+ * 不夠回 null（捲動中就先把那一批拿回來，等靜止補滿預留空間再放）。delta 是負的（變矮）時預留空間跟著變高。不是數字回 null
+ */
+export function olderPadAfter(pad, delta) {
+  if (!Number.isFinite(pad) || !Number.isFinite(delta)) return null;
+  const next = pad - delta;
+  return next >= 0 ? next : null;
+}
+
+/**
+ * 這則項目（宿主渲染好的 Item）會顯示的圖片網址：代理產出的圖片（media 裡不是影片的）、附件的縮圖（圖片與影片）、回覆 HTML 裡的 <img>。
+ * 給預先載入用（conversation.js 的 preloadOlderImages）：只取本站的相對網址與 http(s)，不重複；data:、blob: 不取。壞的資料回 []
+ */
+export function itemImageUrls(item) {
+  const out = [];
+  const add = (u) => {
+    if (typeof u !== 'string' || !u || out.includes(u)) return;
+    if (u.startsWith('/') ? u.startsWith('//') : !/^https?:\/\//i.test(u)) return;
+    out.push(u);
+  };
+  if (!item || typeof item !== 'object') return out;
+  if (Array.isArray(item.media)) for (const m of item.media) if (m && m.kind !== 'video') add(m.url);
+  if (Array.isArray(item.attachments)) {
+    for (const a of item.attachments) {
+      if (!a) continue;
+      if (a.kind === 'Image') add(a.thumbUrl || a.url);
+      else if (a.kind === 'Video') add(a.thumbUrl);
+    }
+  }
+  if (typeof item.html === 'string' && item.html.includes('<img')) {
+    for (const m of item.html.matchAll(/<img\b[^>]*?\ssrc="([^"]+)"/g)) add(m[1].replace(/&amp;/g, '&'));
+  }
+  return out;
+}
+
+/** 快要露出預留空間了沒：畫面上緣以上放進 DOM 的內容不到一個畫面高（這時一個影格多做一點、圖片少等一點） */
+export function olderRush(gap, view) {
+  return Number.isFinite(gap) && Number.isFinite(view) && view > 0 && gap < view;
+}
+
+/** 這一格放了 n 則、花了 ms 毫秒：下一格放幾則（超過 budget 就減半、不到一半就多放一則；1～OLDER_BATCH_MAX） */
+export function olderBatchNext(n, ms, budget = OLDER_STEP_MS) {
+  const cur = Math.min(OLDER_BATCH_MAX, Math.max(1, olderCount(n)));
+  const limit = Number.isFinite(budget) && budget > 0 ? budget : OLDER_STEP_MS;
+  if (!Number.isFinite(ms)) return cur;
+  if (ms > limit) return Math.max(1, Math.floor(cur / 2));
+  if (ms < limit / 2) return Math.min(OLDER_BATCH_MAX, cur + 1);
+  return cur;
+}
+
+/**
+ * 靜止時整個畫面都在預留空間裡（上緣在第一則訊息以上超過一個畫面，看不到任何訊息：滑得比載入快很多、或系統的「回到最上面」）：
+ * 把畫面帶回第一則訊息的上緣，更早的照常接著放在它上面。還看得到訊息時不動（較早的就地往上填滿）
+ */
+export function olderSnapWanted(gap, view) {
+  return Number.isFinite(gap) && Number.isFinite(view) && view > 0 && gap < -view;
+}
+
+/** 觸控捲動還要多久才算停下（毫秒；手指還按著回 null：放開時另外會叫） */
+export function touchRestIn(s, now) {
+  if (!s || s.touching) return null;
+  if (!Number.isFinite(s.touchEndAt) || !Number.isFinite(s.lastScrollAt) || !Number.isFinite(now)) return 0;
+  return Math.max(0, Math.min(MOMENTUM_MAX_MS - (now - s.touchEndAt), SCROLL_IDLE_MS - (now - s.lastScrollAt)));
+}
+
 // ───── /clear ─────
 
 /**

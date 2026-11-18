@@ -231,6 +231,66 @@ public sealed class ReplicaMediaUrlsTests
     }
 
     [Fact]
+    public async Task 來源晚到_先前沒有網址的項目補上_沒有媒體參照的不重送()
+    {
+        // 2026-11-18：app 剛啟動時分頁在同步連線協商出 media1 之前就先畫好了，那一批沒有媒體網址，之後也沒補
+        using var rig = new Rig();
+        rig.Show();
+        var (user, assistant, imageRef, _, madeRef) = Items();
+        var plain = new AgentChatItem { Id = "i3", Ord = 3, Kind = AgentItemKind.Assistant, Status = AgentItemStatus.Done, Text = "沒有圖的回覆" };
+        var before = rig.OpenWith(Owner, user, assistant, plain);
+        before["i1"]["attachments"]![0]!.Value<string>("url").Should().BeNull("陽性對照：畫的時候還沒有來源");
+        before["i2"]["media"].Should().BeNull();
+        var image = MediaKeyRules.Format(Owner, imageRef);
+        var made = MediaKeyRules.Format(Owner, madeRef);
+        rig.For(image, MediaPurposes.Media).Should().BeNull();
+
+        // 沒有來源時叫了也不做事（之後來源掛上才補）
+        var mark = rig.H.Main.Mark();
+        rig.H.Ui.Invoke(() => rig.H.Hub.ReplicaMediaReady());
+        rig.H.Main.All().Skip(mark).Should().NotContain(m => m.Value<string>("type") == "item");
+
+        // 引擎協商出 media1：掛上來源、經發布者通知（任何執行緒）
+        var source = new FakeReplicaMediaSource();
+        rig.Box.ReplicaMedia = source;
+        await Task.Run(() => ((IConversationUiPort)rig.Publisher).ReplicaMediaReady());
+
+        var reply = await rig.H.Main.WaitForAsync("item", m => m["item"]!.Value<string>("id") == "i2", mark, conversationId: IdA);
+        ((JObject)((JArray)reply["item"]!["media"]!).Single()).Value<string>("url").Should().Be("https://myriagent.local/m/" + made);
+        var sent = rig.H.Main.All().Skip(mark).Where(m => m.Value<string>("type") == "item").Select(m => (JObject)m["item"]!).ToList();
+        sent.Select(i => i.Value<string>("id")).Should().BeEquivalentTo(new[] { "i1", "i2" }, "只補帶媒體參照的項目");
+        sent.Single(i => i.Value<string>("id") == "i1")["attachments"]![0]!.Value<string>("url").Should().Be("https://myriagent.local/m/" + image);
+        sent.Should().OnlyContain(i => i.Value<long>("seq") > 0, "沿用原本的順序（網頁就地更新；還沒載入的較早項目它會略過）");
+        rig.For(image, MediaPurposes.Media).Should().BeSameAs(source, "補送時登記了鍵");
+        rig.For(made, MediaPurposes.Media).Should().BeSameAs(source);
+
+        // 補過就不再送
+        var again = rig.H.Main.Mark();
+        rig.H.Ui.Invoke(() => rig.H.Hub.ReplicaMediaReady());
+        rig.H.Main.All().Skip(again).Should().NotContain(m => m.Value<string>("type") == "item");
+    }
+
+    [Fact]
+    public void 來源晚到_沒有視窗開著的複本不送_之後打開時本來就有網址()
+    {
+        using var rig = new Rig();
+        rig.Show();
+        var (user, _, imageRef, _, _) = Items();
+        rig.OpenWith(Owner, user);
+        rig.H.Command(rig.H.Main, "close", new { conversationId = IdA });
+        var mark = rig.H.Main.Mark();
+
+        rig.Box.ReplicaMedia = new FakeReplicaMediaSource();
+        rig.H.Ui.Invoke(() => rig.H.Hub.ReplicaMediaReady());
+        rig.H.Main.All().Skip(mark).Should().NotContain(m => m.Value<string>("type") == "item" || m.Value<string>("type") == "conversation");
+
+        rig.H.Command(rig.H.Main, "open", new { conversationId = IdA });
+        var opened = rig.H.Main.All().Skip(mark).Last(m => m.Value<string>("type") == "conversation");
+        ((JArray)opened["items"]!).Cast<JObject>().Single(i => i.Value<string>("id") == "i1")["attachments"]![0]!.Value<string>("url")
+            .Should().Be("https://myriagent.local/m/" + MediaKeyRules.Format(Owner, imageRef));
+    }
+
+    [Fact]
     public void 擁有者不是裝置id時沒有網址()
     {
         using var rig = new Rig();
