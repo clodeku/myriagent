@@ -795,4 +795,122 @@ public class AntigravityStreamParserTests
         timeoutCompleted.Outcome.Should().Be(AgentTurnOutcome.Failed);
         timeoutCompleted.ErrorMessage.Should().Contain("print_timeout");
     }
+
+    [Fact]
+    public void 逐字稿殘留舊ERROR_MESSAGE但本輪已完成最終回覆_不誤判失敗也不觸發重試或額度耗盡_真正尾端失敗照常回報()
+    {
+        using var temp = new TempDirectory("agy-stale-error");
+        var logPath = temp.Combine("transcript_full.jsonl");
+        var utf8 = new UTF8Encoding(false);
+        const string StaleWsError = """API error (attempt 1): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": read tcp 192.168.0.10:52029->172.217.113.4:443: wsarecv: An existing connection was forcibly closed by the remote host.""";
+
+        // 1) 同輪中途 attempt 1 失敗寫入 ERROR_MESSAGE（step 2），attempt 2 立即恢復（step 3..5）並以最終 PLANNER_RESPONSE（DONE、無 tool_calls）完成，
+        //    但 agy 的 steps.LastStepError 仍讓 result 回報 status=ERROR 與 step 2 的舊錯誤 → 應修正為 Completed 且 ServerBusy=None
+        File.WriteAllLines(logPath, new[]
+        {
+            """{"step_index":1,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","content":"執行更新"}""",
+            new JObject { ["step_index"] = 2, ["source"] = "SYSTEM", ["type"] = "ERROR_MESSAGE", ["status"] = "DONE", ["error"] = StaleWsError }.ToString(Newtonsoft.Json.Formatting.None),
+            """{"step_index":3,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","tool_calls":[{"name":"run_command","args":{"CommandLine":"git status"}}]}""",
+            """{"step_index":4,"source":"MODEL","type":"GENERIC","status":"DONE","content":"clean"}""",
+            """{"step_index":5,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","content":"今日更新已全部完成。"}""",
+        }, utf8);
+
+        var parser1 = new AntigravityStreamParser("p1", _ => logPath);
+        parser1.BeginTurn();
+        parser1.Parse("""{"event":"init","conversation_id":"conv-1","init":{"model":"gemini-4-carbon"}}""");
+        parser1.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":1,"state":"DONE","step_type":"user_input"}}""");
+        parser1.Parse(ToolStep(4, "DONE", "run_command", new { CommandLine = "git status" }, output: "clean"));
+        parser1.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":5,"state":"DONE","step_type":"agent_response","text_delta":"今日更新已全部完成。"}}""");
+        var res1 = parser1.Parse(Result(numTurns: 1, input: 100, output: 20, status: "ERROR", response: "今日更新已全部完成。", error: StaleWsError)).Events;
+        var turn1 = res1.OfType<AgentTurnCompletedEvent>().Single();
+        turn1.Outcome.Should().Be(AgentTurnOutcome.Completed, "同輪中途瞬斷後已由後續 PLANNER_RESPONSE 完成收尾");
+        turn1.ErrorMessage.Should().BeNull();
+        turn1.ServerBusy.Should().Be(AgentServerBusy.None);
+
+        // 2) 隔天以 --conversation 續接同一對話（initialConversationId）：啟動時逐字稿在 step 5（含歷史 step 2 ERROR_MESSAGE），
+        //    送出訊息後寫入 step 6..8（含中途可恢復的 model output error 與最終完成的 PLANNER_RESPONSE），
+        //    agy 的 result 再次回傳同一筆舊錯誤 → 同樣修正為 Completed，不重試
+        var resumed = new AntigravityStreamParser("p2", _ => logPath, initialConversationId: "conv-1");
+        resumed.BeginTurn();
+        File.AppendAllLines(logPath, new[]
+        {
+            """{"step_index":6,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","content":"進度如何？"}""",
+            """{"step_index":7,"source":"SYSTEM","type":"ERROR_MESSAGE","status":"DONE","error":"model output error: empty","content":"Error: model output error: empty"}""",
+            """{"step_index":8,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","content":"上午已 100% 完成。"}""",
+        }, utf8);
+
+        resumed.Parse("""{"event":"init","conversation_id":"conv-1","init":{"model":"gemini-4-carbon"}}""");
+        resumed.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":6,"state":"DONE","step_type":"user_input"}}""");
+        resumed.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":8,"state":"DONE","step_type":"agent_response","text_delta":"上午已 100% 完成。"}}""");
+        var res2 = resumed.Parse(Result(numTurns: 2, input: 120, output: 30, status: "ERROR", response: "上午已 100% 完成。", error: StaleWsError)).Events;
+        var turn2 = res2.OfType<AgentTurnCompletedEvent>().Single();
+        turn2.Outcome.Should().Be(AgentTurnOutcome.Completed, "跨輪殘留的歷史 ERROR_MESSAGE 不應讓正常完成的後續回合失敗");
+        turn2.ErrorMessage.Should().BeNull();
+        turn2.ServerBusy.Should().Be(AgentServerBusy.None);
+
+        // 3) 即使歷史有舊額度耗盡錯誤，額度重置後續接成功完成時也不應再誤發 AgentQuotaExhaustedEvent
+        const string StaleQuotaError = "You have exhausted your daily quota on this model.";
+        File.AppendAllLines(logPath, new[]
+        {
+            new JObject { ["step_index"] = 9, ["source"] = "SYSTEM", ["type"] = "ERROR_MESSAGE", ["status"] = "DONE", ["error"] = StaleQuotaError }.ToString(Newtonsoft.Json.Formatting.None),
+            """{"step_index":10,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","content":"額度重置後繼續"}""",
+            """{"step_index":11,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","content":"已接續完成。"}""",
+        }, utf8);
+
+        resumed.BeginTurn();
+        resumed.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":10,"state":"DONE","step_type":"user_input"}}""");
+        resumed.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":11,"state":"DONE","step_type":"agent_response","text_delta":"已接續完成。"}}""");
+        var res3 = resumed.Parse(Result(numTurns: 3, input: 80, output: 15, status: "ERROR", response: "已接續完成。", error: StaleQuotaError)).Events;
+        res3.OfType<AgentQuotaExhaustedEvent>().Should().BeEmpty("舊的額度耗盡錯誤已被後續完成步驟取代");
+        res3.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Completed);
+
+        // 4) 本輪真的在最後一步再次發生相同錯誤而中斷（step 14 是新的 ERROR_MESSAGE，其後沒有完成的 PLANNER_RESPONSE）：必須保留 Failed 與自動重試標記
+        File.AppendAllLines(logPath, new[]
+        {
+            """{"step_index":12,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","content":"再跑一次"}""",
+            """{"step_index":13,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","content":"先檢查狀態","tool_calls":[{"name":"run_command","args":{"CommandLine":"git log -n 1"}}]}""",
+            """{"step_index":14,"source":"MODEL","type":"GENERIC","status":"DONE","content":"ok"}""",
+            new JObject { ["step_index"] = 15, ["source"] = "SYSTEM", ["type"] = "ERROR_MESSAGE", ["status"] = "DONE", ["error"] = StaleWsError }.ToString(Newtonsoft.Json.Formatting.None),
+        }, utf8);
+
+        resumed.BeginTurn();
+        resumed.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":12,"state":"DONE","step_type":"user_input"}}""");
+        resumed.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":13,"state":"DONE","step_type":"agent_response","text_delta":"先檢查狀態"}}""");
+        resumed.Parse(ToolStep(14, "DONE", "run_command", new { CommandLine = "git log -n 1" }, output: "ok"));
+        var res4 = resumed.Parse(Result(numTurns: 4, input: 90, output: 10, status: "ERROR", response: "先檢查狀態", error: StaleWsError)).Events;
+        var turn4 = res4.OfType<AgentTurnCompletedEvent>().Single();
+        turn4.Outcome.Should().Be(AgentTurnOutcome.Failed, "本輪在工具執行後真的因新的 ERROR_MESSAGE 中斷，不能壓掉錯誤");
+        turn4.ErrorMessage.Should().Be(StaleWsError);
+        turn4.ServerBusy.Should().Be(AgentServerBusy.NetworkError);
+
+        // 5) 磁碟逐字稿尚未 flush 最後一筆 PLANNER_RESPONSE，但舊 ERROR_MESSAGE 在本輪之前、且 stream-json 已收到本輪最後一步 agent_response DONE：仍能識別為已完成
+        File.AppendAllLines(logPath, new[]
+        {
+            """{"step_index":16,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","content":"重試後詢問"}""",
+        }, utf8);
+
+        resumed.BeginTurn();
+        resumed.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":16,"state":"DONE","step_type":"user_input"}}""");
+        resumed.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":17,"state":"DONE","step_type":"agent_response","text_delta":"最終回覆已送達"}}""");
+        var res5 = resumed.Parse(Result(numTurns: 5, input: 50, output: 10, status: "ERROR", response: "最終回覆已送達", error: StaleWsError)).Events;
+        res5.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Completed);
+
+        // 6) 若 finished_reason 明確標示 print_timeout，即使有歷史錯誤也維持 Failed
+        resumed.BeginTurn();
+        resumed.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":18,"state":"DONE","step_type":"user_input"}}""");
+        resumed.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":19,"state":"DONE","step_type":"agent_response","text_delta":"部分回覆"}}""");
+        var timeoutJson = new JObject
+        {
+            ["event"] = "result",
+            ["result"] = new JObject
+            {
+                ["conversation_id"] = "conv-1",
+                ["status"] = "ERROR",
+                ["finished_reason"] = "print_timeout",
+                ["response"] = "部分回覆",
+                ["error"] = StaleWsError,
+            },
+        }.ToString(Newtonsoft.Json.Formatting.None);
+        resumed.Parse(timeoutJson).Events.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Failed);
+    }
 }

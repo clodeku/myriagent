@@ -68,6 +68,7 @@ internal sealed partial class AntigravityStreamParser
 
         /// <summary>指令報 DONE 但沒有 output：可能是被拒（見類別說明），完成事件等 result 再發</summary>
         public bool PendingCompletion { get; set; }
+        public AntigravityStepState LastState { get; set; } = AntigravityStepState.Running;
         public System.Text.StringBuilder Text { get; } = new();
         public bool TextCompleted { get; set; }
     }
@@ -88,6 +89,7 @@ internal sealed partial class AntigravityStreamParser
     private readonly bool isPlanMode;
 
     private int turn;
+    private int previousTurnMaxStepIndex = -1;
     private int baselineStepIndex;
     private int minTurnStepIndex;
     private bool turnStartLocked;
@@ -114,6 +116,7 @@ internal sealed partial class AntigravityStreamParser
         {
             transcript.BindConversation(initialConversationId);
             transcript.Sync();
+            previousTurnMaxStepIndex = transcript.MaxSeenStepIndex;
             baselineStepIndex = transcript.MaxSeenStepIndex + 1;
             minTurnStepIndex = baselineStepIndex;
         }
@@ -148,16 +151,21 @@ internal sealed partial class AntigravityStreamParser
     /// <summary>這一輪開始前呼叫：清掉上一輪的步驟與用量，推進逐字稿基準步驟編號</summary>
     public void BeginTurn()
     {
+        foreach (var step in steps.Values)
+        {
+            if (step.NumericIndex is { } idx)
+            {
+                if (idx > previousTurnMaxStepIndex)
+                    previousTurnMaxStepIndex = idx;
+                if (idx + 1 > baselineStepIndex)
+                    baselineStepIndex = idx + 1;
+            }
+        }
         if (ConversationId != null)
         {
             transcript.Sync();
             if (transcript.MaxSeenStepIndex + 1 > baselineStepIndex)
                 baselineStepIndex = transcript.MaxSeenStepIndex + 1;
-        }
-        foreach (var step in steps.Values)
-        {
-            if (step.NumericIndex is { } idx && idx + 1 > baselineStepIndex)
-                baselineStepIndex = idx + 1;
         }
         steps.Clear();
         stepUsage.Clear();
@@ -278,7 +286,9 @@ internal sealed partial class AntigravityStreamParser
             if (hasNumericIndex)
             {
                 SyncTranscriptBackgroundNotifications(result, numericIndex);
-                minTurnStepIndex = Math.Max(minTurnStepIndex, numericIndex + 1);
+                minTurnStepIndex = !turnStartLocked && numericIndex > previousTurnMaxStepIndex
+                    ? numericIndex + 1
+                    : Math.Max(minTurnStepIndex, numericIndex + 1);
                 turnStartLocked = true;
             }
             return;
@@ -294,9 +304,11 @@ internal sealed partial class AntigravityStreamParser
         {
             if (!turnStartLocked)
             {
-                // 沒收到 user_input（例如測試直接餵步驟）：工具步驟的前一步可能是它的 PLANNER_RESPONSE
+                // 沒收到 user_input（例如測試直接餵步驟，或閒置主動喚醒時磁碟逐字稿已先寫入本輪步驟）：工具步驟的前一步可能是它的 PLANNER_RESPONSE
                 int candidateStart = isToolStep ? Math.Max(0, numericIndex - 1) : numericIndex;
-                minTurnStepIndex = Math.Max(baselineStepIndex, candidateStart);
+                minTurnStepIndex = candidateStart > previousTurnMaxStepIndex
+                    ? candidateStart
+                    : Math.Max(baselineStepIndex, candidateStart);
                 turnStartLocked = true;
             }
             SyncTranscriptAndEmitThinking(result, numericIndex);
@@ -313,6 +325,7 @@ internal sealed partial class AntigravityStreamParser
         }
 
         var state = AntigravityStepRules.ClassifyState(Str(payload["state"]));
+        step.LastState = state;
         var delta = Str(payload["text_delta"]);
 
         if (isToolStep)
@@ -649,6 +662,21 @@ internal sealed partial class AntigravityStreamParser
     {
         SyncTranscriptAndEmitThinking(result, int.MaxValue);
 
+        bool hadOpenToolStep = steps.Values.Any(s => s.IsTool && (s.Started || s.DeferredStart) && !s.Done);
+        bool hadFailedResponseStep = steps.Values.Any(s => !s.IsTool && s.LastState is AntigravityStepState.Failed or AntigravityStepState.Cancelled);
+        int? maxCompletedStreamResponseStepIndex = null;
+        if (!hadOpenToolStep && !hadFailedResponseStep)
+        {
+            StepState? topStep = null;
+            foreach (var s in steps.Values)
+            {
+                if (s.NumericIndex is { } idx && (topStep == null || idx > topStep.NumericIndex!.Value))
+                    topStep = s;
+            }
+            if (topStep is { IsTool: false, LastState: AntigravityStepState.Completed } && topStep.Text.Length > 0)
+                maxCompletedStreamResponseStepIndex = topStep.NumericIndex;
+        }
+
         foreach (var step in steps.Values.Where(s => s.DeferredStart && !s.Started))
             FlushDeferredToolStart(step, result.Events);
 
@@ -699,8 +727,23 @@ internal sealed partial class AntigravityStreamParser
         var status = Str(payload["status"]);
         var finishedReason = Str(payload["finished_reason"]);
         var outcome = AntigravityStepRules.ClassifyResultStatus(status, finishedReason);
+        var rawError = AntigravityStepRules.ErrorText(payload["error"]);
+        if (outcome == AgentTurnOutcome.Failed
+            && string.IsNullOrWhiteSpace(finishedReason)
+            && !string.IsNullOrWhiteSpace(rawError)
+            && !hadOpenToolStep
+            && !hadFailedResponseStep
+            && (anyText || !string.IsNullOrWhiteSpace(response)))
+        {
+            transcript.Sync();
+            if (transcript.IsErrorSupersededByCompletedTurn(minTurnStepIndex, rawError, maxCompletedStreamResponseStepIndex))
+            {
+                outcome = AgentTurnOutcome.Completed;
+                rawError = null;
+            }
+        }
         var error = outcome == AgentTurnOutcome.Failed
-            ? AntigravityStepRules.ErrorText(payload["error"]) is { Length: > 0 } e
+            ? rawError is { Length: > 0 } e
                 ? e
                 : string.Equals(finishedReason, "print_timeout", StringComparison.OrdinalIgnoreCase)
                     ? "agy 執行逾時（print_timeout）"
@@ -745,6 +788,13 @@ internal sealed partial class AntigravityStreamParser
             result.Events.Add(new AgentTokenUsageEvent(turnUsage with { CostUsd = null }, tokenModel));
         result.Events.Add(new AgentTurnCompletedEvent(outcome, error, turnUsage) { ServerBusy = busy });
         result.TurnCompleted = true;
+        if (transcript.MaxSeenStepIndex > previousTurnMaxStepIndex)
+            previousTurnMaxStepIndex = transcript.MaxSeenStepIndex;
+        foreach (var step in steps.Values)
+        {
+            if (step.NumericIndex is { } idx && idx > previousTurnMaxStepIndex)
+                previousTurnMaxStepIndex = idx;
+        }
         stepUsage.Clear();
     }
 

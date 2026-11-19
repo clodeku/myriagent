@@ -20,11 +20,14 @@ internal sealed record AntigravityTranscriptStep(
     string? Thinking,
     IReadOnlyList<AntigravityTranscriptToolCall> ToolCalls,
     IReadOnlyList<string> MediaPaths,
-    string? Content = null);
+    string? Content = null,
+    string? Status = null,
+    string? Error = null);
 
 /// <summary>
 /// Antigravity 逐字稿（transcript_full.jsonl／transcript.jsonl）的純函式解析規則：
-/// 解開雙重編碼參數、計算寫檔與改檔紅綠 Diff、過濾本機媒體 URI、偵測規劃與 RequestFeedback 確認需求、展開子代理完整逐字稿
+/// 解開雙重編碼參數、計算寫檔與改檔紅綠 Diff、過濾本機媒體 URI、偵測規劃與 RequestFeedback 確認需求、展開子代理完整逐字稿、
+/// 以及辨識已被後續完成回合取代的歷史 ERROR_MESSAGE（agy 1.5.x steps.LastStepError 誤報修正）
 /// </summary>
 internal static class AntigravityTranscriptRules
 {
@@ -50,6 +53,12 @@ internal static class AntigravityTranscriptRules
             return null;
 
         var type = Str(obj["type"]) ?? string.Empty;
+        var status = Str(obj["status"]);
+        if (string.IsNullOrWhiteSpace(status))
+            status = null;
+        var error = AntigravityStepRules.ErrorText(obj["error"]);
+        if (string.IsNullOrWhiteSpace(error))
+            error = null;
         var thinking = Str(obj["thinking"]);
         if (string.IsNullOrWhiteSpace(thinking))
             thinking = null;
@@ -71,7 +80,7 @@ internal static class AntigravityTranscriptRules
         }
 
         var media = ExtractMediaPaths(obj["media"] as JArray);
-        return new AntigravityTranscriptStep(stepIndex, type, thinking, calls, media, content);
+        return new AntigravityTranscriptStep(stepIndex, type, thinking, calls, media, content, status, error);
     }
 
     /// <summary>
@@ -643,6 +652,98 @@ internal static class AntigravityTranscriptRules
         return cont + 1 >= expected ? length : length - (cont + 1);
     }
 
+    /// <summary>
+    /// 判斷 stream-json result 回報的錯誤是否為已被後續完成步驟取代的歷史 ERROR_MESSAGE（2026-11-19 實測 agy 1.5.12 steps.LastStepError 瑕疵）：
+    /// agy 一旦在對話某一步（無論是前幾輪，或同一輪中途 attempt 1 瞬斷後 attempt 2 已成功恢復）寫入過非可恢復的 ERROR_MESSAGE 步驟，
+    /// 之後每一輪結束組裝 result 時 steps.LastStepError 都會往回掃整個對話步驟並回傳那筆舊錯誤與 status: "ERROR"。
+    /// 只有在逐字稿存在錯誤文字相符的 ERROR_MESSAGE，且其後在本輪（&gt;= minTurnStepIndex）已有最終完成的 PLANNER_RESPONSE（DONE 且無待執行 tool_calls），
+    /// 並且該最終回覆之後沒有任何新的 ERROR_MESSAGE、工具呼叫或失敗步驟時，才判定為已被取代的舊錯誤（真正中斷於尾端的新錯誤不會被壓掉）
+    /// </summary>
+    public static bool IsErrorSupersededByCompletedTurn(
+        IReadOnlyDictionary<int, AntigravityTranscriptStep>? stepsByIndex,
+        int maxSeenStepIndex,
+        int minTurnStepIndex,
+        string? resultError,
+        int? maxCompletedStreamResponseStepIndex = null)
+    {
+        if (string.IsNullOrWhiteSpace(resultError) || stepsByIndex == null || stepsByIndex.Count == 0)
+            return false;
+        var normalizedTarget = resultError.Trim();
+
+        int latestMatchingErrorIndex = -1;
+        foreach (var step in stepsByIndex.Values)
+        {
+            if (!string.Equals(step.Type, "ERROR_MESSAGE", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (TranscriptErrorMatches(step.Error, step.Content, normalizedTarget) && step.StepIndex > latestMatchingErrorIndex)
+                latestMatchingErrorIndex = step.StepIndex;
+        }
+        if (latestMatchingErrorIndex < 0)
+            return false;
+
+        int finalPlannerIndex = -1;
+        foreach (var step in stepsByIndex.Values)
+        {
+            if (step.StepIndex <= latestMatchingErrorIndex || step.StepIndex < minTurnStepIndex)
+                continue;
+            if (string.Equals(step.Type, "PLANNER_RESPONSE", StringComparison.OrdinalIgnoreCase)
+                && AntigravityStepRules.ClassifyState(step.Status) == AntigravityStepState.Completed
+                && step.ToolCalls.Count == 0
+                && step.StepIndex > finalPlannerIndex)
+            {
+                finalPlannerIndex = step.StepIndex;
+            }
+        }
+
+        // 若磁碟逐字稿還沒 flush 到本輪最後一步，但 stream-json 已收到該步驟（> maxSeenStepIndex）的 agent_response DONE，視為同一最終回覆步驟
+        if (finalPlannerIndex < 0
+            && maxCompletedStreamResponseStepIndex is { } streamIdx
+            && streamIdx > maxSeenStepIndex
+            && streamIdx > latestMatchingErrorIndex
+            && streamIdx >= minTurnStepIndex)
+        {
+            finalPlannerIndex = streamIdx;
+        }
+
+        if (finalPlannerIndex < 0)
+            return false;
+
+        foreach (var step in stepsByIndex.Values)
+        {
+            if (step.StepIndex <= finalPlannerIndex)
+                continue;
+            if (string.Equals(step.Type, "ERROR_MESSAGE", StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (step.ToolCalls.Count > 0)
+                return false;
+            if (AntigravityStepRules.ClassifyState(step.Status) is AntigravityStepState.Failed or AntigravityStepState.Cancelled)
+                return false;
+        }
+        return true;
+    }
+
+    private static bool TranscriptErrorMatches(string? stepError, string? stepContent, string normalizedTarget)
+    {
+        if (!string.IsNullOrWhiteSpace(stepError))
+        {
+            var trimmed = stepError.Trim();
+            if (string.Equals(trimmed, normalizedTarget, StringComparison.Ordinal))
+                return true;
+            if (trimmed.Length >= 32 && normalizedTarget.StartsWith(trimmed, StringComparison.Ordinal))
+                return true;
+        }
+        if (!string.IsNullOrWhiteSpace(stepContent))
+        {
+            var trimmedContent = stepContent.Trim();
+            if (string.Equals(trimmedContent, normalizedTarget, StringComparison.Ordinal)
+                || string.Equals(trimmedContent, "Error: " + normalizedTarget, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static string? Str(JToken? token)
         => token is JValue { Value: not null } v ? Convert.ToString(v.Value, CultureInfo.InvariantCulture) : null;
 }
@@ -808,6 +909,18 @@ internal sealed class AntigravityTranscriptReader
     /// <summary>列出所有 step_index &gt;= minStepIndex 的步驟（依 step_index 升冪）</summary>
     public IEnumerable<AntigravityTranscriptStep> StepsFrom(int minStepIndex)
         => stepsByIndex.Values.Where(s => s.StepIndex >= minStepIndex).OrderBy(s => s.StepIndex);
+
+    /// <summary>檢查 result 回報的錯誤是否為已被本輪後續完成步驟取代的歷史 ERROR_MESSAGE</summary>
+    public bool IsErrorSupersededByCompletedTurn(
+        int minTurnStepIndex,
+        string? resultError,
+        int? maxCompletedStreamResponseStepIndex = null)
+        => AntigravityTranscriptRules.IsErrorSupersededByCompletedTurn(
+            stepsByIndex,
+            maxSeenStepIndex,
+            minTurnStepIndex,
+            resultError,
+            maxCompletedStreamResponseStepIndex);
 
     /// <summary>尋找工具步驟對應的呼叫紀錄（優先精確比對 ExpectedStepIndex，退回找最近同名的未配對呼叫）</summary>
     public AntigravityTranscriptToolCall? FindToolCall(int stepIndex, string? toolName, int minPlannerStepIndex)
