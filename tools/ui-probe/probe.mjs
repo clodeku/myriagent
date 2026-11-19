@@ -1479,6 +1479,10 @@ async function runMain(vp, full) {
     checked: r.querySelector('input').checked, disabled: r.querySelector('input').disabled, label: r.querySelector('.set-label').textContent,
     desc: r.querySelector('.set-desc').textContent, first: r === r.parentElement.querySelector('.set-row'),
   }));
+  // 假資料的 autoStart 後來改成預設開（「自動啟動後鎖定電腦」那一列要它開著）：這一段的流程是從關著開始
+  host.settings.autoStart = false;
+  await host.send({ type: 'settings', settings: host.settings });
+  await sleep(150);
   const bt0 = await bootOf();
   await page.click(bootRow + ' .switch');
   const bt1 = await until(() => host.last('setting', (m) => m.key === 'autoStart'), 2000);
@@ -1579,6 +1583,17 @@ async function runMain(vp, full) {
   const sc3 = await until(() => host.last('setting', (m) => m.key === 'shareCrossCliCustomizations' && m.value === false), 2000);
   if (full) check('settingsShareCrossCliCustomizations', sc0.checked === false && sc0.label === '跨四家 CLI 共用技能與全域指示' && /GEMINI\.md/.test(sc0.desc)
     && !!sc1 && sc2 === true && !!sc3, { initial: sc0, on: sc1, afterOn: sc2, off: sc3 });
+  // 各家代理共用記憶（CLI 分頁，預設開）：關掉送出 shareAgentMemory=false，再開回 true
+  const memRow = '.dlg-settings .set-sec[data-sec="cliShare"] .set-row[data-setting="shareAgentMemory"]';
+  const sm0 = await page.$eval(memRow, (r) => ({ checked: r.querySelector('input').checked, label: r.querySelector('.set-label').textContent, desc: r.querySelector('.set-desc').textContent }));
+  await page.click(memRow + ' .switch');
+  const sm1 = await until(() => host.last('setting', (m) => m.key === 'shareAgentMemory' && m.value === false), 2000);
+  await sleep(120);
+  const sm2 = await page.$eval(memRow + ' input', (i) => i.checked);
+  await page.click(memRow + ' .switch');
+  const sm3 = await until(() => host.last('setting', (m) => m.key === 'shareAgentMemory' && m.value === true), 2000);
+  if (full) check('settingsShareAgentMemory', sm0.checked === true && sm0.label === '各家代理共用記憶' && /Codex、Antigravity 與 Grok/.test(sm0.desc) && /memory/.test(sm0.desc)
+    && !!sm1 && sm2 === false && !!sm3, { initial: sm0, off: sm1, afterOff: sm2, on: sm3 });
   await page.keyboard.press('Escape');
 
   // app 自我更新：橫幅（已備妥 → 立即重啟；排空中 → 取消這次）、設定頁的 Clode Myriagent 區塊
@@ -5070,7 +5085,7 @@ async function runShell(vp) {
   host.pushConversations();
   await sleep(150);
   const rowAfter = await page.$eval('.crow[data-key="c:c4"]', (n) => ({ text: n.querySelector('.crow-title').textContent, spin: !!n.querySelector('.crow-titling') }));
-  check('sidebarContextMenuAutoTitle', rowMenuLabels.join('/') === '開啟/重新命名/自動重新命名/在新視窗開啟/延伸成新對話/刪除…' && !!rowAuto && rowSpin && rowBusy === true
+  check('sidebarContextMenuAutoTitle', rowMenuLabels.join('/') === '開啟/重新命名/自動重新命名/在新視窗開啟/延伸成新對話/複製對話 ID/刪除…' && !!rowAuto && rowSpin && rowBusy === true
     && rowAfter.text === '側欄自動命名' && !rowAfter.spin, { rowMenuLabels, autoTitle: rowAuto, rowSpin, rowBusy, rowAfter });
 
   // 改名中清單重排（例如這一輪結束、對話跳到最上面）：改名框留著，打到一半的標題不會被送出

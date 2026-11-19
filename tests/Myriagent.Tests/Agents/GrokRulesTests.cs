@@ -341,6 +341,27 @@ public class GrokRulesTests
         GrokAcpRules.RemembersSessionAllow(null).Should().BeFalse();
     }
 
+    /// <summary>各家代理共用的記憶資料夾在 ~/.claude 底下：以它自己為根，裡面的檔可以；它外面的 .claude 照舊受保護</summary>
+    [Fact]
+    public void 自動接受編輯_共用記憶資料夾裡的檔也算_它外面的claude資料夾照舊不算()
+    {
+        var work = Path.Combine(Path.GetTempPath(), "grok-rules-work");
+        var conv = Path.Combine(Path.GetTempPath(), "grok-rules-conv");
+        var claude = Path.Combine(Path.GetTempPath(), "grok-rules-home", ".claude");
+        var memory = Path.Combine(claude, "projects", "C--repo-x", "memory");
+        bool Can(string path, string? memoryDirectory)
+            => GrokAcpRules.CanAutoApproveEdit(GrokAcpRules.ParsePermissionRequest(EditRequest(path)), work, conv, _ => null, memoryDirectory);
+
+        Can(Path.Combine(memory, "MEMORY.md"), memory).Should().BeTrue();
+        Can(Path.Combine(memory, "release-flow.md"), memory).Should().BeTrue();
+        Can(Path.Combine(memory, "MEMORY.md"), null).Should().BeFalse("沒有共用記憶時照舊");
+        Can(Path.Combine(claude, "settings.json"), memory).Should().BeFalse("記憶資料夾以外的 ~/.claude");
+        Can(Path.Combine(claude, "projects", "C--repo-x", "session.jsonl"), memory).Should().BeFalse("同一個專案資料夾裡的其他檔");
+        Can(Path.Combine(memory, "..", "..", "..", "settings.json"), memory).Should().BeFalse("跳出記憶資料夾");
+        Can(Path.Combine(memory, ".git", "config"), memory).Should().BeFalse("記憶資料夾裡受保護的名稱照舊不算");
+        Can(Path.Combine(work, "a.txt"), memory).Should().BeTrue("工作資料夾照舊");
+    }
+
     [Fact]
     public void 自動接受編輯_只在工作資料夾或對話資料夾內_擋掉跳出與受保護的資料夾()
     {

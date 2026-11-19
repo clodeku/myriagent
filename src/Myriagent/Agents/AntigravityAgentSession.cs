@@ -46,6 +46,9 @@ internal sealed class AntigravityAgentSession : IAgentSession
     private AgentProcess? process;
     private AntigravityStreamParser parser = new();
     private string? processSignature;
+
+    /// <summary>這個程序啟動時的共用設定（共用記憶的資料夾與說明：啟動參數的 --add-dir、新對話的第一則訊息要用）</summary>
+    private AgentSharedLaunch sharedLaunch = AgentSharedLaunch.None;
     private CliBinaryIdentity? processCli;
     private string? runningVersion;
     private bool running;
@@ -414,7 +417,7 @@ internal sealed class AntigravityAgentSession : IAgentSession
                 abort = interruptRequested;
                 if (!abort)
                 {
-                    var instructions = conversation == null ? settings.Instructions : null;
+                    var instructions = conversation == null ? settings.InstructionsWith(sharedLaunch) : null;
                     var recap = fresh || (pendingRecap && conversation == null) ? settings.HistoryRecap : null;
                     var notice = conversation != null && lastWorkingDirectory != null
                         && !string.Equals(lastWorkingDirectory.TrimEnd('\\'), settings.WorkingDirectory.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)
@@ -516,7 +519,8 @@ internal sealed class AntigravityAgentSession : IAgentSession
         if (!Directory.Exists(settings.WorkingDirectory))
             throw new DirectoryNotFoundException($"工作資料夾不存在：{settings.WorkingDirectory}");
         // 跨四家 CLI 共用設定：啟動前在背景同步 ~/.gemini/GEMINI.md 與 ~/.gemini/config/skills
-        _ = await settings.PrepareSharedAsync();
+        var shared = await settings.PrepareSharedAsync();
+        sharedLaunch = shared;
 
         var mode = AgentPermissionModes.Normalize(AgentProvider.Antigravity, settings.PermissionMode);
         var started = await AgentProcess.StartWithRetryAsync(
@@ -529,7 +533,8 @@ internal sealed class AntigravityAgentSession : IAgentSession
                 settings.ConversationDirectory,
                 settings.UseLocalCustomizations,
                 settings.Agent,
-                settings.WorkingDirectory),
+                settings.WorkingDirectory,
+                sharedMemoryDirectory: shared.SharedMemoryDirectory),
             settings.WorkingDirectory,
             settings.ConfigureEnvironment,
             ct);

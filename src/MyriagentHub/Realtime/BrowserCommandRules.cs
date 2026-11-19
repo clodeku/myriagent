@@ -154,7 +154,7 @@ internal static class BrowserCommandRules
     /// <summary><c>setting</c> 裡只能在電腦本機改的鍵（設計 8.9、SEC-24）：回 desktop_only，不寫入</summary>
     public static IReadOnlySet<string> DesktopOnlySettingKeys { get; } = Set(
         "instructions", "closeToTray", "autoUpdateCli", "autoUpdateApp", "cliRestartPolicy", "claudeRemoteControl",
-        "autoSwitchAccount", "autoSwitchCrossProvider", "shareCrossCliCustomizations", "claudeFallbackModel",
+        "autoSwitchAccount", "autoSwitchCrossProvider", "shareCrossCliCustomizations", "shareAgentMemory", "claudeFallbackModel",
         "claudeIdleResumeWarning", "autoResumeAfterQuota");
 
     /// <summary>不認得的名稱（含空字串、大小寫不同、<c>__proto__</c>）回 null</summary>

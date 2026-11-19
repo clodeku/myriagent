@@ -650,13 +650,15 @@ internal static class GrokAcpRules
     /// 自動接受編輯：kind 是 edit、至少有一個路徑、每個路徑都在工作資料夾或對話資料夾之內（以完整路徑比對，擋掉 ..\ 跳出；
     /// 任何一層的 .git、.grok、.claude 不算；經過交接點、符號連結的不算）。attributes 是查檔案屬性的方法（測試替換；預設查磁碟）
     /// </summary>
+    /// <param name="memoryDirectory">各家代理共用的記憶資料夾（SharedMemoryRules）：裡面的檔也算（它在 ~/.claude 底下，但以它自己為根，受保護的資料夾名稱只看根以下的部分）</param>
     public static bool CanAutoApproveEdit(GrokPermissionRequest request, string workingDirectory, string conversationDirectory,
-        Func<string, FileAttributes?>? attributes = null)
+        Func<string, FileAttributes?>? attributes = null, string? memoryDirectory = null)
     {
         if (request.AcpKind != "edit" || request.Paths.Count == 0 || request.AllowOnceOptionId == null)
             return false;
         attributes ??= ReadAttributes;
-        return request.Paths.All(path => IsInside(path, workingDirectory, attributes) || IsInside(path, conversationDirectory, attributes));
+        return request.Paths.All(path => IsInside(path, workingDirectory, attributes) || IsInside(path, conversationDirectory, attributes)
+            || (memoryDirectory != null && IsInside(path, memoryDirectory, attributes)));
     }
 
     private static readonly string[] ProtectedFolders = { ".git", ".grok", ".claude" };

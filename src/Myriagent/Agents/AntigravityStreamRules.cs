@@ -638,7 +638,7 @@ internal static partial class AntigravityStreamRules
     /// 新對話且非精簡模式時若選了自訂代理則傳 --agent；模型「預設」不傳 --model（用 agy 自己記住的）；模型 id 帶強度時不傳 --effort；
     /// 權限模式見 PermissionArguments；精簡模式（useLocalCustomizations＝false）傳 --disable-slash-commands；對話資料夾（附件）以 --add-dir 加進工作區；
     /// 續接既有對話且目前工作資料夾不在對話資料夾內時，額外以 --add-dir 傳入工作資料夾（agy 1.5.2 起續接會還原原對話工作區）；
-    /// 若有額外設定（JSON 或檔案路徑）則傳 --settings（agy 1.4.11+）
+    /// 若有額外設定（JSON 或檔案路徑）則傳 --settings（agy 1.4.11+）；各家代理共用的記憶資料夾（SharedMemoryRules）也以 --add-dir 加進工作區
     /// </summary>
     public static List<string> BuildArguments(
         string? conversationId,
@@ -649,7 +649,8 @@ internal static partial class AntigravityStreamRules
         bool useLocalCustomizations = true,
         string? agent = null,
         string? workingDirectory = null,
-        string? settingsJson = null)
+        string? settingsJson = null,
+        string? sharedMemoryDirectory = null)
     {
         var args = new List<string> { "--print=", "--input-format", "stream-json", "--output-format", "stream-json" };
         if (!string.IsNullOrWhiteSpace(conversationId))
@@ -687,6 +688,11 @@ internal static partial class AntigravityStreamRules
         {
             args.Add("--add-dir");
             args.Add(workingDirectory);
+        }
+        if (!string.IsNullOrWhiteSpace(sharedMemoryDirectory))
+        {
+            args.Add("--add-dir");
+            args.Add(sharedMemoryDirectory);
         }
         if (!string.IsNullOrWhiteSpace(settingsJson))
         {

@@ -252,6 +252,12 @@ internal sealed class AppSettings
     /// </summary>
     public bool ShareCrossCliCustomizations { get; set; }
 
+    /// <summary>
+    /// 各家代理共用記憶（Accounts.SharedMemoryRules；預設開，只能在本機修改）：Codex、Antigravity、Grok 的對話也讀寫 Claude 那一份專案記憶
+    /// （~/.claude 的 projects\&lt;專案&gt;\memory）——同一個對話換成別的模型、同一個專案的其他對話，用的都是同一份
+    /// </summary>
+    public bool ShareAgentMemory { get; set; } = true;
+
     /// <summary>附加給代理的說明；null＝預設（AgentHubRules.DefaultInstructions）</summary>
     public string? Instructions { get; set; }
 

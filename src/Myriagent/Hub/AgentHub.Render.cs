@@ -543,6 +543,7 @@ internal sealed partial class AgentHub
             ["autoSwitchAccount"] = settings.AutoSwitchAccountOnLimit,
             ["autoSwitchCrossProvider"] = settings.AutoSwitchCrossProviderOnLimit,
             ["shareCrossCliCustomizations"] = settings.ShareCrossCliCustomizations,
+            ["shareAgentMemory"] = settings.ShareAgentMemory,
             ["instructions"] = settings.Instructions ?? AgentHubRules.DefaultInstructions,
             ["continueText"] = settings.ContinueText ?? AgentHubRules.DefaultContinueText,
             ["conversationDefaults"] = new JObject(AgentProviders.All.Select(p => new JProperty(p.ToString(), RenderConversationDefaults(p)))),

@@ -49,7 +49,7 @@ export const state = {
   windowRole: null,
   ready: false,
   app: { version: '' },
-  settings: { theme: initialTheme, fontSize: 14, closeToTray: true, notifications: true, voiceNotifications: true, autoUpdateCli: true, autoUpdateApp: true, enterToSend: true, claudeRemoteControl: true, claudeIdleTokenRefresh: true, autoSwitchAccount: true, autoSwitchCrossProvider: false, shareCrossCliCustomizations: false, instructions: '' },
+  settings: { theme: initialTheme, fontSize: 14, closeToTray: true, notifications: true, voiceNotifications: true, autoUpdateCli: true, autoUpdateApp: true, enterToSend: true, claudeRemoteControl: true, claudeIdleTokenRefresh: true, autoSwitchAccount: true, autoSwitchCrossProvider: false, shareCrossCliCustomizations: false, shareAgentMemory: true, instructions: '' },
   accounts: [],
   accountMap: new Map(),
   conversations: [],

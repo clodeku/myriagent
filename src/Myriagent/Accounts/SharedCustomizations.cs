@@ -146,6 +146,60 @@ internal sealed class SharedCustomizations
         }
     }
 
+    /// <summary>
+    /// 各家代理共用記憶（背景執行緒，接在 <see cref="Prepare(SharedAccount?, string, bool)"/> 之後）：找出這個工作資料夾的記憶資料夾
+    /// （Claude 來源設定資料夾的 projects\&lt;專案&gt;\memory，和 Claude 各帳戶共用的是同一個）、建立它、讀目前的索引，
+    /// 回傳帶著資料夾與說明的啟動參數。任何一步失敗只記錄、回原本的參數（少一份記憶總比開不了對話好）。不拿鎖：只建資料夾與讀一個檔
+    /// </summary>
+    /// <param name="create">
+    /// 資料夾還沒有時先建好（Codex 沙箱的可寫資料夾、Antigravity 的 --add-dir 都要它已經存在）。使用者選的專案資料夾給 true；
+    /// 對話自己的工作區（每個對話一個）給 false——不替每個對話在 ~/.claude 留一個空資料夾，等真的有記憶（例如同一個對話先前的 Claude 存過）才放行寫入。
+    /// 沒建、也還不存在時說明照給（代理知道記憶在哪裡），只是 <see cref="AgentSharedLaunch.SharedMemoryDirectory"/> 是 null：第一次存要照各家的權限流程
+    /// </param>
+    public AgentSharedLaunch WithSharedMemory(AgentSharedLaunch launch, string workingDirectory, bool create = true)
+    {
+        try
+        {
+            var root = SharedCustomizationRules.MemoryProjectRoot(workingDirectory, Directory.Exists, ReadSmallFile);
+            var directory = SharedCustomizationRules.SharedMemoryDirectory(sourceDirectory(AgentProvider.Claude), root);
+            if (create)
+                Directory.CreateDirectory(directory);
+            bool exists = Directory.Exists(directory);
+            var index = exists ? ReadHead(Path.Combine(directory, SharedMemoryRules.IndexFileName), SharedMemoryRules.MaxIndexFileBytes) : null;
+            return launch with { SharedMemoryDirectory = exists ? directory : null, SharedMemoryInstructions = SharedMemoryRules.Instructions(directory, index) };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            Log.Warn($"共用記憶：找不到或建不了記憶資料夾（{workingDirectory}）：{ex.Message}");
+            return launch;
+        }
+    }
+
+    /// <summary>讀檔案開頭最多 maxBytes 個位元組（UTF-8，去掉 BOM；其他程式正在寫也讀得到）；不存在或讀不到回 null</summary>
+    private static string? ReadHead(string path, int maxBytes)
+    {
+        try
+        {
+            if (!File.Exists(path))
+                return null;
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var buffer = new byte[(int)Math.Min(maxBytes, stream.Length)];
+            int read = 0;
+            while (read < buffer.Length)
+            {
+                int n = stream.Read(buffer, read, buffer.Length - read);
+                if (n == 0)
+                    break;
+                read += n;
+            }
+            return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetString(buffer, 0, read).TrimStart((char)0xFEFF);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     private AgentSharedLaunch PrepareCore(SharedAccount account, string source, string workingDirectory)
     {
         var statePath = StatePath(account.ConfigDirectory);

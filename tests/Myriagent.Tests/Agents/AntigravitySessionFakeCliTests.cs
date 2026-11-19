@@ -477,6 +477,25 @@ public sealed class AntigravitySessionFakeCliTests : AntigravitySessionFakeCliTe
 
 public sealed class AntigravitySessionFakeCliTests2 : AntigravitySessionFakeCliTestsBase
 {
+    /// <summary>各家代理共用記憶（Accounts.SharedMemoryRules）：記憶資料夾以 --add-dir 加進工作區，說明接在第一則的背景說明後面</summary>
+    [Fact]
+    public async Task 共用記憶_資料夾以add_dir加進工作區_說明接在第一則()
+    {
+        using var session = NewSession();
+        using var log = new EventLog(session);
+        var memory = Directory.CreateDirectory(Path.Combine(temp.Root, "memory")).FullName;
+        var settings = Settings("default") with
+        {
+            PrepareShared = _ => AgentSharedLaunch.None with { SharedMemoryDirectory = memory, SharedMemoryInstructions = "\n\n# 記憶\n\n（測試的索引）" },
+        };
+
+        var reply = Reply(await TurnAsync(session, log, settings, "你好"));
+
+        Args(reply).Should().Equal("--print=", "--input-format", "stream-json", "--output-format", "stream-json", "--mode", "accept-edits",
+            "--add-dir", temp.Root, "--add-dir", memory);
+        ((string)reply["text"]!).Should().Be("<myriagent_instructions>\n測試說明\n\n# 記憶\n\n（測試的索引）\n</myriagent_instructions>\n\n你好");
+    }
+
     [Fact]
     public async Task CLI本地唯讀斜線指令_介面管理回提示_單發查詢走減p不中斷既有對話程序()
     {

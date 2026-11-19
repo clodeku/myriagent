@@ -25,6 +25,7 @@ export const SETTING_KEYWORDS = Object.freeze({
   instructions: '提示詞 prompt 系統提示 說明 指示',
   autoUpdateCli: '更新 升級 update',
   shareCrossCliCustomizations: 'skills 技能 claude.md agents.md gemini.md 指示 共用 同步',
+  shareAgentMemory: '記憶 memory memory.md 記得 共用 模型 codex grok antigravity gemini',
   claudeIdleTokenRefresh: '權杖 token 登入 過期 用量',
   cliRestartPolicy: '更新 重開 換版 安全點',
   autoUpdateApp: '更新 升級 版本 update',

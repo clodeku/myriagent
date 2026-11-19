@@ -104,6 +104,13 @@ internal sealed partial class CodexAgentSession : IAgentSession
     private bool? sandboxReady;
     private string? processSignature;
 
+    /// <summary>工作資料夾以外沙箱也要能寫的資料夾：對話資料夾（附件），有共用記憶時加上記憶資料夾</summary>
+    private IReadOnlyList<string> WritableRoots(AgentSessionSettings settings)
+        => sharedLaunch.SharedMemoryDirectory is { } memory ? new[] { settings.ConversationDirectory, memory } : new[] { settings.ConversationDirectory };
+
+    /// <summary>這個程序啟動時的共用設定（共用記憶的資料夾與說明：建立 thread 與每一輪的可寫資料夾要用）</summary>
+    private AgentSharedLaunch sharedLaunch = AgentSharedLaunch.None;
+
     /// <summary>
     /// 使用者目前選的權限模式（SendAsync、接續的設定，或執行中 SetPermissionModeAsync 改的；已 Normalize）。完全自動時核准請求一律由宿主直接放行：
     /// 核准政策在 turn/start 就定了，執行中才切到完全自動的這一輪、以及子代理（建立時繼承當時那一輪的政策）都還會送核准請求
@@ -427,7 +434,7 @@ internal sealed partial class CodexAgentSession : IAgentSession
             if (lostHistory && !string.IsNullOrWhiteSpace(settings.HistoryRecap))
                 text = settings.HistoryRecap + text;
             var turnParams = CodexAppServerRules.BuildTurnStartParams(
-                thread, text, images, policy, new[] { settings.ConversationDirectory }, NormalizeModel(settings.Model), settings.Effort);
+                thread, text, images, policy, WritableRoots(settings), NormalizeModel(settings.Model), settings.Effort);
             turnParams["cwd"] = settings.WorkingDirectory;
             if (NormalizeModel(settings.Model) is { } turnModel)
             {
@@ -641,6 +648,7 @@ internal sealed partial class CodexAgentSession : IAgentSession
             : CodexConfigRules.ParseMcpServerNames(CodexConfigRules.ReadConfig(settings.CodexHome));
         // 隔離帳戶共用系統預設帳戶的設定：同步全域指示與連結（背景執行緒），帶上共用的 MCP 伺服器
         var shared = await settings.PrepareSharedAsync();
+        sharedLaunch = shared;
         var serverArguments = CodexAppServerRules.BuildServerArguments(settings.UseLocalCustomizations, mcpServers, shared.CodexConfigOverrides, settings.AutoCompactTokens);
         // 帳戶委派（使用者 @ 過帳戶的對話）：以 -c 掛上 myriagent_accounts MCP，不寫進帳戶的 config.toml；精簡模式不載入 MCP
         if (settings.UseLocalCustomizations && settings.DelegationMcpPipeName != null)
@@ -863,7 +871,7 @@ internal sealed partial class CodexAgentSession : IAgentSession
         }
 
         var (started, error) = await RequestAsync(target, "thread/start",
-            CodexAppServerRules.BuildThreadStartParams(settings.WorkingDirectory, model, policy, settings.Instructions), ct: ct);
+            CodexAppServerRules.BuildThreadStartParams(settings.WorkingDirectory, model, policy, settings.InstructionsWith(sharedLaunch)), ct: ct);
         var id = (started?["thread"] as JObject)?["id"]?.ToString();
         if (error != null || string.IsNullOrWhiteSpace(id))
             throw new InvalidOperationException($"Codex 無法建立對話：{error ?? "沒有回傳對話 id"}");
@@ -1934,7 +1942,7 @@ internal sealed partial class CodexAgentSession : IAgentSession
             // 接續訊息不產生使用者項目（Codex 的 userMessage 項目不轉成事件），中樞也不把它顯示成使用者訊息
             Raise(new AgentTurnStartedByCliEvent(AgentAutoTurnKind.Continuation));
             var turnParams = CodexAppServerRules.BuildTurnStartParams(
-                thread, request.EffectiveContinuationText, Array.Empty<string>(), policy, new[] { settings.ConversationDirectory }, model, settings.Effort);
+                thread, request.EffectiveContinuationText, Array.Empty<string>(), policy, WritableRoots(settings), model, settings.Effort);
             turnParams["cwd"] = settings.WorkingDirectory;
             await ApplySelectedSkillsAsync(fresh, turnParams, settings).ConfigureAwait(false);
             var (result, turnError) = await RequestAsync(fresh, "turn/start", turnParams).ConfigureAwait(false);

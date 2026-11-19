@@ -668,6 +668,32 @@ public sealed class GrokSessionFakeCliTests2 : GrokSessionFakeCliTestsBase
         fake.Log().Should().ContainInOrder("p1:permission call-1-1 edit -> allow-once", "p1:permission call-2-1 outside -> reject-once", "p1:permission call-3-1 exec -> reject-once");
     }
 
+    /// <summary>各家代理共用記憶（Accounts.SharedMemoryRules）：說明接在第一則的背景說明後面；「接受編輯」時記憶資料夾裡的編輯也代為核准</summary>
+    [Fact]
+    public async Task 共用記憶_說明接在第一則_記憶資料夾裡的編輯在接受編輯時代為核准()
+    {
+        var fake = new Fake(temp, "permission");
+        using var session = new GrokAgentSession();
+        var events = Collect(session);
+        Func<AgentEvent, Task> deny = async ev =>
+        {
+            if (ev is AgentApprovalEvent approval)
+                await session.RespondApprovalAsync(approval.RequestKey, AgentApprovalChoice.Deny, null);
+        };
+        // 假 grok 的「outside」寫的是工作資料夾外的那個檔：把它所在的資料夾當成記憶資料夾
+        var memory = Path.GetDirectoryName(fake.Outside)!;
+        var settings = fake.Settings(mode: AgentPermissionMode.AcceptEdits) with
+        {
+            PrepareShared = _ => AgentSharedLaunch.None with { SharedMemoryDirectory = memory, SharedMemoryInstructions = "\n\n# 記憶\n\n（測試的索引）" },
+        };
+
+        var outside = await TurnAsync(session, events, settings, "outside", deny);
+
+        outside.OfType<AgentApprovalEvent>().Should().BeEmpty("記憶資料夾裡的檔不必再問");
+        fake.Log().Should().Contain("p1:permission call-1-1 outside -> allow-once");
+        fake.Log().Should().Contain(@"p1:prompt text=<myriagent_instructions>\n測試說明\n\n# 記憶\n\n（測試的索引）\n</myriagent_instructions>\n\noutside");
+    }
+
     [Fact]
     public async Task 提問卡_選項照原文_自填的答案以Other加notes回覆()
     {

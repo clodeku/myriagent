@@ -182,6 +182,14 @@ public class AntigravityRulesTests
     // ───── 啟動參數與輸入 ─────
 
     [Fact]
+    public void 啟動參數_共用記憶的資料夾也加進工作區()
+    {
+        AntigravityStreamRules.BuildArguments(null, "default", null, AgentPermissionMode.AcceptEdits, @"C:\conv", sharedMemoryDirectory: @"C:\home\.claude\projects\p\memory").Should().Equal(
+            "--print=", "--input-format", "stream-json", "--output-format", "stream-json", "--mode", "accept-edits", "--add-dir", @"C:\conv", "--add-dir", @"C:\home\.claude\projects\p\memory");
+        AntigravityStreamRules.BuildArguments(null, "default", null, AgentPermissionMode.AcceptEdits, @"C:\conv", sharedMemoryDirectory: " ").Should().NotContain(" ");
+    }
+
+    [Fact]
     public void 啟動參數_提示要用等號接在print後面_訊息從stdin送()
     {
         // 實測：-p 會把下一個參數當成提示（「-p took "--input-format" as its prompt」），所以用 --print= 給空的提示

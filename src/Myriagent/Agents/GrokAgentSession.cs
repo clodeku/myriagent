@@ -66,6 +66,9 @@ internal sealed class GrokAgentSession : IAgentSession
     private GrokAcpConnection? connection;
     private GrokUpdateParser parser = new();
     private string? processSignature;
+
+    /// <summary>這個程序啟動時的共用設定（共用記憶的資料夾與說明：新對話的第一則訊息、自動接受編輯要用）</summary>
+    private AgentSharedLaunch sharedLaunch = AgentSharedLaunch.None;
     private CliBinaryIdentity? processCli;
     private string? runningVersion;
 
@@ -436,7 +439,7 @@ internal sealed class GrokAgentSession : IAgentSession
                     var notice = !createdNew && lastWorkingDirectory != null && !GrokAcpRules.SameDirectory(lastWorkingDirectory, settings.WorkingDirectory)
                         ? GrokAcpRules.BuildWorkingDirectoryNotice(settings.WorkingDirectory)
                         : null;
-                    text = GrokAcpRules.BuildTurnText(createdNew ? settings.Instructions : null, lostHistory ? settings.HistoryRecap : null, notice, input.Text, input.Attachments, imagesInline);
+                    text = GrokAcpRules.BuildTurnText(createdNew ? settings.InstructionsWith(sharedLaunch) : null, lostHistory ? settings.HistoryRecap : null, notice, input.Text, input.Attachments, imagesInline);
                     if (skippedImages > 0)
                         text += $"\n（另有 {skippedImages} 張圖片超過單則訊息上限未直接附上，可用 Read 工具讀取上列路徑）";
                     lastWorkingDirectory = settings.WorkingDirectory;
@@ -538,7 +541,7 @@ internal sealed class GrokAgentSession : IAgentSession
         if (!Directory.Exists(settings.WorkingDirectory))
             throw new DirectoryNotFoundException($"工作資料夾不存在：{settings.WorkingDirectory}");
         // 共用設定（Grok 隔離帳戶或跨四家 CLI 共用）：啟動前在背景同步全域指示與連結 skills／rules
-        _ = await settings.PrepareSharedAsync();
+        sharedLaunch = await settings.PrepareSharedAsync();
 
         var started = await AgentProcess.StartWithRetryAsync(launcher, GrokAcpRules.AgentArguments, settings.WorkingDirectory,
             env => ApplyLaunchEnvironment(env, settings), ct);
@@ -1296,7 +1299,8 @@ internal sealed class GrokAgentSession : IAgentSession
             else if (currentMode == AgentPermissionMode.FullAccess)
                 autoOption = request.AllowOnceOptionId;
             else if (currentMode == AgentPermissionMode.AcceptEdits && currentWorkingDirectory != null
-                && GrokAcpRules.CanAutoApproveEdit(request, currentWorkingDirectory, currentConversationDirectory ?? currentWorkingDirectory))
+                && GrokAcpRules.CanAutoApproveEdit(request, currentWorkingDirectory, currentConversationDirectory ?? currentWorkingDirectory,
+                    memoryDirectory: sharedLaunch.SharedMemoryDirectory))
                 autoOption = request.AllowOnceOptionId;
             if (autoOption == null)
                 pendingRequests[key] = new PendingRequest(id, PendingKind.Permission, source, request);

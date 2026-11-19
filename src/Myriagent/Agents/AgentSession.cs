@@ -104,6 +104,12 @@ internal sealed record AgentSessionSettings(
     /// <summary>啟動程序前取得共用設定的啟動參數（背景執行緒；不共用回 None）</summary>
     public async Task<AgentSharedLaunch> PrepareSharedAsync()
         => PrepareShared == null ? AgentSharedLaunch.None : await Task.Run(() => PrepareShared(WorkingDirectory));
+
+    /// <summary>
+    /// 建立 CLI 的對話時交給代理的說明：<see cref="Instructions"/> 加上共用記憶的那一段（<see cref="AgentSharedLaunch.SharedMemoryInstructions"/>，
+    /// 沒有共用記憶時就是原本的說明）。Codex、Antigravity、Grok 用；Claude 的 CLI 自己載入記憶
+    /// </summary>
+    public string InstructionsWith(AgentSharedLaunch? shared) => Instructions + shared?.SharedMemoryInstructions;
 }
 
 /// <summary>隔離帳戶共用系統預設帳戶的設定時，啟動 CLI 要多帶的參數（Accounts.SharedCustomizations.Prepare 產生）</summary>
@@ -113,6 +119,15 @@ internal sealed record AgentSessionSettings(
 internal sealed record AgentSharedLaunch(string? ClaudeMemoryDirectory, string? ClaudeMcpConfigFile, IReadOnlyList<string> CodexConfigOverrides)
 {
     public static readonly AgentSharedLaunch None = new(null, null, Array.Empty<string>());
+
+    /// <summary>
+    /// 各家代理共用記憶（Accounts.SharedMemoryRules）：記憶資料夾的完整路徑，Codex、Antigravity、Grok 要讓代理寫得進去
+    /// （沙箱的可寫資料夾、--add-dir、自動接受編輯）。null＝沒有共用記憶（設定關著、精簡模式、Claude、找不到資料夾）
+    /// </summary>
+    public string? SharedMemoryDirectory { get; init; }
+
+    /// <summary>接在給代理的說明後面的那一段（記憶在哪裡、格式、目前的索引）；null＝沒有共用記憶</summary>
+    public string? SharedMemoryInstructions { get; init; }
 }
 
 /// <summary>開啟 Claude Remote Control 的選項（control_request remote_control）</summary>

@@ -1740,11 +1740,14 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         var sharedCustomizations = accounts.Shared;
         var shared = sharedCustomizations != null ? SharedCustomizations.Snapshot(account) : null;
         bool crossCli = sharedCustomizations != null && settings.ShareCrossCliCustomizations && !account.SafeMode;
+        // 各家代理共用記憶（SharedMemoryRules）：Claude 的 CLI 自己處理，其他三家由 app 在說明後面接上記憶的位置與索引；精簡模式不帶
+        bool sharedMemory = sharedCustomizations != null && settings.ShareAgentMemory && !account.SafeMode && SharedMemoryRules.AppliesTo(account.Provider);
+        bool ownsFolder = !string.IsNullOrWhiteSpace(c.Meta.WorkingDirectory);
         return new AgentSessionSettings(
             c.Meta.SessionId,
             c.Meta.SessionStarted,
             cli.GetLauncher(account.Provider),
-            $"{account.Id}|{AccountRules.ResolveConfigDirectory(account)}{(shared != null ? "|shared" : string.Empty)}{(crossCli ? "|cross" : string.Empty)}",
+            $"{account.Id}|{AccountRules.ResolveConfigDirectory(account)}{(shared != null ? "|shared" : string.Empty)}{(crossCli ? "|cross" : string.Empty)}{(sharedMemory ? "|memory" : string.Empty)}",
             env =>
             {
                 AccountRules.ApplyEnvironment(account, env);
@@ -1766,7 +1769,12 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             Cli: SessionCliIdentity(c, account.Provider),
             RemoteControl: RemoteControlOptions(c),
             Title: c.IsDraft ? null : c.Meta.Title,
-            PrepareShared: shared == null && !crossCli ? null : cwd => sharedCustomizations!.Prepare(shared, cwd, crossCli),
+            PrepareShared: shared == null && !crossCli && !sharedMemory ? null : cwd =>
+            {
+                var launch = sharedCustomizations!.Prepare(shared, cwd, crossCli);
+                // 使用者選的專案資料夾才預先建記憶資料夾；對話自己的工作區每個對話一個，有記憶了才用（WithSharedMemory 的 create）
+                return sharedMemory ? sharedCustomizations.WithSharedMemory(launch, cwd, create: ownsFolder) : launch;
+            },
             Agent: account.Provider switch
             {
                 AgentProvider.Antigravity => account.SafeMode ? null : c.Meta.Agent,
@@ -2734,6 +2742,10 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                 break;
             case "autoSwitchCrossProvider":
                 settings.AutoSwitchCrossProviderOnLimit = value.Type == JTokenType.Boolean && value.Value<bool>();
+                break;
+            case "shareAgentMemory":
+                // 下次送出時程序會重開（AccountKey 帶著這個開關）；已經建立的 CLI 對話裡給過的說明不收回
+                settings.ShareAgentMemory = value.Type == JTokenType.Boolean && value.Value<bool>();
                 break;
             case "shareCrossCliCustomizations":
             {

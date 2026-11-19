@@ -148,7 +148,7 @@ export function browserInit(now, o = {}) {
 // ───── 桌面已配對 ─────
 
 export const DESKTOP_SETTINGS = {
-  theme: 'dark', fontSize: 14, closeToTray: true, notifications: true, voiceNotifications: true, autoUpdateCli: true, enterToSend: true, claudeRemoteControl: true, claudeIdleTokenRefresh: true, autoSwitchAccount: true, autoSwitchCrossProvider: false, shareCrossCliCustomizations: false, cliRestartPolicy: 'SafePoint',
+  theme: 'dark', fontSize: 14, closeToTray: true, notifications: true, voiceNotifications: true, autoUpdateCli: true, enterToSend: true, claudeRemoteControl: true, claudeIdleTokenRefresh: true, autoSwitchAccount: true, autoSwitchCrossProvider: false, shareCrossCliCustomizations: false, shareAgentMemory: true, cliRestartPolicy: 'SafePoint',
   instructions: '回覆一律使用臺灣繁體中文。',
 };
 
