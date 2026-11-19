@@ -663,9 +663,9 @@ internal sealed partial class AntigravityStreamParser
         SyncTranscriptAndEmitThinking(result, int.MaxValue);
 
         bool hadOpenToolStep = steps.Values.Any(s => s.IsTool && (s.Started || s.DeferredStart) && !s.Done);
-        bool hadFailedResponseStep = steps.Values.Any(s => !s.IsTool && s.LastState is AntigravityStepState.Failed or AntigravityStepState.Cancelled);
+        bool hadIncompleteOrFailedResponseStep = steps.Values.Any(s => !s.IsTool && s.LastState != AntigravityStepState.Completed);
         int? maxCompletedStreamResponseStepIndex = null;
-        if (!hadOpenToolStep && !hadFailedResponseStep)
+        if (!hadOpenToolStep && !hadIncompleteOrFailedResponseStep)
         {
             StepState? topStep = null;
             foreach (var s in steps.Values)
@@ -732,7 +732,7 @@ internal sealed partial class AntigravityStreamParser
             && string.IsNullOrWhiteSpace(finishedReason)
             && !string.IsNullOrWhiteSpace(rawError)
             && !hadOpenToolStep
-            && !hadFailedResponseStep
+            && !hadIncompleteOrFailedResponseStep
             && (anyText || !string.IsNullOrWhiteSpace(response)))
         {
             transcript.Sync();

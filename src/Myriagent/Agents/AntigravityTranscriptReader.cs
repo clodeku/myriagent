@@ -654,10 +654,11 @@ internal static class AntigravityTranscriptRules
 
     /// <summary>
     /// 判斷 stream-json result 回報的錯誤是否為已被後續完成步驟取代的歷史 ERROR_MESSAGE（2026-11-19 實測 agy 1.5.12 steps.LastStepError 瑕疵）：
-    /// agy 一旦在對話某一步（無論是前幾輪，或同一輪中途 attempt 1 瞬斷後 attempt 2 已成功恢復）寫入過非可恢復的 ERROR_MESSAGE 步驟，
+    /// agy 一旦在對話某一步（無論是前幾輪，或同一輪中途 attempt 1 瞬斷後 attempt 2 已成功恢復）在對話資料庫留下過非可恢復的 ERROR_MESSAGE 步驟
+    /// （實測像 Individual quota reached 這類錯誤只寫進 conversations\*.db、甚至不會寫入 transcript.jsonl，造成逐字稿 step_index 跳號），
     /// 之後每一輪結束組裝 result 時 steps.LastStepError 都會往回掃整個對話步驟並回傳那筆舊錯誤與 status: "ERROR"。
-    /// 只有在逐字稿存在錯誤文字相符的 ERROR_MESSAGE，且其後在本輪（&gt;= minTurnStepIndex）已有最終完成的 PLANNER_RESPONSE（DONE 且無待執行 tool_calls），
-    /// 並且該最終回覆之後沒有任何新的 ERROR_MESSAGE、工具呼叫或失敗步驟時，才判定為已被取代的舊錯誤（真正中斷於尾端的新錯誤不會被壓掉）
+    /// 只要本輪在該舊錯誤之後已有最終完成的 PLANNER_RESPONSE（DONE 且無待執行 tool_calls，且對應 stream-json 最高步驟為完成的 agent_response），
+    /// 並且該最終回覆之後沒有任何新的 ERROR_MESSAGE、工具呼叫、新一輪輸入或失敗步驟，即判定為已被取代的舊錯誤（真正中斷於尾端的新錯誤不會被壓掉）
     /// </summary>
     public static bool IsErrorSupersededByCompletedTurn(
         IReadOnlyDictionary<int, AntigravityTranscriptStep>? stepsByIndex,
@@ -666,36 +667,45 @@ internal static class AntigravityTranscriptRules
         string? resultError,
         int? maxCompletedStreamResponseStepIndex = null)
     {
-        if (string.IsNullOrWhiteSpace(resultError) || stepsByIndex == null || stepsByIndex.Count == 0)
+        if (string.IsNullOrWhiteSpace(resultError))
             return false;
         var normalizedTarget = resultError.Trim();
 
         int latestMatchingErrorIndex = -1;
-        foreach (var step in stepsByIndex.Values)
+        if (stepsByIndex is { Count: > 0 })
         {
-            if (!string.Equals(step.Type, "ERROR_MESSAGE", StringComparison.OrdinalIgnoreCase))
-                continue;
-            if (TranscriptErrorMatches(step.Error, step.Content, normalizedTarget) && step.StepIndex > latestMatchingErrorIndex)
-                latestMatchingErrorIndex = step.StepIndex;
-        }
-        if (latestMatchingErrorIndex < 0)
-            return false;
-
-        int finalPlannerIndex = -1;
-        foreach (var step in stepsByIndex.Values)
-        {
-            if (step.StepIndex <= latestMatchingErrorIndex || step.StepIndex < minTurnStepIndex)
-                continue;
-            if (string.Equals(step.Type, "PLANNER_RESPONSE", StringComparison.OrdinalIgnoreCase)
-                && AntigravityStepRules.ClassifyState(step.Status) == AntigravityStepState.Completed
-                && step.ToolCalls.Count == 0
-                && step.StepIndex > finalPlannerIndex)
+            foreach (var step in stepsByIndex.Values)
             {
-                finalPlannerIndex = step.StepIndex;
+                if (!string.Equals(step.Type, "ERROR_MESSAGE", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (TranscriptErrorMatches(step.Error, step.Content, normalizedTarget) && step.StepIndex > latestMatchingErrorIndex)
+                    latestMatchingErrorIndex = step.StepIndex;
             }
         }
 
-        // 若磁碟逐字稿還沒 flush 到本輪最後一步，但 stream-json 已收到該步驟（> maxSeenStepIndex）的 agent_response DONE，視為同一最終回覆步驟
+        // 若逐字稿中找不到這筆 ERROR_MESSAGE（例如 Individual quota reached 只存在 .db 未寫入逐字稿，或未掛逐字稿），
+        // 必須要求 stream-json 明確收到本輪最高編號步驟為已完成（state=DONE）的非工具 agent_response
+        if (latestMatchingErrorIndex < 0 && maxCompletedStreamResponseStepIndex == null)
+            return false;
+
+        int finalPlannerIndex = -1;
+        if (stepsByIndex is { Count: > 0 })
+        {
+            foreach (var step in stepsByIndex.Values)
+            {
+                if (step.StepIndex <= latestMatchingErrorIndex || step.StepIndex < minTurnStepIndex)
+                    continue;
+                if (string.Equals(step.Type, "PLANNER_RESPONSE", StringComparison.OrdinalIgnoreCase)
+                    && AntigravityStepRules.ClassifyState(step.Status) == AntigravityStepState.Completed
+                    && step.ToolCalls.Count == 0
+                    && step.StepIndex > finalPlannerIndex)
+                {
+                    finalPlannerIndex = step.StepIndex;
+                }
+            }
+        }
+
+        // 若磁碟逐字稿還沒 flush 到本輪最後一步（或測試未掛逐字稿），但 stream-json 已收到該步驟（> maxSeenStepIndex）的 agent_response DONE，視為同一最終回覆步驟
         if (finalPlannerIndex < 0
             && maxCompletedStreamResponseStepIndex is { } streamIdx
             && streamIdx > maxSeenStepIndex
@@ -708,16 +718,28 @@ internal static class AntigravityTranscriptRules
         if (finalPlannerIndex < 0)
             return false;
 
-        foreach (var step in stepsByIndex.Values)
+        if (maxCompletedStreamResponseStepIndex is { } maxStreamIdx && stepsByIndex != null
+            && stepsByIndex.TryGetValue(maxStreamIdx, out var streamStep)
+            && (streamStep.ToolCalls.Count > 0 || AntigravityStepRules.ClassifyState(streamStep.Status) != AntigravityStepState.Completed))
         {
-            if (step.StepIndex <= finalPlannerIndex)
-                continue;
-            if (string.Equals(step.Type, "ERROR_MESSAGE", StringComparison.OrdinalIgnoreCase))
-                return false;
-            if (step.ToolCalls.Count > 0)
-                return false;
-            if (AntigravityStepRules.ClassifyState(step.Status) is AntigravityStepState.Failed or AntigravityStepState.Cancelled)
-                return false;
+            return false;
+        }
+
+        if (stepsByIndex is { Count: > 0 })
+        {
+            foreach (var step in stepsByIndex.Values)
+            {
+                if (step.StepIndex <= finalPlannerIndex)
+                    continue;
+                if (string.Equals(step.Type, "ERROR_MESSAGE", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(step.Type, "USER_INPUT", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(step.Type, "SYSTEM_MESSAGE", StringComparison.OrdinalIgnoreCase)
+                    || step.ToolCalls.Count > 0
+                    || AntigravityStepRules.ClassifyState(step.Status) is AntigravityStepState.Failed or AntigravityStepState.Cancelled)
+                {
+                    return false;
+                }
+            }
         }
         return true;
     }

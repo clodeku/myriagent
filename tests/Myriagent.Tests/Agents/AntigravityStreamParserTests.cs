@@ -912,5 +912,57 @@ public class AntigravityStreamParserTests
             },
         }.ToString(Newtonsoft.Json.Formatting.None);
         resumed.Parse(timeoutJson).Events.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Failed);
+
+        // 7) 實錄情境：Individual quota reached 只寫進 agy 的 conversations\*.db、根本未寫入 transcript_full.jsonl（step_index 從 89 直接跳到 91），
+        //    額度解開後續接完成本輪最終回覆（step 93 PLANNER_RESPONSE DONE 無 tool_calls），result 仍重播舊額度錯誤 → 修正為 Completed、不發 AgentQuotaExhaustedEvent
+        const string DbOnlyQuotaError = "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m1s.";
+        var dbOnlyLogPath = temp.Combine("db_only_quota_transcript.jsonl");
+        File.WriteAllLines(dbOnlyLogPath, new[]
+        {
+            """{"step_index":88,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","content":"方案 A"}""",
+            """{"step_index":89,"source":"SYSTEM","type":"SYSTEM_MESSAGE","status":"DONE","content":"<SYSTEM_MESSAGE>ok</SYSTEM_MESSAGE>"}""",
+            // step_index 90（Individual quota reached）未寫入逐字稿，只留在 .db 內
+        }, utf8);
+
+        var dbOnlyParser = new AntigravityStreamParser("p3", _ => dbOnlyLogPath, initialConversationId: "conv-quota");
+        dbOnlyParser.BeginTurn();
+        File.AppendAllLines(dbOnlyLogPath, new[]
+        {
+            """{"step_index":91,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","content":"額度解開後繼續"}""",
+            """{"step_index":92,"source":"SYSTEM","type":"SYSTEM_MESSAGE","status":"DONE","content":"<SYSTEM_MESSAGE>resumed</SYSTEM_MESSAGE>"}""",
+            """{"step_index":93,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","content":"已全部完成。"}""",
+        }, utf8);
+
+        dbOnlyParser.Parse("""{"event":"init","conversation_id":"conv-quota","init":{"model":"gemini-4-carbon"}}""");
+        dbOnlyParser.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-quota","step_index":91,"state":"DONE","step_type":"user_input"}}""");
+        dbOnlyParser.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-quota","step_index":93,"state":"DONE","step_type":"agent_response","text_delta":"已全部完成。"}}""");
+        var res7 = dbOnlyParser.Parse(Result(numTurns: 2, input: 100, output: 25, status: "ERROR", response: "已全部完成。", error: DbOnlyQuotaError)).Events;
+        res7.OfType<AgentQuotaExhaustedEvent>().Should().BeEmpty("額度解開後已完成本輪回覆，舊 .db 殘留的額度錯誤不應再次觸發額度耗盡");
+        var turn7 = res7.OfType<AgentTurnCompletedEvent>().Single();
+        turn7.Outcome.Should().Be(AgentTurnOutcome.Completed);
+        turn7.ErrorMessage.Should().BeNull();
+
+        // 8) 對照：若本輪在執行工具後「真的」遇到未寫入逐字稿的 Individual quota reached 中斷（最後一步是工具，沒有最終完成的 PLANNER_RESPONSE），
+        //    仍必須回報 Failed 並發出 AgentQuotaExhaustedEvent；若回應串流到一半斷流（state=ACTIVE 未 DONE）亦同
+        dbOnlyParser.BeginTurn();
+        File.AppendAllLines(dbOnlyLogPath, new[]
+        {
+            """{"step_index":94,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","content":"再做一輪"}""",
+            """{"step_index":95,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","content":"先跑測試","tool_calls":[{"name":"run_command","args":{"CommandLine":"dotnet test"}}]}""",
+            """{"step_index":96,"source":"MODEL","type":"GENERIC","status":"DONE","content":"passed"}""",
+        }, utf8);
+
+        dbOnlyParser.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-quota","step_index":94,"state":"DONE","step_type":"user_input"}}""");
+        dbOnlyParser.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-quota","step_index":95,"state":"DONE","step_type":"agent_response","text_delta":"先跑測試"}}""");
+        dbOnlyParser.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-quota","step_index":96,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","output":"passed"}}}""");
+        var res8 = dbOnlyParser.Parse(Result(numTurns: 3, input: 120, output: 10, status: "ERROR", response: "先跑測試", error: DbOnlyQuotaError)).Events;
+        res8.OfType<AgentQuotaExhaustedEvent>().Should().ContainSingle("本輪在工具結束後真的因額度耗盡而停下");
+        res8.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Failed);
+
+        dbOnlyParser.BeginTurn();
+        dbOnlyParser.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-quota","step_index":97,"state":"DONE","step_type":"user_input"}}""");
+        dbOnlyParser.Parse("""{"event":"step_update","step_update":{"conversation_id":"conv-quota","step_index":98,"state":"ACTIVE","step_type":"agent_response","text_delta":"講到一半斷線"}}""");
+        var res9 = dbOnlyParser.Parse(Result(numTurns: 4, input: 60, output: 5, status: "ERROR", response: "講到一半斷線", error: StaleWsError)).Events;
+        res9.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Failed, "agent_response 停在 ACTIVE 未 DONE 代表半途斷流，不能當成已完成");
     }
 }
