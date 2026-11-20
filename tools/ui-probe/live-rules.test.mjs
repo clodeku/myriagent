@@ -1183,14 +1183,28 @@ test('promptHistory_宿主回的照它_瀏覽器版從已載入的項目找_規�
   assert.deepEqual(L.promptHistory(null, items).map((p) => [p.id, p.text, p.attachments]),
     [['u6', '重複的', 0], ['u5', '把 <div> 改掉\n再測試', 2], ['u1', '清除之前的', 0]], '清除之前的也列；空白、語音訊息與較舊的重複略過');
   assert.equal(L.promptHistory(null, [user('v', '語音訊息（0:12）')]).length, 1, '沒有附件的是使用者自己打的');
-  const many = Array.from({ length: 15 }, (_, i) => user('m' + i, '第 ' + i + ' 則'));
-  assert.deepEqual(L.promptHistory(undefined, many).map((p) => p.text), Array.from({ length: 10 }, (_, i) => '第 ' + (14 - i) + ' 則'));
+  const many = Array.from({ length: 55 }, (_, i) => user('m' + i, '第 ' + i + ' 則'));
+  assert.deepEqual(L.promptHistory(undefined, many).map((p) => p.text), Array.from({ length: 50 }, (_, i) => '第 ' + (54 - i) + ' 則'));
   // 宿主回的（桌面）：照它，不看已載入的項目；壞的略過
   const reply = { prompts: [{ id: 'h1', time: 5, text: '完整的\n指令', attachments: 1 }, null, { id: 7, text: 'x' }, { id: 'h2', text: '' }, { id: 'h3', text: '完整的\n指令' }, { id: 'h4', text: 'ok', attachments: -2 }] };
   assert.deepEqual(L.promptHistory(reply, items), [{ id: 'h1', time: 5, text: '完整的\n指令', attachments: 1 }, { id: 'h4', time: undefined, text: 'ok', attachments: 0 }]);
   assert.deepEqual(L.promptHistory({ prompts: [] }, items), [], '宿主說沒有就是沒有');
   assert.deepEqual(L.promptHistory(null, null), []);
-  assert.equal(L.PROMPT_HISTORY_LIMIT, 10);
+  assert.equal(L.PROMPT_HISTORY_LIMIT, 50);
+  // 輸入框 ↑↓ 用的對話裡送過的訊息（historyrules.mergeRecall 的 sent）：由新到舊、規則同歷史指令，但不限 10 則
+  const sentItems = [
+    { id: 'u1', kind: 'User', html: '<p>第一則</p>' },
+    { id: 'a1', kind: 'Assistant', html: '<p>回覆</p>' },
+    { id: 'u2', kind: 'User', html: '<p>多行<br>第二行 &amp; 符號</p>' },
+    { id: 'u3', kind: 'User', html: '<p>語音訊息（0:12）</p>', attachments: [{}] },
+    { id: 'u4', kind: 'User', html: '<p>第一則</p>' },
+    { id: 'u5', kind: 'User', html: '<p>   </p>', attachments: [{}] },
+  ];
+  assert.deepEqual(L.sentPromptTexts(sentItems), ['第一則', '多行\n第二行 & 符號'], '語音訊息、只有附件、重複的略過');
+  const manyUser = Array.from({ length: 60 }, (_, i) => ({ id: 'm' + i, kind: 'User', html: '<p>訊息 ' + i + '</p>' }));
+  assert.equal(L.sentPromptTexts(manyUser).length, 50, '最多 50 則');
+  assert.deepEqual(L.sentPromptTexts(manyUser, 2), ['訊息 59', '訊息 58']);
+  assert.deepEqual(L.sentPromptTexts(null), []);
 });
 
 test('promptLine_清單裡一行_換行與空白合併_太長截斷', () => {

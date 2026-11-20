@@ -1006,6 +1006,17 @@ async function runMobileComposer() {
   const typed = await page.evaluate((sel) => { const ta = document.querySelector(sel); return { value: ta.value, focused: document.activeElement === ta }; }, taSel(id));
   check('hubMobileComposer', layout.appHeight === layout.innerHeight && layout.coarse && !!layout.ta && layout.ta.top >= 0 && layout.ta.bottom <= layout.innerHeight
     && layout.ta.fontSize >= 16 && typed.value === '手機輸入測試' && typed.focused, { layout, typed });
+  // 手機的對話標頭看得到對話在哪台電腦（2026-11-21 使用者回報：以前窄的窗格只剩在線小點）：電腦圖示＋名稱，完整的一句在 title
+  const dev = await page.evaluate((cid) => {
+    const el = document.querySelector(`.conv[data-conv="${cid}"] .ch-dev`);
+    if (!el || el.hidden) return null;
+    const seen = (n) => { if (!n) return false; const r = n.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const name = el.querySelector('.ch-dev-name');
+    const r = name.getBoundingClientRect();
+    return { name: name.textContent, nameSeen: seen(name), iconSeen: seen(el.querySelector('.ch-dev-ic')), textSeen: seen(el.querySelector('.ch-dev-text')),
+      title: el.title, inView: r.left >= 0 && r.right <= window.innerWidth, online: el.dataset.online };
+  }, id);
+  check('hubMobileDeviceName', !!dev && dev.name === 'OFFICE-PC' && dev.nameSeen && dev.iconSeen && !dev.textSeen && dev.inView && /在 OFFICE-PC 執行/.test(dev.title), dev);
   // 觸控操作的 Enter 只換行、不送出（sendrules.enterSends，2026-10-29 使用者要求）：設定開著 Enter 送出也一樣，送出鈕照樣送得出去
   await page.keyboard.press('Enter');
   await page.keyboard.type('第二行');
@@ -6455,7 +6466,7 @@ const SCENARIOS = [
   { checks: ['hubDraftRecreatedAfterServerRestart'], run: runDraftRecreate },
   { checks: ['hubConversationClosedClosesPane'], run: runClosedClosesPane },
   { checks: ['hubChat390NoHScroll', 'hubPhoneNoPageZoom'], run: runChat390 },
-  { checks: ['hubMobileComposer', 'hubMobileEnterNewline'], run: runMobileComposer },
+  { checks: ['hubMobileComposer', 'hubMobileDeviceName', 'hubMobileEnterNewline'], run: runMobileComposer },
   { checks: ['hubMobileLightboxTouch'], run: runMobileLightbox },
   { checks: ['hubTabletLightboxTouch'], run: runTabletLightbox },
   { checks: ['hubTabletAcctsFolded', 'hubTabletSwipePanels'], run: runTabletPanels },

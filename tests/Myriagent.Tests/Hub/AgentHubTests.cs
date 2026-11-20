@@ -1717,7 +1717,7 @@ public sealed class AgentHubTests
         {
             meta = new AgentConversation { AccountId = "acc-claude", Provider = AgentProvider.Claude, Title = "歷史指令" };
             store.SaveConversation(meta);
-            var items = Enumerable.Range(1, 12).Select(i => new AgentChatItem { Kind = AgentItemKind.User, Text = $"第 {i} 則" }).ToList();
+            var items = Enumerable.Range(1, 52).Select(i => new AgentChatItem { Kind = AgentItemKind.User, Text = $"第 {i} 則" }).ToList();
             items.Add(withFile);
             items.Add(new AgentChatItem { Kind = AgentItemKind.User, Text = longText });
             items.AddRange(Enumerable.Range(1, AgentHub.PageSize + 5).Select(i => new AgentChatItem { Kind = AgentItemKind.Tool, Title = $"第 {i} 步", Status = AgentItemStatus.Done }));
@@ -1732,7 +1732,7 @@ public sealed class AgentHubTests
         reply.Value<string>("requestId").Should().Be("ph1");
         var prompts = (JArray)reply["prompts"]!;
         prompts.Select(p => p.Value<string>("text")).Should().Equal(
-            [longText, "附檔的指令", .. Enumerable.Range(5, 8).Reverse().Select(i => $"第 {i} 則")], "最新的在前、最多 10 則，完整文字（不像 lastPrompt 截斷）");
+            [longText, "附檔的指令", .. Enumerable.Range(5, 48).Reverse().Select(i => $"第 {i} 則")], "最新的在前、最多 50 則，完整文字（不像 lastPrompt 截斷）");
         prompts[1]!.Value<int>("attachments").Should().Be(1);
         prompts[1]!.Value<long>("time").Should().Be(AgentHub.ToUnixMs(withFile.CreatedAt)!.Value);
         prompts[1]!.Value<string>("id").Should().Be(withFile.Id);

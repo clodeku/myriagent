@@ -1,9 +1,10 @@
 // 輸入區的輸入紀錄（↑↓ 帶入最近送出的訊息）：純函式，沒有 import（tools/ui-probe/rules.test.mjs 以 data: URL 匯入測試）
 // 紀錄是每個對話各自一份（在哪個對話送出就記在哪個對話），只存在網頁的 localStorage（composer.js 讀寫；讀寫失敗一律當成沒有），
-// 不經宿主、不進同步
+// 不經宿主、不進同步。↑↓ 翻的是它和對話本身已載入的使用者訊息合併的結果（mergeRecall）：
+// 只靠 localStorage 時，別的電腦、手機、瀏覽器版、從 claude.ai 送的訊息翻不到，儲存被清掉或寫入失敗就沒了
 
 /** 每個對話最多記幾則 */
-export const HISTORY_LIMIT = 10;
+export const HISTORY_LIMIT = 50;
 /** localStorage 的鍵：[{ id: 對話 id, list: 紀錄（最新的在前） }]，最近送出過的對話在前 */
 export const HISTORY_KEY = 'myriagent.app.inputHistory.v2';
 /** 舊版所有對話共用的一份：分不出是哪個對話送的，不搬；寫入新的一份時刪掉 */
@@ -13,7 +14,7 @@ export const HISTORY_MAX_CHARS = 100_000;
 /** 最多記幾個對話（最久沒在裡面送出的先丟） */
 export const HISTORY_CONVERSATIONS = 200;
 /** 所有對話的紀錄加起來最多幾個字，不把 localStorage 的額度用光：超過時從最久沒在裡面送出的對話丟起 */
-export const HISTORY_TOTAL_CHARS = 1_000_000;
+export const HISTORY_TOTAL_CHARS = 2_000_000;
 
 const usable = (t) => typeof t === 'string' && t.trim().length > 0 && t.length <= HISTORY_MAX_CHARS;
 const validId = (id) => typeof id === 'string' && id.length > 0 && id.length <= 200;
@@ -32,7 +33,7 @@ function cleanList(list) {
 
 /**
  * 依上限修剪：最多 HISTORY_CONVERSATIONS 個對話，字數從最前面的對話、每個對話最新的一則算起，
- * 加起來放不下的那則連同後面的都丟（最前面的對話一定放得下：10 則的上限加起來就是 HISTORY_TOTAL_CHARS）
+ * 加起來放不下的那則連同後面的都丟（最前面的對話放不下全部 50 則時，丟的是它最舊的幾則：只有一則一則都貼了幾萬字的長文才會發生）
  */
 function capStore(entries) {
   const out = [];
@@ -104,6 +105,45 @@ export function moveStore(store, from, to) {
   if (!moving.length) return prev;
   const list = cleanList([...historyOf(prev, to), ...moving]);
   return capStore([{ id: to, list }, ...prev.filter((x) => x && x.id !== from && x.id !== to)]);
+}
+
+/** ↑ 最多翻幾則（這個瀏覽器記的與對話裡的使用者訊息合併後） */
+export const RECALL_LIMIT = 50;
+
+/** 比對用：換行統一成 \n、去掉結尾空白（textarea 會把 CRLF 換成 LF；對話項目的文字是從 HTML 取回的，結尾的空白可能不同） */
+const recallKey = (t) => t.replace(/\r\n?/g, '\n').replace(/\s+$/, '');
+
+/**
+ * ↑↓ 要翻的紀錄（最新的在前）：local 是這個瀏覽器在這個對話記的（historyOf，最新的在前、文字是當時輸入框裡的原樣），
+ * sent 是對話本身已載入的使用者訊息（最新的在前；含別的電腦、手機、瀏覽器版、claude.ai 送的）。
+ * - 對話裡的訊息是骨幹、照它的順序；同一則兩邊都有時用 local 的原文。
+ * - local 有、對話裡沒有的：排在兩邊都有的第一則之前的，是比對話裡最新的那則還新的（排隊中、剛送出還沒回來）——放最前面；
+ *   之後的（在已載入的那一頁之前送的）接在最後。兩邊沒有共同的一則時，local 的全部放最前面（多半是剛送出、還在排隊的）。
+ * - 空白、太長、重複（照 recallKey 比）的略過，最多 limit 則
+ */
+export function mergeRecall(local, sent, limit = RECALL_LIMIT) {
+  const own = (Array.isArray(local) ? local : []).filter(usable);
+  const chat = (Array.isArray(sent) ? sent : []).filter(usable);
+  const exact = new Map();
+  for (const t of own) if (!exact.has(recallKey(t))) exact.set(recallKey(t), t);
+  const chatKeys = new Set(chat.map(recallKey));
+  let firstCommon = own.findIndex((t) => chatKeys.has(recallKey(t)));
+  if (firstCommon < 0) firstCommon = own.length;
+  const ordered = [
+    ...own.slice(0, firstCommon),
+    ...chat.map((t) => exact.get(recallKey(t)) ?? t),
+    ...own.slice(firstCommon).filter((t) => !chatKeys.has(recallKey(t))),
+  ];
+  const out = [];
+  const seen = new Set();
+  for (const t of ordered) {
+    const k = recallKey(t);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /** 沒有在翻紀錄的狀態（每個輸入區一份） */

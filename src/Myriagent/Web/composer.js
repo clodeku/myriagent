@@ -11,12 +11,12 @@ import { attachmentTile, planRow } from './items.js';
 import { uploadFile } from './hubapi.js';
 import {
   permissionChoices, sendRestorePlan, settleText, replicaWebUrl, isConversationId, isDraftId, chipsAfter, uploadsSentWith, uploadBatch, uploadName, uploadResult,
-  uploadsKey, storedUploads, UPLOAD_LIMIT_TEXT, controllable,
+  uploadsKey, storedUploads, UPLOAD_LIMIT_TEXT, controllable, sentPromptTexts,
 } from './liverules.js';
 import { track } from './cmdtrack.js';
 import { accountSuggestions, accountMention, mentionPlain } from './accountmentions.js';
 import { contextShown, contextPercent, contextLabel, contextSeverity, contextMark, contextSummary, contextTitle } from './contextrules.js';
-import { HISTORY_KEY, LEGACY_HISTORY_KEY, parseStore, historyOf, pushStore, moveStore, idleNav, historyMove } from './historyrules.js';
+import { HISTORY_KEY, LEGACY_HISTORY_KEY, parseStore, historyOf, pushStore, moveStore, idleNav, historyMove, mergeRecall, RECALL_LIMIT } from './historyrules.js';
 import { tokenCounter } from './tokenfx.js';
 import { createDraftSync, noteSent } from './draftsync.js';
 import { parseTurnTokens, gaugeFx, meterCells, infoWindows, rttLabel, tokenRate, pruneRateSamples, rateLabel, compactDrop, fmtTokK, byteRate, uploadReadout, smoothRate, delegateMeta } from './fxrules.js';
@@ -1496,10 +1496,17 @@ export class Composer {
   }
 
   // ───── 輸入紀錄：↑↓ 帶入這個對話最近送出的訊息（每個對話一份，historyrules.js） ─────
+  /** ↑↓ 翻的紀錄：這個瀏覽器記的，加上對話本身已載入的使用者訊息（mergeRecall：別處送的、儲存被清掉的也翻得到） */
+  recallList() {
+    const conv = this.conv;
+    const items = Array.isArray(conv.order) && conv.items ? conv.order.map((id) => conv.items.get(id)) : [];
+    return mergeRecall(historyOf(readStore(), conv.id), sentPromptTexts(items, RECALL_LIMIT));
+  }
+
   /** ↑（dir 'up'）／↓（'down'）：輸入框換成紀錄裡的一則、游標放到最後；不處理時回 false（照預設移動游標） */
   recallHistory(dir) {
     const ta = this.ta;
-    const r = historyMove(this.hist, dir, ta.value, ta.selectionStart, ta.selectionEnd, historyOf(readStore(), this.conv.id));
+    const r = historyMove(this.hist, dir, ta.value, ta.selectionStart, ta.selectionEnd, this.recallList());
     if (!r) return false;
     ta.value = r.value;
     // textarea 會把 CRLF 換成 LF：「沒改過」以輸入框實際的值比對

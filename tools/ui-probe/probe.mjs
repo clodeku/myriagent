@@ -1028,9 +1028,11 @@ async function runMain(vp, full) {
     await page.focus(ta);
     const up1 = await keys('ArrowUp');
     const caret1 = await page.$eval(ta, (t) => [t.selectionStart, t.value.length]);
-    const upOnly = await keys('ArrowUp'); // c1 只送過這一則：別的對話與舊版共用的紀錄不會翻出來（照預設把游標移到最前面）
+    // 再按一下：翻到對話裡較早的使用者訊息（i1，不是這個瀏覽器記的：別處送的、儲存被清掉的也翻得到）；別的對話與舊版共用的紀錄不會翻出來
+    const upOnly = await keys('ArrowUp');
     await page.keyboard.press('End'); // 游標放回最後（帶入時的位置），↓ 才會還原
     const down1 = await keys('ArrowDown');
+    const down0 = await keys('ArrowDown'); // 已經是最新的一則：還原開始翻之前的文字（空的）
     await page.keyboard.type('草稿');
     const up2 = await keys('ArrowUp');
     const up3 = await keys('ArrowUp');
@@ -1038,10 +1040,11 @@ async function runMain(vp, full) {
     const sendsAfter = host.received.filter((m) => m.cmd === 'send').length;
     const stored = await page.evaluate(() => ({ legacy: localStorage.getItem('myriagent.app.inputHistory.v1'), v2: JSON.parse(localStorage.getItem('myriagent.app.inputHistory.v2') || 'null') }));
     await page.fill(ta, '');
-    check('arrowRecallsHistory', up1 === '請把測試結果整理成表格' && caret1[0] === caret1[1] && upOnly === up1 && down1 === '' && up2 === '草稿' && up3 === '請把測試結果整理成表格'
+    check('arrowRecallsHistory', up1 === '請把測試結果整理成表格' && caret1[0] === caret1[1] && upOnly.startsWith('帳戶沒有登入時')
+      && !/別的對話送出的訊息|舊版共用的紀錄/.test(upOnly) && down1 === up1 && down0 === '' && up2 === '草稿' && up3 === '請把測試結果整理成表格'
       && down2 === '草稿' && sendsAfter === sendsBefore
       && stored.legacy === null && JSON.stringify(stored.v2) === JSON.stringify([{ id: 'c1', list: ['請把測試結果整理成表格'] }, { id: 'c2', list: ['別的對話送出的訊息'] }]),
-    { up1, caret1, upOnly, down1, up2, up3, down2, sendsBefore, sendsAfter, stored });
+    { up1, caret1, upOnly, down1, down0, up2, up3, down2, sendsBefore, sendsAfter, stored });
   }
 
   // 網址交給宿主（openLink）；本機檔案連結開「下載或開啟檔案」框，「用預設程式開啟」送 openPath（另存新檔見 filelinks-probe.mjs）

@@ -6,7 +6,7 @@ import { canManageCollaborators, openShareDialog } from './collab.js';
 import { sharedWith } from './collabrules.js';
 import { openMenu, openDialog, confirmDialog, choiceDialog, toast, spinner } from './ui.js';
 import {
-  originOf, deviceOf, deviceLine, statusLine, composerGate, cardGate, deleteConfirmText, deleteProgramsCheckbox, policyChoices, needsLocalOnlyConfirm, LOCAL_ONLY_CONFIRM_TEXT, loadChunks, LAZY_BATCH, loadRetryDelay, LOAD_RETRY_MS,
+  originOf, deviceOf, deviceLine, deviceShortLine, statusLine, composerGate, cardGate, deleteConfirmText, deleteProgramsCheckbox, policyChoices, needsLocalOnlyConfirm, LOCAL_ONLY_CONFIRM_TEXT, loadChunks, LAZY_BATCH, loadRetryDelay, LOAD_RETRY_MS,
   attachGate, folderPickerGate, ownerRunning, mediaPolicyNote, peerOf, controllable, peerDraftDevices, peerDraftAccount, clearBoundary,
   latestPrompt, promptHistory, promptLine, itemTimeText, itemTimeTitle, dayKey, backgroundLine, backgroundStopMenu, detailTasks, programsView, mergeHeaderLists, missingHeaderLists, HEADER_LISTS_REOPEN_MS, touchUnsticks, touchScrolling, olderPlan, olderPadTarget, olderPadSettle, olderPadAfter, olderBatchNext, olderSnapWanted, olderRush, touchRestIn, itemImageUrls, OLDER_PRELOAD_ITEMS, OLDER_STEP_MS, OLDER_RUSH_MS, OLDER_IMAGE_WAIT_MS, OLDER_RUSH_IMAGE_WAIT_MS,
   remoteAccountMenu, headerAccountId, findAccount, originLink,
@@ -252,9 +252,13 @@ export class ConvView {
     this.deviceEl.hidden = !line;
     if (!line) return;
     this.deviceEl.dataset.online = device.online === true ? 'true' : device.online === false ? 'false' : 'unknown';
-    const text = this.deviceEl.lastChild;
+    const text = this.deviceEl.querySelector('.ch-dev-text');
     if (text.textContent !== line) text.textContent = line;
-    this.deviceEl.title = line;
+    // 窄的窗格（手機）放不下整句：只顯示電腦名稱（chat.css 的容器查詢切換）
+    const short = deviceShortLine(origin, device) || '';
+    const name = this.deviceEl.querySelector('.ch-dev-name');
+    if (name.textContent !== short) name.textContent = short;
+    if (this.deviceEl.title !== line) this.deviceEl.title = line;
   }
 
   /** 〔遠端〕瀏覽器版草稿的「電腦：OFFICE-PC」晶片（D16）：讀 header.deviceId，名稱與在線從 remote.devices 查；點了換電腦 */
@@ -464,7 +468,8 @@ export class ConvView {
     this.offCollab = on('collaborators-changed', () => this.renderCollabChip());
     this.chipsEl = h('div', { class: 'ch-chips', hidden: true }, this.acctChip, this.folderChip, this.gitChip, this.goalChip, this.originChip, this.progChip, this.devChip, this.collabChip); // setHeader 填好內容才顯示
     // 〔同步〕所在電腦（瀏覽器版每個對話、桌面其他電腦的副本）：在線小點＋「在 OFFICE-PC 執行・線上」（textContent）
-    this.deviceEl = h('span', { class: 'ch-dev', hidden: true }, h('span', { class: 'ch-dev-dot', 'aria-hidden': 'true' }), h('span', { class: 'ch-dev-text' }));
+    this.deviceEl = h('span', { class: 'ch-dev', hidden: true, dataset: { field: 'device' } }, h('span', { class: 'ch-dev-dot', 'aria-hidden': 'true' }),
+      icon('desktop', 'ch-dev-ic'), h('span', { class: 'ch-dev-text' }), h('span', { class: 'ch-dev-name' }));
     // 〔同步〕伺服器刪除了這個本機對話（header.conversationSync.serverDeleted，D25）：之後只能留在這台
     this.syncDelEl = h('span', { class: 'tag ch-sync-del', hidden: true, dataset: { field: 'serverDeleted' }, text: '已從伺服器刪除',
       title: '伺服器上的這個對話已刪除，網頁與其他電腦都看不到；這台的對話照常可以用' });

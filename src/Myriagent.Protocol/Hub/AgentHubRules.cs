@@ -475,7 +475,7 @@ internal static partial class AgentHubRules
     }
 
     /// <summary>「最近的指令」那一行展開的歷史指令（web-protocol 的 promptHistory，2026-10-25 使用者要求）最多幾則</summary>
-    public const int PromptHistoryLimit = 10;
+    public const int PromptHistoryLimit = 50;
 
     /// <summary>歷史指令每則最多幾個字：更長的（貼上整份記錄檔之類）不列，同輸入區 ↑↓ 的紀錄（historyrules.HISTORY_MAX_CHARS）</summary>
     public const int PromptHistoryMaxChars = 100_000;

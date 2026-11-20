@@ -1594,19 +1594,37 @@ test('remoterules：背景程式標示的提示——這台列對話與程式、
 });
 
 // ───── 輸入區的輸入紀錄（historyrules.js）─────
-test('historyrules：一份紀錄記下送出的訊息，最新的在前、不重複、最多 10 則', () => {
+test('historyrules：一份紀錄記下送出的訊息，最新的在前、不重複、最多 50 則', () => {
+  assert.equal(IH.HISTORY_LIMIT, 50);
   let list = [];
-  for (let i = 1; i <= 12; i++) list = IH.pushHistory(list, `第 ${i} 則`);
+  for (let i = 1; i <= 52; i++) list = IH.pushHistory(list, `第 ${i} 則`);
   assert.equal(list.length, IH.HISTORY_LIMIT);
-  assert.equal(list[0], '第 12 則');
-  assert.equal(list[9], '第 3 則', '超過 10 則丟掉最舊的');
+  assert.equal(list[0], '第 52 則');
+  assert.equal(list[49], '第 3 則', '超過 50 則丟掉最舊的');
   list = IH.pushHistory(list, '第 5 則');
-  assert.deepEqual(list.slice(0, 2), ['第 5 則', '第 12 則'], '再送一次同樣的：移到最前面');
+  assert.deepEqual(list.slice(0, 2), ['第 5 則', '第 52 則'], '再送一次同樣的：移到最前面');
   assert.equal(list.filter((t) => t === '第 5 則').length, 1);
   assert.equal(IH.pushHistory(list, '   '), list, '空白不記');
   assert.equal(IH.pushHistory(list, 'x'.repeat(IH.HISTORY_MAX_CHARS + 1)), list, '太長的不記');
   assert.deepEqual(IH.pushHistory(null, '/clear'), ['/clear'], '指令也記');
   assert.deepEqual(IH.pushHistory([], '第一行\n第二行'), ['第一行\n第二行'], '多行原樣保留');
+});
+
+test('historyrules：↑↓ 翻的是這個瀏覽器記的與對話裡的訊息合併的結果，別處送的也翻得到', () => {
+  // 對話裡的順序是骨幹；比對話裡最新的還新的（排隊中、剛送出）在最前面，在已載入那一頁之前送的接在最後
+  assert.deepEqual(IH.mergeRecall(['排隊中', '乙', '很久以前'], ['手機送的', '乙', '甲']), ['排隊中', '手機送的', '乙', '甲', '很久以前']);
+  // 兩邊都有的用這裡的原文（對話裡的是從 HTML 取回的：換行、結尾空白可能不同）
+  assert.deepEqual(IH.mergeRecall(['第一行\r\n第二行'], ['第一行\n第二行  ']), ['第一行\r\n第二行']);
+  // 這個瀏覽器什麼都沒記（儲存被清掉、在別台送的）：照樣翻得到對話裡的
+  assert.deepEqual(IH.mergeRecall([], ['b', 'a']), ['b', 'a']);
+  assert.deepEqual(IH.mergeRecall(null, null), []);
+  // 沒有共同的一則：這裡記的放前面（多半是剛送出、還在排隊）
+  assert.deepEqual(IH.mergeRecall(['剛送出'], ['x', 'y']), ['剛送出', 'x', 'y']);
+  // 空白、太長、重複的略過；最多 RECALL_LIMIT 則
+  assert.deepEqual(IH.mergeRecall(['  ', 'a', 'a'], ['a', 'x'.repeat(IH.HISTORY_MAX_CHARS + 1)]), ['a']);
+  const many = Array.from({ length: IH.RECALL_LIMIT + 10 }, (_, i) => '第 ' + i + ' 則');
+  assert.equal(IH.mergeRecall([], many).length, IH.RECALL_LIMIT);
+  assert.equal(IH.RECALL_LIMIT, IH.HISTORY_LIMIT, '合併後也是 50 則');
 });
 
 test('historyrules：每個對話各記一份，最近送出過的對話在前', () => {
@@ -1621,8 +1639,8 @@ test('historyrules：每個對話各記一份，最近送出過的對話在前',
   store = IH.pushStore(store, 'c2', '對話一的第一則');
   assert.deepEqual(IH.historyOf(store, 'c2'), ['對話一的第一則', '對話二的第一則'], '同樣的文字在別的對話照樣記');
   assert.deepEqual(IH.historyOf(store, 'c1'), ['對話一的第二則', '對話一的第一則']);
-  for (let i = 1; i <= 12; i++) store = IH.pushStore(store, 'c1', `第 ${i} 則`);
-  assert.equal(IH.historyOf(store, 'c1').length, IH.HISTORY_LIMIT, '每個對話最多 10 則');
+  for (let i = 1; i <= 52; i++) store = IH.pushStore(store, 'c1', `第 ${i} 則`);
+  assert.equal(IH.historyOf(store, 'c1').length, IH.HISTORY_LIMIT, '每個對話最多 50 則');
   assert.equal(IH.historyOf(store, 'c2').length, 2, '不占別的對話的則數');
   assert.equal(IH.pushStore(store, 'c1', '   '), store, '空白不記');
   assert.equal(IH.pushStore(store, '', 'x'), store, '沒有對話 id 不記');
@@ -1639,14 +1657,18 @@ test('historyrules：對話數與總字數的上限，最久沒送出的先丟',
   assert.deepEqual(IH.historyOf(store, 'c5'), ['訊息 5']);
   const big = (n) => String(n).padEnd(IH.HISTORY_MAX_CHARS, '字');
   let s2 = [];
-  for (let i = 0; i < 6; i++) s2 = IH.pushStore(s2, 'a', big(i));
-  for (let i = 0; i < 6; i++) s2 = IH.pushStore(s2, 'b', big(10 + i));
+  // 每則都是上限長度（10 萬字）：總上限 200 萬字放得下 20 則
+  const fit = IH.HISTORY_TOTAL_CHARS / IH.HISTORY_MAX_CHARS;
+  assert.equal(fit, 20);
+  for (let i = 0; i < 14; i++) s2 = IH.pushStore(s2, 'a', big(100 + i));
+  for (let i = 0; i < 14; i++) s2 = IH.pushStore(s2, 'b', big(200 + i));
   const total = s2.reduce((n, e) => n + e.list.reduce((m, t) => m + t.length, 0), 0);
   assert.ok(total <= IH.HISTORY_TOTAL_CHARS, '總字數不超過上限：' + total);
-  assert.equal(IH.historyOf(s2, 'b').length, 6, '剛送出的對話整份留著');
-  assert.deepEqual(IH.historyOf(s2, 'a').map((t) => t[0]), ['5', '4', '3', '2'], '放不下時從較早的對話最舊的丟起');
-  for (let i = 0; i < 10; i++) s2 = IH.pushStore(s2, 'c', big(20 + i));
-  assert.equal(IH.historyOf(s2, 'c').length, 10, '10 則都是上限長度也放得下');
+  assert.equal(IH.historyOf(s2, 'b').length, 14, '剛送出的對話整份留著');
+  assert.deepEqual(IH.historyOf(s2, 'a').map((t) => t.slice(0, 3)), ['113', '112', '111', '110', '109', '108'], '放不下時從較早的對話最舊的丟起');
+  for (let i = 0; i < 25; i++) s2 = IH.pushStore(s2, 'c', big(300 + i));
+  assert.equal(IH.historyOf(s2, 'c').length, fit, '一個對話的長文多到放不下：留最新的那幾則');
+  assert.equal(IH.historyOf(s2, 'c')[0].slice(0, 3), '324');
   assert.deepEqual(s2.map((e) => e.id), ['c']);
 });
 
@@ -1677,12 +1699,12 @@ test('historyrules：讀回 localStorage 的字串', () => {
     null,
     { id: 'c2', list: [] },
     { id: 'c3', list: 'abc' },
-    { id: 'c4', list: Array.from({ length: 15 }, (_, i) => `t${i}`) },
+    { id: 'c4', list: Array.from({ length: 55 }, (_, i) => `t${i}`) },
   ]);
   const store = IH.parseStore(raw);
   assert.deepEqual(store.map((e) => e.id), ['c1', 'c4'], '略過 id 不對、重複與沒有紀錄的對話');
   assert.deepEqual(IH.historyOf(store, 'c1'), ['a', 'b'], '略過不是字串、空白與重複的');
-  assert.equal(IH.historyOf(store, 'c4').length, 10, '最多 10 則');
+  assert.equal(IH.historyOf(store, 'c4').length, 50, '最多 50 則');
   assert.deepEqual(IH.parseStore(JSON.stringify(store)), store, '寫回去再讀一樣');
   assert.notEqual(IH.HISTORY_KEY, IH.LEGACY_HISTORY_KEY);
 });

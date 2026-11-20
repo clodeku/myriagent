@@ -390,12 +390,12 @@ public class AgentHubRulesTests
         list[1].Attachments.Should().HaveCount(2);
         AgentHubRules.RecentPrompts([User("語音訊息（0:12）")]).Should().ContainSingle("沒有附件的同名文字是使用者自己打的");
 
-        var many = Enumerable.Range(1, 15).Select(i => User($"第 {i} 則")).ToList();
-        AgentHubRules.RecentPrompts(many).Select(i => i.Text).Should().Equal(Enumerable.Range(6, 10).Reverse().Select(i => $"第 {i} 則"));
+        var many = Enumerable.Range(1, 55).Select(i => User($"第 {i} 則")).ToList();
+        AgentHubRules.RecentPrompts(many).Select(i => i.Text).Should().Equal(Enumerable.Range(6, 50).Reverse().Select(i => $"第 {i} 則"));
         AgentHubRules.RecentPrompts(many, 3).Should().HaveCount(3);
         AgentHubRules.RecentPrompts(null).Should().BeEmpty();
         AgentHubRules.RecentPrompts([]).Should().BeEmpty();
-        AgentHubRules.PromptHistoryLimit.Should().Be(10);
+        AgentHubRules.PromptHistoryLimit.Should().Be(50);
     }
 
     [Fact]

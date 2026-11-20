@@ -240,6 +240,15 @@ export function deviceLine(origin, dev, state) {
   return '在' + devLabel(dev, true, true) + (running ? '執行中' : '執行') + suffix;
 }
 
+/**
+ * 窄的窗格（手機）的裝置行：只有電腦名稱（在線與否看前面的小點，完整的一句在 title）。deviceLine 有字時才有；
+ * 2026-11-21 使用者回報：手機版的對話框看不到對話在哪台電腦執行——以前窄的窗格整句藏起來、只剩小點
+ */
+export function deviceShortLine(origin, dev) {
+  if (origin !== 'remote' && origin !== 'replica') return null;
+  return devLabel(dev, false, false);
+}
+
 // ───── 送出、卡片與權限的閘門 ─────
 
 /** 副本的唯讀說明（輸入區與卡片共用） */
@@ -1681,7 +1690,7 @@ export function latestPrompt(items, header, hasMore) {
 }
 
 /** 「最近的指令」那一行展開的歷史指令最多幾則（同宿主 AgentHubRules.PromptHistoryLimit） */
-export const PROMPT_HISTORY_LIMIT = 10;
+export const PROMPT_HISTORY_LIMIT = 50;
 /** 歷史指令每則最多幾個字：更長的不列（同宿主 AgentHubRules.PromptHistoryMaxChars） */
 export const PROMPT_HISTORY_MAX_CHARS = 100000;
 const VOICE_TEXT = /^語音訊息(（\d+(:\d{2}){1,2}）)?$/;
@@ -1710,6 +1719,26 @@ export function promptHistory(reply, items) {
   for (let i = list.length - 1; i >= 0 && out.length < PROMPT_HISTORY_LIMIT; i--) {
     const it = list[i];
     if (it && it.kind === 'User') add(it.id, it.time, userHtmlText(it.html), Array.isArray(it.attachments) ? it.attachments.length : 0);
+  }
+  return out;
+}
+
+/**
+ * 輸入框 ↑↓ 用的「對話裡送過的訊息」（historyrules.mergeRecall 的 sent）：已載入的項目由新到舊的使用者訊息文字，規則同 promptHistory
+ * （/clear 之前的也算；空白、太長、語音訊息、和較新的一則相同的略過），最多 limit 則
+ */
+export function sentPromptTexts(items, limit = 50) {
+  const out = [];
+  const seen = new Set();
+  const list = Array.isArray(items) ? items : [];
+  for (let i = list.length - 1; i >= 0 && out.length < limit; i--) {
+    const it = list[i];
+    if (!it || it.kind !== 'User') continue;
+    const text = userHtmlText(it.html);
+    if (!text.trim() || text.length > PROMPT_HISTORY_MAX_CHARS || seen.has(text)) continue;
+    if (Array.isArray(it.attachments) && it.attachments.length > 0 && VOICE_TEXT.test(text)) continue;
+    seen.add(text);
+    out.push(text);
   }
   return out;
 }

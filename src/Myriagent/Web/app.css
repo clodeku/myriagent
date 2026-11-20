@@ -862,7 +862,15 @@ body.side-resizing { cursor: col-resize; user-select: none; }
 /* 標頭的裝置行：「在 OFFICE-PC 執行・線上」 */
 .ch-dev { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; font-size: 12px; color: var(--text-2); }
 .ch-dev-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@container pane (max-width: 640px) { .ch-dev-text { display: none; } }
+.ch-dev-ic, .ch-dev-name { display: none; }
+.ch-dev-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 窄的窗格（手機）：整句放不下，換成電腦圖示＋名稱（以前整個藏起來、只剩小點，看不出對話在哪台電腦） */
+@container pane (max-width: 640px) {
+  .ch-dev-text { display: none; }
+  .ch-dev-ic { display: inline-flex; flex: none; color: var(--text-3); }
+  .ch-dev-ic svg { width: 13px; height: 13px; }
+  .ch-dev-name { display: block; }
+}
 /* 狀態列沒有在執行（瀏覽器版的「電腦離線」「伺服器正在整理這個對話」）：不轉圈，前面是狀態小點的位置 */
 .runline.idle { color: var(--text-2); }
 /* 瀏覽器版的窄螢幕（手機）：側欄改成蓋在工作區上的抽屜（不把對話擠到超出畫面），工作區用滿寬度；Ctrl+B／左上角的鈕照樣收合。
