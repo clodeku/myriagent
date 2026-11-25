@@ -1340,6 +1340,11 @@ function retryOpen(id) {
   return Object.assign({ sent: true }, s);
 }
 
+/** 這個分頁還在等清單（其他電腦的對話，清單到了才送 open）：載入看門狗這段時間不算重試（liverules.loadWatchStep） */
+function awaitsListNow(id) {
+  return awaitingList.has(id);
+}
+
 // ───── 嵌在別頁的對話（臨時對話的浮動面板）─────
 
 /**
@@ -1464,5 +1469,5 @@ export const api = {
   registerDock, setDock, dockedConv, releaseDock, dockExpecting,
   openConversation, flashConversation, newConversation, openHealthFix, openScheduleAgent, closeTab, activateTab, focusPane, splitPane, closePane, moveTab, cycleTab, closeActiveTab,
   notePendingSwitch, activeConversationId, openConversationIds, refreshTab, getConv, paneCount: () => panes.length,
-  switchDraftDevice, scheduleLayout, forkConversation, retryOpen,
+  switchDraftDevice, scheduleLayout, forkConversation, retryOpen, awaitsList: awaitsListNow,
 };

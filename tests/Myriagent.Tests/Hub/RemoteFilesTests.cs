@@ -578,16 +578,89 @@ public sealed class RemoteFilesTests
     }
 
     [Fact]
-    public async Task fileFetch_範圍外回policy_沒有傳輸回unsupported()
+    public async Task fileFetch_不在對話的資料夾裡回帶說明的fileRef_沒有傳輸回unsupported()
     {
+        // 2026-11-20 實機：代理照使用者的要求把 PDF 存到「下載」，手機上點了四次都只看到被拒。現在不當成被拒：回固定的說明，
+        // 網頁給擁有者「用檔案傳輸下載」（deviceFetch 的把關在那裡）；不發參照、不碰那個檔
         using var rig = new Rig();
         var outside = rig.Outside.WriteFile("x.txt", "x");
 
-        ShouldBeRejected((await rig.RunAsync("fileFetch", new { requestId = "f3", path = outside }, tier: 2)).Outcome, RemoteResultCodes.Policy);
+        var (outcome, output) = await rig.RunAsync("fileFetch", new { requestId = "f3", path = outside }, tier: 2);
+        ShouldBeDone(outcome);
+        var hint = output.Single();
+        hint.Value<string>("type").Should().Be("fileRef");
+        hint.Value<string>("requestId").Should().Be("f3");
+        hint.Value<string>("error").Should().Be("這個檔案不在對話的資料夾裡");
+        hint.ContainsKey("ref").Should().BeFalse();
+        hint.ContainsKey("name").Should().BeFalse();
+
+        // 不存在的檔也一樣（範圍是字串層判的：不讓遠端拿這個回覆探測檔案在不在）
+        var (missing, missingOutput) = await rig.RunAsync("fileFetch", new { requestId = "f3b", path = Path.Combine(rig.Outside.Root, "nope.txt") }, tier: 2);
+        ShouldBeDone(missing);
+        missingOutput.Single().Value<string>("error").Should().Be("這個檔案不在對話的資料夾裡");
+        rig.Transfer.Registered.Count.Should().Be(0);
 
         rig.Transfer.CanTransfer = false;
         ShouldBeRejected((await rig.RunAsync("fileFetch", new { requestId = "f4", path = rig.Write("y.txt") }, tier: 2)).Outcome, RemoteResultCodes.Unsupported);
         rig.Transfer.Registered.Count.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task fileFetch_代理寫在對話資料夾裡的檔給參照_app自己的檔回policy()
+    {
+        // 2026-11-20 實機：代理把產出的 PDF 存在 conversations\{id}\（不是 workspace\、attachments\），回覆裡給完整路徑，手機上點了被拒
+        using var rig = new Rig();
+        var conversation = rig.H.Store.GetConversationDirectory(rig.Id);
+        var report = Path.Combine(conversation, "季報_434版.pdf");
+        File.WriteAllBytes(report, [0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37, 0x0A, 0x00, 0x01, 0x02]);
+        var nested = Path.Combine(Directory.CreateDirectory(Path.Combine(conversation, "scratch", "out")).FullName, "notes.txt");
+        File.WriteAllText(nested, "代理的筆記");
+
+        foreach (var path in new[] { report, nested })
+        {
+            var (outcome, output) = await rig.RunAsync("fileFetch", new { requestId = "o1", path }, tier: 2);
+            ShouldBeDone(outcome);
+            var fileRef = output.Single();
+            fileRef["error"]!.Type.Should().Be(JTokenType.Null, path);
+            fileRef.Value<string>("name").Should().Be(Path.GetFileName(path));
+            fileRef.Value<string>("ref").Should().NotBeNullOrEmpty(path);
+        }
+
+        rig.Transfer.Registered.Count.Should().Be(2);
+
+        // app 自己放在對話資料夾裡的：照舊 policy、不發參照
+        var items = Path.Combine(conversation, "items.json");
+        File.Exists(items).Should().BeTrue("前提：對話資料夾有 items.json");
+        var forkSource = Path.Combine(Directory.CreateDirectory(Path.Combine(conversation, "fork-source")).FullName, "t.jsonl");
+        File.WriteAllText(forkSource, "{}");
+        var agentJson = Path.Combine(conversation, "result.json");
+        File.WriteAllText(agentJson, "{}");
+        foreach (var path in new[] { items, Path.Combine(conversation, "meta.json"), forkSource, agentJson })
+        {
+            var (outcome, output) = await rig.RunAsync("fileFetch", new { requestId = "o2", path }, tier: 2);
+            ShouldBeRejected(outcome, RemoteResultCodes.Policy);
+            output.Should().BeEmpty(path);
+        }
+
+        // 檔名拒絕清單與權杖 DLP 照判
+        var env = Path.Combine(conversation, "scratch", ".env");
+        File.WriteAllText(env, "A=1");
+        var (envOutcome, envOutput) = await rig.RunAsync("fileFetch", new { requestId = "o3", path = env }, tier: 2);
+        ShouldBeDone(envOutcome);
+        envOutput.Single().Value<string>("error").Should().Be("這個檔案不能從網頁讀取", "拒絕清單的檔名是那個檔本身的問題：回帶 error 的 fileRef");
+        var leak = Path.Combine(conversation, "scratch", "token.txt");
+        File.WriteAllText(leak, Token(3));
+        var (leakOutcome, leakOutput) = await rig.RunAsync("fileFetch", new { requestId = "o4", path = leak }, tier: 2);
+        ShouldBeDone(leakOutcome);
+        leakOutput.Single().Value<string>("error").Should().Be("這個檔案不能從網頁讀取");
+        rig.Transfer.Registered.Count.Should().Be(2, "被拒與含權杖的不發參照");
+
+        // 別的對話的資料夾：不在這個對話的資料夾裡（說明），檔案傳輸那邊照樣擋 app 的資料
+        var other = Path.Combine(Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(conversation)!, "ffffffffffffffffffffffffffffffff")).FullName, "a.pdf");
+        File.WriteAllText(other, "x");
+        var (otherOutcome, otherOutput) = await rig.RunAsync("fileFetch", new { requestId = "o5", path = other }, tier: 2);
+        ShouldBeDone(otherOutcome);
+        otherOutput.Single().Value<string>("error").Should().Be("這個檔案不在對話的資料夾裡");
     }
 
     // ───────────────────────────── addUploaded ─────────────────────────────

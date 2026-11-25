@@ -2,7 +2,7 @@
 // 瀏覽那台整台本機磁碟的資料夾與檔案（deviceBrowse）、多選下載（deviceFetch → 桌面 peerXferSave 寫進這台的資料夾／瀏覽器交給瀏覽器下載）、
 // 上傳（桌面 peerUpload {deviceId}／瀏覽器 E4 → devicePut；那台接收的進度看 deviceStats 的 xfers）。
 // 規則在 devicefilesrules.js；文字一律 textContent，class 一律 df- 前綴。
-import { h, setHidden, fmtBytes, fmtRelative } from './util.js';
+import { h, setHidden, fmtBytes, fmtRelative, baseName } from './util.js';
 import { icon, FILE_ICON } from './icons.js';
 import { state, post, postWithFiles, isHub, nextRequestId, newId, peerId } from './store.js';
 import { openDialog, openMenu, toast, spinner } from './ui.js';
@@ -13,6 +13,7 @@ import * as R from './devicefilesrules.js';
 import { openRemoteDesk } from './remotedesk.js';
 import { controlMenuItems } from './devicecontrol.js';
 import { isHandheld } from './voicemsgrules.js';
+import { saveViaShare, shareMedia } from './share.js';
 
 const FOLDER_KEY = 'myriagent.app.xfer.folder.v1';
 const coarseMq = typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: coarse)') : null;
@@ -431,6 +432,19 @@ function queueDownloads(s, files) {
   pump();
 }
 
+/**
+ * 不經檔案對話框下載那台的一個檔：對話裡的檔案連結不在對話的資料夾裡時（liveview 的「用檔案傳輸下載」，2026-11-25）。照一般的下載排進傳輸清單——
+ * 桌面存到這台的「下載」（或上次選的資料夾）、瀏覽器版交給瀏覽器下載（iPhone、iPad 交給分享選單）；進度在右下角的摘要與「檔案傳輸」視窗，
+ * 失敗另外以提示說明原因（沒有開著的對話框可以看）。把關照舊在那台（deviceFetch：要「可以操作」、禁止的資料夾不給）。沒排進去回 false
+ */
+export function downloadPath(deviceId, path, name) {
+  if (typeof deviceId !== 'string' || !deviceId || typeof path !== 'string' || !path) return false;
+  dockDismissed = false;
+  transfers.push({ id: ++seq, dir: 'down', deviceId, name: (typeof name === 'string' && name) || baseName(path) || path, path, size: null, state: 'queued', done: 0, total: 0, single: true });
+  pump();
+  return true;
+}
+
 function startFetch(t) {
   if (t.url) { saveDownload(t, t.url, t.name); return; }
   t.state = 'fetching';
@@ -466,6 +480,9 @@ export function onFileRef(m) {
 /** 拿到 /f/ 網址之後存下來：桌面交給宿主（peerXferSave，資料夾裡的檔帶 subfolder）；瀏覽器版的資料夾寫進選的資料夾，單檔交給瀏覽器下載 */
 function saveDownload(t, url, name) {
   if (isHub && t.dirHandle) { writeToDirectory(t, url, name); return; }
+  // iPhone、iPad（2026-11-25）：加到主畫面的網頁 app 不支援 <a download>（點了沒反應，清單卻寫「已交給瀏覽器下載」）——
+  // 同媒體的「儲存到手機」（2026-11-18，share.js）：抓下來交給分享選單，裡面有「儲存到檔案」，也能直接傳到其他 app
+  if (isHub && saveViaShare()) { shareDownload(t, url, name); return; }
   if (isHub) {
     // 瀏覽器版：交給瀏覽器下載（間隔一點時間，瀏覽器才不會擋多個下載）
     const wait = Math.max(0, browserDownloadAt + R.BROWSER_DOWNLOAD_GAP_MS - Date.now());
@@ -490,6 +507,29 @@ function saveDownload(t, url, name) {
   if (t.subfolder) msg.subfolder = t.subfolder;
   post(msg);
   renderXfers();
+}
+
+/** 分享選單一次只能叫出一個：一個檔的框關掉了才輪下一個 */
+let shareChain = Promise.resolve();
+
+/** iPhone、iPad：抓下來交給分享選單（share.js 的框有進度與取消）；框關掉才算結束，途中取消的記成已取消 */
+function shareDownload(t, url, name) {
+  t.state = 'running';
+  renderXfers();
+  shareChain = shareChain.then(() => new Promise((resolve) => {
+    if (t.state !== 'running') { resolve(); return; }
+    shareMedia({
+      url, name, kind: 'file', mode: 'save',
+      onClose: (handed) => {
+        if (t.state === 'running') {
+          if (handed) { t.state = 'done'; t.shared = true; t.done = t.total; } else t.state = 'cancelled';
+        }
+        renderXfers();
+        pump();
+        resolve();
+      },
+    });
+  }));
 }
 
 /**
@@ -784,6 +824,8 @@ function pump() {
 function fail(t, text) {
   t.state = 'failed';
   t.error = text;
+  // 從對話的檔案連結直接下載的（downloadPath）：沒有開著的檔案對話框，原因另外提示
+  if (t.single) toast('「' + t.name + '」下載失敗：' + text, 'error');
   renderXfers();
   pump();
 }

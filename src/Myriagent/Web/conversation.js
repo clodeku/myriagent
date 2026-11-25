@@ -6,7 +6,7 @@ import { canManageCollaborators, openShareDialog } from './collab.js';
 import { sharedWith } from './collabrules.js';
 import { openMenu, openDialog, confirmDialog, choiceDialog, toast, spinner } from './ui.js';
 import {
-  originOf, deviceOf, deviceLine, deviceShortLine, statusLine, composerGate, cardGate, deleteConfirmText, deleteProgramsCheckbox, policyChoices, needsLocalOnlyConfirm, LOCAL_ONLY_CONFIRM_TEXT, loadChunks, LAZY_BATCH, loadRetryDelay, LOAD_RETRY_MS,
+  originOf, deviceOf, deviceLine, deviceShortLine, statusLine, composerGate, cardGate, deleteConfirmText, deleteProgramsCheckbox, policyChoices, needsLocalOnlyConfirm, LOCAL_ONLY_CONFIRM_TEXT, loadChunks, LAZY_BATCH, loadRetryDelay, LOAD_RETRY_MS, loadWatchStep,
   attachGate, folderPickerGate, ownerRunning, mediaPolicyNote, peerOf, controllable, peerDraftDevices, peerDraftAccount, clearBoundary,
   latestPrompt, promptHistory, promptLine, itemTimeText, itemTimeTitle, dayKey, backgroundLine, backgroundStopMenu, detailTasks, programsView, mergeHeaderLists, missingHeaderLists, HEADER_LISTS_REOPEN_MS, touchUnsticks, touchScrolling, olderPlan, olderPadTarget, olderPadSettle, olderPadAfter, olderBatchNext, olderSnapWanted, olderRush, touchRestIn, itemImageUrls, OLDER_PRELOAD_ITEMS, OLDER_STEP_MS, OLDER_RUSH_MS, OLDER_IMAGE_WAIT_MS, OLDER_RUSH_IMAGE_WAIT_MS,
   remoteAccountMenu, headerAccountId, findAccount, originLink,
@@ -524,6 +524,9 @@ export class ConvView {
     // 載入看門狗（2026-11-07 使用者回報：分頁一直「載入對話中…」）：看得到卻一直沒收到 conversation 就自動重送 open，用完改成「重試」鈕
     this.loadAttempt = 0;
     this.loadWatch = 0;
+    // 等清單（其他電腦的對話：清單到了才送 open）等了多久、回報過沒有：這段時間不算重試（liverules.loadWatchStep）
+    this.listWaitMs = 0;
+    this.listWaitReported = false;
     // 送出中的訊息另放一層、排在所有項目之後：等待期間代理新增的項目（插入這一輪時）不會排到它後面
     this.sendingEl = h('div', { class: 'sending-list' });
     this.thread = h('div', { class: 'thread' }, this.olderRow, this.loadingEl, this.empty, this.padEl, this.itemsEl, this.sendingEl, this.runEl);
@@ -673,6 +676,18 @@ export class ConvView {
       this.loadWatch = 0;
       if (this.loaded || !this.loadingEl) return;
       if (!this.visible) return; // 看不到的時間不算：切回來再從這一次接著等
+      // 還在等清單（其他電腦的對話）：open 還沒送過，沒有東西可以重送——不算一次重試，等太久才回報一次
+      const waiting = !!(this.ws.awaitsList && this.ws.awaitsList(this.id));
+      if (waiting) this.listWaitMs += delay;
+      const step = loadWatchStep({ awaitingList: waiting, waitedMs: this.listWaitMs, reported: this.listWaitReported });
+      if (step.kind === 'wait') {
+        if (step.report) {
+          this.listWaitReported = true;
+          reportIssue('對話一直在等其他電腦的對話清單（' + this.id + '）', JSON.stringify({ waitedMs: this.listWaitMs }));
+        }
+        this.armLoadWatch();
+        return;
+      }
       this.loadAttempt++;
       this.markLoadTry();
       const st = this.ws.retryOpen ? this.ws.retryOpen(this.id) : null;
@@ -841,6 +856,7 @@ export class ConvView {
     clearTimeout(this.loadWatch);
     this.loadWatch = 0;
     this.loadAttempt = 0;
+    this.listWaitMs = 0;
     if (this.loadingEl) { this.loadingEl.remove(); this.loadingEl = null; }
     this.cancelChunks();
     this.cancelLazy();

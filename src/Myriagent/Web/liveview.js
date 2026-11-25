@@ -5,9 +5,9 @@
 // workspace.js 也匯入這支（迴圈匯入）：這裡只在函式裡用 ws.*，模組載入時不碰它
 import { h, iconButton, copyToClipboard, baseName, fmtClock } from './util.js';
 import { icon } from './icons.js';
-import { state, post, isHub, newId, peerId } from './store.js';
+import { state, post, isHub, newId, peerId, isCollaborator } from './store.js';
 import { openDialog, toast, hasLayer, spinner } from './ui.js';
-import { pickDevice, notifyPlan, notifyText, controlBanner, normBuild, buildChanged, reloadPlan, reloadDraftsJson, parseReloadDrafts, RELOAD_CHECK_MS, clipboardAccept, CLIPBOARD_MAX_MS, fileRefView, originOf, peerOf, controllable } from './liverules.js';
+import { pickDevice, notifyPlan, notifyText, controlBanner, normBuild, buildChanged, reloadPlan, reloadDraftsJson, parseReloadDrafts, RELOAD_CHECK_MS, clipboardAccept, CLIPBOARD_MAX_MS, fileRefView, originOf, peerOf, controllable, outsideFileView, deviceOf } from './liverules.js';
 import * as cmdtrack from './cmdtrack.js';
 import * as ws from './workspace.js';
 import * as synclog from './synclog.js';
@@ -16,6 +16,7 @@ import * as voice from './voice.js';
 import { fileRefAction } from './filelinkrules.js';
 import { isHandheld } from './voicemsgrules.js';
 import { shareMedia, shareAvailable } from './share.js';
+import { downloadPath } from './devicefiles.js';
 
 /** app.js 不認得的宿主訊息；commandResult 以外的只有瀏覽器版有，遠端操作紀錄與回收區只有桌面有（設定頁的對話框，synclog.js） */
 export function handle(m) {
@@ -291,7 +292,7 @@ export function fetchFile(conversationId, path, name, opts) {
     h('div', { class: 'file-ref-row' }, icon('file'), h('span', { class: 'file-ref-name', text: label, title: label })),
     h('div', { class: 'file-ref-wait', dataset: { field: 'fileRefWait' } }, spinner(), h('span', { text: '向電腦讀取檔案中…' })));
   const close = h('button', { type: 'button', class: 'btn', text: '關閉' });
-  const entry = { conversationId, body, dialog: null, onReady: opts && typeof opts.onReady === 'function' ? opts.onReady : null };
+  const entry = { conversationId, path, label, body, dialog: null, onReady: opts && typeof opts.onReady === 'function' ? opts.onReady : null };
   const d = openDialog({
     title: '預覽或下載檔案', body, footer: [close], className: 'dlg-file-ref', width: 440, initialFocus: close,
     onClose: () => { if (fetches.get(requestId) === entry) fetches.delete(requestId); },
@@ -328,6 +329,7 @@ function onFileRef(m) {
   const wait = e.body.querySelector('[data-field="fileRefWait"]');
   if (wait) wait.remove();
   for (const old of e.body.querySelectorAll('.file-ref-result')) old.remove();
+  if (!v.ok && v.outside) { showOutside(e); return; }
   if (!v.ok) {
     e.body.append(h('p', { class: 'file-ref-result file-ref-err', role: 'alert', dataset: { field: 'fileRefError' }, text: v.error }));
     return;
@@ -381,6 +383,27 @@ function onFileRef(m) {
   e.body.append(h('div', { class: 'file-ref-result' },
     h('p', { class: 'confirm-detail', dataset: { field: 'fileRefInfo' }, text: (v.sizeText ? v.sizeText + '・' : '') + until + '；文字檔在新分頁預覽，其他檔案會下載。' }),
     h('div', { class: 'file-ref-acts' }, link)));
+}
+
+/**
+ * 檔案不在這個對話的資料夾裡（fileRefView 的 outside；2026-11-20 實機：代理照使用者的要求把 PDF 存到「下載」，手機上點了只看到被拒）：
+ * 框裡說明，擁有者另給「用檔案傳輸下載」——照電腦狀態面板的檔案傳輸向那台要這個檔（devicefiles.downloadPath；那台要開著「可以操作」，
+ * 進度與失敗的原因在右下角的摘要）。協作人、不知道對話在哪台電腦時只有說明
+ */
+function showOutside(e) {
+  const conv = state.convMap.get(e.conversationId);
+  const cv = ws.getConv ? ws.getConv(e.conversationId) : null;
+  const deviceId = (conv && typeof conv.deviceId === 'string' && conv.deviceId) || (cv && cv.header && typeof cv.header.deviceId === 'string' && cv.header.deviceId) || null;
+  const device = deviceId ? deviceOf(deviceId, state.remote, conv || null) : null;
+  const view = outsideFileView({ collaborator: isCollaborator(), deviceId, deviceName: device && device.name });
+  e.body.append(h('p', { class: 'file-ref-result confirm-detail', dataset: { field: 'fileRefOutside' }, text: view.text }));
+  if (!view.transfer) return;
+  const go = h('button', { type: 'button', class: 'btn primary', dataset: { field: 'fileRefTransfer' } }, icon('download'), h('span', { text: '用檔案傳輸下載' }));
+  go.addEventListener('click', () => {
+    e.dialog.close();
+    if (!downloadPath(deviceId, e.path, e.label)) toast('現在不能用檔案傳輸下載這個檔案', 'error');
+  });
+  e.body.append(h('div', { class: 'file-ref-result file-ref-acts' }, go));
 }
 
 /** 手機與平板（同 composer 的判斷：粗指標、行動裝置的 UA、iPadOS 的觸控點） */

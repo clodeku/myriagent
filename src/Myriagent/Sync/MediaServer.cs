@@ -163,6 +163,11 @@ internal sealed class MediaServer : IDisposable
         {
             Log.Info($"媒體轉送 {job.Request.RelayId} 取消（連線丟掉、停止或逾時）");
         }
+        catch (Exception ex) when (MediaServerRules.IsRelayBodyAborted(ex))
+        {
+            // 伺服器在本文送完之前就回覆並關掉請求（瀏覽器已經離開：捲過去了、關掉頁面；多半緊跟著一串 410）——不是這台的失敗（2026-11-25）
+            Log.Info($"媒體轉送 {job.Request.RelayId}：本文送到一半伺服器就關掉了（瀏覽器多半已經離開）");
+        }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or ObjectDisposedException or OperationCanceledException)
         {
             Log.Warn($"媒體轉送 {job.Request.RelayId} 失敗：{ex.Message}");

@@ -361,6 +361,28 @@ public sealed class MediaServerTests : IDisposable
         policy.Header("Content-Type").Should().BeNull("檔案不帶型別");
     }
 
+    [Fact]
+    public async Task file_代理寫在對話資料夾裡的檔給_app自己的檔回403()
+    {
+        // 2026-11-25：fileFetch 發了參照之後，轉送時守門員以同一個規則再驗一次（對話資料夾裡代理的產出給、items.json 與 fork-source 不給）
+        var pdf = new byte[] { 0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37, 0x0A, 0x00, 0xFF, 0x10 };
+        var report = files.Write(Path.Combine("data", "conversations", MediaTestFiles.ConversationId, "outputs", "報表.pdf"), pdf);
+        var items = files.Write(Path.Combine("data", "conversations", MediaTestFiles.ConversationId, "items.json"), Encoding.UTF8.GetBytes("[]"));
+        var forked = files.Write(Path.Combine("data", "conversations", MediaTestFiles.ConversationId, "fork-source", "t.jsonl"), Encoding.UTF8.GetBytes("{}"));
+        answer = _ => files.Snapshot();
+
+        var ok = await RunAsync(Job(Loose(MediaServerRules.FileItemId, report), MediaPurposes.File, new MediaRange(0, 8 * 1024 * 1024 - 1)));
+        var own = await RunAsync(Job(Loose(MediaServerRules.FileItemId, items), MediaPurposes.File, new MediaRange(0, 0)));
+        var transcript = await RunAsync(Job(Loose(MediaServerRules.FileItemId, forked), MediaPurposes.File, new MediaRange(0, 0)));
+
+        ok.Status.Should().Be(206);
+        ok.Body.Should().Equal(pdf);
+        ok.Header(MediaRelayHeaders.ContentKind).Should().Be(MediaContentKinds.Binary);
+        own.Status.Should().Be(403);
+        own.Header(MediaRelayHeaders.Error).Should().Be(MediaErrorCodes.Forbidden);
+        transcript.Status.Should().Be(403);
+    }
+
     // ── 範圍與禁止清單 ──
 
     [Fact]

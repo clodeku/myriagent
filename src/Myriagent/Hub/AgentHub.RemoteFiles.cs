@@ -563,7 +563,9 @@ internal sealed partial class AgentHub
     }
 
     /// <summary>
-    /// 背景：守門員以 fileFetch 的範圍開檔（≤512 MB）→ 開頭就證明是二進位的（<see cref="MediaServerRules.IsProvenBinary"/>）不掃；其他要 ≤20 MB、
+    /// 背景：守門員以 fileFetch 的範圍（工作資料夾、attachments\、代理寫在對話資料夾裡的檔）開檔（≤512 MB）；只是不在這個對話的範圍裡的
+    /// （<see cref="RemoteListRules.IsOutsideConversation"/>）回帶 <see cref="RemoteListRules.FetchOutside"/> 的 fileRef，其他被拒的回 policy
+    /// → 開頭就證明是二進位的（<see cref="MediaServerRules.IsProvenBinary"/>）不掃；其他要 ≤20 MB、
     /// 整份讀進來，文字類（副檔名、嚴格 UTF-8 或 UTF-16／UTF-32 的 BOM）整份跑權杖 DLP
     /// （<see cref="MediaServerRules.HasLeak"/>：UTF-8 之外也照 BOM 或 UTF-16 解碼掃），命中就回帶 error 的 fileRef →
     /// 經傳輸發 <c>@file</c> 參照，<c>expiresAt</c> 是現在加 15 分鐘。轉送時 MediaServer 會再查一次（檔案可能改過）
@@ -574,6 +576,12 @@ internal sealed partial class AgentHub
         var opened = await s.Guard.OpenAsync(path, RemoteFilePurpose.File, scope, MediaServerRules.MaxBinaryFileBytes, ct).ConfigureAwait(false);
         if (opened.File is not { } file)
         {
+            if (RemoteListRules.IsOutsideConversation(opened.Reason, path, s.ConversationDirectory))
+            {
+                Log.Info("遠端 fileFetch 的路徑不在對話的資料夾裡：回說明（網頁可以改用檔案傳輸）");
+                return RemoteFilesResult.Send(FileRefError(s, requestId, RemoteListRules.FetchOutside));
+            }
+
             if (RemoteListRules.RefusesPath(opened.Reason!))
             {
                 Log.Info($"遠端 fileFetch 的路徑被拒（{opened.Reason}）");
@@ -637,12 +645,12 @@ internal sealed partial class AgentHub
     }
 
     /// <summary>不給的檔（太大、拒絕清單、含憑證、讀不到…）：fileRef 只帶固定的錯誤文字（WPR：error 不為 null 時其他欄位省略）</summary>
-    private static JObject FileRefError(RemoteFileSnapshot s, string? requestId) => new()
+    private static JObject FileRefError(RemoteFileSnapshot s, string? requestId, string error = RemoteListRules.FetchRefused) => new()
     {
         ["type"] = "fileRef",
         ["requestId"] = TextOrNull(requestId),
         ["conversationId"] = s.WireId,
-        ["error"] = RemoteListRules.FetchRefused,
+        ["error"] = error,
     };
 
     // ───────────────────────────── addUploaded 與 BeginRemoteUploads（D22） ─────────────────────────────

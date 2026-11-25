@@ -296,6 +296,13 @@ public sealed class RemoteFileGuardRulesTests
     [InlineData("queue.json")]
     [InlineData("meta.json")]
     [InlineData("items.json.bak")]
+    [InlineData("items.json.tmp")]
+    [InlineData("meta.json.corrupt-20261125-010203")]
+    [InlineData("running.json")]
+    [InlineData("continue.json")]
+    [InlineData("sync-ord.json")]
+    [InlineData("sync-policy.json")]
+    [InlineData("ITEMS.JSON")]
     public void items_json與queue_json被拒(string name)
     {
         var path = Conversation + @"\" + name;
@@ -317,7 +324,8 @@ public sealed class RemoteFileGuardRulesTests
         var scope = Scope([@"E:\conv\c1"], [@"E:\conv\c1\cover.png", @"E:\conv\c1\queue.json"], custom);
         RemoteFileGuardRules.CheckString(@"E:\conv\c1\queue.json", RemoteFilePurpose.File, scope, RemoteDriveKind.Fixed).Should().Be(R.Forbidden);
         RemoteFileGuardRules.CheckString(@"E:\conv\c1\queue.json", RemoteFilePurpose.Media, scope, RemoteDriveKind.Fixed).Should().Be(R.Forbidden, "不是媒體格式");
-        RemoteFileGuardRules.CheckString(@"E:\conv\c1\cover.png", RemoteFilePurpose.File, scope, RemoteDriveKind.Fixed).Should().Be(R.Forbidden, "預覽與下載不給對話資料夾本身的檔");
+        RemoteFileGuardRules.CheckString(@"E:\conv\c1\cover.png", RemoteFilePurpose.File, scope, RemoteDriveKind.Fixed).Should().BeNull("代理寫在對話資料夾裡的檔可以預覽與下載");
+        RemoteFileGuardRules.CheckString(@"E:\conv\c1\fork-source\a.jsonl", RemoteFilePurpose.File, scope, RemoteDriveKind.Fixed).Should().Be(R.Forbidden, "延伸時複製的逐字稿不給");
         RemoteFileGuardRules.CheckString(@"E:\conv\c1\cover.png", RemoteFilePurpose.Media, scope, RemoteDriveKind.Fixed).Should().BeNull("登記過的媒體照樣給");
         RemoteFileGuardRules.CheckString(@"E:\conv\c1\attachments\a.png", RemoteFilePurpose.File, scope, RemoteDriveKind.Fixed).Should().BeNull();
         RemoteFileGuardRules.CheckString(@"E:\conv\c1x\queue.json", RemoteFilePurpose.File, Scope([@"E:\"], folders: custom), RemoteDriveKind.Fixed)
@@ -338,8 +346,110 @@ public sealed class RemoteFileGuardRulesTests
         RemoteFileGuardRules.CheckString(path, RemoteFilePurpose.Thumb, scope, RemoteDriveKind.Fixed).Should().BeNull(path);
         RemoteFileGuardRules.CheckString(path, RemoteFilePurpose.List, scope, RemoteDriveKind.Fixed).Should().Be(R.Scope, "列檔的範圍不變");
         RemoteFileGuardRules.CheckString(path, RemoteFilePurpose.File, Scope([Conversation]), RemoteDriveKind.Fixed)
-            .Should().Be(R.Forbidden, "預覽與下載不給對話資料夾本身的檔");
+            .Should().BeNull("代理寫在對話資料夾裡的檔可以預覽與下載（2026-11-25）");
         RemoteFileGuardRules.CheckString(path, RemoteFilePurpose.Media, Scope([Conversation]), RemoteDriveKind.Fixed).Should().Be(R.Scope, "媒體一樣只收精確檔案");
+    }
+
+    [Theory]
+    [InlineData(@"\季報_2026Q3_第434版.pdf")]
+    [InlineData(@"\scratch\report.xlsx")]
+    [InlineData(@"\outputs\2026\a.zip")]
+    [InlineData(@"\build.py")]
+    [InlineData(@"\live.log")]
+    [InlineData(@"\scratch\items.json")]
+    public void 代理寫在對話資料夾裡的檔可以預覽與下載(string relative)
+    {
+        // 2026-11-20 實機：代理把 PDF 存在 conversations\{id}\，回覆裡給完整路徑，手機上點了五次都被拒（scope）
+        var path = Conversation + relative;
+        var normal = Scope([@"C:\repo", Conversation + @"\attachments"]);
+        RemoteFileGuardRules.IsConversationOutput(path, RemoteFilePurpose.File, Folders).Should().BeTrue(path);
+        RemoteFileGuardRules.CheckString(path, RemoteFilePurpose.File, normal, RemoteDriveKind.Fixed).Should().BeNull(path);
+        RemoteFileGuardRules.CheckString(path.ToUpperInvariant(), RemoteFilePurpose.File, normal, RemoteDriveKind.Fixed).Should().BeNull("不分大小寫");
+        RemoteFileGuardRules.CheckString(path, RemoteFilePurpose.List, normal, RemoteDriveKind.Fixed).Should().Be(R.Scope, "列檔的範圍不變");
+        RemoteFileGuardRules.CheckDirectoryString(Conversation + @"\scratch", normal, RemoteDriveKind.Fixed).Should().Be(R.Scope, "抽屜不列對話資料夾");
+        RemoteFileGuardRules.CheckString(path, RemoteFilePurpose.Media, normal, RemoteDriveKind.Fixed).Should().Be(R.Scope, "媒體照舊只收登記過的精確檔案");
+    }
+
+    [Theory]
+    [InlineData(@"\items.json")]
+    [InlineData(@"\queue.json")]
+    [InlineData(@"\data.json")]
+    [InlineData(@"\transcript.jsonl")]
+    [InlineData(@"\meta.json.tmp")]
+    [InlineData(@"\fork-source\0b1c.jsonl")]
+    [InlineData(@"\Fork-Source\sub\a.txt")]
+    [InlineData(@"\.cache\a.txt")]
+    [InlineData(@"\.hidden.txt")]
+    [InlineData(@"\x.json.d\a.txt")]
+    public void app自己放在對話資料夾的項目照舊不給(string relative)
+    {
+        var path = Conversation + relative;
+        var normal = Scope([@"C:\repo", Conversation + @"\attachments"]);
+        RemoteFileGuardRules.IsConversationOutput(path, RemoteFilePurpose.File, Folders).Should().BeFalse(path);
+        RemoteFileGuardRules.CheckString(path, RemoteFilePurpose.File, normal, RemoteDriveKind.Fixed).Should().Be(R.Scope, path);
+        RemoteFileGuardRules.CheckString(path, RemoteFilePurpose.File, Scope([Conversation]), RemoteDriveKind.Fixed).Should().Be(R.Forbidden, "範圍放到整個對話資料夾也禁止");
+    }
+
+    [Fact]
+    public void 對話資料夾裡的檔案例外不放寬其他禁止的地方()
+    {
+        var normal = Scope([@"C:\repo", Conversation + @"\attachments"]);
+        var other = Data + @"\conversations\c2\report.pdf";
+        RemoteFileGuardRules.IsConversationOutput(other, RemoteFilePurpose.File, Folders).Should().BeFalse("別的對話的資料夾");
+        RemoteFileGuardRules.CheckString(other, RemoteFilePurpose.File, normal, RemoteDriveKind.Fixed).Should().Be(R.Scope);
+        RemoteFileGuardRules.CheckString(other, RemoteFilePurpose.File, Scope([Data]), RemoteDriveKind.Fixed).Should().Be(R.Forbidden, "範圍放寬也還在資料根目錄裡");
+        RemoteFileGuardRules.IsConversationOutput(Conversation, RemoteFilePurpose.File, Folders).Should().BeFalse("對話資料夾本身");
+        RemoteFileGuardRules.IsConversationOutput(Conversation + "x" + @"\a.pdf", RemoteFilePurpose.File, Folders).Should().BeFalse("以「資料夾＋分隔字元」為界");
+        RemoteFileGuardRules.IsConversationOutput(Conversation + @"\attachments\a.pdf", RemoteFilePurpose.File, Folders).Should().BeFalse("允許子樹裡的照原本的規則");
+        RemoteFileGuardRules.IsConversationOutput(Conversation + @"\a.pdf", RemoteFilePurpose.List, Folders).Should().BeFalse("只有 fileFetch");
+        RemoteFileGuardRules.IsConversationOutput(Conversation + @"\a.pdf", RemoteFilePurpose.File, null).Should().BeFalse();
+        RemoteFileGuardRules.IsConversationOutput(Conversation + @"\a.pdf", RemoteFilePurpose.File, Folders with { ConversationDirectory = null }).Should().BeFalse("沒有對話（檔案傳輸的範圍）");
+
+        var report = Conversation + @"\scratch\report.pdf";
+        RemoteFileGuardRules.CheckString(Conversation + @"\scratch\.env", RemoteFilePurpose.File, normal, RemoteDriveKind.Fixed).Should().Be(R.Name, "檔名拒絕清單照判");
+        RemoteFileGuardRules.CheckString(Conversation + @"\scratch\id_rsa", RemoteFilePurpose.File, normal, RemoteDriveKind.Fixed).Should().Be(R.Name);
+        RemoteFileGuardRules.CheckString(report, RemoteFilePurpose.File, normal, RemoteDriveKind.Network).Should().Be(R.Drive);
+        var incomplete = Folders with { RoamingAppData = @"C:\PROGRA~1\x" };
+        RemoteFileGuardRules.CheckString(report, RemoteFilePurpose.File, Scope([@"C:\repo"], folders: incomplete), RemoteDriveKind.Fixed)
+            .Should().Be(R.Forbidden, "禁止清單不完整一律禁止");
+        var underClaude = Folders with { ConversationDirectory = @"C:\Users\Amy\.claude\conv\c1", AllowedDataSubtrees = [] };
+        RemoteFileGuardRules.CheckString(@"C:\Users\Amy\.claude\conv\c1\report.pdf", RemoteFilePurpose.File, Scope([@"C:\repo"], folders: underClaude), RemoteDriveKind.Fixed)
+            .Should().Be(R.Forbidden, "其他禁止的資料夾照判");
+    }
+
+    [Theory]
+    [InlineData("meta.json", true)]
+    [InlineData("items.json", true)]
+    [InlineData("queue.json", true)]
+    [InlineData("running.json", true)]
+    [InlineData("continue.json", true)]
+    [InlineData("sync-ord.json", true)]
+    [InlineData("sync-policy.json", true)]
+    [InlineData("items.json.tmp", true)]
+    [InlineData("fork-source", true)]
+    [InlineData(".kept", true)]
+    [InlineData("", true)]
+    [InlineData("scratch", false)]
+    [InlineData("report.pdf", false)]
+    [InlineData("json-notes.txt", false)]
+    public void 對話資料夾根目錄裡app自己的項目(string name, bool expected)
+        => RemoteFileGuardRules.IsAppConversationEntry(name).Should().Be(expected, name);
+
+    [Fact]
+    public void app寫在對話資料夾的檔名都算自己的項目()
+    {
+        // 新增寫在對話資料夾根目錄的狀態檔時加在這裡：名稱不含 .json 的要另外在 IsAppConversationEntry 列出，否則遠端的 fileFetch 讀得到
+        string[] names =
+        [
+            Myriagent.Hub.ConversationStore.SyncPolicyFileName, Myriagent.Hub.ConversationStore.OrdFileName, Myriagent.Hub.ContinueOfferStore.FileName,
+            "meta.json", "items.json", "queue.json", "running.json",
+        ];
+        foreach (var name in names)
+        {
+            RemoteFileGuardRules.IsAppConversationEntry(name).Should().BeTrue(name);
+            RemoteFileGuardRules.IsAppConversationEntry(name + ".tmp").Should().BeTrue(name);
+            RemoteFileGuardRules.IsAppConversationEntry(name + ".corrupt-20261125-010203").Should().BeTrue(name);
+        }
     }
 
     [Fact]

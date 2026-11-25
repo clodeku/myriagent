@@ -15,7 +15,10 @@ internal enum RemoteFilePurpose
     /// <summary>listFiles／fileSearch 的項目：對話的工作資料夾子樹與附件資料夾（<see cref="RemoteFileScope.ListRoots"/>）</summary>
     List,
 
-    /// <summary>fileFetch（非媒體的預覽與下載）：範圍同 <see cref="List"/></summary>
+    /// <summary>
+    /// fileFetch（非媒體的預覽與下載）：範圍同 <see cref="List"/>，另加代理寫在這個對話資料夾裡的檔
+    /// （<see cref="RemoteFileGuardRules.IsConversationOutput"/>；app 自己放在那裡的 items.json、queue.json…照舊不給）
+    /// </summary>
     File,
 }
 
@@ -305,14 +308,18 @@ internal static class RemoteFileGuardRules
     /// <summary>名稱代理（符號連結、junction、掛載點這類「指到別處」的標籤）：路徑走到這一層會被導到連結的目標（遠端選資料夾時要解析，不能直接跟進）</summary>
     public static bool IsNameSurrogate(uint tag) => (tag & NameSurrogateBit) != 0;
 
-    /// <summary>第 4 步的範圍：媒體與縮圖只收精確檔案（正規化後不分大小寫相同），列檔與 fileFetch 要在任何一個範圍資料夾裡</summary>
+    /// <summary>
+    /// 第 4 步的範圍：媒體與縮圖只收精確檔案（正規化後不分大小寫相同），列檔與 fileFetch 要在任何一個範圍資料夾裡；
+    /// fileFetch 另收代理寫在這個對話資料夾裡的檔（<see cref="IsConversationOutput"/>）
+    /// </summary>
     private static string? CheckScope(string normalized, RemoteFilePurpose purpose, RemoteFileScope scope)
     {
         var inScope = purpose switch
         {
             RemoteFilePurpose.Media or RemoteFilePurpose.Thumb => (scope.ExactFiles ?? Enumerable.Empty<string>()).Any(file =>
                 RemoteFolderRules.TryNormalize(file, out var exact) && string.Equals(exact, normalized, StringComparison.OrdinalIgnoreCase)),
-            RemoteFilePurpose.List or RemoteFilePurpose.File => RemoteFolderRules.IsInScope(normalized, scope.ListRoots ?? []),
+            RemoteFilePurpose.List => RemoteFolderRules.IsInScope(normalized, scope.ListRoots ?? []),
+            RemoteFilePurpose.File => RemoteFolderRules.IsInScope(normalized, scope.ListRoots ?? []) || IsConversationOutput(normalized, purpose, scope.Folders),
             _ => throw new ArgumentOutOfRangeException(nameof(purpose), purpose, "未知的遠端檔案用途"),
         };
         return inScope ? null : RemoteFileGuardReasons.Scope;
@@ -323,7 +330,7 @@ internal static class RemoteFileGuardRules
     {
         if (driveKind is not (RemoteDriveKind.Fixed or RemoteDriveKind.Removable))
             return RemoteFileGuardReasons.Drive;
-        if (IsConversationMedia(normalized, purpose, scope.Folders))
+        if (IsConversationMedia(normalized, purpose, scope.Folders) || IsConversationOutput(normalized, purpose, scope.Folders))
         {
             // 只免除「在資料根目錄裡」這一條（允許的子資料夾就是這個檔本身）；其他禁止的資料夾與不完整的清單照判
             return RemoteFolderRules.IsForbidden(normalized, driveKind, scope.Folders with { AllowedDataSubtrees = [normalized] })
@@ -339,7 +346,7 @@ internal static class RemoteFileGuardRules
     /// <summary>
     /// 媒體與縮圖要的是這個對話資料夾裡（不是它本身）的媒體檔：代理常把截圖存在對話資料夾（例如 <c>conversations\{id}\screens\</c>），
     /// 設計 8.7 第 4 步的媒體範圍只要求「項目登記過的精確檔案、白名單的媒體格式」，queue.json、items.json、meta.json 與備份檔都不是媒體格式
-    /// （2026-10-23：原本連媒體也擋，網頁版與其他電腦看到的是破圖）。列檔與 fileFetch 照舊只給工作資料夾與 attachments\
+    /// （2026-10-23：原本連媒體也擋，網頁版與其他電腦看到的是破圖）。列檔照舊只給工作資料夾與 attachments\；fileFetch 見 <see cref="IsConversationOutput"/>
     /// </summary>
     private static bool IsConversationMedia(string normalized, RemoteFilePurpose purpose, RemoteFolderContext? folders)
     {
@@ -349,6 +356,34 @@ internal static class RemoteFileGuardRules
                && !string.Equals(normalized, conversation, StringComparison.OrdinalIgnoreCase)
                && RemoteFolderRules.IsWithin(normalized, conversation);
     }
+
+    /// <summary>
+    /// fileFetch 要的是代理寫在這個對話資料夾裡（不是它本身、不在允許子樹裡）的檔：代理常把產出放在對話資料夾——報表、PDF、記錄、
+    /// <c>scratch\</c>、<c>outputs\</c>——回覆裡給完整路徑，瀏覽器版與其他電腦點了卻一律被拒（2026-11-20 實機：手機上連點代理產出的 PDF 都打不開）。
+    /// app 自己放在對話資料夾根目錄的照舊不給（<see cref="IsAppConversationEntry"/>）；檔名拒絕清單、其他禁止的資料夾、不完整的禁止清單照判，
+    /// 讀檔時的權杖 DLP 也照掃。列檔（<see cref="RemoteFilePurpose.List"/>）不放寬：抽屜照舊只列工作資料夾與 attachments\
+    /// </summary>
+    public static bool IsConversationOutput(string normalized, RemoteFilePurpose purpose, RemoteFolderContext? folders)
+    {
+        if (purpose != RemoteFilePurpose.File || folders is null || !RemoteFolderRules.TryNormalize(folders.ConversationDirectory, out var conversation))
+            return false;
+        if (string.Equals(normalized, conversation, StringComparison.OrdinalIgnoreCase) || !RemoteFolderRules.IsWithin(normalized, conversation))
+            return false;
+        if (!InConversationFolderOutsideSubtrees(normalized, folders))
+            return false;
+        var relative = normalized[conversation.Length..].TrimStart('\\');
+        var separator = relative.IndexOf('\\');
+        return !IsAppConversationEntry(separator < 0 ? relative : relative[..separator]);
+    }
+
+    /// <summary>
+    /// 對話資料夾根目錄裡 app 自己的項目（給它的名稱，不分大小寫）：名稱含 <c>.json</c> 的（meta.json、items.json、queue.json、running.json、
+    /// continue.json、sync-ord.json、sync-policy.json，與它們的 <c>.tmp</c>、<c>.corrupt-*</c>、備份；代理自己放在根目錄的 json 也一併不給——
+    /// 之後 app 新增的狀態檔只要照慣例是 json 就自動在這裡）、<c>fork-source</c>（延伸對話時複製的 CLI 逐字稿）、以點開頭的
+    /// </summary>
+    public static bool IsAppConversationEntry(string name)
+        => string.IsNullOrEmpty(name) || name.StartsWith('.') || name.Contains(".json", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(name, "fork-source", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 在對話資料夾裡、但不在它的允許子樹（工作資料夾、attachments\）裡：queue.json（含秘密回答的 CLI 原文）、items.json（沒經 DLP 遮蔽）、

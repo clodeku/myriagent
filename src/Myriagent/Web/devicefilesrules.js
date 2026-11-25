@@ -165,7 +165,7 @@ export function stateText(t, deviceName) {
     case 'queued': return '排隊中';
     case 'fetching': return '向' + who + '要檔案…';
     case 'running': return '下載中' + p;
-    case 'done': return t.dir === 'down' ? (t.browser ? '已交給瀏覽器下載' : '已下載') : '完成';
+    case 'done': return t.dir === 'down' ? (t.shared ? '已交給分享選單' : t.browser ? '已交給瀏覽器下載' : '已下載') : '完成';
     case 'uploading': return '上傳到伺服器' + p;
     case 'sending': return '交給' + who + '…';
     case 'receiving': return t.late ? who + '還沒有回報進度（面板開著才會更新）' : who + '接收中' + p;

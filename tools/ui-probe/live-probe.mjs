@@ -4762,6 +4762,95 @@ async function runFileFetch() {
   await HP.closePage(app);
 }
 
+/**
+ * 檔案連結不在對話的資料夾裡（2026-11-20 實機：代理照使用者的要求把 PDF 存到「下載」，手機上點了四次都只看到被拒）：電腦回帶固定說明的 fileRef
+ * （不是被拒）→ 框裡說明、給「用檔案傳輸下載」→ 按了送 deviceFetch（對話所在的那台、同一個路徑）→ 拿到 /f/ 的網址：
+ * 電腦上的瀏覽器交給瀏覽器下載、右下角有傳輸的摘要；iPhone 改交給分享選單（主畫面的網頁 app 不支援 <a download>）
+ */
+async function runFileOutside() {
+  const id = LF.CONV.idle;
+  const PATH = 'C:\\Users\\User\\Downloads\\季報_434版.pdf';
+  const items = LF.liveItems(NOW).concat([{ id: 'i7', kind: 'Approval', status: 'Done', time: NOW - LF.MIN, toolKind: 'edit', toolName: '編輯檔案', title: '存到下載資料夾',
+    filePath: PATH, detail: null, canAllowForSession: false, decision: 'allow', seq: 7 }]);
+  const serve = (hub) => {
+    hub.onCmd('open', (cmd) => ({ push: [LF.conversationMessage(NOW, cmd.conversationId, TITLE_OF[cmd.conversationId] || '對話', { items })] }));
+    hub.onCmd('fileFetch', (cmd, arg) => ({ push: [serverResult(arg.commandId, 'done'),
+      { type: 'fileRef', requestId: cmd.requestId, conversationId: cmd.conversationId, error: '這個檔案不在對話的資料夾裡' }] }));
+    hub.onCmd('deviceFetch', (cmd, arg) => ({ push: [serverResult(arg.commandId, 'done'),
+      { type: 'fileRef', requestId: cmd.requestId, url: '/f/d_A-xf1', name: '季報_434版.pdf', size: 2048, expiresAt: NOW + 120 * LF.MIN, error: null }] }));
+  };
+  const outsideState = (page) => page.evaluate(() => {
+    const d = document.querySelector('.dlg-file-ref');
+    if (!d) return null;
+    const info = d.querySelector('[data-field="fileRefOutside"]');
+    const go = d.querySelector('[data-field="fileRefTransfer"]');
+    return info ? { text: info.textContent, button: go ? go.textContent : null, error: !!d.querySelector('[data-field="fileRefError"]'), wait: !!d.querySelector('[data-field="fileRefWait"]') } : null;
+  });
+  const link = itemSel(id, 'i7') + ' [data-field="fileFetch"]';
+
+  // 1. 電腦上的瀏覽器
+  const app = await openWithLayout('file-outside', layoutOf([[[id], id]]), { open: { hub: serve } });
+  const { hub, page } = app;
+  await waitLoaded(app, [id]);
+  await page.evaluate(() => {
+    window.__downloads = [];
+    const orig = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.hasAttribute('download')) { window.__downloads.push({ href: this.getAttribute('href'), download: this.getAttribute('download') }); return; }
+      return orig.call(this);
+    };
+  });
+  const hasLink = await page.waitForSelector(link, { timeout: 3000 }).then(() => true, () => false);
+  if (hasLink) await page.click(link);
+  const shown = hasLink ? await until(() => outsideState(page), 3000) : null;
+  await shot(app, 'hub-file-outside-1440');
+  if (shown && shown.button) await page.click('.dlg-file-ref [data-field="fileRefTransfer"]');
+  const fetched = await until(() => hub.cmds('deviceFetch')[0] || null, 3000);
+  const downloads = await until(async () => { const d = await page.evaluate(() => window.__downloads); return d && d.length ? d : null; }, 4000);
+  const dlgClosed = !!(await until(() => page.evaluate(() => (document.querySelector('.dlg-file-ref') ? null : true)), 2000));
+  const dock = await until(() => page.evaluate(() => { const d = document.querySelector('.df-dock'); return d && !d.hidden ? d.querySelector('.df-dock-text').textContent : null; }), 3000);
+  check('hubFileOutsideTransfer', !!shown && shown.text.includes('不在這個對話的資料夾裡') && shown.text.includes('要開著「可以操作」') && shown.button === '用檔案傳輸下載' && !shown.error && !shown.wait
+    && !!fetched && fetched.cmd.deviceId === LF.DEVICE.control && fetched.cmd.path === PATH
+    && JSON.stringify(downloads) === JSON.stringify([{ href: '/f/d_A-xf1', download: '季報_434版.pdf' }]) && dlgClosed && !!dock && (await HP.xssState(app)).xss === 0,
+  { shown, fetch: fetched && fetched.cmd, downloads, dlgClosed, dock });
+  await HP.closePage(app);
+
+  // 2. iPhone：交給分享選單（不走 <a download>）
+  const shareStub = () => {
+    window.__shares = [];
+    window.__downloads = [];
+    const orig = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.hasAttribute('download')) { window.__downloads.push(this.getAttribute('href')); return; }
+      return orig.call(this);
+    };
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: (d) => !!(d && Array.isArray(d.files) && d.files.length) });
+    Object.defineProperty(navigator, 'share', { configurable: true, value: async (d) => { window.__shares.push((d.files || []).map((f) => ({ name: f.name, size: f.size }))); } });
+    Object.defineProperty(navigator, 'userActivation', { configurable: true, get: () => ({ isActive: true, hasBeenActive: true }) });
+  };
+  const phone = await openWithLayout('file-outside-phone', layoutOf([[[id], id]]), {
+    open: { vp: { w: 390, h: 844 }, hasTouch: true, userAgent: IPHONE_UA, initScript: shareStub, hub: serve },
+  });
+  await waitLoaded(phone, [id]);
+  await phone.page.click('#btnSidebar');
+  await sleep(300);
+  const hasPhoneLink = await phone.page.waitForSelector(link, { timeout: 3000 }).then(() => true, () => false);
+  if (hasPhoneLink) await phone.page.tap(link);
+  const phoneShown = hasPhoneLink ? await until(() => outsideState(phone.page), 3000) : null;
+  await shot(phone, 'hub-file-outside-390');
+  if (phoneShown && phoneShown.button) await phone.page.tap('.dlg-file-ref [data-field="fileRefTransfer"]');
+  const shared = await until(async () => { const x = await phone.page.evaluate(() => window.__shares); return x.length ? x[0] : null; }, 5000);
+  const phoneDownloads = await phone.page.evaluate(() => window.__downloads);
+  const row = await until(async () => {
+    await phone.page.evaluate(() => { const b = document.querySelector('.df-dock-main'); if (b && !document.querySelector('.df-xfer-dlg')) b.click(); });
+    return phone.page.evaluate(() => { const r = document.querySelector('.df-xfer-dlg .df-x'); return r ? (r.querySelector('.df-x-state') || {}).textContent || null : null; });
+  }, 4000);
+  check('hubMobileFileOutsideShare', !!phoneShown && phoneShown.button === '用檔案傳輸下載' && !!shared && shared[0] && shared[0].name === '季報_434版.pdf' && shared[0].size > 0
+    && phoneDownloads.length === 0 && row === '已交給分享選單' && phone.hub.cmds('deviceFetch').length === 1,
+  { phoneShown, shared, phoneDownloads, row, fetches: phone.hub.cmds('deviceFetch').length });
+  await HP.closePage(phone);
+}
+
 async function runVideoPolicyOff() {
   const id = LF.CONV.idle;
   // OFFICE-PC 的遠端政策是 Off：/m/ 的影片回 403 policy（設計 Q1-A），影片放不出來 → 說明只能看縮圖
@@ -6537,6 +6626,7 @@ const SCENARIOS = [
   { checks: ['hubDirsOnlyPicker', 'hubDirsOnlyNeedsControl'], run: runDirsPicker },
   { checks: ['hubDraftDirsPicker', 'hubDraftDirsPickerOldDevice'], run: runDraftDirsPicker },
   { checks: ['hubFileFetchDialog', 'hubFileRefErrorFixedText', 'hubFileRefAbsoluteRejected', 'hubOfficeFileDownloads'], run: runFileFetch },
+  { checks: ['hubFileOutsideTransfer', 'hubMobileFileOutsideShare'], run: runFileOutside },
   { checks: ['hubVideoPolicyOff'], run: runVideoPolicyOff },
   { checks: ['desktopReplicaMedia'], run: runDesktopReplicaMedia },
   { checks: ['desktopReplicaMediaLate'], run: runDesktopReplicaMediaLate },

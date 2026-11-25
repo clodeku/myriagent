@@ -12,6 +12,35 @@ namespace Myriagent.Tests.Files;
 /// </summary>
 public sealed class RemoteListRulesTests
 {
+    [Fact]
+    public void fileFetch的固定文字_網頁照字面比對()
+    {
+        // 網頁 liverules.js 的 FILE_REF_OUTSIDE（tools/ui-probe/live-rules.test.mjs 也固定同一句）：改了兩邊一起改
+        RemoteListRules.FetchOutside.Should().Be("這個檔案不在對話的資料夾裡");
+        RemoteListRules.FetchRefused.Should().Be("這個檔案不能從網頁讀取");
+    }
+
+    [Theory]
+    [InlineData("scope", @"C:\Users\Amy\Downloads\a.pdf", true)]
+    [InlineData("scope", @"D:\other\a.pdf", true)]
+    [InlineData("scope", @"c:\users\amy\appdata\local\Myriagent\conversations\c2\a.pdf", true)]
+    [InlineData("scope", @"C:\Users\Amy\AppData\Local\Myriagent\conversations\c1\items.json", false)]
+    [InlineData("scope", @"C:\Users\Amy\AppData\Local\Myriagent\conversations\c1\fork-source\a.jsonl", false)]
+    [InlineData("scope", @"C:\Users\Amy\AppData\Local\Myriagent\conversations\c1", false)]
+    [InlineData("forbidden", @"C:\Users\Amy\Downloads\a.pdf", false)]
+    [InlineData("reparse", @"C:\Users\Amy\Downloads\a.pdf", false)]
+    [InlineData("name", @"C:\Users\Amy\Downloads\.env", false)]
+    [InlineData("not_found", @"C:\Users\Amy\Downloads\a.pdf", false)]
+    [InlineData(null, @"C:\Users\Amy\Downloads\a.pdf", false)]
+    [InlineData("scope", "a.pdf", false)]
+    [InlineData("scope", null, false)]
+    public void 不在對話的資料夾裡_只有scope而且不在對話資料夾裡才算(string? reason, string? path, bool expected)
+        => RemoteListRules.IsOutsideConversation(reason, path, @"C:\Users\Amy\AppData\Local\Myriagent\conversations\c1").Should().Be(expected);
+
+    [Fact]
+    public void 不在對話的資料夾裡_對話資料夾不明時照scope判()
+        => RemoteListRules.IsOutsideConversation("scope", @"C:\Users\Amy\Downloads\a.pdf", null).Should().BeTrue();
+
     private static JObject Entry(string name) => new() { ["name"] = name };
 
     [Fact]

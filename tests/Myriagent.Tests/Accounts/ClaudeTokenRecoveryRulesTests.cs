@@ -174,6 +174,16 @@ public class ClaudeTokenRecoveryRulesTests
             .Result.Should().Be(ClaudeTokenRefreshResult.LoginLost);
 
     [Fact]
+    public void CLI說的原因_stderr第一行或錯誤結果_沒有回null()
+    {
+        ClaudeTokenRecoveryRules.CliReason(Run(1, stderr: "\n  Failed to authenticate: OAuth session expired and could not be refreshed\nmore"))
+            .Should().Be("Failed to authenticate: OAuth session expired and could not be refreshed");
+        ClaudeTokenRecoveryRules.CliReason(Run(1, """{"type":"result","is_error":true,"result":"invalid_grant"}""")).Should().Be("invalid_grant");
+        ClaudeTokenRecoveryRules.CliReason(Run(0)).Should().BeNull();
+        ClaudeTokenRecoveryRules.CliReason(Run(1, stderr: new string('x', 400))).Should().HaveLength(161, "最多 160 字加省略號");
+    }
+
+    [Fact]
     public void 結果_沒換成_說明逾時_stderr第一行_錯誤結果文字()
     {
         ClaudeTokenRecoveryRules.EvaluateRefresh(ClaudeTokenState.Expiring, Run(-1, timedOut: true)).Should().Be((ClaudeTokenRefreshResult.Failed, "執行逾時"));

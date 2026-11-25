@@ -1937,6 +1937,30 @@ async function runReplicaRestore(vp) {
   const okOld = same(result.oldHost, { panes: { p1: { tabs: ['c1'], active: 'c1' } }, focused: 'p1' });
   await closeApp(old);
   check('replicaRestoreWaitsForList', okWaiting && okSettled && okOld, result);
+
+  // 等清單的期間載入看門狗不算重試（2026-11-25：每次啟動都在 6 秒時寫「自動重試第 1 次」、回報「一直沒有載入完成」，其實 open 還沒送）：
+  // 等 7 秒（過了第一次的 6 秒）——畫面照舊是「載入對話中…」、沒有亮起重試的格子、沒有回報；清單到了照常送 open、載好
+  const slow = await openApp('replica-restore-slow', {
+    vp, layout: { panes: [{ id: 'p1', tabs: [R1], active: R1 }], focusedPane: 'p1', sidebarCollapsed: false, view: 'chat' }, replicasPending: true,
+    hostSetup: (host) => {
+      host.data[R1] = { header: F.baseHeader(R1, 'a1', '其他電腦的對話一'), items: [], hasMore: false, composer: { attachments: [], busy: false, busyText: null, queue: [] } };
+    },
+  });
+  await sleep(7000);
+  const waitState = await slow.page.evaluate((sel) => {
+    const root = document.querySelector(sel);
+    const text = root && root.querySelector('.load-line .run-text');
+    return { text: text ? text.textContent : null, tries: root ? root.querySelectorAll('.load-tries i.on').length : -1, failed: !!(root && root.querySelector('.load-failed')) };
+  }, convSel(R1));
+  const waitReports = slow.host.received.filter((m) => m.cmd === 'clientError').map((m) => m.message);
+  const waitOpens = slow.host.received.filter((m) => m.cmd === 'open' && m.conversationId === R1).length;
+  slow.host.conversations = slow.host.conversations.concat([summary(R1, '其他電腦的對話一')]);
+  slow.host.send({ type: 'conversations', items: slow.host.conversations, replicasPending: false });
+  const slowLoaded = await slow.page.waitForSelector(convSel(R1) + ':not(.loading)', { state: 'attached', timeout: 5000 }).then(() => true, () => false);
+  const slowOpens = slow.host.received.filter((m) => m.cmd === 'open' && m.conversationId === R1).length;
+  await closeApp(slow);
+  check('replicaRestoreNoFalseRetry', waitState.text === '載入對話中…' && waitState.tries === 0 && !waitState.failed && waitReports.length === 0 && waitOpens === 0 && slowLoaded && slowOpens === 1,
+    { waitState, waitReports, waitOpens, slowLoaded, slowOpens });
 }
 
 // ───── 淺色主題 ─────

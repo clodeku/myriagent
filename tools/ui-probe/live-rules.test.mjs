@@ -1977,6 +1977,51 @@ test('openOrder_先聚焦窗格作用中的分頁_再其他窗格作用中的_�
   assert.deepEqual(L.openOrder([{ id: 'p1', tabs: ['a', 'b', 'c', 'd'], active: 'd' }], 'p1'), ['d', 'a', 'b', 'c']);
 });
 
+test('fileRefView_檔案不在對話的資料夾裡_另外標出來', () => {
+  // 電腦的 RemoteListRules.FetchOutside（tests 的 RemoteListRulesTests 固定同一句）：照字面比對，改了兩邊一起改
+  assert.equal(L.FILE_REF_OUTSIDE, '這個檔案不在對話的資料夾裡');
+  assert.deepEqual(L.fileRefView({ type: 'fileRef', requestId: 'r20', conversationId: CONV_A, error: '這個檔案不在對話的資料夾裡' }),
+    { requestId: 'r20', conversationId: CONV_A, ok: false, outside: true, error: '這個檔案不在對話的資料夾裡' });
+  // 其他的錯誤文字照舊是固定的那一句、不算 outside
+  const other = L.fileRefView({ requestId: 'r20', conversationId: CONV_A, error: '這個檔案不在對話的資料夾裡 ' });
+  assert.equal(other.error, '這個檔案不能從網頁讀取');
+  assert.equal(other.outside, undefined);
+  assert.equal(L.fileRefView({ requestId: 'r20', conversationId: CONV_A, url: '/f/k', error: null }).outside, undefined);
+});
+
+test('outsideFileView_擁有者給檔案傳輸_協作人與不知道在哪台只說明', () => {
+  const owner = L.outsideFileView({ collaborator: false, deviceId: 'd_A', deviceName: 'OFFICE-PC' });
+  assert.equal(owner.transfer, true);
+  assert.ok(owner.text.includes('「OFFICE-PC」要開著「可以操作」'), owner.text);
+  assert.ok(L.outsideFileView({ collaborator: false, deviceId: 'd_A' }).text.includes('那台電腦要開著「可以操作」'));
+  assert.deepEqual(L.outsideFileView({ collaborator: true, deviceId: 'd_A', deviceName: 'OFFICE-PC' }),
+    { text: '這個檔案不在這個對話的資料夾裡，不能從這裡讀取。', transfer: false });
+  assert.equal(L.outsideFileView({ collaborator: false, deviceId: null }).transfer, false);
+  assert.equal(L.outsideFileView({ collaborator: false, deviceId: '' }).transfer, false);
+  assert.equal(L.outsideFileView().transfer, false);
+});
+
+test('loadWatchStep_等清單的期間不算重試_等太久才回報一次', () => {
+  // 2026-11-25：每次啟動 app，還原的其他電腦的對話分頁都在 6 秒時被當成沒有載入完成（open 根本還沒送）
+  assert.deepEqual(L.loadWatchStep({ awaitingList: false, waitedMs: 0, reported: false }), { kind: 'retry' });
+  assert.deepEqual(L.loadWatchStep({ awaitingList: undefined }), { kind: 'retry' });
+  assert.deepEqual(L.loadWatchStep(), { kind: 'retry' });
+  assert.deepEqual(L.loadWatchStep({ awaitingList: true, waitedMs: 6000, reported: false }), { kind: 'wait', report: false });
+  assert.deepEqual(L.loadWatchStep({ awaitingList: true, waitedMs: L.LIST_WAIT_REPORT_MS - 1, reported: false }), { kind: 'wait', report: false });
+  assert.deepEqual(L.loadWatchStep({ awaitingList: true, waitedMs: L.LIST_WAIT_REPORT_MS, reported: false }), { kind: 'wait', report: true });
+  assert.deepEqual(L.loadWatchStep({ awaitingList: true, waitedMs: L.LIST_WAIT_REPORT_MS * 3, reported: true }), { kind: 'wait', report: false }, '只回報一次');
+  assert.deepEqual(L.loadWatchStep({ awaitingList: true, waitedMs: NaN, reported: false }), { kind: 'wait', report: false });
+  // 6 秒看一次：第 10 次（60 秒）才回報
+  let waited = 0, reports = 0, reported = false;
+  for (let i = 0; i < 30; i++) {
+    waited += L.LOAD_RETRY_MS[0];
+    const step = L.loadWatchStep({ awaitingList: true, waitedMs: waited, reported });
+    assert.equal(step.kind, 'wait');
+    if (step.report) { reports++; reported = true; assert.equal(waited, 60000); }
+  }
+  assert.equal(reports, 1);
+});
+
 test('loadRetryDelay_依序6秒15秒30秒_用完回null', () => {
   assert.deepEqual([0, 1, 2, 3].map((n) => L.loadRetryDelay(n)), [6000, 15000, 30000, null]);
   assert.equal(L.loadRetryDelay(-1), null);

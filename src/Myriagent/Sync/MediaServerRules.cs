@@ -126,6 +126,15 @@ internal static class MediaServerRules
     }
 
     /// <summary>守門員的拒絕原因（<see cref="RemoteFileGuardReasons"/>）→ 回覆：不存在 404、太大 413、其他（範圍外、禁止清單、重新解析點、逾時…）403</summary>
+    /// <summary>
+    /// 以 E7 回覆時本文送到一半就失敗（HttpContent 複製本文時的 I/O 錯誤，沒有拿到回應）：伺服器在本文送完之前就回覆並關掉了請求——
+    /// 瀏覽器已經離開（捲過去、關掉頁面；記錄裡前後都是一串「瀏覽器已經離開」的 410）或連線剛好斷了。這台沒有做錯事，不記成警告
+    /// （2026-11-25：八天 6 則警告都是這個）。判斷照 .NET 包這個錯誤的方式（訊息固定是英文；<c>MediaServerRulesTests</c> 以真的 HttpContent 產生一個來守住）
+    /// </summary>
+    public static bool IsRelayBodyAborted(Exception? ex)
+        => ex is HttpRequestException { StatusCode: null, InnerException: IOException or ObjectDisposedException } http
+           && http.Message.Contains("copying content to a stream", StringComparison.OrdinalIgnoreCase);
+
     public static MediaVerdict AfterGuard(string reason) => reason switch
     {
         RemoteFileGuardReasons.NotFound or RemoteFileGuardReasons.NotFile => new MediaVerdict(404, MediaErrorCodes.NotFound),

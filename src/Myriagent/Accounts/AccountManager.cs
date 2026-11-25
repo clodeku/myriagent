@@ -1447,7 +1447,8 @@ internal sealed class AccountManager : IDisposable
                 Log.Info($"「{account.Label}」的權杖已由 Claude CLI 換發");
                 break;
             case ClaudeTokenRefreshResult.LoginLost:
-                Log.Warn($"「{account.Label}」換發權杖被拒，CLI 清空了登入：要重新登入");
+                Log.Warn($"「{account.Label}」換發權杖被拒，CLI 清空了登入：要重新登入"
+                         + (ClaudeTokenRecoveryRules.CliReason(run) is { } why ? $"（CLI 說：{why}）" : "（CLI 沒有說明原因）"));
                 break;
             case ClaudeTokenRefreshResult.Failed:
                 Log.Warn($"「{account.Label}」讓 Claude CLI 換發權杖沒有成功：{detail}");

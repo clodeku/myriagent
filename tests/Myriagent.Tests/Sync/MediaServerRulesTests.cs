@@ -8,6 +8,34 @@ namespace Myriagent.Tests.Sync;
 /// <summary>桌面回覆媒體轉送的判斷（WP4.7 計畫步 8，D26、D28、D36）</summary>
 public sealed class MediaServerRulesTests
 {
+    /// <summary>讀到一半就丟 IOException 的資料流（模擬送本文途中連線被關掉）</summary>
+    private sealed class BrokenStream : MemoryStream
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => throw new IOException("連線被關掉");
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => throw new IOException("連線被關掉");
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new IOException("連線被關掉");
+    }
+
+    [Fact]
+    public async Task 本文送到一半被關掉_認得出NET包的錯誤()
+    {
+        // 真的讓 HttpContent 複製本文失敗，拿 .NET 自己包的那個例外來判（訊息或包法變了這裡會先紅）
+        using var content = new StreamContent(new BrokenStream());
+        var thrown = await Assert.ThrowsAsync<HttpRequestException>(() => content.CopyToAsync(Stream.Null));
+        MediaServerRules.IsRelayBodyAborted(thrown).Should().BeTrue(thrown.Message);
+
+        MediaServerRules.IsRelayBodyAborted(new HttpRequestException("Error while copying content to a stream.", new IOException("reset"))).Should().BeTrue();
+        MediaServerRules.IsRelayBodyAborted(new HttpRequestException("Error while copying content to a stream.", new ObjectDisposedException("stream"))).Should().BeTrue();
+        MediaServerRules.IsRelayBodyAborted(new HttpRequestException("No such host is known.", new IOException("dns"))).Should().BeFalse("連不上伺服器照舊記警告");
+        MediaServerRules.IsRelayBodyAborted(new HttpRequestException("Error while copying content to a stream.")).Should().BeFalse("沒有內層的 I/O 錯誤");
+        MediaServerRules.IsRelayBodyAborted(new HttpRequestException("Error while copying content to a stream.", new IOException("x"), System.Net.HttpStatusCode.BadGateway))
+            .Should().BeFalse("有狀態碼的是伺服器的回應");
+        MediaServerRules.IsRelayBodyAborted(new IOException("Error while copying content to a stream.")).Should().BeFalse();
+        MediaServerRules.IsRelayBodyAborted(null).Should().BeFalse();
+    }
+
     private static readonly DevicePolicy Off = new("Off", false);
 
     private static readonly DevicePolicy View = new("View", false);

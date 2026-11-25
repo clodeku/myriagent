@@ -40,10 +40,11 @@ export function shareAvailable() {
 
 /**
  * 抓 url 的檔案、交給分享選單。mode：'save'（下載鈕：說明要選「儲存影片」）或 'share'；kind：'image'|'video'|'file'。
- * 回 Promise（結束、取消、失敗都會 resolve；失敗以提示說明）
+ * 回 Promise（結束、取消、失敗都會 resolve；失敗以提示說明）。onClose(handed)：框關掉時叫一次——handed 是 true＝檔案抓好、分享選單叫出來過
+ * （使用者在選單裡存了或取消，分不出來），false＝抓的途中取消或失敗（檔案傳輸靠它一次只交一個檔，devicefiles.js）
  */
-export function shareMedia({ url, name, kind = 'file', mode = 'share' }) {
-  if (!shareableUrl(url)) { toast('這個檔案不能從這裡分享', 'error'); return Promise.resolve(false); }
+export function shareMedia({ url, name, kind = 'file', mode = 'share', onClose = null }) {
+  if (!shareableUrl(url)) { toast('這個檔案不能從這裡分享', 'error'); if (onClose) onClose(false); return Promise.resolve(false); }
   const ctrl = new AbortController();
   const verb = mode === 'save' ? '儲存' : '分享';
   const title = h('div', { class: 'share-name', text: name || '' });
@@ -51,11 +52,11 @@ export function shareMedia({ url, name, kind = 'file', mode = 'share' }) {
   const status = h('div', { class: 'share-status', dataset: { field: 'shareStatus' }, text: progressText(0, 0) });
   const go = h('button', { type: 'button', class: 'btn primary', hidden: true, dataset: { field: 'shareGo' } }, icon(mode === 'save' ? 'download' : 'share'), h('span', { text: verb }));
   const cancel = h('button', { type: 'button', class: 'btn', dataset: { field: 'shareCancel' }, text: '取消' });
-  let file = null, done = false;
+  let file = null, done = false, handed = false;
   const d = openDialog({
     title: mode === 'save' ? '儲存到手機' : '分享到其他 App', width: 380, className: 'share-dlg',
     body: h('div', { class: 'share-body' }, title, bar, status), footer: [cancel, go],
-    onClose: () => { if (!done) ctrl.abort(); },
+    onClose: () => { if (!done) ctrl.abort(); if (onClose) onClose(handed); },
   });
   cancel.addEventListener('click', () => d.close());
 
@@ -63,9 +64,10 @@ export function shareMedia({ url, name, kind = 'file', mode = 'share' }) {
   const open = async () => {
     try {
       await navigator.share({ files: [file] });
+      handed = true;
       finish();
     } catch (e) {
-      if (e && e.name === 'AbortError') { finish(); return; } // 使用者在分享選單按了取消
+      if (e && e.name === 'AbortError') { handed = true; finish(); return; } // 使用者在分享選單按了取消
       if (e && e.name === 'NotAllowedError') { showGo(); return; } // 點按的效力過了：等使用者再點一下
       finish();
       toast('無法' + verb + '：' + ((e && e.message) || '分享選單打不開'), 'error');

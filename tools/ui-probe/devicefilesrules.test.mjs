@@ -390,3 +390,9 @@ test('streamSegments：空的檔（416 bytes */0）、已知總長是 0 不必�
   assert.deepEqual(await T.streamSegments({ total: 0, fetchRange: g.fetchRange, write: sink().write }), { got: 0, total: 0, etag: null });
   assert.equal(g.calls.length, 0);
 });
+
+test('stateText：iPhone、iPad 交給分享選單的下載另外說明', () => {
+  assert.equal(stateText({ state: 'done', dir: 'down', shared: true, browser: true }), '已交給分享選單');
+  assert.equal(stateText({ state: 'done', dir: 'down', browser: true }), '已交給瀏覽器下載');
+  assert.equal(stateText({ state: 'done', dir: 'down' }), '已下載');
+});

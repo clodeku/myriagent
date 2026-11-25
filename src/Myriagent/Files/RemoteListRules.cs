@@ -18,6 +18,22 @@ internal static class RemoteListRules
     public const string FetchRefused = "這個檔案不能從網頁讀取";
 
     /// <summary>
+    /// fileFetch 的路徑不在這個對話的資料夾裡時 fileRef.error 的固定文字（網頁 liverules.FILE_REF_OUTSIDE 照字面比對，兩邊一起改）：
+    /// 不當成被拒，網頁在框裡說明並給擁有者「用檔案傳輸下載」（deviceFetch：那台要「可以操作」，把關在那裡）。
+    /// 伺服器的投影只看 error 是不是非空字串、原樣轉給瀏覽器；舊版的網頁一律顯示 <see cref="FetchRefused"/> 的文字
+    /// </summary>
+    public const string FetchOutside = "這個檔案不在對話的資料夾裡";
+
+    /// <summary>
+    /// 守門員拒絕 fileFetch 的原因是不是「只是不在這個對話的範圍裡」（2026-11-20 實機：代理照使用者的要求把 PDF 存到「下載」資料夾，
+    /// 手機上點了四次都只看到被拒）：原因是 scope、路徑正規化得了、而且不在對話資料夾裡（裡面被擋的是 app 自己的檔，照舊回 policy）
+    /// </summary>
+    public static bool IsOutsideConversation(string? reason, string? path, string? conversationDirectory)
+        => reason == RemoteFileGuardReasons.Scope
+           && RemoteFolderRules.TryNormalize(path, out var normalized)
+           && !(RemoteFolderRules.TryNormalize(conversationDirectory, out var conversation) && RemoteFolderRules.IsWithin(normalized, conversation));
+
+    /// <summary>
     /// 邊加邊量（UTF-8、不縮排，加上分隔的逗號），加進去會超過 <paramref name="maxBytes"/> 就停並回 truncated（之後的一筆都不加，順序不變）。
     /// 沒有父節點的物件直接放進陣列（不複製）
     /// </summary>

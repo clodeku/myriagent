@@ -193,6 +193,12 @@ internal static class ClaudeTokenRecoveryRules
     }
 
     /// <summary>
+    /// CLI 自己說的原因（錯誤結果或 stderr 的第一行，最多 160 字；沒有回 null）：換發被拒、登入被清空時只進記錄，
+    /// 之後才查得出為什麼被登出（2026-11-25：一週內兩台電腦各有一個帳戶被拒，記錄裡只有「換發權杖被拒」、看不出原因）
+    /// </summary>
+    public static string? CliReason(CliRunResult run) => FirstLine(run.Stderr) ?? ResultText(run.Stdout);
+
+    /// <summary>
     /// 用量查詢回「權杖已過期」時給人看的說明（儀表板與側欄提示）：依能不能讓 CLI 換發、上一次的結果，說明接下來會怎樣。
     /// nextAttempt＝下一次可以再試的時間（TooSoon 才用得到）
     /// </summary>

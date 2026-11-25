@@ -37,6 +37,11 @@ export const UNKNOWN_RESULT_TEXT = '結果不明，請看對話內容確認';
 export const DEFAULT_PASSWORD_TEXT = '密碼還是預設值，知道它的人都能遠端操作你開了遠端控制的電腦';
 /** fileRef 有錯誤（或網址不合格）時一律顯示的文字（D34） */
 export const FILE_REF_ERROR_TEXT = '這個檔案不能從網頁讀取';
+/**
+ * fileRef.error 是這一句＝檔案不在這個對話的資料夾裡（電腦的 RemoteListRules.FetchOutside，照字面比對，兩邊一起改）：
+ * 不是不能給，只是 fileFetch 的範圍只有對話的工作資料夾與對話自己的資料夾——擁有者可以改用檔案傳輸下載（2026-11-25）
+ */
+export const FILE_REF_OUTSIDE = '這個檔案不在對話的資料夾裡';
 /** 上傳中（或加進輸入區中）時送出的說明（D14、D32） */
 export const UPLOADING_TEXT = '附件上傳中，完成後才能送出';
 /** 改成「只留在這台」之前的確認（D25） */
@@ -1130,6 +1135,7 @@ function sizeClose(text, bytes) {
 export function fileRefView(msg) {
   const m = isObj(msg) ? msg : {};
   const base = { requestId: str(m.requestId), conversationId: str(m.conversationId) };
+  if (isObj(msg) && m.error === FILE_REF_OUTSIDE) return Object.assign(base, { ok: false, outside: true, error: FILE_REF_OUTSIDE });
   if (!isObj(msg) || (m.error !== null && m.error !== undefined)) return Object.assign(base, { ok: false, error: FILE_REF_ERROR_TEXT });
   const url = safeRelativeUrl(m.url, ['/f/']);
   if (!url) return Object.assign(base, { ok: false, error: FILE_REF_ERROR_TEXT });
@@ -1143,6 +1149,17 @@ export function fileRefView(msg) {
     sizeText: sizeText(size !== null && size >= 0 ? size : null),
     expiresAt: num(m.expiresAt),
   });
+}
+
+/**
+ * 檔案不在對話的資料夾裡（fileRefView 的 outside）時框裡的說明，與要不要給「用檔案傳輸下載」（2026-11-20 實機：代理照使用者的要求把 PDF 存到
+ * 「下載」資料夾，手機上點了四次都只看到被拒）。檔案傳輸（deviceFetch）讀得到那台整台本機磁碟，把關是那台的「可以操作」，只有擁有者能用：
+ * 協作人、不知道對話在哪台電腦時只說明。回 { text, transfer }
+ */
+export function outsideFileView({ collaborator, deviceId, deviceName } = {}) {
+  const who = str(deviceName) ? '「' + str(deviceName) + '」' : '那台電腦';
+  if (collaborator === true || !str(deviceId)) return { text: '這個檔案不在這個對話的資料夾裡，不能從這裡讀取。', transfer: false };
+  return { text: '這個檔案不在這個對話的資料夾裡，不能直接預覽。可以改用檔案傳輸下載（' + who + '要開著「可以操作」）。', transfer: true };
 }
 
 /** 一則訊息最多附加幾個網頁上傳的檔案（addUploaded 的 1～20 個，AgentAttachmentRules.MaxAttachmentsPerMessage） */
@@ -1329,6 +1346,21 @@ export const LOAD_RETRY_MS = [6000, 15000, 30000];
 /** 第 attempt 次（0 起算）自動重送之前要等的毫秒；用完回 null */
 export function loadRetryDelay(attempt) {
   return Number.isInteger(attempt) && attempt >= 0 && attempt < LOAD_RETRY_MS.length ? LOAD_RETRY_MS[attempt] : null;
+}
+
+/** 還在等清單的分頁等了多久才回報一次（平常啟動約 10 秒清單就到；等這麼久多半是同步元件沒起來） */
+export const LIST_WAIT_REPORT_MS = 60000;
+
+/**
+ * 載入看門狗到點時要做什麼（2026-11-25：每次啟動 app，還原的「其他電腦的對話」分頁都在 6 秒時被當成沒有載入完成——它在等清單
+ * 〔同步元件啟動後才到〕，open 根本還沒送：畫面寫「自動重試第 1 次」、白白用掉一次重試、每台電腦每次啟動多一則警告）。
+ * - 還在等清單（awaitingList）：{ kind: 'wait', report }——不重送、不算一次重試，照同樣的間隔再看；等的時間累計到 LIST_WAIT_REPORT_MS
+ *   而且還沒回報過（reported 不是 true）的那一次 report 是 true
+ * - 其他：{ kind: 'retry' }——重送 open、算一次重試、回報
+ */
+export function loadWatchStep({ awaitingList, waitedMs, reported } = {}) {
+  if (awaitingList !== true) return { kind: 'retry' };
+  return { kind: 'wait', report: reported !== true && Number.isFinite(waitedMs) && waitedMs >= LIST_WAIT_REPORT_MS };
 }
 
 // ───── 一次 open 很多分頁的順序 ─────
