@@ -14,7 +14,28 @@ namespace Myriagent.Tests.Hub;
 public sealed class ExternalConversationImporterTests
 {
     [Fact]
-    public void 掃描四家CLI歷史對話_排除子代理與已匯入工作階段_並解析工具與回覆()
+    public async Task 點對話連結直接定位到同帳戶既有對話_不開CLI()
+    {
+        var thread = Guid.NewGuid().ToString();
+        var source = new AgentConversation { AccountId = "acc-codex", Provider = AgentProvider.Codex, SessionStarted = true };
+        var target = new AgentConversation { AccountId = source.AccountId, Provider = source.Provider, SessionId = thread, SessionStarted = true };
+        var other = new AgentConversation { AccountId = "other", Provider = source.Provider, SessionId = thread, SessionStarted = true };
+        using var h = new HubHarness(seedStore: store =>
+        {
+            store.SaveConversation(other);
+            store.SaveConversation(source);
+            store.SaveConversation(target);
+        });
+        h.Command(h.Main, "open", new { conversationId = source.Id });
+        var mark = h.Main.Mark();
+        h.Command(h.Main, "openCodexThread", new { conversationId = source.Id, threadId = thread, requestId = "open" });
+        var focus = await h.Main.WaitForAsync("focusConversation", _ => true, mark);
+        focus.Value<string>("conversationId").Should().Be(target.Id);
+        h.Sessions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task 掃描四家CLI歷史對話_排除子代理與已匯入工作階段_並解析工具與回覆()
     {
         using var temp = new TempDirectory("ext-import");
         var workDir = temp.CreateDirectory("workspace-demo");
@@ -219,7 +240,7 @@ public sealed class ExternalConversationImporterTests
             new ExternalAccountScanTarget("acc-grok", "Grok（本機）", AgentProvider.Grok, grokHome),
         };
 
-        var scanned = ExternalConversationImporter.Scan(targets, Array.Empty<(AgentProvider, string)>());
+        var scanned = await ExternalConversationImporter.ScanAsync(targets, []);
         scanned.Select(c => (c.Provider, c.SessionId)).Should().BeEquivalentTo(new[]
         {
             (AgentProvider.Grok, "grok-sess-1"),
@@ -243,7 +264,7 @@ public sealed class ExternalConversationImporterTests
         claudeLoaded.Items.Single(i => i.Kind == AgentItemKind.Tool).Output.Should().Contain("Passed! 42 tests");
 
         // 已存在於 Myriagent 的工作階段應自動排除
-        var filtered = ExternalConversationImporter.Scan(targets, new[] { (AgentProvider.Claude, claudeSessionId) });
+        var filtered = await ExternalConversationImporter.ScanAsync(targets, [(AgentProvider.Claude, "claude", claudeSessionId)]);
         filtered.Should().NotContain(c => c.SessionId == claudeSessionId);
     }
 
@@ -450,7 +471,7 @@ public sealed class ExternalConversationImporterTests
             new ExternalAccountScanTarget("acc-agy", "Antigravity", AgentProvider.Antigravity, agyHome),
             new ExternalAccountScanTarget("acc-codex", "Codex", AgentProvider.Codex, codexHome),
         };
-        var scanned = ExternalConversationImporter.Scan(targets, Array.Empty<(AgentProvider, string)>());
+        var scanned = await ExternalConversationImporter.ScanAsync(targets, []);
         scanned.Select(c => (c.Provider, c.SessionId)).Should().BeEquivalentTo(new[]
         {
             (AgentProvider.Grok, grokUuid),

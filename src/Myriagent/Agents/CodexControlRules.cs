@@ -70,14 +70,16 @@ internal static class CodexControlRules
         var state = runtime?.Value<string>("status") ?? runtime?.Value<string>("type") ?? (row["runtimeStatus"] is JValue ? row.Value<string>("runtimeStatus") : null);
         var error = row.Value<string>("toolsError") ?? runtime?.Value<string>("error");
         var auth = row.Value<string>("authStatus");
-        var status = state == "disabled" ? "disabled" : auth == "notLoggedIn" || state == "authenticationRequired" ? "needs-auth" : error != null ? "failed" : state switch
+        var status = state switch
         {
-            "failed" or "cancelled" => "failed", "notStarted" or "starting" or "connecting" => "pending",
-            _ => "connected",
+            "disabled" or "connected" or "failed" or "cancelled" or "notStarted" or "starting" => state,
+            "connecting" => "starting",
+            "authenticationRequired" => "needs-auth",
+            _ => "unknown",
         };
         return new AgentMcpServer(row.Value<string>("name") ?? "MCP", status, error,
             row.Value<string>("httpOrigin") != null ? "http" : null,
-            row.Value<string>("pluginId") != null ? "plugin" : "user", (row["tools"] as JObject)?.Count);
+            row.Value<string>("pluginId") != null ? "plugin" : "user", (row["tools"] as JObject)?.Count, auth);
     }
 
     /// <summary>手動操作經一般送出流程管理執行狀態，但送到 CLI 的是專用 RPC。</summary>

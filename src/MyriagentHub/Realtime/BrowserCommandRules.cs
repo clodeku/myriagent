@@ -85,7 +85,7 @@ internal static class BrowserCommandRules
         // 取消等額度重置後自動接著做：等待只記在那台（瀏覽器版的標頭沒有）
         "quotaWaitCancel",
         // 匯入本機外部 CLI 歷史對話：唯讀掃描與匯入這台電腦上的 CLI 對話紀錄（瀏覽器版無此按鈕）
-        "listExternalConversations", "importExternalConversation",
+        "listExternalConversations", "importExternalConversation", "openCodexThread",
         // 延伸成新對話：複製那台的對話資料夾與 Claude 逐字稿（瀏覽器版的選單沒有這一項）
         "forkConversation",
         // 工作資料夾的 git 狀態「重新檢查」：讀這台電腦上的 repo（瀏覽器版沒有 git 晶片）

@@ -1143,6 +1143,24 @@ export function turnRules(items) {
   return out;
 }
 
+/** 每則提問後已完成的工具與思考。插話也屬於執行中的回合，直到這輪結束才可收合。 */
+export function completedActivities(items, running, startedAt) {
+  const groups = new Map();
+  let prompt = null, activities = [];
+  for (const item of items) {
+    if (item.kind === 'User') {
+      if (activities.length && (!running || (Number.isFinite(startedAt) && item.time < startedAt)))
+        groups.set(prompt, activities);
+      prompt = item.id;
+      activities = [];
+    } else if (prompt && item.status === 'Done' && (item.kind === 'Tool' || item.kind === 'Thinking')) {
+      activities.push(item.id);
+    }
+  }
+  if (prompt && activities.length && !running) groups.set(prompt, activities);
+  return groups;
+}
+
 /** 分隔線寫出間隔的門檻（第十批） */
 export const TURN_GAP_MS = 30 * 60000;
 

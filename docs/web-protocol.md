@@ -413,7 +413,7 @@ ScheduleEntry = {
                        { "name": "broken", "status": "failed", "source": "plugin", "error": "Connection closed" } ] | null } } } }
 ```
 - 只有這台的 Claude 與 Codex 帳戶（`accounts` 以帳戶 id 為鍵）。`servers` 是 null＝還沒查到過；`error` 是上次查不到的原因（之前查到的 `servers` 照留）；`checking`、`authorizing`（正在授權的伺服器名稱）時網頁轉圈、停用按鈕；`safeMode`＝精簡模式不載入 MCP、不查。
-- `status` 原樣（`connected`、`failed`、`needs-auth`、`pending`、`disabled`）；`source` 是設定從哪裡來（`user`、`plugin`、`claudeai`、`project`、`local`、`dynamic`〔隔離帳戶共用來源的 MCP 經 `--mcp-config` 帶〕…）；`error` 壓成一行、最多 300 字；`tools` 是工具數（連上才有）；每個帳戶最多 60 個。
+- Claude 沿用 CLI 的連線狀態。Codex 另外區分 `notStarted`、`starting`、`cancelled`、`unknown`，並以選填的 `authStatus` 回報授權狀態。`source` 表示設定來源，`error` 最多 300 字，`tools` 是目錄中的工具數量，每個帳戶最多 60 個伺服器。
 - 檢查用的程序在中立的資料夾開，所以只看得到帳戶層的（使用者層、外掛、claude.ai 連接器）；專案資料夾的 `.mcp.json` 只在那個資料夾開的對話載入，這裡不列。
 - 網頁（`Web/mcp.js`、純規則 `Web/mcprules.js`）在 Claude 與 Codex 帳戶卡上健康度那一行下面多一行「MCP」（樣式同健康度那一行：已連線數／總數、要授權與連不上的數量；有連不上的是 bad、有要授權的是 warn），點了開明細：每個伺服器的狀態與來源、錯誤原因或工具數，要授權的有「授權…」、連不上與已連線的有「重新連線」（`mcpAction`），底部「重新檢查」（`mcpCheck` 帶 `force`）。
 
@@ -734,7 +734,7 @@ app 更新排空完成、要換版之前，宿主向每個視窗要輸入框裡�
                "sessionId": "e436d714-…", "title": "重構資料庫連線", "workingDirectory": "C:\\repo\\proj" | null,
                "updatedAt": 1791580000000, "messageCount": 14 } ] }
 ```
-- 新到舊排序（依檔案最後寫入時間），最多 100 筆。已存在於 Myriagent 對話清單的 `(provider, sessionId)`、子代理對話（Claude 的 `isSidechain`、Codex 的 `source.subagent`、Antigravity 由 `invoke_subagent` 產生的子對話）與空對話不列。`sourceKey` 是帳戶與對話檔案路徑的 SHA-256 雜湊，本機路徑不交給網頁指定。
+- 最多列出 100 筆，依最近更新時間排序。Codex 依帳戶與 thread ID 排除已匯入的對話，索引清單省略子代理，訊息數尚未讀取時傳 0。其他代理沿用逐字稿摘要與既有的排除規則。網頁以宿主產生的來源鍵選取對話。
 
 ## 二、網頁 → 宿主（`cmd`）
 
@@ -753,7 +753,8 @@ app 更新排空完成、要換版之前，宿主向每個視窗要輸入框裡�
 | `quickChatEnd` | `conversationId` | 〔臨時對話〕關掉面板（或「重新開始」）：宿主停下並刪掉這個臨時對話（不進回收區），連 CLI 自己留的逐字稿（Claude 的 `projects\…`、Codex 的 rollout）一起刪；還沒送出的草稿直接丟掉。只收臨時對話。瀏覽器版不送它：草稿送 `close`、已建立的送 `delete`（那台把臨時對話直接刪掉）。app 下次啟動時，上次沒刪掉的臨時對話也會刪掉 |
 | `speakItem` | `conversationId`、`itemId` | 〔臨時對話〕回覆的「朗讀」（回覆下方一直看得到的鈕；面板的「自動朗讀回覆」開著時〔預設開，網頁的 `localStorage`〕一輪正常結束也送，念這一輪最後一則回覆，`quickchatrules.turnReplyId`）：宿主以語音通知同一個 SAPI 念這則回覆的純文字（程式碼區塊換成一句說明、網址與 Markdown 符號拿掉，`QuickChatRules.SpeechText`），先停下正在念的。瀏覽器版不送：網頁從畫面上的回覆取文字、以瀏覽器的語音合成分段念（`voice.js` 的 `readAloud`） |
 | `speakStop` | — | 〔臨時對話〕停止朗讀（也停下正在念的語音通知）；瀏覽器版由網頁自己停 |
-| `listExternalConversations` | `requestId` | 只有桌面：側欄對話清單標題列的「匯入本機 CLI 歷史對話」開啟對話框時送出，宿主在背景以唯讀共享模式（`FileShare.ReadWrite \| FileShare.Delete`）掃描這台電腦上四家 CLI（Claude Code、Codex、Antigravity、Grok）的外部對話紀錄檔，回 `externalConversations`（第一節，只給送指令的視窗）。瀏覽器版是 `desktop_only` |
+| `listExternalConversations` | `requestId` | 桌面列出尚未匯入的本機 CLI 對話，以 `externalConversations` 回應。Codex 用來源帳戶的 `thread/list` 讀取最近的對話摘要，選取後才讀內容；舊版 CLI 沿用逐字稿掃描。 |
+| `openCodexThread` | `conversationId`、`threadId`、`requestId`、選填 `turnId`、`cursor` | 桌面在本機來源帳戶開啟 Codex 連結。已匯入的對話會開啟分頁，其餘以 `codexThreadPage` 回傳唯讀回合清單或該回合的一頁項目；失敗以 `error` 說明。 |
 | `importExternalConversation` | `sourceKey`、選填的 `paneId` | 只有桌面：匯入對話框點選一筆外部對話（`sourceKey` 只認最近一次 `listExternalConversations` 快取的雜湊鍵）：宿主在背景讀取完整歷史訊息與工具紀錄、確認工作資料夾存在性後建立 `SessionStarted=true` 的正式對話並寫入 `ConversationStore`，回 `conversation`＋`focusConversation`，之後使用者可直接輸入訊息以原 CLI session 續接；已在清單中的直接開啟原對話。瀏覽器版是 `desktop_only` |
 | `open` | `conversationId` | 在這個 view 開這個對話的分頁（還原版面時背景分頁也會送）；宿主回 `conversation` |
 | `close` | `conversationId` | 這個 view 不再顯示它（關分頁）；草稿會被丟棄（〔熱更新〕第一則因 CLI 更新被延後的草稿已轉成正式對話〔`header.isDraft=false`、出現在清單〕，不會被丟，延後的訊息更新完照常送出）。執行中的對話**繼續在背景執行** |

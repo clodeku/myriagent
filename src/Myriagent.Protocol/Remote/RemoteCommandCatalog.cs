@@ -193,7 +193,7 @@ internal static class RemoteCommandCatalog
         // 取消等額度重置後自動接著做：等待只記在這台（遠端的標頭沒有）
         "quotaWaitCancel",
         // 匯入本機外部 CLI 歷史對話：唯讀掃描與匯入這台電腦上的 CLI 對話紀錄
-        "listExternalConversations", "importExternalConversation",
+        "listExternalConversations", "importExternalConversation", "openCodexThread",
         // 延伸成新對話：複製這台的對話資料夾與 Claude 逐字稿
         "forkConversation",
         // 工作資料夾的 git 狀態「重新檢查」：讀這台的 repo

@@ -32,7 +32,8 @@ internal sealed partial class CodexEventParser
             child.Streamed.Clear();
             if (label != null) child.Label = label;
             var title = child.Label + (model != null ? " · " + model : string.Empty) + (effort != null ? " · " + effort : string.Empty);
-            result.Events.Add(new AgentToolStartedEvent(child.Card, "子代理", "agent", title, "展開查看任務、執行過程與結果"));
+            var detail = Guid.TryParseExact(thread, "D", out var id) ? $"codex://threads/{id}" : "展開查看任務、執行過程與結果";
+            result.Events.Add(new AgentToolStartedEvent(child.Card, "子代理", "agent", title, detail));
         }
         return child;
     }

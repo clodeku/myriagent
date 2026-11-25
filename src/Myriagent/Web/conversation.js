@@ -14,6 +14,7 @@ import {
 import { track } from './cmdtrack.js';
 import { deviceChoices, requestCopy, fetchFile, takeReloadDraft } from './liveview.js';
 import { createItem, updateItem, fillsInPlace, applyCardGate, markItemCopied, refreshTimes, settleRetryNotes, playStepPeek, stopStepPeek, tickToolElapsed, tickThinkTimes, tickCardAges, paintAgentUsage, chipMentions, paintDelegation } from './items.js';
+import { completedActivities } from './fxrules.js';
 import { mentionPlain } from './accountmentions.js';
 import { Composer } from './composer.js';
 import { FileDrawer } from './files.js';
@@ -89,6 +90,7 @@ export class ConvView {
     this.ws = ws;
     this.header = null;
     this.items = new Map();
+    this.foldedTurns = new Set();
     this.nodes = new Map();
     this.order = [];
     // 〔遠端〕瀏覽器版分批載入大對話（D39）：還沒建節點的較早項目 { list, ranges }（liverules.loadChunks）與下一批的 rAF
@@ -880,6 +882,7 @@ export class ConvView {
     this.preloading.clear();
     this.stopPeek();
     this.items.clear();
+    this.turnRuleSig = null;
     this.nodes.clear();
     this.cardGateKey = null; // 卡片重建了：setHeader 一定重套一次閘門
     this.order = [];
@@ -1514,6 +1517,7 @@ export class ConvView {
   upsert(item) {
     if (!item || !item.id) return false;
     const prev = this.items.get(item.id);
+    if (!prev || prev.status !== item.status || prev.kind !== item.kind) this.turnRuleSig = null;
     this.items.set(item.id, item);
     if (prev) {
       const node = this.nodes.get(item.id);
@@ -1685,6 +1689,7 @@ export class ConvView {
     setAcc(this.root, safeColor(color, hd.provider), hd.provider);
     // 〔同步〕桌面上其他電腦的副本（D22）：唯讀，不能改名、換帳戶、換資料夾、瀏覽檔案；不看 accountMissing
     const replica = this.isReplica();
+    this.root.dataset.codexHistory = !replica && hd.provider === 'Codex' ? 'available' : 'unavailable';
     // 臨時對話（quickchat.js）：回覆顯示「朗讀」鈕（chat.css 的 .conv.quick .it-speak）
     this.root.classList.toggle('quick', !!hd.ephemeral);
     // 自動命名產生了新標題：先閃過亂碼再逐字鎖定（fxrules.titleDecodeFx；手動改名直接換）
@@ -1897,13 +1902,41 @@ export class ConvView {
    */
   paintTurnRules() {
     const order = this.order;
-    const sig = order.length + '|' + this.nodes.size + '|' + this.pending + '|' + (order[0] || '') + '|' + (order[order.length - 1] || '');
+    const running = this.root.classList.contains('running') || this.root.classList.contains('bg-wait');
+    const startedAt = this.header?.startedAt;
+    const sig = [order.length, this.nodes.size, this.pending, order[0], order.at(-1), running, startedAt].join('|');
     if (sig === this.turnRuleSig) return;
     this.turnRuleSig = sig;
-    const rules = new Map(turnRules(order.map((id) => this.items.get(id))).map((r) => [r.id, r.parts]));
+    const items = order.map((id) => this.items.get(id));
+    const groups = completedActivities(items, running, startedAt);
+    const hidden = new Set();
+    const rules = new Map(turnRules(items).map((r) => [r.id, r.parts]));
+    for (const [prompt, ids] of groups) {
+      if (this.foldedTurns.has(prompt) && this.nodes.has(prompt)) for (const id of ids) hidden.add(id);
+    }
     for (const id of order) {
       const node = this.nodes.get(id);
-      if (!node || !node.classList.contains('it-user')) continue;
+      if (!node) continue;
+      node.classList.toggle('turn-folded', hidden.has(id));
+      if (!node.classList.contains('it-user')) continue;
+      const activities = groups.get(id);
+      if (activities) {
+        if (!node._fold) {
+          node._fold = h('button', { type: 'button', class: 'turn-fold', onClick: () => {
+            if (!this.foldedTurns.delete(id)) this.foldedTurns.add(id);
+            this.turnRuleSig = null;
+            this.paintTurnRules();
+            this.minimap.request();
+          } });
+          node.append(node._fold);
+        }
+        const folded = this.foldedTurns.has(id);
+        setTextIfChanged(node._fold, (folded ? '展開' : '收合') + '工具與思考（' + activities.length + '）');
+        node._fold.setAttribute('aria-expanded', String(!folded));
+      } else if (node._fold) {
+        node._fold.remove();
+        node._fold = null;
+      }
       const parts = rules.get(id);
       const key = parts ? JSON.stringify(parts) : '';
       if (node._ruleKey === key) continue;

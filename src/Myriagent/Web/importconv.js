@@ -183,7 +183,7 @@ export function openImportDialog(ws) {
         h('div', { class: 'imp-meta' },
           h('span', { class: 'imp-acct', text: it.accountLabel }),
           h('span', { class: 'imp-folder' }, icon('folder', 'imp-meta-ic'), h('span', { text: folderShort })),
-          h('span', { class: 'imp-count', text: it.messageCount + ' 則訊息' }))));
+          it.messageCount ? h('span', { class: 'imp-count', text: it.messageCount + ' 則訊息' }) : null)));
       const frac = sizeFrac(it.messageCount, maxCount);
       if (frac !== null) row.append(h('span', { class: 'imp-bar', 'aria-hidden': 'true' }, h('i', { style: { transform: 'scaleX(' + frac.toFixed(3) + ')' } })));
       if (idx < enter) { row.style.setProperty('--fx-i', String(idx)); replayClass(row, 'fx-row-in', 260 + idx * LIST_STAGGER_MS); }

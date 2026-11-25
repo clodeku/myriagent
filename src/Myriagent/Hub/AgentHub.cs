@@ -404,6 +404,9 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                 case "listExternalConversations":
                     ListExternalConversations(view, Str("requestId"));
                     break;
+                case "openCodexThread":
+                    _ = OpenCodexThreadAsync(view, Conv(), command);
+                    break;
                 case "importExternalConversation":
                     ImportExternalConversation(view, Str("sourceKey"), Str("paneId"));
                     break;

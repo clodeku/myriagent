@@ -11,6 +11,10 @@ const STATUS = {
   'needs-auth': { level: 'warn', text: '需要授權' },
   failed: { level: 'bad', text: '連不上' },
   pending: { level: 'info', text: '連線中…' },
+  notStarted: { level: 'info', text: '尚未啟動' },
+  starting: { level: 'info', text: '啟動中…' },
+  cancelled: { level: 'info', text: '已取消' },
+  unknown: { level: 'info', text: '狀態未知' },
   disabled: { level: 'info', text: '已停用' },
 };
 
@@ -56,12 +60,18 @@ export function mcpStrip(entry) {
   }
   if (!servers.length) return { level: 'ok', text: '沒有設定 MCP 伺服器', busy };
   const count = (status) => servers.filter((s) => s.status === status).length;
-  const auth = count('needs-auth');
+  const auth = servers.filter(needsAuth).length;
   const failed = count('failed');
   const parts = [count('connected') + '/' + servers.length + ' 個已連線'];
   if (auth) parts.push(auth + ' 個要授權');
   if (failed) parts.push(failed + ' 個連不上');
-  return { level: failed ? 'bad' : auth ? 'warn' : 'ok', text: parts.join('・'), busy };
+  if (count('notStarted')) parts.push(count('notStarted') + ' 個尚未啟動');
+  if (count('unknown')) parts.push(count('unknown') + ' 個狀態未知');
+  return { level: failed ? 'bad' : auth ? 'warn' : count('connected') === servers.length ? 'ok' : 'info', text: parts.join('・'), busy };
+}
+
+function needsAuth(s) {
+  return s.status !== 'disabled' && (s.status === 'needs-auth' || s.authStatus === 'notLoggedIn');
 }
 
 /**
@@ -78,10 +88,12 @@ export function mcpRows(entry) {
     const source = str(s.source) ? SOURCE_LABEL[s.source] || s.source : null;
     const tools = num(s.tools);
     const detail = [];
+    const authText = { notLoggedIn: '尚未授權', oAuth: '已使用 OAuth 授權', bearerToken: '已設定權杖', unknown: '授權狀態未知' }[s.authStatus];
+    if (authText) detail.push(authText);
     if (str(s.error)) detail.push(s.error);
     if (s.status === 'connected' && tools !== null) detail.push(tools + ' 個工具');
     const actions = [];
-    if (s.status === 'needs-auth') {
+    if (needsAuth(s)) {
       const authorizing = entry.authorizing === s.name;
       actions.push({ action: 'authenticate', label: authorizing ? '授權中…' : '授權…', title: '在瀏覽器開啟授權頁，完成後狀態會自動更新', disabled: busy });
     } else if (s.status === 'failed' || s.status === 'connected') {

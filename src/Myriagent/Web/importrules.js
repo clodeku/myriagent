@@ -32,7 +32,7 @@ export function normalizeExternalItems(rawItems) {
       title: str(it.title) || '未命名對話',
       workingDirectory: str(it.workingDirectory) || null,
       updatedAt: typeof it.updatedAt === 'number' && Number.isFinite(it.updatedAt) ? it.updatedAt : null,
-      messageCount: typeof it.messageCount === 'number' && it.messageCount > 0 ? Math.trunc(it.messageCount) : 1,
+      messageCount: it.messageCount === 0 ? null : typeof it.messageCount === 'number' && it.messageCount > 0 ? Math.trunc(it.messageCount) : 1,
     });
   }
   return out;

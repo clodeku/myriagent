@@ -195,7 +195,7 @@ internal sealed record AgentCustomizationsEvent(IReadOnlyList<AgentNamedOption> 
 /// Error 是連不上的原因、Transport 是 stdio／http／sse／claudeai-proxy…、Source 是設定從哪裡來（user、plugin、claudeai、project、local、dynamic…）、
 /// Tools 是工具數（連上才有）
 /// </summary>
-internal sealed record AgentMcpServer(string Name, string Status, string? Error, string? Transport, string? Source, int? Tools);
+internal sealed record AgentMcpServer(string Name, string Status, string? Error, string? Transport, string? Source, int? Tools, string? AuthStatus = null);
 
 /// <summary>MCP 狀態的查詢結果：Servers 是 null 時 Error 是查不到的原因</summary>
 internal sealed record AgentMcpStatusResult(IReadOnlyList<AgentMcpServer>? Servers, string? Error);

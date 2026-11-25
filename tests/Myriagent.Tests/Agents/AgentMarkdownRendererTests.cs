@@ -7,6 +7,18 @@ namespace Myriagent.Tests.Agents;
 public class AgentMarkdownRendererTests
 {
     [Fact]
+    public void Codex對話連結只接受完整識別碼且轉成頁內操作()
+    {
+        const string id = "12345678-1234-4567-8123-123456789abc";
+        var url = $"codex://threads/{id}";
+        foreach (var markdown in new[] { $"[查看子代理]({url})", $"<{url}>" })
+            AgentMarkdownRenderer.ToHtml(markdown).Should().Contain($"href=\"#codex-thread-{id}\"");
+        foreach (var tail in new[] { "/extra", "?x", "#x", "a" })
+            AgentMarkdownRenderer.RewriteUrl(url + tail, false).Should().Be("#");
+        AgentMarkdownRenderer.RewriteUrl(url, true).Should().Be("#");
+    }
+
+    [Fact]
     public void 原始HTML一律當文字()
     {
         var html = AgentMarkdownRenderer.ToHtml("哈囉 <script>alert(1)</script> <img src=x onerror=alert(1)>");

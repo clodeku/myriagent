@@ -52,10 +52,11 @@ public class CodexControlRulesTests
     [Fact]
     public void MCP授權狀態與連線錯誤分開_空工具清單也可能連線成功()
     {
-        CodexControlRules.McpServer(JObject.Parse("""{"name":"oauth","authStatus":"notLoggedIn","tools":{}}""")).Status.Should().Be("needs-auth");
-        CodexControlRules.McpServer(JObject.Parse("""{"name":"broken","authStatus":"unsupported","toolsError":"failed","tools":{}}""")).Status.Should().Be("failed");
-        CodexControlRules.McpServer(JObject.Parse("""{"name":"empty","authStatus":"unsupported","tools":{}}""")).Status.Should().Be("connected");
-        CodexControlRules.McpServer(JObject.Parse("""{"name":"pending","runtimeStatus":"notStarted"}""")).Status.Should().Be("pending");
+        CodexControlRules.McpServer(JObject.Parse("""{"name":"oauth","authStatus":"notLoggedIn","tools":{}}""")).AuthStatus.Should().Be("notLoggedIn");
+        CodexControlRules.McpServer(JObject.Parse("""{"name":"broken","authStatus":"unsupported","toolsError":"failed","tools":{}}""")).Error.Should().Be("failed");
+        CodexControlRules.McpServer(JObject.Parse("""{"name":"empty","authStatus":"unsupported","tools":{}}""")).Status.Should().Be("unknown");
+        CodexControlRules.McpServer(JObject.Parse("""{"name":"pending","runtimeStatus":"notStarted","authStatus":"notLoggedIn"}""")).Status.Should().Be("notStarted");
+        CodexControlRules.McpServer(JObject.Parse("""{"runtimeStatus":"starting"}""")).Status.Should().Be("starting");
         CodexControlRules.McpServer(JObject.Parse("""{"name":"auth","runtimeStatus":"authenticationRequired","authStatus":"unknown"}""")).Status.Should().Be("needs-auth");
         CodexControlRules.McpServer(JObject.Parse("""{"name":"off","runtimeStatus":"disabled","authStatus":"notLoggedIn"}""")).Status.Should().Be("disabled");
     }

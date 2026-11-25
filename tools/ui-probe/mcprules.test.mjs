@@ -16,6 +16,18 @@ test('規則模組沒有 import、沒有 HTML 寫入點', () => {
   assert.doesNotMatch(source, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
 });
 
+test('Codex 待啟動與未知皆不誤報已連線，授權可獨立處理', () => {
+  const entry = { servers: [
+    { name: 'cold', status: 'notStarted', tools: 5 },
+    { name: 'busy', status: 'starting' },
+    { name: 'oauth', status: 'unknown', authStatus: 'notLoggedIn' },
+  ] };
+  const rows = R.mcpRows(entry);
+  assert.deepEqual(rows.map(s => s.text), ['尚未啟動', '啟動中…', '狀態未知']);
+  assert.deepEqual(rows.map(s => s.actions.map(a => a.action)), [[], [], ['authenticate']]);
+  assert.equal(R.mcpStrip(entry).text, '0/3 個已連線・1 個要授權・1 個尚未啟動・1 個狀態未知');
+});
+
 test('accountMcpOf：只取物件、帳戶 id 要是字串', () => {
   const mcp = { accounts: { a1: { checking: false, servers: [] }, a2: 'x' } };
   assert.deepEqual(R.accountMcpOf(mcp, 'a1'), { checking: false, servers: [] });

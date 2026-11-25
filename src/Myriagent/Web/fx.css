@@ -1213,7 +1213,7 @@ textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
 .mcp-leds > i[data-st="connected"] { background: var(--green); opacity: 1; }
 .mcp-leds > i[data-st="needs-auth"] { background: var(--amber); opacity: 1; }
 .mcp-leds > i[data-st="failed"] { background: var(--red); opacity: 1; }
-.mcp-leds > i[data-st="pending"] { background: var(--link); opacity: 1; }
+.mcp-leds > i:is([data-st="pending"], [data-st="starting"]) { background: var(--link); opacity: 1; }
 /* 檔案抽屜：大小比例條（相對這一頁最大的檔）、最近一小時改過的燈、拖曳寬度的讀數 */
 .fe.line { position: relative; }
 .fe-bar { position: absolute; left: 36px; right: 8px; bottom: 2px; height: 2px; pointer-events: none; }

@@ -143,13 +143,15 @@ internal sealed partial class AgentHub
                 {
                     ApplyMcpStatus(state, status);
                     PostMcp();
-                    var now = status.Servers.FirstOrDefault(s => s.Name == server)?.Status;
-                    if (!AccountMcpRules.AwaitingAuth(now))
+                    var current = status.Servers.FirstOrDefault(s => s.Name == server);
+                    var now = current?.Status;
+                    var authorized = current?.AuthStatus is "oAuth" or "bearerToken";
+                    if (authorized || (current?.AuthStatus != "notLoggedIn" && now != "starting" && !AccountMcpRules.AwaitingAuth(now)))
                     {
                         var reconnected = now == "connected" ? ReconnectLiveConversations(accountId, server) : 0;
-                        Toast(now == "connected"
+                        Toast(authorized || now == "connected"
                             ? $"MCP 伺服器「{server}」已授權{(reconnected > 0 ? $"，開著的 {reconnected} 個對話已重新連線" : string.Empty)}"
-                            : $"MCP 伺服器「{server}」授權後仍然連不上，請到明細看原因", isError: now != "connected", view: view);
+                            : $"MCP 伺服器「{server}」尚未確認授權，請到明細看狀態", isError: !authorized && now != "connected", view: view);
                         return;
                     }
                 }
@@ -194,6 +196,10 @@ internal sealed partial class AgentHub
             {
                 var reconnected = ReconnectLiveConversations(accountId, server);
                 Toast($"MCP 伺服器「{server}」連得上{(reconnected > 0 ? $"，開著的 {reconnected} 個對話已重新連線" : string.Empty)}", view: view);
+            }
+            else if (result.Ok && now is ("notStarted" or "starting" or "unknown"))
+            {
+                Toast($"已重新載入 MCP 伺服器「{server}」的設定，目前尚未確認連線", view: view);
             }
             else
             {

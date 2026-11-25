@@ -11,6 +11,35 @@ export async function runCodex(ctx, vp) {
     c.header = { ...c.header, provider: 'Codex', running: false, status: null, sessionStarted: true, codex: { goal, busy: false, selectedSkills: [], serviceTier: null } };
     await host.pushHeader('c2');
     await settle(page, 120);
+    const threadId = '12345678-1234-4567-8123-123456789abc';
+    const rows = [
+      { id: 'fold-user', kind: 'User', status: 'Done', html: '<p>查看工作紀錄</p>' },
+      { id: 'fold-tool', kind: 'Tool', toolKind: 'bash', title: '建置', status: 'Done' },
+      { id: 'fold-failed', kind: 'Tool', toolKind: 'bash', title: '測試失敗', status: 'Failed' },
+      { id: 'fold-reply', kind: 'Assistant', status: 'Done', html: '<p>子代理 codex://threads/' + threadId + '。</p>' },
+    ];
+    for (const [i, row] of rows.entries()) {
+      Object.assign(row, { seq: 810 + i, time: Date.now() + i });
+      c.items.push(row); await host.pushItem('c2', row);
+    }
+    const fold = page.locator(sel + ' [data-id="fold-user"] .turn-fold');
+    await fold.click();
+    check('codexFold-' + theme, await page.locator('[data-id="fold-tool"]').isHidden() && await page.locator('[data-id="fold-failed"]').isVisible() && await page.locator('[data-id="fold-reply"]').isVisible());
+    await fold.click();
+    check('codexUnfold-' + theme, await page.locator('[data-id="fold-tool"]').isVisible());
+    await page.locator(sel + ' a[href="#codex-thread-' + threadId + '"]').click();
+    const history = await until(() => host.last('openCodexThread'), 2000);
+    await host.send({ type: 'codexThreadPage', requestId: history.requestId, page: { title: '子代理紀錄', rows: [{ id: 't1', title: '驗證第一輪' }] } });
+    await page.getByRole('button', { name: '驗證第一輪' }).click();
+    const turn = await until(() => host.last('openCodexThread', m => m.turnId === 't1'), 2000);
+    await host.send({ type: 'codexThreadPage', requestId: turn.requestId, page: { title: '子代理紀錄', rows: [{ kind: 'Assistant', text: '<img src=x>檢查完成' }], nextCursor: 'next' } });
+    const dlg = page.locator('.codex-thread-history');
+    await dlg.getByText('<img src=x>檢查完成', { exact: true }).waitFor();
+    check('codexHistory-' + theme, history.conversationId === 'c2' && turn.threadId === threadId && await dlg.locator('img,textarea').count() === 0);
+    await dlg.getByRole('button', { name: '載入更多項目' }).click();
+    const next = await until(() => host.last('openCodexThread', m => m.cursor === 'next'), 2000);
+    check('codexHistoryPage-' + theme, next.turnId === 't1');
+    await page.keyboard.press('Escape');
     let lastRequest;
     const reply = async (action, result, error) => {
       const req = await until(() => host.last('codexControl', m => m.action === action && m.requestId !== lastRequest), 2000);

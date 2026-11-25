@@ -117,9 +117,11 @@ internal static partial class AgentMarkdownRenderer
             link.Url = localPath == null ? RewriteUrl(url, link.IsImage, urls) : LinkUrl(localPath, urls);
         }
 
-        foreach (var autolink in document.Descendants<AutolinkInline>())
+        foreach (var autolink in document.Descendants<AutolinkInline>().ToList())
         {
-            if (!autolink.IsEmail && !IsAllowedWebUrl(autolink.Url))
+            if (!autolink.IsEmail && ThreadAnchor(autolink.Url) is { } target)
+                autolink.ReplaceBy(new LinkInline { Url = target, IsClosed = true }.AppendChild(new LiteralInline(autolink.Url)), copyChildren: false);
+            else if (!autolink.IsEmail && !IsAllowedWebUrl(autolink.Url))
                 autolink.Url = "#";
         }
 
@@ -176,6 +178,7 @@ internal static partial class AgentMarkdownRenderer
             return "#";
 
         var trimmed = url.Trim();
+        if (!isImage && ThreadAnchor(trimmed) is { } target) return target;
         if (IsAllowedWebUrl(trimmed))
             return isImage ? "#" : trimmed;
         if (!isImage && trimmed.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase))
@@ -186,6 +189,13 @@ internal static partial class AgentMarkdownRenderer
             return isImage ? ImageUrl(localPath, urls) : LinkUrl(localPath, urls);
 
         return "#";
+    }
+
+    private static string? ThreadAnchor(string url)
+    {
+        const string prefix = "codex://threads/";
+        return url.Length == prefix.Length + 36 && url.StartsWith(prefix, StringComparison.Ordinal)
+            && Guid.TryParseExact(url.AsSpan(prefix.Length), "D", out var id) ? $"#codex-thread-{id}" : null;
     }
 
     /// <summary>本機圖片的 &lt;img src&gt;：呼叫端指定的網址，沒有指定就是桌面的 /media</summary>

@@ -26,10 +26,11 @@ internal sealed partial class AgentHub
 
         var existingSessions = conversations.Values
             .Where(c => !c.IsDraft && !c.IsReplica && !string.IsNullOrWhiteSpace(c.Meta.SessionId))
-            .Select(c => (c.Meta.Provider, c.Meta.SessionId!))
+            .Select(c => (c.Meta.Provider, c.Meta.SessionAccountId ?? c.Meta.AccountId, c.Meta.SessionId!))
             .ToList();
 
-        _ = Task.Run(() => ExternalConversationImporter.Scan(targets, existingSessions)).ContinueWith(task =>
+        var launcher = accounts.ResolveLauncher(AgentProvider.Codex);
+        _ = Task.Run(() => ExternalConversationImporter.ScanAsync(targets, existingSessions, launcher)).ContinueWith(task =>
         {
             host.BeginInvoke(() =>
             {
@@ -82,7 +83,7 @@ internal sealed partial class AgentHub
             return;
         }
 
-        if (FindExistingBySession(candidate.Provider, candidate.SessionId) is { } already)
+        if (FindExistingBySession(candidate.Provider, candidate.AccountId, candidate.SessionId) is { } already)
         {
             externalImportCache.Remove(sourceKey);
             Open(view, already);
@@ -91,9 +92,11 @@ internal sealed partial class AgentHub
             return;
         }
 
-        _ = Task.Run(() =>
+        var launcher = candidate.CodexHome == null ? null : accounts.ResolveLauncher(AgentProvider.Codex);
+        _ = Task.Run(async () =>
         {
-            var data = ExternalConversationImporter.Load(candidate);
+            var data = candidate.CodexHome == null ? ExternalConversationImporter.Load(candidate)
+                : launcher == null ? null : await CodexThreadHistory.ImportAsync(launcher, candidate);
             string? validDir = null;
             if (data != null && !string.IsNullOrWhiteSpace(data.WorkingDirectory))
             {
@@ -116,11 +119,11 @@ internal sealed partial class AgentHub
 
                 if (task.Status != TaskStatus.RanToCompletion || task.Result.Data is not { } loaded)
                 {
-                    Toast("無法讀取這筆外部對話紀錄（檔案可能已被移除或無對話內容）", isError: true, view: view);
+                    Toast(task.Exception?.GetBaseException().Message ?? "無法讀取這筆外部對話紀錄（檔案可能已被移除或無對話內容）", isError: true, view: view);
                     return;
                 }
 
-                if (FindExistingBySession(candidate.Provider, loaded.SessionId) is { } existing)
+                if (FindExistingBySession(candidate.Provider, candidate.AccountId, loaded.SessionId) is { } existing)
                 {
                     externalImportCache.Remove(sourceKey);
                     if (views.ContainsKey(view.Id))
@@ -133,7 +136,7 @@ internal sealed partial class AgentHub
                 }
 
                 var account = accounts.Find(candidate.AccountId)
-                    ?? accounts.Accounts.FirstOrDefault(a => a.Provider == candidate.Provider);
+                    ?? (candidate.Provider == AgentProvider.Codex ? null : accounts.Accounts.FirstOrDefault(a => a.Provider == candidate.Provider));
                 if (account == null)
                 {
                     Toast("找不到對應的帳戶，請先新增或確認帳戶存在", isError: true, view: view);
@@ -202,10 +205,50 @@ internal sealed partial class AgentHub
         }, TaskScheduler.Default);
     }
 
-    private ConversationState? FindExistingBySession(AgentProvider provider, string sessionId)
+    private ConversationState? FindExistingBySession(AgentProvider provider, string accountId, string sessionId)
         => conversations.Values.FirstOrDefault(c =>
             !c.IsDraft
             && !c.IsReplica
             && c.Meta.Provider == provider
+            && (provider != AgentProvider.Codex || (c.Meta.SessionAccountId ?? c.Meta.AccountId) == accountId)
             && string.Equals(c.Meta.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+
+    private async Task OpenCodexThreadAsync(IAgentView view, ConversationState? source, JObject command)
+    {
+        if (view is RemoteResponseView) return;
+        var reply = new JObject { ["type"] = "codexThreadPage", ["requestId"] = command["requestId"] };
+        try
+        {
+            if (source == null || source.IsReplica || source.IsDraft || !source.ViewIds.Contains(view.Id)
+                || source.Meta.Provider != AgentProvider.Codex)
+                throw new InvalidOperationException("請在來源電腦的 Codex 對話開啟連結");
+            var owner = source.Meta.SessionAccountId ?? source.Meta.AccountId;
+            var account = accounts.Find(owner);
+            if (account?.Provider != AgentProvider.Codex || source.Meta.AccountId != owner)
+                throw new InvalidOperationException("來源帳戶已變更，無法開啟歷史");
+            if (!Guid.TryParseExact(command.Value<string>("threadId"), "D", out var thread))
+                throw new ArgumentException("Codex 對話連結無效");
+            var turn = command.Value<string>("turnId");
+            var cursor = command.Value<string>("cursor");
+            if (turn?.Length > 200 || cursor?.Length > 8192) throw new ArgumentException("Codex 分頁參數無效");
+            if (turn == null && cursor == null && FindExistingBySession(AgentProvider.Codex, owner, thread.ToString()) is { } existing)
+            {
+                Open(view, existing);
+                Post(view, new JObject { ["type"] = "focusConversation", ["conversationId"] = existing.Meta.Id });
+                reply["opened"] = true;
+            }
+            else
+            {
+                var launcher = accounts.ResolveLauncher(AgentProvider.Codex) ?? throw new InvalidOperationException("請先安裝 Codex CLI");
+                var directory = AccountRules.ResolveConfigDirectory(account);
+                var page = await Task.Run(() => CodexThreadHistory.PreviewAsync(launcher, directory, thread.ToString(), turn, cursor));
+                if (!ReferenceEquals(accounts.Find(owner), account) || !conversations.TryGetValue(source.Meta.Id, out var current)
+                    || current != source || !source.ViewIds.Contains(view.Id) || source.IsReplica || source.Meta.AccountId != owner)
+                    throw new InvalidOperationException("來源對話或帳戶已變更");
+                reply["page"] = page;
+            }
+        }
+        catch (Exception ex) { reply["error"] = ex.Message; }
+        if (!disposed && views.ContainsKey(view.Id)) Post(view, reply);
+    }
 }

@@ -78,7 +78,7 @@ export class Minimap {
       const kind = minimapKind(conv.items.get(id));
       if (!kind) continue;
       const n = conv.nodes.get(id);
-      if (!n || !n.isConnected || n.classList.contains('pre-clear')) continue;
+      if (!n || !n.isConnected || n.classList.contains('pre-clear') || n.classList.contains('turn-folded')) continue;
       entries.push({ id, kind, top: n.getBoundingClientRect().top - base });
     }
     const marks = minimapMarks(entries, sh, rail);

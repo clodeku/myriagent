@@ -149,7 +149,8 @@ public sealed class CodexControlsSessionTests : IDisposable
         using var session = new CodexAgentSession();
         var settings = Settings();
         var status = await session.GetMcpStatusAsync(settings);
-        status.Servers!.Select(s => s.Status).Should().Equal("connected", "needs-auth");
+        status.Servers!.Select(s => s.Status).Should().Equal("connected", "unknown");
+        status.Servers![1].AuthStatus.Should().Be("notLoggedIn");
         var auth = await session.McpActionAsync("second", AgentMcpAction.Authenticate, settings);
         auth.AuthUrl.Should().Be("https://example.test/oauth");
         (await session.McpActionAsync("first", AgentMcpAction.Reconnect, settings)).Ok.Should().BeTrue();

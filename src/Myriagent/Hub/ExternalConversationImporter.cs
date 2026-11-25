@@ -37,15 +37,16 @@ internal static class ExternalConversationImporter
     };
 
     /// <summary>掃描所有帳戶設定資料夾內尚未匯入 Myriagent 的外部 CLI 對話，依最後更新時間由新到舊排序</summary>
-    public static List<ExternalConversationCandidate> Scan(
+    public static async Task<List<ExternalConversationCandidate>> ScanAsync(
         IReadOnlyList<ExternalAccountScanTarget> accounts,
-        IReadOnlyCollection<(AgentProvider Provider, string SessionId)> existingSessions,
+        IReadOnlyCollection<(AgentProvider Provider, string AccountId, string SessionId)> existingSessions,
+        AgentLauncher? codexLauncher = null,
         int maxResults = 100)
     {
         var existing = new HashSet<string>(
             existingSessions
                 .Where(x => !string.IsNullOrWhiteSpace(x.SessionId))
-                .Select(x => SessionKey(x.Provider, x.SessionId)),
+                .Select(x => SessionKey(x.Provider, x.AccountId, x.SessionId)),
             StringComparer.OrdinalIgnoreCase);
 
         var seenDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -55,14 +56,15 @@ internal static class ExternalConversationImporter
         {
             if (string.IsNullOrWhiteSpace(account.ConfigDirectory))
                 continue;
-            var dirKey = $"{account.Provider}|{account.ConfigDirectory.TrimEnd('\\', '/')}";
+            var dirKey = SessionKey(account.Provider, account.AccountId, account.ConfigDirectory.TrimEnd('\\', '/'));
             if (!seenDirs.Add(dirKey))
                 continue;
 
             IEnumerable<ExternalConversationCandidate> found = account.Provider switch
             {
                 AgentProvider.Claude => ScanClaudeAccount(account),
-                AgentProvider.Codex => ScanCodexAccount(account),
+                AgentProvider.Codex => codexLauncher == null ? ScanCodexAccount(account)
+                    : await CodexThreadHistory.ListAsync(codexLauncher, account, MaxCandidateFilesPerAccount) ?? ScanCodexAccount(account),
                 AgentProvider.Antigravity => ScanAntigravityAccount(account),
                 AgentProvider.Grok => ScanGrokAccount(account),
                 _ => Array.Empty<ExternalConversationCandidate>(),
@@ -70,7 +72,7 @@ internal static class ExternalConversationImporter
 
             foreach (var candidate in found)
             {
-                var key = SessionKey(candidate.Provider, candidate.SessionId);
+                var key = SessionKey(candidate.Provider, candidate.AccountId, candidate.SessionId);
                 if (existing.Contains(key))
                     continue;
                 if (!bySession.TryGetValue(key, out var prev) || candidate.UpdatedAt > prev.UpdatedAt)
@@ -442,8 +444,8 @@ internal static class ExternalConversationImporter
             filePath);
     }
 
-    internal static string SessionKey(AgentProvider provider, string sessionId)
-        => $"{provider}|{sessionId.Trim()}";
+    private static string SessionKey(AgentProvider provider, string accountId, string sessionId)
+        => $"{provider}|{(provider == AgentProvider.Codex ? accountId : "")}|{sessionId.Trim()}";
 
     private static DateTime SafeLastWriteLocal(string path)
     {

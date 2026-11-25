@@ -56,6 +56,7 @@ import * as live from './liveview.js';
 import * as cmdtrack from './cmdtrack.js';
 import { onPeerUpload } from './composer.js';
 import { openFileLink } from './filelinks.js';
+import { openThreadLink, onThreadPage } from './codexthreads.js';
 import * as mon from './monitor.js';
 import * as devfiles from './devicefiles.js';
 import * as devcontrol from './devicecontrol.js';
@@ -551,6 +552,7 @@ function handle(m) {
     case 'collaborators': applyCollaborators(m.collaborators); break; // 多人協作：協作人清單與分享（擁有者）
     case 'collabResult': onCollabResult(m); break; // 多人協作：管理指令的結果（只給發起的視窗）
     case 'externalConversations': onExternalConversations(m); break; // 本機外部 CLI 歷史對話清單（只有桌面）
+    case 'codexThreadPage': onThreadPage(m); break;
     case 'conversation':
       pending.delete(id);
       liveRv.delete(id);
@@ -810,7 +812,7 @@ document.addEventListener('click', (e) => {
   const a = e.target.closest && e.target.closest('a[href]');
   if (!a) return;
   e.preventDefault();
-  if (openFileLink(a)) { e.stopPropagation(); return; }
+  if (openThreadLink(a) || openFileLink(a)) { e.stopPropagation(); return; }
   const href = a.getAttribute('href');
   if (!href || href.startsWith('#') || /^javascript:/i.test(href)) return;
   post({ cmd: 'openLink', href: a.href });
@@ -820,7 +822,7 @@ document.addEventListener('auxclick', (e) => {
   if (!a) return;
   e.preventDefault();
   if (e.button === 1) {
-    if (openFileLink(a)) { e.stopPropagation(); return; }
+    if (openThreadLink(a) || openFileLink(a)) { e.stopPropagation(); return; }
     const href = a.getAttribute('href');
     if (href && !href.startsWith('#') && !/^javascript:/i.test(href)) post({ cmd: 'openLink', href: a.href });
   }

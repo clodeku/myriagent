@@ -2,6 +2,7 @@
 import { h, baseName, extOf, copyToClipboard, iconButton, replayClass, fadeInImg, setHidden, setAcc, safeColor } from './util.js';
 import { icon, TOOL_ICON } from './icons.js';
 import { post, isHub, state } from './store.js';
+import { decorateThreadLinks } from './codexthreads.js';
 import { authorLabel, resolvedLabel, collabColor } from './collabrules.js';
 import { mentionParts, mentionView } from './accountmentions.js';
 import { toast, spinner } from './ui.js';
@@ -168,6 +169,7 @@ function decoratePaths(root) {
 const imgLoading = (ctx) => (ctx && ctx.eagerMedia ? 'eager' : 'lazy');
 
 export function enhanceMarkdown(root, _ctx, opts) {
+  decorateThreadLinks(root);
   decoratePaths(root);
   for (const pre of root.querySelectorAll('pre')) {
     if (pre.parentElement && pre.parentElement.classList.contains('code')) continue;
@@ -771,7 +773,11 @@ function renderToolBody(n, item, ctx) {
   stopStepPeek(n);
   const b = h('div', { class: 't-body' });
   if (item.filePath) b.append(fileLink(item.filePath, ctx));
-  if (item.detail) b.append(section('輸入', detailPre(item)));
+  if (item.detail) {
+    const detail = detailPre(item);
+    if (item.toolKind === 'agent') decorateThreadLinks(detail);
+    b.append(section('輸入', detail));
+  }
   if (item.detailHtml) {
     const previewMd = h('div', { class: 'md t-art-md' });
     setHtml(previewMd, item.detailHtml, ctx);

@@ -60,6 +60,8 @@ internal static class AccountMcpRules
     private static JObject RenderServer(AgentMcpServer s)
     {
         var o = new JObject { ["name"] = s.Name, ["status"] = s.Status };
+        if (s.AuthStatus != null)
+            o["authStatus"] = s.AuthStatus;
         if (s.Source != null)
             o["source"] = s.Source;
         if (s.Transport != null)

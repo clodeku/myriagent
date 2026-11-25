@@ -20,7 +20,8 @@ internal sealed record ExternalConversationCandidate(
     string? WorkingDirectory,
     DateTime UpdatedAt,
     int MessageCount,
-    string FilePath);
+    string FilePath,
+    string? CodexHome = null);
 
 /// <summary>本機外部 CLI 歷史對話完整解析結果（供建立 AgentConversation 與 items.json）</summary>
 internal sealed record ExternalConversationImportData(
@@ -416,7 +417,7 @@ internal static partial class ExternalConversationRules
         return FinalizeImportData(threadId, explicitTitle, workingDir, firstTime, lastTime, fallbackTime, chosen);
     }
 
-    private static string? CleanCodexUserBlock(string? text)
+    internal static string? CleanCodexUserBlock(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
             return null;
