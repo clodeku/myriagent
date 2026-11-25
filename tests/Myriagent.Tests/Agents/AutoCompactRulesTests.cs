@@ -36,7 +36,7 @@ public class AutoCompactRulesTests
         => AutoCompactRules.TryParse(text, out _).Should().BeFalse();
 
     [Fact]
-    public void TryNormalize_夾進範圍_只有Claude與Codex支援()
+    public void TryNormalize_夾進範圍_Claude與Codex與Antigravity支援()
     {
         AutoCompactRules.TryNormalize(AgentProvider.Claude, "400k", out var claude).Should().BeTrue();
         claude.Should().Be(400_000);
@@ -49,8 +49,16 @@ public class AutoCompactRulesTests
         AutoCompactRules.TryNormalize(AgentProvider.Codex, "", out var cleared).Should().BeTrue();
         cleared.Should().BeNull();
 
+        AutoCompactRules.TryNormalize(AgentProvider.Antigravity, "700k", out var agy).Should().BeTrue();
+        agy.Should().Be(700_000);
+        AutoCompactRules.TryNormalize(AgentProvider.Antigravity, "5k", out var agyLow).Should().BeTrue();
+        agyLow.Should().Be(20_000);
+        AutoCompactRules.TryNormalize(AgentProvider.Antigravity, "5M", out var agyHigh).Should().BeTrue();
+        agyHigh.Should().Be(2_000_000);
+        AutoCompactRules.AntigravityOverrideValue(700_000).Should().Be("700000");
+        AutoCompactRules.AntigravityOverrideValue(null).Should().BeNull();
+
         AutoCompactRules.TryNormalize(AgentProvider.Grok, "400k", out _).Should().BeFalse();
-        AutoCompactRules.TryNormalize(AgentProvider.Antigravity, "400k", out _).Should().BeFalse();
         AutoCompactRules.TryNormalize(AgentProvider.Claude, "abc", out _).Should().BeFalse();
     }
 
@@ -129,5 +137,14 @@ public class AutoCompactRulesTests
         none.Should().NotContainKey("GROK_AUTO_COMPACT_THRESHOLD_PERCENT", "沒設定時照 CLI 預設");
 
         GrokAgentSession.Signature(Settings(70)).Should().NotBe(GrokAgentSession.Signature(Settings(null)));
+
+        AgentSessionSettings AgySettings(long? tokens) => new("s-2", false, new AgentLauncher("agy.exe", Array.Empty<string>()), "acc",
+            e => e["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true", null, null, null, AgentPermissionMode.Ask, @"C:\w", @"C:\c", "說明", true, AutoCompactTokens: tokens);
+        var agyEnv = new Dictionary<string, string?>();
+        AntigravityStreamRules.ApplyLaunchEnvironment(agyEnv, AgySettings(700_000));
+        agyEnv["AGY_CLI_AUTO_COMPACT_OVERRIDE"].Should().Be("700000");
+        agyEnv["AGY_CLI_DISABLE_AUTO_UPDATE"].Should().Be("true");
+        AntigravityAgentSession.Signature(AgySettings(700_000)).Should().NotBe(AntigravityAgentSession.Signature(AgySettings(null)));
+        AntigravityAcpSession.Signature(AgySettings(700_000)).Should().NotBe(AntigravityAcpSession.Signature(AgySettings(null)));
     }
 }

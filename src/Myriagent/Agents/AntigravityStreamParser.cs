@@ -334,6 +334,21 @@ internal sealed partial class AntigravityStreamParser
             if (subagentInfo != null)
                 step.PendingSubagentInfo = subagentInfo;
 
+            if (string.Equals(toolName, "update_steps", StringComparison.OrdinalIgnoreCase))
+            {
+                var call = hasNumericIndex ? transcript.FindToolCall(numericIndex, toolName, minTurnStepIndex) : null;
+                var mergedInfo = MergeTranscriptArgs(toolInfo, call?.Args);
+                var planSteps = AntigravityStepRules.ParseUpdateSteps((call?.Args ?? mergedInfo?["parameters"] as JObject)?["steps"]);
+                if (planSteps.Count > 0 && !step.Started)
+                {
+                    step.Started = true;
+                    result.Events.Add(new AgentPlanEvent(null, planSteps));
+                }
+                if (state != AntigravityStepState.Running)
+                    step.Done = true;
+                return;
+            }
+
             if (!step.Started)
             {
                 var call = hasNumericIndex ? transcript.FindToolCall(numericIndex, toolName, minTurnStepIndex) : null;
@@ -595,6 +610,26 @@ internal sealed partial class AntigravityStreamParser
                 step.ToolTitle,
                 step.ToolDetail);
             liveBackgroundTasks[key] = new BackgroundEntry(key, tool, IsOneShotTimer: false, IsDaemon: isDaemon);
+            EmitBackgroundWorkEvent(events);
+            return;
+        }
+
+        if (rawTool.Equals("run_workflow", StringComparison.OrdinalIgnoreCase))
+        {
+            bool backgroundedInOutput = !string.IsNullOrWhiteSpace(output)
+                && (output.Contains("running in the background", StringComparison.OrdinalIgnoreCase)
+                    || output.Contains("background task", StringComparison.OrdinalIgnoreCase)
+                    || (output.Contains("background", StringComparison.OrdinalIgnoreCase) && BackgroundTaskIdRegex().IsMatch(output)));
+            if (!backgroundedInOutput)
+                return;
+
+            var key = ExtractTaskKey(output) ?? $"wf-{step.Id}";
+            var tool = new AgentBackgroundTool(
+                step.DisplayToolName ?? "執行工作流",
+                "agent",
+                step.ToolTitle,
+                step.ToolDetail);
+            liveBackgroundTasks[key] = new BackgroundEntry(key, tool, IsOneShotTimer: false, IsDaemon: false);
             EmitBackgroundWorkEvent(events);
             return;
         }
@@ -973,6 +1008,10 @@ internal static class AntigravityStepRules
         ["browser_subagent"] = ("瀏覽器子代理", "agent"),
         ["manage_subagents"] = ("管理子代理", "agent"),
         ["send_message"] = ("傳送代理訊息", "agent"),
+        ["run_workflow"] = ("執行工作流", "agent"),
+        ["swarm"] = ("代理蜂群", "agent"),
+        ["update_steps"] = ("更新步驟清單", "plan"),
+        ["ask_question"] = ("詢問使用者", "question"),
         ["schedule"] = ("排程計時", "other"),
         ["call_mcp_tool"] = ("MCP 工具", "mcp"),
         ["list_resources"] = ("MCP 資源", "mcp"),
@@ -992,6 +1031,47 @@ internal static class AntigravityStepRules
         var key = toolName ?? (subagentInfo != null ? "invoke_subagent" : string.Empty);
         var (name, kind) = KnownTools.TryGetValue(key, out var known) ? known : GuessTool(key);
         var parameters = info?["parameters"] as JObject;
+
+        if (key.Equals("run_workflow", StringComparison.OrdinalIgnoreCase))
+        {
+            var wfDesc = FirstParameter(parameters, "Description");
+            var scriptPath = FirstParameter(parameters, "ScriptPath");
+            var wfTitle = !string.IsNullOrWhiteSpace(wfDesc)
+                ? wfDesc!
+                : !string.IsNullOrWhiteSpace(scriptPath)
+                    ? Path.GetFileName(scriptPath)
+                    : name;
+            var localScript = AntigravityTranscriptRules.TryResolveLocalPath(scriptPath);
+            var wfDetail = FirstParameter(parameters, "Script") is { } scriptSrc
+                ? ClaudeStreamRules.Truncate(scriptSrc, ClaudeStreamRules.MaxToolDetailLength)
+                : parameters is { Count: > 0 }
+                    ? ClaudeStreamRules.Truncate(parameters.ToString(Formatting.Indented), ClaudeStreamRules.MaxToolDetailLength)
+                    : null;
+            return new ToolDescription(name, kind, ClaudeStreamRules.FirstLine(wfTitle), wfDetail, localScript);
+        }
+
+        if (key.Equals("swarm", StringComparison.OrdinalIgnoreCase))
+        {
+            var action = FirstParameter(parameters, "action");
+            var member = FirstParameter(parameters, "name");
+            var swarmTitle = FirstParameter(parameters, "title");
+            var brief = FirstParameter(parameters, "brief");
+            var displayTitle = action?.ToLowerInvariant() switch
+            {
+                "add" when !string.IsNullOrWhiteSpace(member) => $"新增成員：{member}",
+                "kill" when !string.IsNullOrWhiteSpace(member) => $"結束成員：{member}",
+                "model" when !string.IsNullOrWhiteSpace(member) => $"切換成員模型：{member}",
+                "title" when !string.IsNullOrWhiteSpace(swarmTitle) => $"命名蜂群：{swarmTitle}",
+                _ when !string.IsNullOrWhiteSpace(action) => $"蜂群操作：{action}",
+                _ => name,
+            };
+            var detailText = !string.IsNullOrWhiteSpace(brief)
+                ? ClaudeStreamRules.Truncate(brief, ClaudeStreamRules.MaxToolDetailLength)
+                : parameters is { Count: > 0 }
+                    ? ClaudeStreamRules.Truncate(parameters.ToString(Formatting.Indented), ClaudeStreamRules.MaxToolDetailLength)
+                    : null;
+            return new ToolDescription(name, kind, ClaudeStreamRules.FirstLine(displayTitle), detailText, null);
+        }
 
         if (kind == "agent")
         {
@@ -1090,6 +1170,37 @@ internal static class AntigravityStepRules
         }
 
         return parts.Count > 0 ? string.Join("・", parts) : null;
+    }
+
+    /// <summary>
+    /// 解析 <c>update_steps</c> 工具參數的 <c>steps</c> 陣列（<c>[{ title, status: pending|in_progress|done|skipped|failed }]</c>）為待辦清單步驟
+    /// </summary>
+    public static List<AgentPlanStep> ParseUpdateSteps(JToken? stepsToken)
+    {
+        var result = new List<AgentPlanStep>();
+        if (stepsToken is not JArray arr)
+            return result;
+        foreach (var item in arr.OfType<JObject>())
+        {
+            var title = FirstParameter(item, "title", "step", "content")?.Trim();
+            if (string.IsNullOrWhiteSpace(title))
+                continue;
+            var rawStatus = (FirstParameter(item, "status") ?? "pending").Trim().ToLowerInvariant();
+            var (status, suffix) = rawStatus switch
+            {
+                "in_progress" or "inprogress" => ("inProgress", null),
+                "done" or "completed" => ("completed", null),
+                "skipped" => ("completed", "（已略過）"),
+                "failed" => ("pending", "（失敗）"),
+                _ => ("pending", null),
+            };
+            result.Add(new AgentPlanStep
+            {
+                Text = suffix != null && !title.EndsWith(suffix, StringComparison.Ordinal) ? title + suffix : title,
+                Status = status,
+            });
+        }
+        return result;
     }
 
     /// <summary>檔案路徑的參數名稱（標題與檔案連結取第一個有值的）</summary>

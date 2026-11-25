@@ -203,9 +203,8 @@ public sealed class DraftCommandRulesTests
     {
         DraftCommandRules.ConversationCreate(Draft, "hi")["permissionMode"]!.Value<string>().Should().Be(nameof(AgentPermissionMode.Ask), "最低的層級，不用電腦的預設（可能是完全自動）");
         DraftCommandRules.ConversationCreate(new BrowserDraft(DraftId, LaB, AgentProvider.Codex), "hi")["permissionMode"]!.Value<string>().Should().Be("Ask");
-        // 同標頭顯示的值：Antigravity 沒有每步詢問，經代理種類正規化成自動接受編輯
         var agy = new BrowserDraft(DraftId, LaA, AgentProvider.Antigravity);
-        DraftCommandRules.ConversationCreate(agy, "hi")["permissionMode"]!.Value<string>().Should().Be("AcceptEdits")
+        DraftCommandRules.ConversationCreate(agy, "hi")["permissionMode"]!.Value<string>().Should().Be("Ask")
             .And.Be(BrowserDraftRules.Header(agy)["permission"]!.Value<string>());
     }
 

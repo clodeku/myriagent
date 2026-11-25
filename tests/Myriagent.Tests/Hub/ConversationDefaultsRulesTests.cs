@@ -112,7 +112,7 @@ public class ConversationDefaultsRulesTests
         var empty = ConversationDefaultsRules.Migrate(accounts, new Dictionary<string, AccountDefaults>(), lastAccountId: null);
         empty["Claude"].PermissionMode.Should().Be(AgentPermissionMode.Ask);
         empty["Codex"].PermissionMode.Should().Be(AgentPermissionMode.Ask);
-        empty["Antigravity"].PermissionMode.Should().Be(AgentPermissionMode.AcceptEdits, "Antigravity 不能在對話中詢問，沒有每步詢問");
+        empty["Antigravity"].PermissionMode.Should().Be(AgentPermissionMode.Ask, "Antigravity 走 ACP 核准請求，五種模式都有");
         empty["Grok"].PermissionMode.Should().Be(AgentPermissionMode.Ask, "Grok 走 ACP 核准請求，五種模式都有");
 
         ConversationDefaultsRules.Migrate(accounts, new Dictionary<string, AccountDefaults> { ["x1"] = new() { PermissionMode = AgentPermissionMode.Plan } }, "x1")

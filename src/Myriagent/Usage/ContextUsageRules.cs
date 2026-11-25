@@ -18,7 +18,7 @@ internal sealed record ContextUsage(long? UsedTokens, long? WindowTokens, long? 
 /// <item>Codex：thread/tokenUsage/updated 的 last.totalTokens（壓縮後那一則只有 totalTokens＝壓縮後的大小）與 modelContextWindow</item>
 /// <item>Grok：_x.ai/session_notification 的 response_completed（每次模型呼叫）與 session/prompt 回應 _meta 頂層（最後一次呼叫），
 /// 視窗是模型清單裡目前模型的 _meta.totalContextTokens</item>
-/// <item>Antigravity：串流沒有視窗大小，不顯示</item>
+/// <item>Antigravity：ACP session/update 的 usage_update（used 與 size 視窗大小，agy 1.5.8+ 實測）</item>
 /// </list>
 /// </summary>
 internal static class ContextUsageRules

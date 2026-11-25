@@ -81,33 +81,30 @@ public class AntigravityRulesTests
     // ───── 權限模式與背景說明 ─────
 
     [Fact]
-    public void 權限模式_支援自動沙箱_每步詢問換成自動接受編輯()
+    public void 權限模式_ACP支援完整五種模式含每步詢問與自動沙箱()
     {
         var modes = AgentPermissionModes.For(AgentProvider.Antigravity);
         modes.Select(o => o.Mode).Should().Equal(
-            AgentPermissionMode.AcceptEdits, AgentPermissionMode.Plan, AgentPermissionMode.Auto, AgentPermissionMode.FullAccess);
+            AgentPermissionMode.Ask, AgentPermissionMode.AcceptEdits, AgentPermissionMode.Plan, AgentPermissionMode.Auto, AgentPermissionMode.FullAccess);
         modes.Single(o => o.Mode == AgentPermissionMode.Auto).Label.Should().Be("自動（沙箱）");
-        AgentPermissionModes.Normalize(AgentProvider.Antigravity, AgentPermissionMode.Ask).Should().Be(AgentPermissionMode.AcceptEdits);
-        AgentPermissionModes.Normalize(AgentProvider.Antigravity, AgentPermissionMode.Auto).Should().Be(AgentPermissionMode.Auto,
-            "agy 1.4.6 以 --dangerously-skip-permissions --sandbox 提供 Windows 沙箱自動模式");
-        AgentPermissionModes.Normalize(AgentProvider.Antigravity, AgentPermissionMode.Plan).Should().Be(AgentPermissionMode.Plan);
-        AgentPermissionModes.Normalize(AgentProvider.Antigravity, AgentPermissionMode.FullAccess).Should().Be(AgentPermissionMode.FullAccess);
-        ConversationDefaultsRules.PermissionFor(AgentProvider.Antigravity, null).Should().Be(AgentPermissionMode.AcceptEdits);
+        foreach (var mode in Enum.GetValues<AgentPermissionMode>())
+            AgentPermissionModes.Normalize(AgentProvider.Antigravity, mode).Should().Be(mode);
+        ConversationDefaultsRules.PermissionFor(AgentProvider.Antigravity, null).Should().Be(AgentPermissionMode.Ask);
+        AgentHubRules.SendsDenyFeedbackAsMessage(AgentProvider.Antigravity).Should().BeTrue("ACP 的拒絕回覆不含文字欄位，拒絕說明由中樞於下一輪送出");
     }
 
     [Fact]
-    public void 背景說明_沒有提問工具的那一行換成用文字詢問_工作資料夾註明換資料夾會另外告知()
+    public void 背景說明_ACP提問工具代換為ask_question_工作資料夾註明換資料夾會另外告知()
     {
         var text = AgentHubRules.BuildAgentInstructions(null, AgentProvider.Antigravity, @"C:\work", @"C:\att");
 
         text.Should().NotContain("{questionTool}").And.NotContain("request_user_input").And.NotContain("AskUserQuestion");
-        text.Should().Contain(AgentHubRules.AntigravityQuestionLine);
+        text.Should().Contain("ask_question");
         text.Should().Contain(@"工作資料夾：C:\work" + AgentHubRules.AntigravityWorkingDirectoryNote);
         text.Should().Contain(@"使用者上傳的附件放在：C:\att");
 
-        // 使用者自訂的範本：只換提到 {questionTool} 的行，連續兩行只換成一句
-        AgentHubRules.BuildAgentInstructions("A\n用 {questionTool} 問\n再用 {questionTool}\nB {cwd}", AgentProvider.Antigravity, @"C:\w", @"C:\a")
-            .Should().Be("A\n" + AgentHubRules.AntigravityQuestionLine + "\nB C:\\w" + AgentHubRules.AntigravityWorkingDirectoryNote);
+        AgentHubRules.BuildAgentInstructions("A\n用 {questionTool} 問\nB {cwd}", AgentProvider.Antigravity, @"C:\w", @"C:\a")
+            .Should().Be("A\n用 ask_question 問\nB C:\\w" + AgentHubRules.AntigravityWorkingDirectoryNote);
         AgentHubRules.BuildAgentInstructions("沒有提到工具 {cwd}", AgentProvider.Antigravity, @"C:\w", @"C:\a")
             .Should().Be("沒有提到工具 C:\\w" + AgentHubRules.AntigravityWorkingDirectoryNote);
     }
@@ -678,7 +675,63 @@ public class AntigravityRulesTests
         AntigravityStreamRules.TryParsePluginSignInNotice("⚠ The linear plugin needs you to sign in. Open /plugin to sign in.", out var notice)
             .Should().BeTrue();
         notice.Should().Contain("linear").And.Contain("/plugin");
+        AntigravityStreamRules.TryParsePluginSignInNotice(
+            "⚠ The github-enterprise plugin needs you to sign in. Open /plugin to install or sign in to this plugin.", out var notice1514)
+            .Should().BeTrue("agy 1.5.14+ 新版外掛登入提示文字");
+        notice1514.Should().Contain("github-enterprise").And.Contain("/plugin");
         AntigravityStreamRules.TryParsePluginSignInNotice("normal output", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Agy_1_5_17_預付錢包耗盡_Orchestrator防呆_跨工具Skills探索_本地斜線指令與標題標註同步()
+    {
+        // 1) 1.5.10 / 1.5.17 企業預付餘額耗盡與花費上限
+        AntigravityStreamRules.IsQuotaExhausted("Your organization's prepaid balance is insufficient. Contact your administrator to add funds.").Should().BeTrue();
+        AntigravityStreamRules.IsQuotaExhausted("Organization prepaid wallet is empty").Should().BeTrue();
+        AntigravityStreamRules.IsQuotaExhausted("Your organization's spend cap has been reached.").Should().BeTrue();
+        AntigravityStreamRules.ClassifyServerBusy("API error: Your organization's prepaid balance is insufficient.").Should().Be(AgentServerBusy.None);
+
+        // 2) Orchestrator 雙模型不傳 --effort，並支援組裝 orchestrator JSON
+        AntigravityStreamRules.IsOrchestratorModel("gemini-pro-orchestrator").Should().BeTrue();
+        AntigravityStreamRules.IsOrchestratorModel("gemini-pro-orchestrator-neon").Should().BeTrue();
+        AntigravityStreamRules.SupportsEffortArgument("gemini-pro-orchestrator-argon").Should().BeFalse();
+        AntigravityStreamRules.BuildArguments(null, "gemini-pro-orchestrator", "high", AgentPermissionMode.Auto, @"C:\conv")
+            .Should().NotContain("--effort", "Orchestrator 的強度由 planner／executor 決定，不帶 --effort");
+        var orchJson = AntigravityStreamRules.BuildOrchestratorSettingsJson("gemini-4-neon", "gemini-3.8-flash", "xhigh", "medium");
+        orchJson.Should().NotBeNull();
+        var parsedOrch = JObject.Parse(orchJson!)["orchestrator"]!;
+        parsedOrch.Value<string>("planner").Should().Be("gemini-4-neon");
+        parsedOrch.Value<string>("executor").Should().Be("gemini-3.8-flash");
+        parsedOrch.Value<string>("plannerEffort").Should().Be("xhigh");
+        parsedOrch.Value<string>("executorEffort").Should().Be("medium");
+
+        // 3) 1.5.14+ 新增本地斜線指令攔截與 1.5.5 防毒 ripgrep 變數
+        AntigravityStreamRules.DisableEmbeddedRipgrepVariable.Should().Be("ANTIGRAVITY_DISABLE_EMBEDDED_RIPGREP");
+        AntigravityStreamRules.ClassifyCliOnlySlashCommand("/thinking off").Kind.Should().Be(AntigravityStreamRules.CliOnlySlashKind.SinglePrompt);
+        AntigravityStreamRules.ClassifyCliOnlySlashCommand("/context").Kind.Should().Be(AntigravityStreamRules.CliOnlySlashKind.SinglePrompt);
+        AntigravityStreamRules.ClassifyCliOnlySlashCommand("/doctor").Kind.Should().Be(AntigravityStreamRules.CliOnlySlashKind.SinglePrompt);
+
+        // 4) 1.5.16+ 跨工具全域 ~/.agents/skills 掃描（~/.gemini/config/skills 同名優先）與對話標註檔寫入
+        using var temp = new TempDirectory("agy-1517-rules");
+        var userHome = temp.Root;
+        var agyDir = Path.Combine(userHome, ".gemini", "antigravity-cli");
+        var geminiSkillDir = Directory.CreateDirectory(Path.Combine(userHome, ".gemini", "config", "skills", "shared-skill")).FullName;
+        File.WriteAllText(Path.Combine(geminiSkillDir, "SKILL.md"), "---\nname: shared-skill\ndescription: 來自 gemini 優先\n---\n");
+        var agentsCollisionDir = Directory.CreateDirectory(Path.Combine(userHome, ".agents", "skills", "shared-skill")).FullName;
+        File.WriteAllText(Path.Combine(agentsCollisionDir, "SKILL.md"), "---\nname: shared-skill\ndescription: 來自 agents 被覆蓋\n---\n");
+        var agentsOnlyDir = Directory.CreateDirectory(Path.Combine(userHome, ".agents", "skills", "cross-tool-skill")).FullName;
+        File.WriteAllText(Path.Combine(agentsOnlyDir, "SKILL.md"), "---\nname: cross-tool-skill\ndescription: 跨工具全域技能\n---\n");
+
+        var commands = AntigravityStreamRules.DiscoverLocalCommands(agyDir, userHome);
+        commands.Should().Contain(c => c.Name == "cross-tool-skill" && c.Description == "跨工具全域技能");
+        commands.Single(c => c.Name == "shared-skill").Description.Should().Be("來自 gemini 優先");
+
+        // 5) annotations/<id>.pbtxt 標題同步（保留其他欄位、防目錄穿越）
+        AntigravityStreamRules.ResolveAnnotationPath(userHome, "../bad").Should().BeNull();
+        var updatedPbtxt = AntigravityStreamRules.UpsertTitleInPbtxt("pinned:true\ntitle:\"舊標題\"\nstarred:true\n", "新標題 \"v2\"");
+        updatedPbtxt.Should().Be("pinned:true\ntitle:\"新標題 \\\"v2\\\"\"\nstarred:true\n");
+        AntigravityStreamRules.WriteConversationTitle("conv-abc", "整理報表", userHome).Should().BeTrue();
+        File.ReadAllText(Path.Combine(agyDir, "annotations", "conv-abc.pbtxt")).Should().Be("title:\"整理報表\"\n");
     }
 
     [Fact]

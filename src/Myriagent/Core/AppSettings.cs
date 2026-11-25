@@ -65,7 +65,7 @@ internal sealed class ProviderConversationDefaults
     /// <summary>模型（CLI 回報的 value；"default"＝帳戶預設模型）→ 預設推理強度；沒有列的模型用 CLI 預設</summary>
     public Dictionary<string, string> Efforts { get; set; } = new();
 
-    /// <summary>自動壓縮上限（token）：上下文到這麼多時 CLI 自動壓縮；null＝CLI 預設。只有 Claude、Codex 支援（AutoCompactRules），已開的對話下次啟動程序時套用</summary>
+    /// <summary>自動壓縮上限（token）：上下文到這麼多時 CLI 自動壓縮；null＝CLI 預設。Claude、Codex、Antigravity 支援（AutoCompactRules），已開的對話下次啟動程序時套用</summary>
     public long? AutoCompactTokens { get; set; }
 
     /// <summary>自動壓縮門檻（上下文視窗的百分比）；null＝CLI 預設。只有 Grok 支援（AutoCompactRules.PercentRangeOf），已開的對話下次啟動程序時套用</summary>

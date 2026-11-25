@@ -258,6 +258,10 @@ public sealed class AntigravityAcpRulesTests
         SharedCustomizationRules.IsSharedSkill(AgentProvider.Antigravity, "swarm").Should().BeFalse();
         SharedCustomizationRules.IsSharedSkill(AgentProvider.Antigravity, "agy-customizations").Should().BeFalse();
         SharedCustomizationRules.IsSharedSkill(AgentProvider.Antigravity, "antigravity-guide").Should().BeFalse();
+        SharedCustomizationRules.IsSharedSkill(AgentProvider.Antigravity, "automation").Should().BeFalse("1.5.17 內建技能保留");
+        SharedCustomizationRules.IsSharedSkill(AgentProvider.Antigravity, "conversations").Should().BeFalse();
+        SharedCustomizationRules.IsSharedSkill(AgentProvider.Antigravity, "run-workflow").Should().BeFalse();
+        SharedCustomizationRules.IsSharedSkill(AgentProvider.Antigravity, "plugin").Should().BeFalse();
         SharedCustomizationRules.IsSharedSkill(AgentProvider.Antigravity, "my-custom-skill").Should().BeTrue();
 
         var existingMcp = JObject.Parse("""
@@ -278,5 +282,88 @@ public sealed class AntigravityAcpRulesTests
         merged.Should().NotBeNull();
         merged!["mcpServers"]!["playwright"]!.Value<bool>("disabled").Should().BeTrue("既有已設定（含 disabled: true）的同名伺服器不可被覆蓋");
         merged["mcpServers"]!["github"]!.Value<string>("command").Should().Be("gh-mcp");
+    }
+
+    [Fact]
+    public void Agy_1_5_17_ACP_模型合併_Orchestrator_UsageUpdate_PromptUsage與UpdateParser驗證()
+    {
+        // 1) availableModels 強度合併與 Orchestrator 空強度清單
+        var liveSessionJson = JObject.Parse("""
+            {
+              "sessionId": "s-1517",
+              "models": {
+                "currentModelId": "gemini-4-neon-high",
+                "availableModels": [
+                  { "modelId": "gemini-4-neon-high", "name": "Gemini 4 Neon (High)" },
+                  { "modelId": "gemini-4-neon-xhigh", "name": "Gemini 4 Neon (XHigh)" },
+                  { "modelId": "gemini-4-neon-low", "name": "Gemini 4 Neon (Low)" },
+                  { "modelId": "gemini-pro-orchestrator", "name": "Orchestrator (Carbon)" },
+                  { "modelId": "gpt-oss-120b-medium", "name": "GPT-OSS 120B (Medium)" }
+                ]
+              },
+              "configOptions": [
+                {
+                  "id": "model",
+                  "options": [
+                    { "value": "gemini-4-neon", "name": "Gemini 4 Neon" },
+                    { "value": "gemini-pro-orchestrator", "name": "Orchestrator (Carbon)" },
+                    { "value": "gpt-oss-120b-medium", "name": "GPT-OSS 120B (Medium)" }
+                  ]
+                },
+                {
+                  "id": "thought_level",
+                  "options": [
+                    { "value": "low", "name": "Low" },
+                    { "value": "high", "name": "High" },
+                    { "value": "xhigh", "name": "Extra" }
+                  ]
+                }
+              ]
+            }
+            """);
+
+        var (curModel, models) = AntigravityAcpRules.ParseSessionModels(liveSessionJson);
+        curModel.Should().Be("gemini-4-neon");
+        models.Select(m => (m.Value, m.Label, string.Join(",", m.Efforts))).Should().Equal(
+            ("gemini-4-neon", "Gemini 4 Neon", "low,high,xhigh"),
+            ("gemini-pro-orchestrator", "Orchestrator (Carbon)", ""),
+            ("gpt-oss-120b", "GPT-OSS 120B", "medium"));
+
+        var cfgOpts = AntigravityAcpRules.ParseSessionConfigOptions(liveSessionJson);
+        AntigravityAcpRules.ResolveModelAndEffort("gemini-4-neon", "xhigh", cfgOpts).Should().Be(("gemini-4-neon", "xhigh"));
+        AntigravityAcpRules.ResolveModelAndEffort("gemini-pro-orchestrator", "high", cfgOpts).Should().Be(("gemini-pro-orchestrator", null));
+        AntigravityAcpRules.ResolveModelAndEffort("gpt-oss-120b", "medium", cfgOpts).Should().Be(("gpt-oss-120b-medium", null));
+
+        // 2) -32002 與 Failed to read session 皆視為找不到對話
+        AntigravityAcpRules.IsSessionNotFound(new GrokAcpError(-32002, "Session not found: abc", null, "Session not found: abc")).Should().BeTrue();
+        AntigravityAcpRules.IsSessionNotFound(new GrokAcpError(-32603, "Failed to read session abc; retry, or load it with session/load", null, "Failed to read session abc")).Should().BeTrue();
+
+        // 3) usage_update 與 session/prompt usage 解析
+        AntigravityAcpRules.TryParseUsageUpdate(JObject.Parse("""{"sessionUpdate":"usage_update","used":13497,"size":1048576}"""), out var used, out var window).Should().BeTrue();
+        used.Should().Be(13497);
+        window.Should().Be(1_048_576);
+
+        var promptUsage = AntigravityAcpRules.ParsePromptUsage(
+            JObject.Parse("""{"stopReason":"end_turn","usage":{"inputTokens":17915,"outputTokens":160,"cachedReadTokens":22925,"cachedWriteTokens":0,"thoughtTokens":40,"totalTokens":41040}}"""),
+            out var cacheWrite);
+        cacheWrite.Should().Be(0);
+        promptUsage.Should().Be(new AgentUsage(17915 + 22925, 160 + 40, 22925, null));
+
+        // 4) AntigravityAcpUpdateParser：update_steps 發出待辦清單、write_file 產生 Diff 與規劃模式確認卡
+        var updateParser = new AntigravityAcpUpdateParser("acp", artifactFileReader: _ => "# 實作計畫\n1. 第一步");
+        updateParser.BeginTurn(planMode: true);
+        var planEvs = updateParser.HandleUpdate(JObject.Parse("""
+            {"sessionUpdate":"tool_call","toolCallId":"c1","name":"update_steps","args":{"steps":[{"title":"步驟 A","status":"in_progress"},{"title":"步驟 B","status":"pending"}]},"status":"in_progress"}
+            """));
+        planEvs.OfType<AgentToolStartedEvent>().Should().BeEmpty();
+        planEvs.OfType<AgentPlanEvent>().Single().Steps.Select(s => (s.Text, s.Status)).Should().Equal(("步驟 A", "inProgress"), ("步驟 B", "pending"));
+
+        var writeEvs = updateParser.HandleUpdate(JObject.Parse("""
+            {"sessionUpdate":"tool_call","toolCallId":"c2","name":"write_file","args":{"Path":"C:\\brain\\s1\\plan.md","Content":"# 實作計畫\n1. 第一步","ArtifactMetadata":{"Summary":"測試計畫","UserFacing":true,"RequestFeedback":true}},"status":"completed"}
+            """));
+        writeEvs.OfType<AgentToolStartedEvent>().Single().Diff.Should().NotBeNullOrEmpty();
+        writeEvs.OfType<AgentToolCompletedEvent>().Single().Status.Should().Be(AgentItemStatus.Done);
+        var finishEvs = updateParser.FinishTurn(AgentTurnOutcome.Completed);
+        finishEvs.OfType<AgentQuestionEvent>().Single().AnswerAsMessage.Should().BeTrue();
     }
 }

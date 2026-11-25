@@ -217,4 +217,43 @@ public sealed class AntigravityIntegrationTests : IDisposable
         completed!.Outcome.Should().Be(AgentTurnOutcome.Interrupted);
         session.IsRunning.Should().BeFalse();
     }
+
+    [EnvFact("MYRIAGENT_IT", Reason)]
+    public async Task ACP雙向會話_建立與續接對話_即時收usage_update與權限核准卡()
+    {
+        string sid;
+        using (var session = new AntigravityAcpSession())
+        {
+            var events = new BlockingCollection<AgentEvent>();
+            session.EventReceived += ev => events.Add(ev);
+            await session.SendAsync(
+                new AgentTurnInput("請用 run_command 執行 echo acp-ok，最後只回答「完成」。", Array.Empty<AgentAttachment>()),
+                Settings(null, started: false, AgentPermissionMode.Ask));
+
+            var collected = new List<AgentEvent>();
+            var deadline = DateTime.UtcNow + TurnTimeout;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (!events.TryTake(out var ev, TimeSpan.FromSeconds(1)))
+                    continue;
+                collected.Add(ev);
+                if (ev is AgentApprovalEvent approval)
+                    await session.RespondApprovalAsync(approval.RequestKey, AgentApprovalChoice.Allow, null);
+                if (ev is AgentTurnCompletedEvent)
+                    break;
+            }
+
+            collected.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Completed);
+            collected.OfType<AgentContextUsageEvent>().Should().NotBeEmpty("ACP 1.5.8+ 回報 usage_update 視窗用量");
+            sid = collected.OfType<AgentSessionStartedEvent>().Single().SessionId;
+            await session.CloseAsync();
+        }
+
+        using (var resumed = new AntigravityAcpSession())
+        {
+            var second = await RunTurnAsync(resumed, "只回答「續接成功」，不要用工具。", Settings(sid, started: true, AgentPermissionMode.Auto));
+            second.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Completed);
+            AllText(second).Should().Contain("續接成功");
+        }
+    }
 }

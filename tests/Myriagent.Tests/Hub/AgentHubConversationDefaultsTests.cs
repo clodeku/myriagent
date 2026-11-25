@@ -248,7 +248,8 @@ public class AgentHubConversationDefaultsTests
         defaults["Grok"]!["autoCompactRange"]!.Type.Should().Be(JTokenType.Null, "Grok 只有百分比");
         defaults["Grok"]!["autoCompactPercentRange"]!.Value<int>("max").Should().Be(95);
         defaults["Claude"]!["autoCompactPercentRange"]!.Type.Should().Be(JTokenType.Null);
-        defaults["Antigravity"]!["autoCompactRange"]!.Type.Should().Be(JTokenType.Null);
+        defaults["Antigravity"]!["autoCompactRange"]!.Value<long>("min").Should().Be(20_000);
+        defaults["Antigravity"]!["autoCompactRange"]!.Value<long>("max").Should().Be(2_000_000);
         var (id, session) = h.StartConversation(h.Main, h.Claude);
         session.Sent.All[^1].Settings.AutoCompactTokens.Should().BeNull("預設照 CLI");
 

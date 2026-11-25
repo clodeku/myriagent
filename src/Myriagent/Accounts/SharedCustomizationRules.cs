@@ -91,8 +91,11 @@ internal static class SharedCustomizationRules
     /// <summary>Antigravity 內建的保留工作流與技能名稱（跨 CLI 共用時不把同名 skill 連進 ~/.gemini/config/skills，避免蓋掉內建指令與說明技能）</summary>
     private static readonly HashSet<string> AntigravityReservedSkillNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "goal", "compact", "schedule", "browser", "plan", "grill-me", "teamwork", "learn", "boost", "swarm",
+        "goal", "compact", "schedule", "browser", "plan", "grill-me", "teamwork", "learn", "boost", "swarm", "native_swarm",
         "agy-customizations", "antigravity-guide", "antigravity_guide",
+        "automation", "conversations", "generative_ui", "mcp-app-development",
+        "migrate-agent-settings", "migrate-workflows", "permissioned-github",
+        "plugin", "run-workflow", "swarm_monitor", "swarm_narrator", "swarm_pane", "ui-plugin-navigation",
     };
 
     /// <summary>

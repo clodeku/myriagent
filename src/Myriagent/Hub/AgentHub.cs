@@ -270,7 +270,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
     {
         AgentProvider.Claude => new ClaudeAgentSession(),
         AgentProvider.Codex => new CodexAgentSession(),
-        AgentProvider.Antigravity => new AntigravityAgentSession(),
+        AgentProvider.Antigravity => new AntigravityAcpSession(),
         AgentProvider.Grok => new GrokAgentSession(),
         _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
     };

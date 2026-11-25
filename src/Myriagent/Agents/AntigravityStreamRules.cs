@@ -45,6 +45,12 @@ internal static partial class AntigravityStreamRules
     /// <summary><see cref="DisableAutoUpdateVariable"/> 唯一有效的值（agy 只認 "true"）</summary>
     public const string DisableAutoUpdateValue = "true";
 
+    /// <summary>停用 agy 內嵌解壓縮的 ripgrep、改用 PATH 上的 rg 或內建搜尋（agy 1.5.5+，供端點防毒攔截暫存執行檔時使用）</summary>
+    public const string DisableEmbeddedRipgrepVariable = "ANTIGRAVITY_DISABLE_EMBEDDED_RIPGREP";
+
+    /// <summary><see cref="DisableEmbeddedRipgrepVariable"/> 的啟用值</summary>
+    public const string DisableEmbeddedRipgrepValue = "true";
+
     /// <summary>「預設」模型可選的推理強度（agy --effort；模型 id 本身帶強度時不另外傳，見 ModelEncodesEffort）</summary>
     public static IReadOnlyList<string> DefaultModelEfforts { get; } = new[] { "low", "medium", "high", "xhigh", "max" };
 
@@ -107,6 +113,10 @@ internal static partial class AntigravityStreamRules
         new("learn", "將這次的修正或複雜設定整理成規則供日後對話沿用", null),
         new("browser", "使用瀏覽器搜尋網頁或與網頁應用程式互動", null),
         new("schedule", "設定單次計時器或定期排程執行指令", null),
+        new("automation", "設計並建立定期自動執行的背景排程工作", null),
+        new("run-workflow", "撰寫並執行協調多個子代理的 Python 工作流腳本", null),
+        new("migrate-agent-settings", "將其他代理的 MCP、技能與規則匯入成單一 Antigravity 外掛", null),
+        new("migrate-workflows", "將舊版 workflows 自動遷移為新版 SKILL.md 技能", null),
         new("compact", "壓縮並摘要目前的對話脈絡，釋放上下文空間", null),
     };
 
@@ -232,11 +242,13 @@ internal static partial class AntigravityStreamRules
     }
 
     /// <summary>
-    /// 唯讀掃描本機 Antigravity 資料夾（builtin\skills、config\skills、已啟用的 config\plugins\*\skills）組出斜線指令選單，
-    /// 不必額外啟動 190 MB 的 agy 子程序與 language server；資料夾不存在時回傳 <see cref="BuiltinWorkflowCommands"/>
+    /// 唯讀掃描本機 Antigravity 資料夾（builtin\skills、config\skills、已啟用的 config\plugins\*\skills，以及 agy 1.5.16+ 跨工具共用的 ~/.agents/skills）
+    /// 組出斜線指令選單，不必額外啟動 190 MB 的 agy 子程序與 language server；資料夾不存在時回傳 <see cref="BuiltinWorkflowCommands"/>。
+    /// 同名時 ~/.gemini 優先於 ~/.agents/skills
     /// </summary>
     /// <param name="agyConfigDir">Antigravity CLI 資料夾（~/.gemini/antigravity-cli）</param>
-    public static IReadOnlyList<AgentSlashCommand> DiscoverLocalCommands(string? agyConfigDir)
+    /// <param name="userProfileOverride">測試覆寫使用者家目錄（null 時由 ~/.gemini 的上層推導）</param>
+    public static IReadOnlyList<AgentSlashCommand> DiscoverLocalCommands(string? agyConfigDir, string? userProfileOverride = null)
     {
         var result = new List<AgentSlashCommand>(BuiltinWorkflowCommands);
         if (string.IsNullOrWhiteSpace(agyConfigDir))
@@ -251,6 +263,12 @@ internal static partial class AntigravityStreamRules
             var customConfig = Path.Combine(geminiRoot, "config");
             ScanSkillFolder(Path.Combine(customConfig, "skills"), seen, result);
             ScanPluginSkills(customConfig, Path.Combine(agyConfigDir, "config.json"), seen, result);
+
+            var userHome = !string.IsNullOrWhiteSpace(userProfileOverride)
+                ? userProfileOverride
+                : Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(geminiRoot));
+            if (!string.IsNullOrEmpty(userHome))
+                ScanSkillFolder(Path.Combine(userHome, ".agents", "skills"), seen, result);
         }
         return result;
     }
@@ -631,6 +649,40 @@ internal static partial class AntigravityStreamRules
     public static bool ModelEncodesEffort(string? model)
         => !string.IsNullOrEmpty(model) && EffortSuffix().IsMatch(model);
 
+    /// <summary>
+    /// Orchestrator 雙模型（agy 1.5.10+：gemini-pro-orchestrator、gemini-pro-orchestrator-neon、gemini-pro-orchestrator-argon）：
+    /// 實測 1.5.17 切換至此模型時 configOptions 不含 thought_level，強度由 orchestrator 設定的 planner／executor 各自決定，不接受獨立 --effort
+    /// </summary>
+    public static bool IsOrchestratorModel(string? model)
+        => !string.IsNullOrWhiteSpace(model) && model.Contains("orchestrator", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>這個模型是否可搭配獨立的 <c>--effort</c>（或 ACP <c>thought_level</c>）指定推理強度</summary>
+    public static bool SupportsEffortArgument(string? model)
+        => !ModelEncodesEffort(model) && !IsOrchestratorModel(model);
+
+    /// <summary>
+    /// 組裝 <c>--settings</c> 用的 Orchestrator 雙模型設定 JSON（agy 1.5.12+／1.5.17：分別指定規劃與執行的模型及推理強度）；皆未指定時回 null
+    /// </summary>
+    public static string? BuildOrchestratorSettingsJson(
+        string? plannerModel,
+        string? executorModel,
+        string? plannerEffort = null,
+        string? executorEffort = null)
+    {
+        var orch = new JObject();
+        if (!string.IsNullOrWhiteSpace(plannerModel))
+            orch["planner"] = plannerModel.Trim();
+        if (!string.IsNullOrWhiteSpace(executorModel))
+            orch["executor"] = executorModel.Trim();
+        if (!string.IsNullOrWhiteSpace(plannerEffort))
+            orch["plannerEffort"] = plannerEffort.Trim();
+        if (!string.IsNullOrWhiteSpace(executorEffort))
+            orch["executorEffort"] = executorEffort.Trim();
+        if (orch.Count == 0)
+            return null;
+        return new JObject { ["orchestrator"] = orch }.ToString(Formatting.None);
+    }
+
     // ───────────────────────────── 啟動參數與輸入 ─────────────────────────────
 
     /// <summary>
@@ -669,7 +721,7 @@ internal static partial class AntigravityStreamRules
             args.Add("--model");
             args.Add(normalizedModel);
         }
-        if (!string.IsNullOrWhiteSpace(effort) && !ModelEncodesEffort(normalizedModel))
+        if (!string.IsNullOrWhiteSpace(effort) && SupportsEffortArgument(normalizedModel))
         {
             args.Add("--effort");
             args.Add(effort);
@@ -795,8 +847,19 @@ internal static partial class AntigravityStreamRules
         }
     }
 
+    /// <summary>帳戶環境之後加上設定頁的自動壓縮上限（AGY_CLI_AUTO_COMPACT_OVERRIDE，agy 1.5.15+）；未設定時照 CLI 預設</summary>
+    public static void ApplyLaunchEnvironment(IDictionary<string, string?> env, AgentSessionSettings settings)
+    {
+        settings.ConfigureEnvironment(env);
+        if (AutoCompactRules.AntigravityOverrideValue(settings.AutoCompactTokens) is { } overrideVal)
+            env[AutoCompactRules.AntigravityOverrideVariable] = overrideVal;
+    }
+
+    private static AgentPermissionMode NormalizeStreamPermissionMode(AgentPermissionMode mode)
+        => mode == AgentPermissionMode.Ask ? AgentPermissionMode.AcceptEdits : mode;
+
     /// <summary>
-    /// 要以新的參數重開程序的設定組合：帳戶、執行檔、工作資料夾、模型、推理強度、權限模式、精簡模式、自訂代理（agy 都只能在啟動時指定）；
+    /// 要以新的參數重開程序的設定組合（stream-json 模式）：帳戶、執行檔、工作資料夾、模型、推理強度、權限模式、精簡模式、自訂代理、自動壓縮上限；
     /// 執行檔身分另外比（CliBinaryIdentity.SameOrUnknown）
     /// </summary>
     public static string Signature(
@@ -808,11 +871,13 @@ internal static partial class AntigravityStreamRules
         AgentPermissionMode mode,
         string conversationDirectory,
         bool useLocalCustomizations = true,
-        string? agent = null)
+        string? agent = null,
+        long? autoCompactTokens = null)
         => string.Join("|", accountKey, launcher, workingDirectory, NormalizeModel(model), effort,
-            AgentPermissionModes.Normalize(AgentProvider.Antigravity, mode), conversationDirectory,
-            useLocalCustomizations ? "1" : "0",
-            useLocalCustomizations ? NormalizeAgent(agent) : null);
+               NormalizeStreamPermissionMode(mode), conversationDirectory,
+               useLocalCustomizations ? "1" : "0",
+               useLocalCustomizations ? NormalizeAgent(agent) : null)
+           + (autoCompactTokens is { } ac ? $"|ac:{ac}" : string.Empty);
 
     public static bool NeedsNewProcess(string? runningSignature, CliBinaryIdentity? runningCli, string nextSignature, CliBinaryIdentity? nextCli)
         => !string.Equals(runningSignature, nextSignature, StringComparison.Ordinal) || !CliBinaryIdentity.SameOrUnknown(runningCli, nextCli);
@@ -923,6 +988,7 @@ internal static partial class AntigravityStreamRules
     private static readonly HashSet<string> SinglePromptOnlySlashNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "help", "usage", "quota", "credits", "skills", "agents", "plugin", "plugins", "hooks", "config", "settings", "changelog",
+        "thinking", "context", "doctor", "memory",
     };
 
     /// <summary>
@@ -1076,6 +1142,109 @@ internal static partial class AntigravityStreamRules
         return true;
     }
 
+    // ───────────────────────────── 對話標題同步（annotations/<conversationId>.pbtxt） ─────────────────────────────
+
+    /// <summary>
+    /// 對話的標註檔路徑（%USERPROFILE%\.gemini\antigravity-cli\annotations\&lt;conversationId&gt;.pbtxt，實測 agy 1.5.17 ConversationService 儲存標題處）；
+    /// conversationId 含非法字元或目錄穿越時回 null
+    /// </summary>
+    public static string? ResolveAnnotationPath(string userProfile, string? conversationId)
+    {
+        if (string.IsNullOrWhiteSpace(userProfile) || string.IsNullOrWhiteSpace(conversationId))
+            return null;
+        var id = conversationId.Trim();
+        if (id is "." or ".." || id.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || id.Contains('/') || id.Contains('\\'))
+            return null;
+        return Path.Combine(ResolveHome(userProfile), "annotations", id + ".pbtxt");
+    }
+
+    /// <summary>
+    /// 更新或插入 Protobuf text-format 的 <c>title:"..."</c> 欄位，保留既有標註檔裡的其他欄位（如 pinned、starred、archived、tags）
+    /// </summary>
+    public static string UpsertTitleInPbtxt(string? existingPbtxt, string? title)
+    {
+        var clean = (title ?? string.Empty).Replace("\r", " ").Replace("\n", " ").Trim();
+        var escaped = EscapePbtxtString(clean);
+        var titleLine = $"title:\"{escaped}\"";
+        if (string.IsNullOrWhiteSpace(existingPbtxt))
+            return titleLine + "\n";
+
+        var lines = existingPbtxt.Replace("\r\n", "\n").Split('\n');
+        var kept = new List<string>(lines.Length + 1);
+        bool replaced = false;
+        foreach (var line in lines)
+        {
+            var trimmed = line.TrimStart();
+            if (trimmed.StartsWith("title:", StringComparison.Ordinal))
+            {
+                if (!replaced)
+                {
+                    kept.Add(titleLine);
+                    replaced = true;
+                }
+                continue;
+            }
+            if (line.Length > 0)
+                kept.Add(line);
+        }
+        if (!replaced)
+            kept.Insert(0, titleLine);
+        return string.Join("\n", kept) + "\n";
+    }
+
+    private static string EscapePbtxtString(string value)
+    {
+        var sb = new System.Text.StringBuilder(value.Length + 8);
+        foreach (var ch in value)
+        {
+            switch (ch)
+            {
+                case '\\':
+                    sb.Append(@"\\");
+                    break;
+                case '"':
+                    sb.Append("\\\"");
+                    break;
+                case '\t':
+                    sb.Append(@"\t");
+                    break;
+                default:
+                    if (!char.IsControl(ch))
+                        sb.Append(ch);
+                    break;
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>將對話標題寫入 Antigravity 的 <c>annotations/&lt;conversationId&gt;.pbtxt</c>（失敗靜默忽略，不影響主對話）</summary>
+    public static bool WriteConversationTitle(string? conversationId, string? title, string? userProfile = null)
+    {
+        if (string.IsNullOrWhiteSpace(conversationId) || string.IsNullOrWhiteSpace(title))
+            return false;
+        var profile = string.IsNullOrWhiteSpace(userProfile)
+            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : userProfile;
+        var targetPath = ResolveAnnotationPath(profile, conversationId);
+        if (targetPath == null)
+            return false;
+        try
+        {
+            var dir = Path.GetDirectoryName(targetPath)!;
+            Directory.CreateDirectory(dir);
+            string? existing = File.Exists(targetPath) ? File.ReadAllText(targetPath) : null;
+            var updated = UpsertTitleInPbtxt(existing, title);
+            var tempPath = Path.Combine(dir, $".{Path.GetFileName(targetPath)}.{Guid.NewGuid():N}.tmp");
+            File.WriteAllText(tempPath, updated, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.Move(tempPath, targetPath, overwrite: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     [GeneratedRegex(@"please sign in|not logged in(to)?|sign in to view|authentication (required|failed)", RegexOptions.IgnoreCase)]
     private static partial Regex NotSignedIn();
 
@@ -1089,7 +1258,7 @@ internal static partial class AntigravityStreamRules
     [GeneratedRegex(@"conversation\b.*\b(not found|does not exist|no such|unknown|invalid)|(no|unknown|invalid) conversation", RegexOptions.IgnoreCase)]
     private static partial Regex ConversationNotFound();
 
-    [GeneratedRegex(@"credits balance is too low|individual quota reached|exhausted (?:your )?(?:(?:daily|weekly|monthly|five[\s-]hour|5h) )?quota|quota (?:has been )?exhausted|(?:usage|daily|weekly|monthly) limit (?:has been )?(?:reached|exceeded)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"credits balance is too low|individual quota reached|exhausted (?:your )?(?:(?:daily|weekly|monthly|five[\s-]hour|5h) )?quota|quota (?:has been )?exhausted|(?:usage|daily|weekly|monthly) limit (?:has been )?(?:reached|exceeded)|prepaid balance is insufficient|prepaid wallet is empty|spend cap (?:has been )?(?:reached|exceeded)|exceeded (?:your |the )?(?:organization'?s? )?spend cap", RegexOptions.IgnoreCase)]
     private static partial Regex QuotaExhaustedPattern();
 
     [GeneratedRegex(@"\bUNAVAILABLE\s*\(code\s*503\)|\b503\b[^\r\n]{0,40}?\bunavailable\b|\bservice is (?:currently |temporarily )?unavailable\b", RegexOptions.IgnoreCase)]
@@ -1121,6 +1290,6 @@ internal static partial class AntigravityStreamRules
     [GeneratedRegex(@"\s*\((minimal|low|medium|high|xhigh|max|extra high)\)\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex EffortLabelSuffix();
 
-    [GeneratedRegex(@"(?:⚠\s*)?\bThe\s+(?<plugin>[^\s]+)\s+plugin\s+needs\s+you\s+to\s+sign\s+in\.\s*Open\s+/plugin\s+to\s+sign\s+in\.", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?:⚠\s*)?\bThe\s+(?<plugin>[^\s]+)\s+plugin\s+needs\s+you\s+to\s+sign\s+in\.\s*Open\s+/plugin\s+to\s+(?:install\s+or\s+)?sign\s+in(?:\s+to\s+this\s+plugin)?\.", RegexOptions.IgnoreCase)]
     private static partial Regex PluginSignInNoticePattern();
 }

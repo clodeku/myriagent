@@ -43,13 +43,98 @@ internal static class AntigravityAcpRules
 {
     public const int ProtocolVersion = 1;
 
-    /// <summary>啟動 Antigravity ACP 雙向 stdio 伺服器的參數</summary>
+    /// <summary>啟動 Antigravity ACP 雙向 stdio 伺服器的預設參數</summary>
     public static IReadOnlyList<string> AgentArguments { get; } = new[] { "acp", "--stdio" };
+
+    /// <summary>停止時還在執行的工具卡說明</summary>
+    public const string CancelledToolOutput = "已停止";
 
     /// <summary>權限選項預設代碼（當 request_permission 未附 options 時使用）</summary>
     public const string DefaultAllowOnceOptionId = "allow_once";
     public const string DefaultAllowAlwaysOptionId = "allow_always";
     public const string DefaultRejectOnceOptionId = "reject_once";
+
+    /// <summary>
+    /// 組裝 <c>agy acp --stdio</c> 啟動參數：新對話且非精簡模式時可指定 <c>--agent</c>，精簡模式關閉預設自訂項，並以 <c>--add-dir</c> 加入對話與共用記憶資料夾
+    /// </summary>
+    public static List<string> BuildAgentArguments(
+        string? conversationDirectory = null,
+        bool useLocalCustomizations = true,
+        string? agent = null,
+        string? sharedMemoryDirectory = null,
+        bool isResume = false)
+    {
+        var args = new List<string> { "acp", "--stdio" };
+        if (!isResume && useLocalCustomizations && AntigravityStreamRules.NormalizeAgent(agent) is { } normalizedAgent)
+        {
+            args.Add("--agent");
+            args.Add(normalizedAgent);
+        }
+        if (!useLocalCustomizations)
+            args.Add("--include-default-customizations=false");
+        if (!string.IsNullOrWhiteSpace(conversationDirectory))
+        {
+            args.Add("--add-dir");
+            args.Add(conversationDirectory);
+        }
+        if (!string.IsNullOrWhiteSpace(sharedMemoryDirectory))
+        {
+            args.Add("--add-dir");
+            args.Add(sharedMemoryDirectory);
+        }
+        return args;
+    }
+
+    /// <summary>
+    /// ACP 程序的重開簽章：模型、推理強度與權限模式皆在程序內以 JSON-RPC 即時切換，不必放進簽章；
+    /// 只有帳戶、執行檔、工作資料夾、對話資料夾、精簡模式、自訂代理或自動壓縮上限改變時才重開程序
+    /// </summary>
+    public static string Signature(
+        string accountKey,
+        string? launcher,
+        string workingDirectory,
+        string conversationDirectory,
+        bool useLocalCustomizations = true,
+        string? agent = null,
+        long? autoCompactTokens = null)
+        => string.Join("|",
+               accountKey,
+               launcher,
+               workingDirectory,
+               conversationDirectory,
+               useLocalCustomizations ? "1" : "0",
+               useLocalCustomizations ? AntigravityStreamRules.NormalizeAgent(agent) : null)
+           + (autoCompactTokens is { } ac ? $"|ac:{ac}" : string.Empty);
+
+    /// <summary>ACP 錯誤是否代表尚未登入 Google／Antigravity</summary>
+    public static bool IsAuthRequired(GrokAcpError? error)
+    {
+        if (error == null)
+            return false;
+        if (error.Code == -32000)
+            return true;
+        var text = error.Text ?? string.Empty;
+        return text.Contains("Authentication required", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("Please sign in", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("not logged in", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("visit the URL to log in", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// ACP <c>session/resume</c> 或 <c>session/load</c> 找不到指定對話（實測 agy 1.5.17：<c>session/load</c> 回 <c>-32002 Session not found</c>，
+    /// <c>session/resume</c> 回 <c>-32603 Failed to read session ...; retry, or load it with session/load</c>）
+    /// </summary>
+    public static bool IsSessionNotFound(GrokAcpError? error)
+    {
+        if (error == null)
+            return false;
+        if (error.Code == -32002)
+            return true;
+        var text = error.Text ?? string.Empty;
+        return text.Contains("Session not found", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("Failed to read session", StringComparison.OrdinalIgnoreCase)
+               || AntigravityStreamRules.IsConversationNotFound(text);
+    }
 
     // ───────────────────────────── initialize ─────────────────────────────
 
@@ -219,14 +304,20 @@ internal static class AntigravityAcpRules
             string.IsNullOrEmpty(desc) ? null : desc);
     }
 
-    /// <summary>解析 <c>session/new</c> 回應的 <c>models</c>（<c>currentModelId</c> 與 <c>availableModels</c>）</summary>
+    /// <summary>
+    /// 解析 <c>session/new</c> 或 <c>session/resume</c> 回應的 <c>models</c>（<c>currentModelId</c> 與 <c>availableModels</c>）：
+    /// 同一個模型若帶 <c>-low/-medium/-high/-xhigh/-max</c> 後綴（實測 agy 1.5.17 <c>availableModels</c>），自動合併為基本 ID 與可選強度清單；
+    /// Orchestrator 雙模型不附強度選單；本來就沒有後綴的一般模型維持預設強度清單
+    /// </summary>
     public static (string? CurrentModelId, IReadOnlyList<AgentModelOption> AvailableModels) ParseSessionModels(JObject? result)
     {
         var modelsObj = result?["models"] as JObject;
         if (modelsObj == null)
             return (null, Array.Empty<AgentModelOption>());
-        var current = modelsObj.Value<string>("currentModelId")?.Trim();
-        var list = new List<AgentModelOption>();
+        var rawCurrent = modelsObj.Value<string>("currentModelId")?.Trim();
+        string? current = string.IsNullOrEmpty(rawCurrent) ? null : StripEffortSuffix(rawCurrent, out _);
+
+        var groups = new List<(string Id, string Label, string? Description, List<string> Efforts, bool HadSuffix)>();
         if (modelsObj["availableModels"] is JArray arr)
         {
             foreach (var item in arr.OfType<JObject>())
@@ -236,14 +327,120 @@ internal static class AntigravityAcpRules
                     continue;
                 var name = item.Value<string>("name")?.Trim();
                 var desc = item.Value<string>("description")?.Trim();
-                list.Add(new AgentModelOption(
-                    id,
-                    string.IsNullOrEmpty(name) ? id : name,
-                    string.IsNullOrEmpty(desc) ? null : desc,
-                    AntigravityStreamRules.DefaultModelEfforts));
+                var baseId = StripEffortSuffix(id, out var effort);
+                var cleanLabel = string.IsNullOrEmpty(name)
+                    ? baseId
+                    : effort != null ? StripEffortLabel(name) : name;
+                var idx = groups.FindIndex(g => string.Equals(g.Id, baseId, StringComparison.Ordinal));
+                if (idx < 0)
+                {
+                    groups.Add((
+                        baseId,
+                        cleanLabel.Length > 0 ? cleanLabel : baseId,
+                        string.IsNullOrEmpty(desc) ? null : desc,
+                        new List<string>(),
+                        effort != null));
+                    idx = groups.Count - 1;
+                }
+                if (effort != null && !groups[idx].Efforts.Contains(effort))
+                    groups[idx].Efforts.Add(effort);
             }
         }
-        return (string.IsNullOrEmpty(current) ? null : current, list);
+
+        var list = groups.Select(g =>
+        {
+            IReadOnlyList<string> efforts;
+            if (AntigravityStreamRules.IsOrchestratorModel(g.Id))
+                efforts = Array.Empty<string>();
+            else if (g.Efforts.Count > 0)
+                efforts = OrderEfforts(g.Efforts);
+            else
+                efforts = AntigravityStreamRules.DefaultModelEfforts;
+            return new AgentModelOption(g.Id, g.Label, g.Description, efforts);
+        }).ToList();
+
+        return (current, list);
+    }
+
+    private static readonly string[] EffortRank = { "minimal", "low", "medium", "high", "xhigh", "max" };
+
+    private static string[] OrderEfforts(List<string> efforts)
+        => efforts.OrderBy(e => Array.IndexOf(EffortRank, e) is >= 0 and var i ? i : int.MaxValue).ToArray();
+
+    private static string StripEffortSuffix(string modelId, out string? effort)
+    {
+        effort = null;
+        var dash = modelId.LastIndexOf('-');
+        if (dash <= 0 || dash >= modelId.Length - 1)
+            return modelId;
+        var tail = modelId[(dash + 1)..].ToLowerInvariant();
+        if (Array.IndexOf(EffortRank, tail) < 0)
+            return modelId;
+        effort = tail;
+        return modelId[..dash];
+    }
+
+    private static string StripEffortLabel(string label)
+    {
+        var open = label.LastIndexOf('(');
+        if (open > 0 && label.EndsWith(')'))
+        {
+            var inner = label[(open + 1)..^1].Trim().ToLowerInvariant();
+            if (inner is "minimal" or "low" or "medium" or "high" or "xhigh" or "max" or "extra high" or "extra")
+                return label[..open].TrimEnd();
+        }
+        return label;
+    }
+
+    /// <summary>
+    /// 依 ACP <c>configOptions</c> 解析實際要送給 <c>session/set_model</c> 的模型 ID 與 <c>thought_level</c> 強度（實測 gpt-oss-120b-medium 在 configOptions 為完整 ID，
+    /// 而 gemini-4-neon 等為無後綴 ID、Orchestrator 則不含 thought_level）
+    /// </summary>
+    public static (string? ModelId, string? Effort) ResolveModelAndEffort(
+        string? requestedModel,
+        string? requestedEffort,
+        IReadOnlyList<AntigravityAcpConfigOption>? configOptions)
+    {
+        var normalized = AntigravityStreamRules.NormalizeModel(requestedModel);
+        string? extractedEffort = null;
+        string? modelToSend = normalized;
+        if (normalized != null)
+        {
+            var modelOpt = configOptions?.FirstOrDefault(c => string.Equals(c.Id, "model", StringComparison.OrdinalIgnoreCase));
+            if (modelOpt != null && modelOpt.Choices.Any(c => string.Equals(c.Value, normalized, StringComparison.OrdinalIgnoreCase)))
+            {
+                modelToSend = normalized;
+            }
+            else
+            {
+                var stripped = StripEffortSuffix(normalized, out extractedEffort);
+                if (modelOpt == null || modelOpt.Choices.Count == 0 || modelOpt.Choices.Any(c => string.Equals(c.Value, stripped, StringComparison.OrdinalIgnoreCase)))
+                {
+                    modelToSend = stripped;
+                }
+                else
+                {
+                    var withEffort = modelOpt.Choices.FirstOrDefault(c => c.Value.StartsWith(stripped + "-", StringComparison.OrdinalIgnoreCase));
+                    if (withEffort != null)
+                        modelToSend = withEffort.Value;
+                }
+            }
+        }
+
+        var desiredEffort = !string.IsNullOrWhiteSpace(requestedEffort) ? requestedEffort.Trim().ToLowerInvariant() : extractedEffort;
+        if (string.IsNullOrWhiteSpace(desiredEffort) || !AntigravityStreamRules.SupportsEffortArgument(modelToSend))
+            return (modelToSend, null);
+
+        if (configOptions is { Count: > 0 })
+        {
+            var thoughtOpt = configOptions.FirstOrDefault(c => string.Equals(c.Id, "thought_level", StringComparison.OrdinalIgnoreCase));
+            if (thoughtOpt == null)
+                return (modelToSend, null);
+            if (thoughtOpt.Choices.Count > 0 && !thoughtOpt.Choices.Any(c => string.Equals(c.Value, desiredEffort, StringComparison.OrdinalIgnoreCase)))
+                return (modelToSend, null);
+        }
+
+        return (modelToSend, desiredEffort);
     }
 
     /// <summary>解析 <c>session/new</c> 回應的 <c>modes</c>（<c>currentModeId</c> 與 <c>availableModes</c>）</summary>
@@ -362,11 +559,18 @@ internal static class AntigravityAcpRules
         string? text,
         IReadOnlyList<AgentAttachment> attachments,
         bool supportsInlineImages = true,
-        Func<string, byte[]>? readFile = null)
+        Func<string, byte[]>? readFile = null,
+        string? workingDirectoryNotice = null)
     {
         var prompt = new JArray();
         var reader = readFile ?? File.ReadAllBytes;
         bool inlinedAnyImage = false;
+        int imageCount = 0;
+        long totalBytes = 0;
+        int skippedImages = 0;
+        const int MaxImages = 20;
+        const long MaxBytes = 20L * 1024 * 1024;
+
         if (supportsInlineImages && attachments is { Count: > 0 })
         {
             foreach (var att in attachments)
@@ -378,6 +582,11 @@ internal static class AntigravityAcpRules
                     try
                     {
                         var bytes = reader(imgPath);
+                        if (imageCount >= MaxImages || totalBytes + bytes.LongLength > MaxBytes)
+                        {
+                            skippedImages++;
+                            continue;
+                        }
                         var ext = Path.GetExtension(imgPath).ToLowerInvariant();
                         var mime = ext switch
                         {
@@ -393,6 +602,8 @@ internal static class AntigravityAcpRules
                             ["data"] = Convert.ToBase64String(bytes),
                         });
                         inlinedAnyImage = true;
+                        imageCount++;
+                        totalBytes += bytes.LongLength;
                     }
                     catch
                     {
@@ -406,7 +617,12 @@ internal static class AntigravityAcpRules
             parts.Add($"<myriagent_instructions>\n{instructions.Trim()}\n</myriagent_instructions>");
         if (!string.IsNullOrWhiteSpace(historyRecap))
             parts.Add(historyRecap.Trim());
-        parts.Add((text ?? string.Empty) + AgentAttachmentRules.BuildAttachmentNote(attachments, imagesInline: inlinedAnyImage));
+        if (!string.IsNullOrWhiteSpace(workingDirectoryNotice))
+            parts.Add(workingDirectoryNotice);
+        var body = (text ?? string.Empty) + AgentAttachmentRules.BuildAttachmentNote(attachments, imagesInline: inlinedAnyImage);
+        if (skippedImages > 0)
+            body += $"\n（另有 {skippedImages} 張圖片超過單則訊息上限未直接附上，可用讀取工具查看上列路徑）";
+        parts.Add(body);
 
         prompt.Add(new JObject
         {
@@ -453,11 +669,13 @@ internal static class AntigravityAcpRules
         var detail = command ?? (rawInput is { Count: > 0 } ? rawInput.ToString(Newtonsoft.Json.Formatting.Indented) : path);
 
         string allowOnce = DefaultAllowOnceOptionId;
-        string allowAlways = DefaultAllowAlwaysOptionId;
+        string? nativeAllowAlways = null;
         string rejectOnce = DefaultRejectOnceOptionId;
+        bool sawOptions = false;
 
-        if (@params["options"] is JArray options)
+        if (@params["options"] is JArray options && options.Count > 0)
         {
+            sawOptions = true;
             foreach (var opt in options.OfType<JObject>())
             {
                 var optionId = opt.Value<string>("optionId")?.Trim();
@@ -467,12 +685,16 @@ internal static class AntigravityAcpRules
                 if (optKind.Equals("allow_once", StringComparison.OrdinalIgnoreCase))
                     allowOnce = optionId;
                 else if (optKind.Equals("allow_always", StringComparison.OrdinalIgnoreCase))
-                    allowAlways = optionId;
+                    nativeAllowAlways = optionId;
                 else if (optKind.Equals("reject_once", StringComparison.OrdinalIgnoreCase)
                          || optKind.Equals("reject_always", StringComparison.OrdinalIgnoreCase))
                     rejectOnce = optionId;
             }
         }
+
+        // 實測 agy 1.5.17：Windows PowerShell 指令只附 allow（allow_once）與 deny（reject_once），不附 allow_always；
+        // 若無 allow_always 選項，AllowForSession 退回送 allowOnce（並由會話層記住本對話自動放行）
+        var effectiveAllowAlways = nativeAllowAlways ?? (sawOptions ? allowOnce : DefaultAllowAlwaysOptionId);
 
         return new AntigravityPermissionRequest(
             sessionId,
@@ -482,7 +704,7 @@ internal static class AntigravityAcpRules
             command ?? path,
             detail,
             allowOnce,
-            allowAlways,
+            effectiveAllowAlways,
             rejectOnce);
     }
 
@@ -700,4 +922,157 @@ internal static class AntigravityAcpRules
         updatedAt = string.IsNullOrEmpty(rawUpdated) ? null : rawUpdated;
         return title != null || updatedAt != null;
     }
+
+    /// <summary>
+    /// 解析 <c>session/update</c> 中的 <c>usage_update</c>（agy 1.5.8+ 實測：<c>{"sessionUpdate":"usage_update","used":13497,"size":1048576}</c>）
+    /// </summary>
+    public static bool TryParseUsageUpdate(JObject? update, out long? usedTokens, out long? windowTokens)
+    {
+        usedTokens = null;
+        windowTokens = null;
+        if (update == null || !string.Equals(update.Value<string>("sessionUpdate"), "usage_update", StringComparison.Ordinal))
+            return false;
+        long used = Long(update["used"]);
+        long size = Long(update["size"]);
+        if (used > 0)
+            usedTokens = used;
+        if (size > 0)
+            windowTokens = size;
+        return usedTokens != null || windowTokens != null;
+    }
+
+    /// <summary>
+    /// 解析 <c>session/prompt</c> 回應中的 <c>usage</c>（實測 agy 1.5.17：<c>inputTokens</c>、<c>outputTokens</c>、<c>cachedReadTokens</c>、<c>cachedWriteTokens</c>、<c>thoughtTokens</c>）
+    /// </summary>
+    public static AgentUsage? ParsePromptUsage(JToken? result, out long cacheWriteTokens)
+    {
+        cacheWriteTokens = 0;
+        if ((result as JObject)?["usage"] is not JObject usage)
+            return null;
+        long cached = Long(usage["cachedReadTokens"] ?? usage["cache_read_tokens"]);
+        cacheWriteTokens = Long(usage["cachedWriteTokens"] ?? usage["cache_write_tokens"]);
+        long input = Long(usage["inputTokens"] ?? usage["input_tokens"]) + cached + cacheWriteTokens;
+        long output = Long(usage["outputTokens"] ?? usage["output_tokens"]) + Long(usage["thoughtTokens"] ?? usage["thinking_tokens"]);
+        return input + output > 0 ? new AgentUsage(input, output, cached, null) : null;
+    }
+
+    /// <summary>解析 <c>session/prompt</c> 的 <c>stopReason</c></summary>
+    public static (AgentTurnOutcome Outcome, string? Error) EvaluateStopReason(string? stopReason) => (stopReason ?? string.Empty).Trim().ToLowerInvariant() switch
+    {
+        "cancelled" or "canceled" or "interrupted" => (AgentTurnOutcome.Interrupted, null),
+        "end_turn" or "stop_sequence" or "max_tokens" or "max_turn_requests" or "" => (AgentTurnOutcome.Completed, null),
+        var other => (AgentTurnOutcome.Completed, null),
+    };
+
+    /// <summary>從 ACP <c>tool_call</c>／<c>tool_call_update</c> 取出工具名稱與完整參數物件</summary>
+    public static (string? ToolName, JObject? Args) ExtractToolNameAndArgs(JObject? call)
+    {
+        if (call == null)
+            return (null, null);
+        var name = call.Value<string>("name")?.Trim();
+        var args = call["args"] as JObject ?? call["rawInput"] as JObject;
+        return (string.IsNullOrEmpty(name) ? null : name, args);
+    }
+
+    /// <summary>從 ACP <c>tool_call</c>／<c>tool_call_update</c> 計算編輯紅綠 Diff（優先採用 ACP <c>content[type="diff"]</c>，否則由工具參數推導）</summary>
+    public static IReadOnlyList<AgentDiffLine>? ExtractToolDiff(JObject? call)
+    {
+        if (call == null)
+            return null;
+        if (call["content"] is JArray contentArr)
+        {
+            var pairs = new List<(string? OldString, string? NewString)>();
+            foreach (var item in contentArr.OfType<JObject>())
+            {
+                if (!string.Equals(item.Value<string>("type"), "diff", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var oldText = item.Value<string>("oldText");
+                var newText = item.Value<string>("newText");
+                if (oldText != null || newText != null)
+                    pairs.Add((oldText, newText));
+            }
+            if (pairs.Count == 1 && string.IsNullOrEmpty(pairs[0].OldString) && pairs[0].NewString != null)
+                return DiffRules.FromNewFile(pairs[0].NewString!);
+            if (pairs.Count > 0)
+                return DiffRules.FromEdits(pairs);
+        }
+
+        var (name, args) = ExtractToolNameAndArgs(call);
+        return AntigravityTranscriptRules.ComputeToolDiff(name, args);
+    }
+
+    /// <summary>從 ACP <c>tool_call_update</c> 取出工具文字輸出與結束碼</summary>
+    public static (string? Output, int? ExitCode) ExtractToolOutput(JObject? update)
+    {
+        if (update == null)
+            return (null, null);
+        int? exitCode = null;
+        string? rawOutText = null;
+        if (update["rawOutput"] is JObject rawOut)
+        {
+            if (rawOut["exit_code"] is JValue { Value: not null } ec
+                && int.TryParse(Convert.ToString(ec.Value, System.Globalization.CultureInfo.InvariantCulture), out var parsedEc))
+            {
+                exitCode = parsedEc;
+            }
+            else if (rawOut["exitCode"] is JValue { Value: not null } ec2
+                     && int.TryParse(Convert.ToString(ec2.Value, System.Globalization.CultureInfo.InvariantCulture), out var parsedEc2))
+            {
+                exitCode = parsedEc2;
+            }
+            rawOutText = rawOut.Value<string>("output") ?? rawOut.Value<string>("error");
+        }
+
+        if (string.IsNullOrEmpty(rawOutText) && update["content"] is JArray contentArr)
+        {
+            var parts = new List<string>();
+            foreach (var item in contentArr.OfType<JObject>())
+            {
+                if (item["content"] is JObject inner && string.Equals(inner.Value<string>("type"), "text", StringComparison.OrdinalIgnoreCase))
+                {
+                    var t = inner.Value<string>("text");
+                    if (!string.IsNullOrEmpty(t))
+                        parts.Add(t);
+                }
+                else if (string.Equals(item.Value<string>("type"), "text", StringComparison.OrdinalIgnoreCase))
+                {
+                    var t = item.Value<string>("text");
+                    if (!string.IsNullOrEmpty(t))
+                        parts.Add(t);
+                }
+            }
+            if (parts.Count > 0)
+                rawOutText = string.Join("\n", parts);
+        }
+
+        var normalized = string.IsNullOrEmpty(rawOutText) ? null : rawOutText.Replace("\r\n", "\n");
+        return (normalized, exitCode);
+    }
+
+    /// <summary>ACP <c>tool_call</c>／<c>tool_call_update</c> 的結束狀態（未結束回 null）</summary>
+    public static AgentItemStatus? ClassifyToolEndStatus(string? status) => (status ?? string.Empty).Trim().ToLowerInvariant() switch
+    {
+        "completed" or "done" or "succeeded" => AgentItemStatus.Done,
+        "failed" or "error" => AgentItemStatus.Failed,
+        "cancelled" or "canceled" => AgentItemStatus.Cancelled,
+        "rejected" or "declined" => AgentItemStatus.Declined,
+        _ => null,
+    };
+
+    /// <summary>工具更新是否代表使用者在核准卡按了拒絕</summary>
+    public static bool IsRejectedToolUpdate(string? status, string? output)
+    {
+        if (string.Equals(status, "rejected", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "declined", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        return output != null
+               && (output.Contains("user denied permission", StringComparison.OrdinalIgnoreCase)
+                   || output.Contains("User rejected", StringComparison.OrdinalIgnoreCase)
+                   || output.Contains("Permission denied by user", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static long Long(JToken? token)
+        => token is JValue { Value: not null } v && long.TryParse(Convert.ToString(v.Value, System.Globalization.CultureInfo.InvariantCulture), out var n) ? n : 0;
 }

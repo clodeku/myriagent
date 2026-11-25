@@ -622,13 +622,26 @@ internal sealed class HealthScanner(HealthMachine machine) : IHealthScanner
                 _ = TryReadJsonConfig(scan, hooksCandidate);
         }
 
-        // 使用者層 Skills（~/.gemini/config/skills/<name>/SKILL.md）與自訂代理（~/.gemini/config/agents/*.md）
+        // 使用者層 Skills（~/.gemini/config/skills/<name>/SKILL.md 與 agy 1.5.16+ 跨工具共用的 ~/.agents/skills/<name>/SKILL.md；~/.gemini 優先）與自訂代理
         var listing = new StringBuilder();
         var skills = 0;
+        var seenUserSkills = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var skill in SkillFiles(Path.Combine(globalConfig, "skills")))
         {
+            seenUserSkills.Add(skill.Name);
             skills++;
             AddListing(listing, scan, skill.Name, skill.File, "skill", "user", null);
+        }
+        var userHome = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(gemini));
+        if (!string.IsNullOrEmpty(userHome))
+        {
+            foreach (var skill in SkillFiles(Path.Combine(userHome, ".agents", "skills")))
+            {
+                if (!seenUserSkills.Add(skill.Name))
+                    continue;
+                skills++;
+                AddListing(listing, scan, skill.Name, skill.File, "skill", "user", null);
+            }
         }
         var agents = MarkdownFiles(Path.Combine(globalConfig, "agents")).Count()
                      + MarkdownFiles(Path.Combine(dir, "agents")).Count();

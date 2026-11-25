@@ -792,12 +792,16 @@ internal static class AgentPermissionModes
         new(AgentPermissionMode.FullAccess, "完全自動", "完全存取、一律放行"),
     };
 
-    /// <summary>Antigravity：stream-json 沒有核准協定，拿不到核准的操作會被 agy 略過（軟拒絕），所以沒有「每步詢問」；「自動（沙箱）」以 --dangerously-skip-permissions --sandbox 在 Windows 終端機沙箱內自動執行</summary>
+    /// <summary>
+    /// Antigravity：ACP（agy acp --stdio，1.5.8+／1.5.17）支援雙向核准（session/request_permission）與對話中即時切換模式（session/set_mode）：
+    /// default＝每步詢問、accept-edits＝工作區內自動接受編輯（指令仍問）、plan＝規劃模式、auto＝沙箱與安全指令自動執行（高風險才問）、FullAccess＝會話自動放行所有核准請求
+    /// </summary>
     private static readonly Option[] AntigravityOptions =
     {
-        new(AgentPermissionMode.AcceptEdits, "自動接受編輯", "可以讀取與修改檔案；執行指令等需要核准的操作會被自動拒絕（agy 無法在對話中詢問）"),
+        new(AgentPermissionMode.Ask, "每步詢問", "執行指令、修改檔案前先問你"),
+        new(AgentPermissionMode.AcceptEdits, "自動接受編輯", "工作資料夾內修改檔案不再詢問，執行指令仍會問"),
         new(AgentPermissionMode.Plan, "規劃模式", "只讀取與分析，寫出計畫後顯示確認卡等你決定"),
-        new(AgentPermissionMode.Auto, "自動（沙箱）", "在 Windows 終端機沙箱內自動執行指令與修改檔案，保護工作區外的敏感目錄"),
+        new(AgentPermissionMode.Auto, "自動（沙箱）", "在終端機沙箱內自動執行安全指令與修改檔案，高風險或跨出沙箱才問"),
         new(AgentPermissionMode.FullAccess, "完全自動", "一律放行，包括在沙箱外執行指令"),
     };
 
@@ -825,7 +829,7 @@ internal static class AgentPermissionModes
 
     /// <summary>
     /// 這個代理不支援的模式換成最接近的：Codex 的「自動接受編輯」→自動、「規劃模式」→每步詢問；
-    /// Antigravity 的「每步詢問」→自動接受編輯（stream-json 不能詢問；「自動（沙箱）」對應 --dangerously-skip-permissions --sandbox）
+    /// Claude、Antigravity（ACP）、Grok 五種模式都支援
     /// </summary>
     public static AgentPermissionMode Normalize(AgentProvider provider, AgentPermissionMode mode) => provider switch
     {
@@ -836,7 +840,7 @@ internal static class AgentPermissionModes
             AgentPermissionMode.Plan => AgentPermissionMode.Ask,
             _ => mode,
         },
-        AgentProvider.Antigravity => mode == AgentPermissionMode.Ask ? AgentPermissionMode.AcceptEdits : mode,
+        AgentProvider.Antigravity => mode,
         AgentProvider.Grok => mode,
         _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
     };

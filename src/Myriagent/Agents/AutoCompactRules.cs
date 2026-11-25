@@ -14,7 +14,7 @@ namespace Myriagent.Agents;
 /// <item>Grok：沒有以 token 指定的門檻，改用百分比（ProviderConversationDefaults.AutoCompactPercent）：環境變數 GROK_AUTO_COMPACT_THRESHOLD_PERCENT
 /// （整數 0～100，超出的 grok 忽略；蓋過伺服器給每個模型的 80% 與 config 的 session.auto_compact_threshold_percent，1.0.70 實測 5% 在 9% 就壓縮）。
 /// 系統提示就約佔 256k 視窗的 9%，太低每一輪都會壓縮，所以只收 20～95</item>
-/// <item>Antigravity：agy 的 AGY_CLI_AUTO_COMPACT_OVERRIDE 格式不明，不提供</item>
+/// <item>Antigravity：環境變數 AGY_CLI_AUTO_COMPACT_OVERRIDE（agy 1.5.15+ 支援所有適用模型，接受 token 整數、K／M 或百分比，此處統一使用 token 上限）</item>
 /// </list>
 /// </summary>
 internal static class AutoCompactRules
@@ -30,6 +30,9 @@ internal static class AutoCompactRules
 
     /// <summary>Grok 的環境變數：上下文用到視窗的百分之幾時自動壓縮</summary>
     public const string GrokPercentVariable = "GROK_AUTO_COMPACT_THRESHOLD_PERCENT";
+
+    /// <summary>Antigravity 的環境變數：上下文用到這麼多 token 時自動壓縮（agy 1.5.15+）</summary>
+    public const string AntigravityOverrideVariable = "AGY_CLI_AUTO_COMPACT_OVERRIDE";
 
     /// <summary>以百分比設定的範圍（含兩端）；null＝這一家不以百分比設定</summary>
     public static (int Min, int Max)? PercentRangeOf(AgentProvider provider) => provider switch
@@ -78,7 +81,7 @@ internal static class AutoCompactRules
     {
         AgentProvider.Claude => (100_000 - ClaudeBufferTokens, 1_000_000 - ClaudeBufferTokens),
         AgentProvider.Codex => (20_000, 2_000_000),
-        AgentProvider.Antigravity => null,
+        AgentProvider.Antigravity => (20_000, 2_000_000),
         AgentProvider.Grok => null,
         _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
     };
@@ -128,4 +131,8 @@ internal static class AutoCompactRules
     /// <summary>Codex app-server 的「-c」值；null＝不帶</summary>
     public static string? CodexOverride(long? tokens)
         => tokens is { } value and > 0 ? $"{CodexConfigKey}={value.ToString(CultureInfo.InvariantCulture)}" : null;
+
+    /// <summary>Antigravity 的 AGY_CLI_AUTO_COMPACT_OVERRIDE 要帶的值（token 整數）；null＝不帶</summary>
+    public static string? AntigravityOverrideValue(long? tokens)
+        => tokens is { } value and > 0 ? value.ToString(CultureInfo.InvariantCulture) : null;
 }

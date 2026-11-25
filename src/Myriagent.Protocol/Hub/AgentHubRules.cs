@@ -205,7 +205,7 @@ internal static partial class AgentHubRules
         {
             AgentProvider.Claude => (workingDirectory, "AskUserQuestion"),
             AgentProvider.Codex => (workingDirectory + CodexWorkingDirectoryNote, "request_user_input"),
-            AgentProvider.Antigravity => (workingDirectory + AntigravityWorkingDirectoryNote, (string?)null),
+            AgentProvider.Antigravity => (workingDirectory + AntigravityWorkingDirectoryNote, "ask_question"),
             AgentProvider.Grok => (workingDirectory + GrokWorkingDirectoryNote, "ask_user_question"),
             _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
         };
@@ -237,12 +237,12 @@ internal static partial class AgentHubRules
     }
 
     /// <summary>
-    /// 拒絕核准時附的說明要不要改當下一則訊息送（回覆沒有欄位能帶說明的：Codex、Grok）；Claude 放進拒絕訊息，Antigravity 沒有核准卡
+    /// 拒絕核准時附的說明要不要改當下一則訊息送（ACP／AppServer 的拒絕回覆沒有欄位能帶說明：Codex、Grok、Antigravity）；Claude 放進拒絕訊息
     /// </summary>
     public static bool SendsDenyFeedbackAsMessage(AgentProvider provider) => provider switch
     {
-        AgentProvider.Codex or AgentProvider.Grok => true,
-        AgentProvider.Claude or AgentProvider.Antigravity => false,
+        AgentProvider.Codex or AgentProvider.Grok or AgentProvider.Antigravity => true,
+        AgentProvider.Claude => false,
         _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
     };
 

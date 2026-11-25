@@ -965,4 +965,46 @@ public class AntigravityStreamParserTests
         var res9 = dbOnlyParser.Parse(Result(numTurns: 4, input: 60, output: 5, status: "ERROR", response: "講到一半斷線", error: StaleWsError)).Events;
         res9.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Failed, "agent_response 停在 ACTIVE 未 DONE 代表半途斷流，不能當成已完成");
     }
+
+    [Fact]
+    public void UpdateSteps轉為即時待辦清單_不發多餘工具卡_並支援run_workflow與swarm工具描述與背景追蹤()
+    {
+        var parser = new AntigravityStreamParser("p");
+        parser.BeginTurn();
+
+        var stepActive = """
+            {"event":"step_update","step_update":{"conversation_id":"conv-plan","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"update_steps","tool_info":{"name":"update_steps","parameters":{"steps":[{"title":"分析協定","status":"done"},{"title":"實作解析器","status":"in_progress"},{"title":"略過舊介面","status":"skipped"},{"title":"驗證失敗案例","status":"failed"}]}}}}
+            """;
+        var activeEvents = parser.Parse(stepActive).Events;
+        activeEvents.OfType<AgentToolStartedEvent>().Should().BeEmpty("update_steps 只更新待辦清單，不畫多餘工具卡");
+        var plan = activeEvents.OfType<AgentPlanEvent>().Single();
+        plan.Steps.Select(s => (s.Text, s.Status)).Should().Equal(
+            ("分析協定", "completed"),
+            ("實作解析器", "inProgress"),
+            ("略過舊介面（已略過）", "completed"),
+            ("驗證失敗案例（失敗）", "pending"));
+
+        var stepDone = """{"event":"step_update","step_update":{"conversation_id":"conv-plan","step_index":1,"state":"DONE","step_type":"tool","tool_name":"update_steps","tool_info":{"name":"update_steps"}}}""";
+        parser.Parse(stepDone).Events.Should().BeEmpty();
+
+        // run_workflow 與 swarm 的工具標題與背景任務追蹤
+        var wfStart = """{"event":"step_update","step_update":{"conversation_id":"conv-plan","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"run_workflow","tool_info":{"name":"run_workflow","parameters":{"Description":"平行審查十個模組","ScriptPath":"C:\\repo\\wf.py"}}}}""";
+        var wfStarted = parser.Parse(wfStart).Events.OfType<AgentToolStartedEvent>().Single();
+        wfStarted.ToolName.Should().Be("執行工作流");
+        wfStarted.ToolKind.Should().Be("agent");
+        wfStarted.Title.Should().Be("平行審查十個模組");
+        wfStarted.FilePath.Should().Be(@"C:\repo\wf.py");
+
+        var wfDone = """{"event":"step_update","step_update":{"conversation_id":"conv-plan","step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_workflow","tool_info":{"name":"run_workflow","output":"Workflow running in the background as task-wf-99"}}}""";
+        var wfDoneEvents = parser.Parse(wfDone).Events;
+        wfDoneEvents.OfType<AgentBackgroundWorkEvent>().Single().Count.Should().Be(1);
+        parser.HasLiveBackgroundWork.Should().BeTrue();
+
+        var swarmDesc = AntigravityStepRules.DescribeTool(
+            "swarm",
+            JObject.Parse("""{"parameters":{"action":"add","name":"reviewer-1","brief":"檢查安全性"}}"""));
+        swarmDesc.Name.Should().Be("代理蜂群");
+        swarmDesc.Title.Should().Be("新增成員：reviewer-1");
+        swarmDesc.Detail.Should().Be("檢查安全性");
+    }
 }

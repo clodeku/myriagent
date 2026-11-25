@@ -41,6 +41,9 @@ internal sealed class AntigravityAgentSession : IAgentSession
     /// <summary>解析逐字稿路徑的注入點（測試可替換或設為 null；預設指向使用者目錄下的 brain 記錄）</summary>
     internal Func<string, string?>? TranscriptPathResolver { get; set; } = AntigravityTranscriptReader.DefaultResolveTranscriptPath;
 
+    /// <summary>寫入標註檔（annotations/&lt;id&gt;.pbtxt）時使用的家目錄覆寫（測試用；null 用系統預設家目錄）</summary>
+    internal string? UserProfileOverride { get; set; }
+
     private readonly object gate = new();
     private readonly object safePointOrder = new();
     private AgentProcess? process;
@@ -63,6 +66,9 @@ internal sealed class AntigravityAgentSession : IAgentSession
 
     /// <summary>目前程序啟動時帶的 --conversation（null＝新對話）</summary>
     private string? processConversation;
+
+    /// <summary>對話尚未拿到 conversationId 時先由 RenameAsync 指定的標題，待收到 NewConversationId 時補寫入標註檔</summary>
+    private string? pendingTitle;
 
     /// <summary>目前程序在 stderr 回報找不到 --conversation 指定的對話（它已默默改開空白的新對話）</summary>
     private bool processConversationMissing;
@@ -197,7 +203,7 @@ internal sealed class AntigravityAgentSession : IAgentSession
         }
     }
 
-    private static string Signature(AgentSessionSettings settings)
+    internal static string Signature(AgentSessionSettings settings)
         => AntigravityStreamRules.Signature(
             settings.AccountKey,
             settings.Launcher?.FileName,
@@ -207,7 +213,8 @@ internal sealed class AntigravityAgentSession : IAgentSession
             settings.PermissionMode,
             settings.ConversationDirectory,
             settings.UseLocalCustomizations,
-            settings.Agent);
+            settings.Agent,
+            settings.AutoCompactTokens);
 
     public async Task SendAsync(AgentTurnInput input, AgentSessionSettings settings)
     {
@@ -536,7 +543,7 @@ internal sealed class AntigravityAgentSession : IAgentSession
                 settings.WorkingDirectory,
                 sharedMemoryDirectory: shared.SharedMemoryDirectory),
             settings.WorkingDirectory,
-            settings.ConfigureEnvironment,
+            env => AntigravityStreamRules.ApplyLaunchEnvironment(env, settings),
             ct);
         started.LineReceived += OnLine;
         started.StderrReceived += OnStderr;
@@ -635,6 +642,14 @@ internal sealed class AntigravityAgentSession : IAgentSession
         {
             if (!IsCurrent(source))
                 return;
+            string? titleToSync;
+            lock (gate)
+            {
+                titleToSync = pendingTitle;
+                pendingTitle = null;
+            }
+            if (!string.IsNullOrWhiteSpace(titleToSync))
+                AntigravityStreamRules.WriteConversationTitle(id, titleToSync, UserProfileOverride);
             Raise(new AgentSessionStartedEvent(id, parsed.Model, null));
         }
 
@@ -952,7 +967,21 @@ internal sealed class AntigravityAgentSession : IAgentSession
 
     public Task SetRemoteControlAsync(AgentRemoteControlOptions? options) => Task.CompletedTask;
 
-    public Task RenameAsync(string title) => Task.CompletedTask;
+    public Task RenameAsync(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return Task.CompletedTask;
+        string? id;
+        lock (gate)
+        {
+            id = conversationId;
+            if (string.IsNullOrWhiteSpace(id))
+                pendingTitle = title.Trim();
+        }
+        if (!string.IsNullOrWhiteSpace(id))
+            AntigravityStreamRules.WriteConversationTitle(id, title, UserProfileOverride);
+        return Task.CompletedTask;
+    }
 
     public Task<bool> ReattachRemoteControlAsync(AgentSessionSettings settings) => Task.FromResult(false);
 
