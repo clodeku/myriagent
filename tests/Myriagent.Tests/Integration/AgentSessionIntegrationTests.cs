@@ -505,6 +505,53 @@ public sealed class AgentSessionIntegrationTests : IDisposable
     }
 
     [EnvFact("MYRIAGENT_IT", Reason)]
+    public async Task Claude_插入後移到背景_馬上讀到_指令沒被中斷_沒人看時片段合併()
+    {
+        var settings = Settings(AgentProvider.Claude, Guid.NewGuid().ToString(), false, ClaudeModel, AgentPermissionMode.FullAccess);
+        using var session = new ClaudeAgentSession();
+        var steer = Guid.NewGuid().ToString();
+        var read = new TaskCompletionSource<DateTime>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sentAt = DateTime.MaxValue;
+        session.EventReceived += ev =>
+        {
+            if (ev is AgentSteerReadEvent r && r.MessageUuid == steer)
+                read.TrySetResult(DateTime.UtcNow);
+            // CLI 登記了前景的指令（約 3 秒後；之前送移到背景沒有作用）：插入一則、移到背景
+            if (ev is AgentTaskLifecycleEvent { Ended: false, Backgrounded: false } && sentAt == DateTime.MaxValue)
+            {
+                sentAt = DateTime.UtcNow;
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(500);
+                    (await session.SteerAsync(new AgentTurnInput("插入：先用一句話回答 1+1 等於多少。", Array.Empty<AgentAttachment>(), steer))).Should().BeTrue();
+                    (await session.MoveToBackgroundAsync(null)).Should().BeNull();
+                });
+            }
+        };
+        session.SetWatched(false);
+        var turn = await RunTurnAsync(session, new AgentTurnInput("請用 Bash 工具在前景（不要背景）執行 `ping -n 25 127.0.0.1`，跑完後用繁體中文寫一段約 200 字介紹 ping。",
+            Array.Empty<AgentAttachment>()), settings);
+        var at = await read.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        (at - sentAt).Should().BeLessThan(TimeSpan.FromSeconds(12), "不必等 25 次 ping 跑完");
+        AllText(turn).Should().Contain("2");
+        turn.OfType<AgentToolCompletedEvent>().First().Output.Should().Contain("background", "指令移到背景，沒有被中斷");
+        // 沒人看：每秒一行，同一段回覆的片段很少
+        var longest = turn.OfType<AgentTextCompletedEvent>().MaxBy(t => t.Text.Length)!;
+        turn.OfType<AgentTextDeltaEvent>().Count(d => d.BlockId == longest.BlockId).Should().BeLessThan(20);
+    }
+
+    [EnvFact("MYRIAGENT_IT", Reason)]
+    public async Task Claude_PushNotification_回報要通知的話()
+    {
+        var settings = Settings(AgentProvider.Claude, Guid.NewGuid().ToString(), false, ClaudeModel, AgentPermissionMode.FullAccess);
+        using var session = new ClaudeAgentSession();
+        var turn = await RunTurnAsync(session, new AgentTurnInput("請先用 ToolSearch 載入 PushNotification 工具（query 用 select:PushNotification），再用它送一則通知，內容是「測試通知 ABC」，然後回覆完成。",
+            Array.Empty<AgentAttachment>()), settings);
+        turn.OfType<AgentNotifyUserEvent>().Should().ContainSingle().Which.Message.Should().Contain("ABC");
+        turn.OfType<AgentToolStartedEvent>().Should().Contain(t => t.ToolName == "通知使用者");
+    }
+
+    [EnvFact("MYRIAGENT_IT", Reason)]
     public async Task Claude_背景工作完成後CLI自己開的一輪_一開始就標成執行中_它的result結束這一輪()
     {
         using var session = new ClaudeAgentSession();

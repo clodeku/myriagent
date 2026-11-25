@@ -33,10 +33,17 @@ internal sealed record ReplicaItems(string ConversationId, bool Reset, IReadOnly
 /// <param name="Deleted">被擁有者刪除的複本（從清單移除）</param>
 /// <param name="Items">項目的變化</param>
 /// <param name="Full"><paramref name="Metas"/> 是整份清單：不在裡面的複本都移除（整份清單的要求、伺服器換實例）</param>
-internal sealed record ReplicaDelta(IReadOnlyList<ReplicaMeta> Metas, IReadOnlyList<string> Deleted, IReadOnlyList<ReplicaItems> Items, bool Full = false)
+/// <param name="Notices">其他電腦的代理主動通知使用者（conv.attention 的 notice，依伺服器 seq）；null＝沒有</param>
+internal sealed record ReplicaDelta(IReadOnlyList<ReplicaMeta> Metas, IReadOnlyList<string> Deleted, IReadOnlyList<ReplicaItems> Items, bool Full = false,
+    IReadOnlyList<ReplicaNotice>? Notices = null)
 {
-    public bool IsEmpty => !Full && Metas.Count == 0 && Deleted.Count == 0 && Items.Count == 0;
+    public bool IsEmpty => !Full && Metas.Count == 0 && Deleted.Count == 0 && Items.Count == 0 && Notices is not { Count: > 0 };
 }
+
+/// <summary>其他電腦的代理主動通知使用者的一句話</summary>
+/// <param name="Text">擁有者依同步政策組好的句子（conv.attention 的 speech；沒帶是只有標題的句子）</param>
+/// <param name="CreatedAtMs">伺服器收到的時間（Unix 毫秒）：太舊的不跳</param>
+internal sealed record ReplicaNotice(string ConversationId, string Text, long CreatedAtMs);
 
 /// <summary>
 /// 中樞向引擎要複本的出口（對話變化的接收者另外實作：發布者把要求放進盒子，結果以 <see cref="ReplicaDelta"/> 回到中樞）。

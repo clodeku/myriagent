@@ -56,6 +56,9 @@ internal sealed class ClaudeAgentSession : IAgentSession
     private readonly Dictionary<string, ClaudeControlRequest> pendingRequests = new();
     private readonly Dictionary<string, (AgentProcess Process, TaskCompletionSource<ClaudeControlResponse?> Completion)> controlWaiters = new();
 
+    /// <summary>這個程序被安全機制換到別的模型（model_refusal_fallback，整個對話）：設定的模型沒變，換回去要再送一次 set_model</summary>
+    private bool modelSwapped;
+
     /// <summary>SetModelAsync 一次一個（連續切換依序送給 CLI）</summary>
     private readonly SemaphoreSlim modelSwitchGate = new(1, 1);
 
@@ -702,6 +705,24 @@ internal sealed class ClaudeAgentSession : IAgentSession
 
     private SteerUndo? pendingSteer;
 
+    /// <summary>有沒有人在看（SetWatched）；新程序啟動時沒人看就再告訴它一次</summary>
+    private bool watched = true;
+
+    public void SetWatched(bool value)
+    {
+        AgentProcess? target;
+        lock (gate)
+        {
+            if (disposed || watched == value)
+                return;
+            watched = value;
+            target = process is { HasExited: false } ? process : null;
+        }
+        // 回應不等：舊版不認得這個請求時回 error，照舊每個片段一行
+        if (target != null)
+            _ = WriteQuietlyAsync(target, ClaudeStreamRules.BuildSetWatchedRequest(NextRequestId("watch"), value));
+    }
+
     public bool CanCancelSteer => true;
 
     public bool CanMoveToBackground => true;
@@ -1005,6 +1026,12 @@ internal sealed class ClaudeAgentSession : IAgentSession
         _ = WriteQuietlyAsync(started, ClaudeStreamRules.BuildGetSettingsRequest(NextRequestId("caps")));
         // 緊接著開 Remote Control（實測 initialize 回應前、一輪進行中送都可以，不影響接著寫入的訊息）
         RequestRemoteControl(started);
+        // 這個對話現在沒人看：新程序從「有人看」開始，要再說一次
+        bool unwatched;
+        lock (gate)
+            unwatched = !watched;
+        if (unwatched)
+            _ = WriteQuietlyAsync(started, ClaudeStreamRules.BuildSetWatchedRequest(NextRequestId("watch"), false));
         // 工作階段名稱跟著對話標題（續接清單也看得到）。remote_control 帶的 name 不算工作階段的名稱（實測開啟時不送 session_title_changed，
         // 接回時也不一定改名），所以 Remote Control 連上後另外再送一次（HandleRemoteControlResponse）
         SendSessionTitle(started, startupTitleRequestId);
@@ -1399,6 +1426,7 @@ internal sealed class ClaudeAgentSession : IAgentSession
     private void ResetProcessStateLocked()
     {
         pendingSteer = null;
+        modelSwapped = false;
         remoteControlActive = false;
         remoteControlRequestId = null;
         remoteControlEnableSent = false;
@@ -1498,6 +1526,12 @@ internal sealed class ClaudeAgentSession : IAgentSession
                         processSettings = fs with { ForkSource = null };
                 }
             }
+            else if (ev is AgentModelRefusalEvent refusal)
+            {
+                // 整個對話換過去＝true、回到原本的＝false；只有子代理被攔、沒有接手的模型時不變
+                lock (gate)
+                    modelSwapped = refusal.SessionSwitched || (modelSwapped && !refusal.Reverted);
+            }
             else if (ev is AgentPermissionModeChangedEvent changed)
             {
                 // 以 CLI 回報的模式為準（代理自己進出規劃模式等），之後要切換時才不會拿過期的值比對而略過
@@ -1558,6 +1592,7 @@ internal sealed class ClaudeAgentSession : IAgentSession
 
         bool reinterrupt = false;
         int generation = 0;
+        string? steerRead = null;
         AgentRemoteUserMessageEvent? remoteEvent = null;
         lock (gate)
         {
@@ -1579,6 +1614,8 @@ internal sealed class ClaudeAgentSession : IAgentSession
             if (startedNow)
             {
                 turnUuidStarted = true;
+                // 插入的那則被讀到了：畫面上「已插入這一輪」的那一行收掉
+                steerRead = pendingSteer?.Uuid == turnUuid ? turnUuid : null;
                 // 排隊時按了停止：中斷停的是前面那一輪（CLI 回 still_queued），接著開始的這則要再停一次
                 reinterrupt = running && interruptRequested && interruptSent && payloadSent;
                 generation = turnGeneration;
@@ -1641,6 +1678,8 @@ internal sealed class ClaudeAgentSession : IAgentSession
 
         if (remoteEvent != null)
             Raise(remoteEvent);
+        if (steerRead != null)
+            Raise(new AgentSteerReadEvent(steerRead));
         if (reinterrupt)
         {
             _ = WriteQuietlyAsync(source, ClaudeStreamRules.BuildInterruptRequest(NextRequestId("interrupt")));
@@ -2419,7 +2458,11 @@ internal sealed class ClaudeAgentSession : IAgentSession
                 current = processSettings;
             }
 
-            if (!string.Equals(NormalizeModel(current.Model), NormalizeModel(model), StringComparison.OrdinalIgnoreCase))
+            bool swapped;
+            lock (gate)
+                swapped = modelSwapped;
+            // 安全機制換過模型：設定的模型沒變、程序實際用的是接手的，同一個也要送
+            if (swapped || !string.Equals(NormalizeModel(current.Model), NormalizeModel(model), StringComparison.OrdinalIgnoreCase))
             {
                 var response = await RequestControlAsync(target, "model", id => ClaudeStreamRules.BuildSetModelRequest(id, NormalizeModel(model))).ConfigureAwait(false);
                 if (response is not { Success: true })
@@ -2429,6 +2472,11 @@ internal sealed class ClaudeAgentSession : IAgentSession
                 }
                 if (!UpdateProcessSettings(target, s => s with { Model = model }))
                     return false;
+                lock (gate)
+                {
+                    if (ReferenceEquals(process, target))
+                        modelSwapped = false;
+                }
             }
 
             if (!string.Equals(current.Effort ?? string.Empty, effort ?? string.Empty, StringComparison.OrdinalIgnoreCase))

@@ -182,6 +182,9 @@ internal static partial class ClaudeStreamRules
 
     public const string ExitPlanModeTool = "ExitPlanMode";
 
+    /// <summary>代理主動通知使用者的工具（CLI 只送終端機通知與 Remote Control 的手機推播，app 自己接）</summary>
+    public const string PushNotificationTool = "PushNotification";
+
     public const string TodoWriteTool = "TodoWrite";
 
     /// <summary>Claude Code 2.1.295 起舊模型（Sonnet 4.x、Haiku 4.5）以這組工具管理待辦，TodoWrite 預設停用</summary>
@@ -212,6 +215,18 @@ internal static partial class ClaudeStreamRules
 
     /// <summary>開檔案檢查點（Agent SDK 的 enableFileCheckpointing；代理以編輯工具改的檔案每則使用者訊息記一個還原點，Bash 改的不記）</summary>
     public const string FileCheckpointingVariable = "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING";
+
+    /// <summary>CLI 合併逐字片段（content_block_delta、thinking_tokens）的時間（毫秒）：有人看時</summary>
+    public const string StreamHoldVariable = "CLAUDE_CODE_STREAM_EVENT_HOLD_MS";
+
+    /// <summary>沒人看時（set_has_subscribers false 之後）合併的時間（毫秒）</summary>
+    public const string StreamHoldUnwatchedVariable = "CLAUDE_CODE_STREAM_EVENT_NO_SUBSCRIBER_HOLD_MS";
+
+    /// <summary>有人看：和中樞送畫面的間隔相同，看起來沒有差別</summary>
+    public const string StreamHoldMs = "50";
+
+    /// <summary>沒人看：一秒一行</summary>
+    public const string StreamHoldUnwatchedMs = "1000";
 
     /// <summary>推理強度的環境變數：CLI 以它蓋過 --effort 與 apply_flag_settings 的 effortLevel（實測 2.1.310：回 success 但強度不變）</summary>
     public const string EffortLevelVariable = "CLAUDE_CODE_EFFORT_LEVEL";
@@ -859,6 +874,10 @@ internal static partial class ClaudeStreamRules
             [DisableAutoUpdaterVariable] = "1",
             // 檔案檢查點（回溯的 rewind_files 要它；實測沒開時回 canRewind false「File rewinding is not enabled.」）
             [FileCheckpointingVariable] = "1",
+            // 逐字片段合併成較少的行（實測內容完全相同、行數少很多；中樞本來就每 50 ms 才送一次畫面）。
+            // 沒人看的對話以 set_has_subscribers 改成第二個值（BuildSetWatchedRequest）；舊版不認得就照舊
+            [StreamHoldVariable] = StreamHoldMs,
+            [StreamHoldUnwatchedVariable] = StreamHoldUnwatchedMs,
         };
         if (EffortEnvironmentValue(effort) is { } level)
             env[EffortLevelVariable] = level;
@@ -1030,6 +1049,9 @@ internal static partial class ClaudeStreamRules
             : m).ToList();
 
     /// <summary>停掉一個背景工作（不經模型；CLI 回 task_notification stopped 與 background_tasks_changed，實測 E-11）</summary>
+    public static string BuildSetWatchedRequest(string requestId, bool watched)
+        => BuildControlRequest(requestId, new JObject { ["subtype"] = "set_has_subscribers", ["has_subscribers"] = watched });
+
     public static string BuildStopTaskRequest(string requestId, string taskId)
         => BuildControlRequest(requestId, new JObject { ["subtype"] = "stop_task", ["task_id"] = taskId });
 
@@ -1596,6 +1618,8 @@ internal static partial class ClaudeStreamRules
                 return new ToolDescription("使用技能", "other", Str("skill") ?? Str("command") ?? string.Empty, Str("args"));
             case "ToolSearch":
                 return new ToolDescription("載入工具", "other", Str("query") ?? string.Empty, null);
+            case PushNotificationTool:
+                return new ToolDescription("通知使用者", "other", ClaudeEventRules.NotifyMessage(input) ?? string.Empty, null);
             case ExitPlanModeTool:
                 return new ToolDescription("確認執行計畫", "plan", "代理已規劃好做法，請確認是否照計畫執行", Str("plan"));
         }
@@ -1934,6 +1958,18 @@ internal sealed partial class ClaudeStreamParser
     private readonly HashSet<string> finishedTools = new(StringComparer.Ordinal);
     private readonly HashSet<string> cardToolIds = new(StringComparer.Ordinal);
 
+    /// <summary>已經通知過使用者的 PushNotification（tool_use_id；同一個工具會從串流與 assistant 各看到一次）</summary>
+    private readonly HashSet<string> notifiedToolIds = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 這一輪各則 assistant 訊息（線上 uuid，一則一個區塊）對到的畫面區塊：CLI 說要撤回（安全機制改用別的模型重答、工具呼叫讀不懂）時據此拿掉。
+    /// 一輪結束清掉
+    /// </summary>
+    private readonly Dictionary<string, string> messageBlocks = new(StringComparer.Ordinal);
+
+    /// <summary>主對話上一則回覆的模型（AgentReplyModelEvent 只在改變時發）</summary>
+    private string? replyModel;
+
     /// <summary>
     /// 只在串流裡開始（content_block_start）、還沒收到完整 assistant 區塊的主對話工具 → 所在的訊息。串流在途中斷、CLI 重送請求時（api_retry），
     /// 被丟下的那則回應不會有 assistant 區塊、工具也不會有結果，重試的回應是新的訊息與新的工具 id：主對話的下一則訊息開始時還留著的就拿掉，
@@ -2136,6 +2172,9 @@ internal sealed partial class ClaudeStreamParser
                     break;
                 }
                 result.TurnActivity = true;
+                // 這則取代了之前的訊息（工具呼叫讀不懂而重答、安全機制改用別的模型）：先把被取代的拿掉
+                Retract(ClaudeEventRules.MessageUuids(message["supersedes"]), result);
+                RememberBlock(StringOf(message["uuid"]), message["message"] as JObject);
                 ParseAssistant(message["message"] as JObject, result);
                 // CLI 合成的「You've hit your session limit」：額度用完，這一輪接著以錯誤結束。其他 rate_limit 錯誤（暫時性的 429、
                 // 要額外用量的模型）記下來：接著的失敗不以被拒的 rate_limit_event 當成額度用完
@@ -2212,6 +2251,7 @@ internal sealed partial class ClaudeStreamParser
                 result.ResumeReason = ClaudeStreamRules.ParseResumeReason(message);
                 result.TurnFromOtherOrigin = !ClaudeStreamRules.IsUserTurnResult(message);
                 result.UserMessageUuid = StringOf(message["user_message_uuid"]);
+                messageBlocks.Clear();
                 // 一輪結束：這一輪的工具都已有結果（被中止的不會再回報）
                 foreach (var id in runningTools)
                     finishedTools.Add(id);
@@ -2258,6 +2298,16 @@ internal sealed partial class ClaudeStreamParser
     /// </summary>
     private void ParseSubagent(JObject message, ClaudeParseResult result)
     {
+        // 子代理要通知使用者：卡片已經有結果的背景子代理也算，先於下面的略過
+        if (message.Value<string>("type") == "assistant")
+        {
+            foreach (var block in (message["message"]?["content"] as JArray ?? new JArray()).OfType<JObject>())
+            {
+                if (block.Value<string>("type") == "tool_use")
+                    AddNotification(StringOf(block["id"]), StringOf(block["name"]), block["input"] as JObject, result);
+            }
+        }
+
         var parent = message.Value<string>("parent_tool_use_id")!;
         var root = subagentRoots.TryGetValue(parent, out var outer) ? outer : parent;
         if (!agentCardIds.Contains(root) || finishedTools.Contains(root))
@@ -2390,6 +2440,18 @@ internal sealed partial class ClaudeStreamParser
                 // 主模型不能用、改用 --fallback-model 接手（實測主模型不存在時 trigger 是 model_not_found）
                 result.Events.Add(new AgentNoticeEvent(ClaudeEventRules.ModelFallback(message), IsError: false));
                 break;
+            case "model_refusal_fallback":
+                // 安全機制攔下了回覆、改用別的模型重答：被撤回的回覆拿掉（它在撤回之後才送），對話的模型可能整個換掉
+                Retract(ClaudeEventRules.MessageUuids(message["retracted_message_uuids"]), result);
+                result.Events.Add(ClaudeEventRules.RefusalFallback(message));
+                break;
+            case "model_refusal_no_fallback":
+                result.Events.Add(ClaudeEventRules.RefusalWithoutFallback(message));
+                break;
+            case "informational":
+                if (ClaudeEventRules.Informational(message) is { } info)
+                    result.Events.Add(new AgentNoticeEvent(info, IsError: false));
+                break;
             case "permission_denied":
                 // 權限規則、自動模式的判斷或 hook 擋下了一個工具（工具卡另外會以錯誤結束）
                 result.Events.Add(new AgentNoticeEvent(ClaudeEventRules.PermissionDenied(message), IsError: false));
@@ -2478,6 +2540,11 @@ internal sealed partial class ClaudeStreamParser
                 {
                     contextModel = (string?)startModel.Value;
                     messageModels[currentMessageId] = contextModel;
+                    if (!string.IsNullOrEmpty(contextModel) && contextModel != replyModel)
+                    {
+                        replyModel = contextModel;
+                        result.Events.Add(new AgentReplyModelEvent(contextModel));
+                    }
                 }
                 RecordMessageUsage(currentMessageId, (ev["message"] as JObject)?["usage"] as JObject, result);
                 break;
@@ -2657,6 +2724,47 @@ internal sealed partial class ClaudeStreamParser
         if (d.Kind == "agent")
             agentCardIds.Add(toolUseId);
         result.Events.Add(new AgentToolStartedEvent(toolUseId, d.DisplayName, d.Kind, d.Title, d.Detail, d.FilePath, d.Diff));
+        AddNotification(toolUseId, toolName, input, result);
+    }
+
+    /// <summary>PushNotification：代理要通知使用者（一個工具只通知一次）</summary>
+    private void AddNotification(string? toolUseId, string? toolName, JObject? input, ClaudeParseResult result)
+    {
+        if (toolName != ClaudeStreamRules.PushNotificationTool || string.IsNullOrEmpty(toolUseId)
+            || ClaudeEventRules.NotifyMessage(input) is not { } message || !notifiedToolIds.Add(toolUseId))
+            return;
+        result.Events.Add(new AgentNotifyUserEvent(message));
+    }
+
+    /// <summary>
+    /// 記下這則 assistant 訊息（線上 uuid）是畫面上的哪個區塊：完整的 assistant 訊息一則一個區塊，比它的 content_block_stop 先到，
+    /// 所以就是目前還開著、同一種的那個區塊。工具不記（工具可能已經執行過，卡片留著）
+    /// </summary>
+    private void RememberBlock(string? uuid, JObject? message)
+    {
+        if (string.IsNullOrEmpty(uuid) || message?["content"] is not JArray { Count: 1 } content || content[0] is not JObject block)
+            return;
+        var kind = block.Value<string>("type");
+        if (kind is not ("text" or "thinking") || message.Value<string>("id") != currentMessageId)
+            return;
+        foreach (var state in blocks.Values)
+        {
+            if (state.Open && state.Kind == kind)
+                messageBlocks[uuid] = state.BlockId;
+        }
+    }
+
+    /// <summary>撤回這些訊息對到的畫面區塊（不認得的略過；重複的只算一次）</summary>
+    private void Retract(IReadOnlyList<string> uuids, ClaudeParseResult result)
+    {
+        List<string>? ids = null;
+        foreach (var uuid in uuids)
+        {
+            if (messageBlocks.Remove(uuid, out var blockId))
+                (ids ??= new()).Add(blockId);
+        }
+        if (ids != null)
+            result.Events.Add(new AgentBlocksRetractedEvent(ids));
     }
 
     /// <summary>

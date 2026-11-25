@@ -217,12 +217,13 @@ internal sealed partial class ConversationProjector(IItemMediaHook? mediaHook = 
     /// <paramref name="speech"/>＝語音通知念的句子（null＝不帶；超過 <see cref="ConversationEventRules.MaxSpeechLength"/> 的在子句邊界截短（<see cref="VoiceNotifyRules.ForWire"/>），
     /// 截完是空的不帶，伺服器改組只有標題的句子）
     /// </summary>
-    public OutboxAppend Attention(string wireId, long epoch, string? kind, string? itemId, string? speech = null)
+    /// <param name="notice">代理主動通知使用者（句子就是通知的內容）</param>
+    public OutboxAppend Attention(string wireId, long epoch, string? kind, string? itemId, string? speech = null, bool notice = false)
     {
         if (!ConversationAttentionKinds.IsKnown(kind))
             throw new ArgumentException("不認得的提醒種類", nameof(kind));
         var spoken = VoiceNotifyRules.ForWire(speech);
-        return Required(ConversationEventKinds.Attention, new ConversationAttentionPayload(kind!, ConversationIds.IsItemId(itemId) ? itemId : null, spoken), wireId, epoch);
+        return Required(ConversationEventKinds.Attention, new ConversationAttentionPayload(kind!, ConversationIds.IsItemId(itemId) ? itemId : null, spoken, notice ? true : null), wireId, epoch);
     }
 
     /// <summary><c>conv.deleted</c>：<c>{}</c>、沒有合併鍵（WP4.7：這個對話的媒體參照一起刪）</summary>

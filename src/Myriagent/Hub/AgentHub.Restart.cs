@@ -1217,6 +1217,7 @@ internal sealed partial class AgentHub
         c.DeniedThisTurn = false;
         c.BlockItems.Clear();
         c.ToolItems.Clear();
+        c.MovableTools.Clear();
         foreach (var key in c.RequestItems.Where(kv => !kv.Value.AnswerAsMessage).Select(kv => kv.Key).ToList())
             c.RequestItems.Remove(key);
         c.PlanItem = null;
@@ -1262,6 +1263,7 @@ internal sealed partial class AgentHub
         }
         c.BlockItems.Clear();
         c.ToolItems.Clear();
+        c.MovableTools.Clear();
         c.UnapprovedTools.Clear();
     }
 

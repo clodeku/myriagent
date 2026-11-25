@@ -81,8 +81,11 @@ public class ClaudeStreamRulesTests
         i.Should().BeGreaterThan(0);
         JObject.Parse(args[i + 1])["env"]!["CLAUDE_CODE_EFFORT_LEVEL"]!.ToString().Should().Be("high");
         ClaudeStreamRules.BuildEnvironmentOverrides("high").Should().ContainKey("CLAUDE_CODE_EFFORT_LEVEL").WhoseValue.Should().Be("high");
-        ClaudeStreamRules.BuildEnvironmentOverrides(null).Keys.Should().Equal(new[] { "DISABLE_AUTOUPDATER", "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING" },
-            "沒指定強度就不設強度（只有一律都帶的關閉自動更新與檔案檢查點）");
+        ClaudeStreamRules.BuildEnvironmentOverrides(null).Keys.Should().Equal(new[]
+            {
+                "DISABLE_AUTOUPDATER", "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "CLAUDE_CODE_STREAM_EVENT_HOLD_MS", "CLAUDE_CODE_STREAM_EVENT_NO_SUBSCRIBER_HOLD_MS",
+            },
+            "沒指定強度就不設強度（只有一律都帶的關閉自動更新、檔案檢查點與逐字片段合併）");
         ClaudeStreamRules.BuildEnvironmentOverrides(null)["CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"].Should().Be("1", "回溯的 rewind_files 要它");
         ClaudeStreamRules.BuildEnvironmentOverrides(" ").Should().NotContainKey("CLAUDE_CODE_EFFORT_LEVEL");
     }

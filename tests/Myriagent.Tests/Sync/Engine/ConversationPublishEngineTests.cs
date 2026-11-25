@@ -1472,6 +1472,17 @@ public sealed class ConversationPublishEngineTests
         (await SpeechAsync(rig, paused)).Should().Be(line.Head, "權杖 DLP 命中：內容不上線");
         (await SpeechAsync(rig, silent)).Should().BeEmpty("背景工作還在跑：不念");
         (await AttentionRowAsync(rig, none))["speech"].Should().BeNull("沒帶句子：線上格式和以前相同");
+        (await AttentionRowAsync(rig, full))["notice"].Should().BeNull("不是代理主動通知的不帶");
+
+        // 代理主動通知使用者（PushNotification）：帶 notice，句子照政策
+        var notified = rig.New();
+        rig.Meta(notified);
+        rig.Ui.Put(new AttentionChange(notified.Id, ConversationAttentionKinds.Question, null, new VoiceLine("「標題」通知你：要驗證", "「標題」有事通知你") { Notice = true }));
+        await rig.IdleAsync();
+        var row = await AttentionRowAsync(rig, notified);
+        row.Value<bool>("notice").Should().BeTrue();
+        row.Value<string>("kind").Should().Be(ConversationAttentionKinds.Question, "舊伺服器照提問處理");
+        row.Value<string>("speech").Should().Be("「標題」通知你：要驗證");
     }
 
     [Fact]

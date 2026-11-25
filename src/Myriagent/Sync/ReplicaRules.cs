@@ -18,6 +18,17 @@ internal static class ReplicaRules
         return policy is ConversationSyncPolicies.Full or ConversationSyncPolicies.Metadata or ConversationSyncPolicies.Paused ? policy : ConversationSyncPolicies.LocalOnly;
     }
 
+    /// <summary>
+    /// 代理主動通知使用者（<c>conv.attention</c> 的 notice；payload 已驗證過）的句子：擁有者組好的 speech，沒帶或是空的用只有標題的句子；不是這種提醒回 null
+    /// </summary>
+    public static string? NoticeText(string attentionJson, string metaJson)
+    {
+        var o = JObject.Parse(attentionJson);
+        if (o["notice"] is not JValue { Type: JTokenType.Boolean, Value: true })
+            return null;
+        return o["speech"] is JValue { Type: JTokenType.String, Value: string { Length: > 0 } speech } ? speech : VoiceNotifyRules.Notice(Meta(metaJson)?.Title, null);
+    }
+
     /// <summary>政策是 full：有同步項目（metadata、paused 只有標題與狀態，WP4.2 的 P10）</summary>
     public static bool HasItems(string metaJson) => PolicyOf(metaJson) == ConversationSyncPolicies.Full;
 

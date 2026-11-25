@@ -231,7 +231,7 @@ internal sealed class ConversationReplicas
     /// <see cref="ConversationEventRules.Validate(string?, string?)"/> 驗證，不合格的略過（游標照樣前進，<see cref="ReplicaPagePlan.Invalid"/>）；
     /// 這台寫的、本機已有的對話（<paramref name="isLocal"/>）、作者不是複本擁有者的一律略過（SEC-27）。
     /// created／meta 依 seq 新增或取代 meta（政策不是 full 時丟掉項目）；deleted 丟掉整個複本；item、itemRemoved 依 seq 套用到政策是 full 的複本；
-    /// 一輪、提醒、佇列複本不用。不改任何狀態（<paramref name="current"/> 是快取，計畫裡的新值寫成了才由 <see cref="Committed"/> 放進去）。
+    /// 一輪、佇列複本不用，提醒只取代理主動通知的（<see cref="ReplicaDelta.Notices"/>）。不改任何狀態（<paramref name="current"/> 是快取，計畫裡的新值寫成了才由 <see cref="Committed"/> 放進去）。
     /// <paramref name="blobs"/>：WP4.7 步 12 預取到的 blob（以 SHA-256 取）；item 的 blob 欄位取得到就換回內容再存（<see cref="ReplicaBlobRules.Inline"/>）
     /// </summary>
     public static ReplicaPagePlan PlanPage(IReadOnlyList<PulledEvent> events, string selfDeviceId, Func<string, bool> isLocal,
@@ -328,8 +328,13 @@ internal sealed class ConversationReplicas
                     break;
                 }
 
+                case ConversationEventKinds.Attention:
+                    // 代理主動通知使用者（notice）：這台也跳（太舊的中樞不跳）；其他提醒複本不用
+                    if (row is not null && ReplicaRules.NoticeText(json, row.MetaJson) is { } text)
+                        delta.Notice(new ReplicaNotice(id, text, e.CreatedAt));
+                    break;
                 default:
-                    // conv.turn、conv.attention、conv.queue：複本不用（執行狀態在 meta 裡）
+                    // conv.turn、conv.queue：複本不用（執行狀態在 meta 裡）
                     break;
             }
         }
@@ -370,6 +375,9 @@ internal sealed class ConversationReplicas
         private readonly List<string> deletedOrder = new();
         private readonly Dictionary<string, Items> items = new(StringComparer.Ordinal);
         private readonly List<string> itemOrder = new();
+        private readonly List<ReplicaNotice> notices = new();
+
+        public void Notice(ReplicaNotice notice) => notices.Add(notice);
 
         private sealed class Items
         {
@@ -442,7 +450,7 @@ internal sealed class ConversationReplicas
                 var upserts = entry.Upserts.Values.OrderBy(i => i.Ord ?? long.MaxValue).ThenBy(i => i.Id, StringComparer.Ordinal).ToList();
                 return new ReplicaItems(id, entry.Reset, upserts, entry.Removed.Order(StringComparer.Ordinal).ToList());
             }).ToList();
-            return new ReplicaDelta(metaList, deletedOrder.ToList(), itemList);
+            return new ReplicaDelta(metaList, deletedOrder.ToList(), itemList, Notices: notices.Count > 0 ? notices.ToList() : null);
         }
 
         private Items Of(string id)

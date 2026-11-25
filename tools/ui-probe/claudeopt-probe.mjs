@@ -97,6 +97,22 @@ export async function runClaudeOpt(ctx, vp) {
   const s3 = await page.evaluate(composerState, sel);
   check('claudeOptSteered', !!s3.steer && s3.steer.text === '已插入這一輪：順便把整合測試也跑一下' && s3.steer.button === '取消插入', s3);
   await page.locator(`${sel} .dock`).screenshot({ path: outFile('claudeopt-steered-dark.png') });
+  // 立即讀到（2026-11-25）：前景有能移到背景的才有（標頭 canBackground），按了送 backgroundTasks
+  const steerNow = () => page.evaluate((s) => {
+    const b = document.querySelector(s + ' .steer-now');
+    return b && !b.hidden && b.getBoundingClientRect().width > 0 ? { text: b.textContent, title: b.title, disabled: b.disabled } : null;
+  }, sel);
+  const noNow = await steerNow();
+  await push({ canBackground: true });
+  const now1 = await steerNow();
+  await page.locator(`${sel} .dock`).screenshot({ path: outFile('claudeopt-steernow-dark.png') });
+  await page.click(`${sel} .steer-now`);
+  const nowSent = await until(() => host.last('backgroundTasks'), 2000);
+  const now2 = await steerNow();
+  await push({ canBackground: undefined });
+  const nowGone = await steerNow();
+  check('claudeOptSteerNow', !noNow && !!now1 && now1.text === '立即讀到' && /背景/.test(now1.title) && !!nowSent && nowSent.conversationId === 'c1'
+    && now2 && now2.disabled === true && !nowGone, { noNow, now1, nowSent, now2, nowGone });
   await page.click(`${sel} .steer-cancel`);
   const cancel = await until(() => host.last('cancelSteer'), 2000);
   await host.send({ type: 'steerCancelled', conversationId: 'c1', text: '順便把整合測試也跑一下' });
@@ -272,6 +288,23 @@ export async function runClaudeOpt(ctx, vp) {
   await push({ subagents: null });
   const agentChipGone = await page.evaluate((s) => !document.querySelector(s + ' .it[data-id="i9"] .t-agent-tokens'), sel);
   check('claudeOptSubagentUsageCleared', agentChipGone, agentChipGone);
+
+  // 安全機制把對話換到別的模型（Header.modelSwitch，2026-11-25）：常駐一行與「換回」，拿掉就收起來
+  const msOf = () => page.evaluate((s) => {
+    const q = document.querySelector(s + ' .modelswitch');
+    return q && !q.hidden && q.getBoundingClientRect().height > 0
+      ? { text: q.querySelector('.steer-sum').textContent, button: q.querySelector('.btn').textContent, title: q.title, icon: !!q.querySelector('svg') } : null;
+  }, sel);
+  const ms0 = await msOf();
+  await push({ modelSwitch: { from: 'Fable 5.2', to: 'Opus 4.8' } });
+  const ms1 = await msOf();
+  await page.locator(`${sel} .dock`).screenshot({ path: outFile('claudeopt-modelswitch-dark.png') });
+  await page.click(`${sel} .modelswitch .btn`);
+  const msSent = await until(() => host.last('modelSwitchBack'), 2000);
+  await push({ modelSwitch: undefined });
+  const ms2 = await msOf();
+  check('claudeOptModelSwitch', !ms0 && !!ms1 && ms1.text === '安全機制把這個對話換成 Opus 4.8（原本是 Fable 5.2）' && ms1.button === '換回 Fable 5.2' && ms1.icon
+    && !!msSent && msSent.conversationId === 'c1' && !ms2, { ms0, ms1, msSent, ms2 });
 
   // 額度用完、等重置後自動接著做（Header.quotaWait）：輸入區上方一行與「取消等待」
   await push({ quotaWait: { until: Date.now() + 2.5 * 3600e3, account: 'Claude 主帳戶' } });

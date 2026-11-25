@@ -178,6 +178,29 @@ internal sealed record AgentQuotaExhaustedEvent(AgentProvider Provider, DateTime
 
 internal sealed record AgentNoticeEvent(string Message, bool IsError) : AgentEvent;
 
+/// <summary>
+/// 代理主動要通知使用者（Claude 的 PushNotification 工具，主對話或子代理）：CLI 在 app 的程序裡只會推到開著 Remote Control 的手機，
+/// 中樞照自己的通知送（系統通知、語音、閃爍、其他電腦與瀏覽器版；AgentHub.NotifyUser.cs）
+/// </summary>
+internal sealed record AgentNotifyUserEvent(string Message) : AgentEvent;
+
+/// <summary>安全機制攔下了回覆（Claude 的 model_refusal_fallback／model_refusal_no_fallback；AgentHub.ModelRefusal.cs）</summary>
+/// <param name="OriginalModel">原本的模型</param>
+/// <param name="FallbackModel">接手的模型；null＝沒有接手的模型，這次就停在這裡</param>
+/// <param name="SessionSwitched">整個對話換過去了（之後的回覆都是接手的模型，直到換回來或程序重開）；false＝只有子代理或旁支提問那一次</param>
+/// <param name="Notice">給使用者看的說明</param>
+/// <param name="Reverted">整個對話回到原本的模型</param>
+internal sealed record AgentModelRefusalEvent(string? OriginalModel, string? FallbackModel, bool SessionSwitched, string Notice, bool Reverted = false) : AgentEvent;
+
+/// <summary>主對話的一則回覆實際是哪個模型產生的（Claude 的 message_start；只在和上一則不同時發）：對照安全機制換過的模型</summary>
+internal sealed record AgentReplyModelEvent(string Model) : AgentEvent;
+
+/// <summary>CLI 撤回了已經串流出來的回覆（安全機制改用別的模型重答、工具呼叫讀不懂而重答）：畫面上對應的回覆與思考要拿掉</summary>
+internal sealed record AgentBlocksRetractedEvent(IReadOnlyList<string> BlockIds) : AgentEvent;
+
+/// <summary>插進這一輪的訊息（AgentTurnInput.MessageUuid）代理讀到了：不能再取消，也不必再等</summary>
+internal sealed record AgentSteerReadEvent(string MessageUuid) : AgentEvent;
+
 /// <summary>Claude 子代理（Agent 工具）的即時用量（task_progress／task_notification）：中樞放在標頭的 subagents，網頁畫在那張工具卡上</summary>
 internal sealed record AgentSubagentUsageEvent(SubagentUsage Usage) : AgentEvent;
 

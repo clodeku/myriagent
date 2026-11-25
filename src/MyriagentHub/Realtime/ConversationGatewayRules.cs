@@ -156,6 +156,18 @@ internal static class ConversationGatewayRules
         _ => null,
     };
 
+    /// <summary><c>notify</c> 的 kind：代理主動通知使用者（2026-11-25；本文是 <c>text</c>）</summary>
+    public const string NoticeKind = "notice";
+
+    /// <summary>代理主動通知使用者（<c>conv.attention</c> 的 notice）的通知內容：擁有者依政策組的句子，沒帶就是只有標題的句子；不是這種提醒回 null</summary>
+    public static string? NoticeText(ConversationChange change, string? title)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        if (!change.Notice)
+            return null;
+        return string.IsNullOrEmpty(change.Speech) ? VoiceNotifyRules.Notice(title, null) : change.Speech;
+    }
+
     /// <summary>
     /// <c>speak</c> 要念的句子：擁有者帶了就照念（空字串＝不念，回 null），沒帶（舊版桌面、由 conv.turn 帶出的失敗）就組只有「標題＋發生什麼事」的句子；
     /// 不認得的種類回 null
@@ -341,15 +353,20 @@ internal static class ConversationGatewayRules
         new(ResyncType, Write(new JObject { ["type"] = ResyncType, ["conversationId"] = conversationId }), null, conversationId);
 
     /// <summary><c>{type:"notify", conversationId, kind, title, deviceName}</c>〔遠端〕：通知類（init 屏障保留）</summary>
-    public static ClientOutboxMessage NotifyMessage(string conversationId, string kind, string title, string? deviceName) =>
-        new(ClientOutboxRules.NotifyType, Write(new JObject
+    public static ClientOutboxMessage NotifyMessage(string conversationId, string kind, string title, string? deviceName, string? text = null)
+    {
+        var message = new JObject
         {
             ["type"] = ClientOutboxRules.NotifyType,
             ["conversationId"] = conversationId,
             ["kind"] = kind,
             ["title"] = title,
             ["deviceName"] = deviceName is null ? JValue.CreateNull() : new JValue(deviceName),
-        }), null, conversationId);
+        };
+        if (text is not null)
+            message["text"] = text;
+        return new(ClientOutboxRules.NotifyType, Write(message), null, conversationId);
+    }
 
     /// <summary><c>{type:"speak", conversationId, id, text}</c>：通知類，給每一條連線；<c>id</c> 是那筆事件的 seq（同一個瀏覽器開好幾個分頁時只念一次）</summary>
     public static ClientOutboxMessage SpeakMessage(string conversationId, long seq, string text) =>

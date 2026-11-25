@@ -14,6 +14,10 @@ public class AgentHubMoveToBackgroundTests
     private static Task<JObject> HeaderAsync(HubHarness h, string id, Func<JObject, bool> pred, int mark)
         => h.Main.WaitForAsync("header", m => m["header"] is JObject hd && pred(hd), mark, conversationId: id);
 
+    /// <summary>CLI 登記了這個工具的前景工作（task_started 的 is_backgrounded 是 false；指令約 3 秒後、子代理馬上）</summary>
+    private static AgentTaskLifecycleEvent Registered(string toolId, bool? backgrounded = false)
+        => new("task-" + toolId, Ended: false, "local_bash", null, toolId, backgrounded, null, null);
+
     [Fact]
     public async Task 前景有指令在跑才帶canBackground_按了交給會話_結束了就不帶()
     {
@@ -21,6 +25,11 @@ public class AgentHubMoveToBackgroundTests
         var (id, s) = h.StartConversation(h.Main, h.Claude);
         var mark = h.Main.Mark();
         h.Raise(s, new AgentToolStartedEvent("t1", "執行指令", "bash", "dotnet test", "dotnet test"));
+        await HeaderAsync(h, id, hd => hd.Value<string>("status")?.Contains("執行指令") == true, mark);
+        h.Main.Messages("header", mark, id).Should().NotContain(m => m["header"]!["canBackground"] != null, "CLI 還沒登記：這時送了不會有作用");
+        h.Raise(s, Registered("t1", backgrounded: true));
+        mark = h.Main.Mark();
+        h.Raise(s, Registered("t1"));
         await HeaderAsync(h, id, hd => hd.Value<bool?>("canBackground") == true, mark);
 
         h.Command(h.Main, "backgroundTasks", new { conversationId = id });
@@ -43,7 +52,9 @@ public class AgentHubMoveToBackgroundTests
         h.Main.Messages("header", mark, id).Should().NotContain(m => m["header"]!["canBackground"] != null);
 
         mark = h.Main.Mark();
+        h.Raise(s, Registered("t1"));
         h.Raise(s, new AgentToolStartedEvent("t2", "子代理", "agent", "整理", "{}"));
+        h.Raise(s, Registered("t2"));
         await HeaderAsync(h, id, hd => hd.Value<bool?>("canBackground") == true, mark);
     }
 
@@ -58,6 +69,7 @@ public class AgentHubMoveToBackgroundTests
         s.BackgroundMoves.All.Should().BeEmpty();
 
         h.Raise(s, new AgentToolStartedEvent("t1", "執行指令", "bash", "npm run build", "npm run build"));
+        h.Raise(s, Registered("t1"));
         s.MoveToBackgroundError = "目前沒有可以移到背景的指令或子代理";
         mark = h.Main.Mark();
         h.Command(h.Main, "backgroundTasks", new { conversationId = id });
@@ -71,6 +83,7 @@ public class AgentHubMoveToBackgroundTests
         var (id, s) = h.StartConversation(h.Main, h.Codex);
         var mark = h.Main.Mark();
         h.Raise(s, new AgentToolStartedEvent("t1", "執行指令", "bash", "npm test", "npm test"));
+        h.Raise(s, Registered("t1"));
         await HeaderAsync(h, id, hd => hd.Value<string>("status")?.Contains("執行指令") == true, mark);
         h.Main.Messages("header", mark, id).Should().NotContain(m => m["header"]!["canBackground"] != null);
     }

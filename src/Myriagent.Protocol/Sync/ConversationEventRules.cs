@@ -463,6 +463,8 @@ internal static class ConversationEventRules
             return "kind 不合格";
         if (!Optional(o, "itemId", t => ConversationIds.IsItemId(AsString(t))))
             return "itemId 不合格";
+        if (!Optional(o, "notice", t => t.Type == JTokenType.Boolean))
+            return "notice 不合格";
         return Optional(o, "speech", t => t.Type == JTokenType.String && AsString(t) is { Length: <= MaxSpeechLength }) ? null : "speech 不合格";
     }
 

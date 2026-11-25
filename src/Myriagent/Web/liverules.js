@@ -569,7 +569,9 @@ export function notifyText(msg) {
   const m = isObj(msg) ? msg : {};
   const title = str(m.title) || '對話';
   const dev = str(m.deviceName);
-  return { title: dev ? dev + '：' + title : title, body: own(NOTIFY_BODY, m.kind) || '有新的動態' };
+  // 代理主動通知使用者（kind 是 notice，2026-11-25）：本文就是它要通知的話
+  const notice = m.kind === 'notice' ? str(m.text) : null;
+  return { title: dev ? dev + '：' + title : title, body: notice || own(NOTIFY_BODY, m.kind) || '有新的動態' };
 }
 
 /** control 訊息的預設密碼常駐警告（D20）：只有 defaultPassword 是 true 才有 */

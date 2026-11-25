@@ -341,6 +341,32 @@ internal sealed partial class AgentHub
                 AddItem(c, new AgentChatItem { Kind = notice.IsError ? AgentItemKind.Error : AgentItemKind.Notice, Text = notice.Message });
                 break;
 
+            case AgentNotifyUserEvent notify:
+                OnNotifyUser(c, notify.Message);
+                break;
+
+            case AgentModelRefusalEvent refusal:
+                OnModelRefusal(c, refusal);
+                break;
+
+            case AgentReplyModelEvent reply:
+                OnReplyModel(c, reply.Model);
+                break;
+
+            case AgentBlocksRetractedEvent retracted:
+                OnBlocksRetracted(c, retracted.BlockIds);
+                break;
+
+            case AgentTaskLifecycleEvent { Ended: false, Backgrounded: false, ToolUseId: { Length: > 0 } foregroundTool }:
+                OnForegroundTaskStarted(c, foregroundTool);
+                break;
+
+            case AgentSteerReadEvent steerRead:
+                // 代理讀到插入的那則了：不能再取消、也不必再等
+                if (c.CancellableSteer?.Uuid == steerRead.MessageUuid)
+                    ForgetSteer(c);
+                break;
+
             // 每次啟動 CLI 程序都會回報一次，內容通常和上次一樣：沒變就不寫設定檔（UI 執行緒上約 100 KB 並落盤）、不重送標頭
             case AgentModelsEvent models:
                 if (!UpdateModels(c.Meta.AccountId, models.Models))
@@ -420,6 +446,7 @@ internal sealed partial class AgentHub
             case AgentProcessStartedEvent processStarted:
                 OnProcessStarted(c, processStarted);
                 ForgetGoal(c);
+                ForgetModelSwitch(c);
                 break;
 
             case AgentRunningVersionEvent runningVersion:
@@ -614,6 +641,7 @@ internal sealed partial class AgentHub
         HookTurnCompleted(c, outcome, turn.Usage, continues: switching || overloadRetry != null);
         c.BlockItems.Clear();
         c.ToolItems.Clear();
+        c.MovableTools.Clear();
         c.UnapprovedTools.Clear();
         foreach (var key in c.RequestItems.Where(kv => !kv.Value.AnswerAsMessage).Select(kv => kv.Key).ToList())
             c.RequestItems.Remove(key);

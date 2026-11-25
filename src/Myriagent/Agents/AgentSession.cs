@@ -455,6 +455,14 @@ internal interface IAgentSession : IDisposable
     bool CanMoveToBackground => false;
 
     /// <summary>
+    /// 有沒有人在看這個對話（AgentHub.StreamWatch.cs）：沒人看時 CLI 把逐字的小片段合併成較少的行（內容不少）。
+    /// 沒有程序時記著、下次啟動時帶上；不會阻塞呼叫端。只有 Claude 支援
+    /// </summary>
+    void SetWatched(bool watched)
+    {
+    }
+
+    /// <summary>
     /// 取消插進這一輪、CLI 還沒讀走的那則（cancel_async_message；messageUuid 是送出時的 AgentTurnInput.MessageUuid）。
     /// 回 true＝那則不會被代理看到（會話已回到插入之前的狀態）；false＝已被讀走或做不到。只有 Claude 支援
     /// </summary>

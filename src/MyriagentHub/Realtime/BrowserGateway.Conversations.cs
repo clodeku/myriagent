@@ -261,9 +261,11 @@ internal sealed partial class BrowserGateway
         {
             if (ConversationGatewayRules.NotifyKind(attention.AttentionKind) is not { } kind || store.NotifyInfo(conversationId) is not { } info)
                 continue;
-            var notify = ConversationGatewayRules.NotifyMessage(conversationId, kind, info.Title, info.DeviceName);
+            // 代理主動通知使用者：通知直接顯示它的話
+            var notice = ConversationGatewayRules.NoticeText(attention, info.Title);
+            var notify = ConversationGatewayRules.NotifyMessage(conversationId, notice is null ? kind : ConversationGatewayRules.NoticeKind, info.Title, info.DeviceName, notice);
             // 語音通知：每一條連線都送（看得到也念，同桌面；網頁依這個瀏覽器的開關決定），句子由擁有者依同步政策組好
-            var speak = ConversationGatewayRules.SpeechText(attention.Speech, attention.AttentionKind, info.Title) is { } text
+            var speak = (notice ?? ConversationGatewayRules.SpeechText(attention.Speech, attention.AttentionKind, info.Title)) is { } text
                 ? ConversationGatewayRules.SpeakMessage(conversationId, attention.Seq, text)
                 : null;
             foreach (var connection in live)

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
 
 namespace Myriagent.Agents;
@@ -58,6 +59,98 @@ internal static class ClaudeEventRules
         var head = by != null ? $"{by}擋下了「{tool}」" : $"Claude 擋下了「{tool}」";
         return Append(head, Str(message, "decision_reason") ?? Str(message, "message"));
     }
+
+    /// <summary>PushNotification 工具的通知內容最多留多長（工具說明要代理 200 字以內，手機會截）</summary>
+    public const int MaxNotifyLength = 500;
+
+    /// <summary>PushNotification {message, status}：代理要通知使用者的一句話（空白併成一個、太長截短）；沒有內容回 null</summary>
+    public static string? NotifyMessage(JObject? input)
+    {
+        if (input == null || Str(input, "message") is not { } raw)
+            return null;
+        var text = string.Join(' ', raw.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (text.Length > MaxNotifyLength)
+            text = text[..(char.IsHighSurrogate(text[MaxNotifyLength - 1]) ? MaxNotifyLength - 1 : MaxNotifyLength)] + "…";
+        return text.Length == 0 ? null : text;
+    }
+
+    /// <summary>
+    /// model_refusal_fallback {original_model, fallback_model, scope, direction, api_refusal_category, retracted_message_uuids…}：安全機制攔下了回覆、
+    /// 改用別的模型重答。scope 是 session（舊版沒有這個欄位，也當 session）＝整個對話換過去；local＝只有子代理或旁支提問那一次。
+    /// direction 是 revert（回到原本的模型）時不算換過去
+    /// </summary>
+    public static AgentModelRefusalEvent RefusalFallback(JObject message)
+    {
+        var original = Str(message, "original_model");
+        var fallback = Str(message, "fallback_model");
+        bool reverted = Str(message, "direction") == "revert";
+        bool session = Str(message, "scope") != "local";
+        static string Label(string? model) => model != null ? ModelLabel(model) : "另一個模型";
+        var why = RefusalCategory(Str(message, "api_refusal_category"));
+        string head;
+        if (reverted)
+            head = $"Claude 已換回原本的模型{(original != null ? " " + ModelLabel(original) : string.Empty)}";
+        else if (session)
+            head = $"Claude 的安全機制攔下了這次回覆{why}，改用 {Label(fallback)} 接著回答（原本是 {(original != null ? ModelLabel(original) : "選定的模型")}）。"
+                   + "這種判斷偶爾會誤攔一般的程式或資安工作；之後的回覆也是接手的模型，桌面版按輸入框上方的「換回」可以換回去";
+        else
+            head = $"Claude 的安全機制攔下了子代理或旁支提問的回覆{why}，那一次改用 {Label(fallback)} 回答，對話本身的模型沒有變";
+        return new AgentModelRefusalEvent(original, reverted ? null : fallback, SessionSwitched: session && !reverted && fallback != null, head, Reverted: reverted);
+    }
+
+    /// <summary>model_refusal_no_fallback：安全機制攔下了回覆，而且沒有可以接手的模型，這次就停在這裡</summary>
+    public static AgentModelRefusalEvent RefusalWithoutFallback(JObject message)
+        => new(Str(message, "original_model"), null, SessionSwitched: false,
+            $"Claude 的安全機制攔下了這次回覆{RefusalCategory(Str(message, "api_refusal_category"))}，沒有可以接手的模型，這次停在這裡。可以換個說法再問，或先換別的模型");
+
+    private static readonly Regex ModelId = new(@"^claude-(?<family>[a-z]+)-(?<major>\d{1,2})(?:-(?<minor>\d{1,2}))?(?:-\d{8})?(?:\[[^\]]*\])?$", RegexOptions.CultureInvariant);
+
+    /// <summary>模型的顯示名稱：「claude-fable-5-2」→「Fable 5.2」；不是這種樣子的照原文，沒有是「原本的模型」</summary>
+    public static string ModelLabel(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+            return "原本的模型";
+        var match = ModelId.Match(id.Trim());
+        if (!match.Success)
+            return id.Trim();
+        var family = match.Groups["family"].Value;
+        var version = match.Groups["minor"].Success ? match.Groups["major"].Value + "." + match.Groups["minor"].Value : match.Groups["major"].Value;
+        return char.ToUpperInvariant(family[0]) + family[1..] + " " + version;
+    }
+
+    /// <summary>同一個模型（不看 [1m] 這類視窗的後綴與大小寫）</summary>
+    public static bool SameModel(string? a, string? b)
+    {
+        static string Bare(string? s)
+        {
+            var t = (s ?? string.Empty).Trim();
+            var i = t.IndexOf('[');
+            return i > 0 ? t[..i] : t;
+        }
+        return string.Equals(Bare(a), Bare(b), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>被攔的類別（開放的字串）：認得的寫中文，不認得的照原文</summary>
+    private static string RefusalCategory(string? category) => category switch
+    {
+        null => string.Empty,
+        "cyber" => "（類別：資安）",
+        "bio" => "（類別：生物）",
+        _ => $"（類別：{category}）",
+    };
+
+    /// <summary>撤回的訊息 uuid（model_refusal_fallback 的 retracted_message_uuids、assistant 的 supersedes）；沒有回空的</summary>
+    public static IReadOnlyList<string> MessageUuids(JToken? token)
+        => token is JArray array
+            ? array.OfType<JValue>().Where(v => v.Type == JTokenType.String && v.ToString().Length > 0).Select(v => v.ToString()).ToList()
+            : Array.Empty<string>();
+
+    /// <summary>
+    /// informational {content, level, tool_use_id}：CLI 給使用者看的說明（hook 為什麼擋下、安全機制先停下再試一次…）；
+    /// level 是 info 的只在終端機的逐字稿模式顯示，不畫
+    /// </summary>
+    public static string? Informational(JObject message)
+        => Str(message, "level") is "notice" or "warning" or "suggestion" && Str(message, "content") is { } text ? Append("Claude 說明", text) : null;
 
     /// <summary>notification {key, text, priority, color}：CLI 要使用者知道的事（Fast 點數用完、模型被政策拒絕…）；color 是 error 時當成錯誤</summary>
     public static (string Text, bool IsError)? Notification(JObject message)

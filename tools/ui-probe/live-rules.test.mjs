@@ -450,6 +450,12 @@ test('notifyText_標題帶電腦名稱_本文依kind', () => {
   assert.equal(L.notifyText({ kind: 'question' }).body, '有問題等你回答');
   assert.equal(L.notifyText({ kind: 'failed' }).body, '發生錯誤，沒有完成');
   assert.deepEqual(L.notifyText({ kind: 'x' }), { title: '對話', body: '有新的動態' });
+  // 代理主動通知使用者（2026-11-25）：本文是它要通知的話（純文字），沒帶就照不認得的
+  assert.deepEqual(L.notifyText({ kind: 'notice', title: '資料擷取', deviceName: 'PC-1', text: '「資料擷取」通知你：要人工驗證' }),
+    { title: 'PC-1：資料擷取', body: '「資料擷取」通知你：要人工驗證' });
+  assert.equal(L.notifyText({ kind: 'notice', text: XSS }).body, XSS);
+  assert.equal(L.notifyText({ kind: 'notice', text: 5 }).body, '有新的動態');
+  assert.equal(L.notifyText({ kind: 'completed', text: '不是通知不看 text' }).body, '已完成');
   assert.equal(L.notifyText({ kind: 'constructor' }).body, '有新的動態', '原型上的名稱不算認得');
 });
 

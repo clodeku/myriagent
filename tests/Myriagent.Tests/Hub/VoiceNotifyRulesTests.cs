@@ -131,6 +131,9 @@ public sealed class VoiceNotifyRulesTests
         VoiceNotifyRules.HeadFor(ConversationAttentionKinds.Question, "報表").Should().Be("「報表」有問題想問你");
         VoiceNotifyRules.HeadFor(ConversationAttentionKinds.Approval, "報表").Should().Be("「報表」要執行操作，等你核准");
         VoiceNotifyRules.HeadFor(ConversationAttentionKinds.Plan, "報表").Should().Be("「報表」的計畫等你確認");
+        VoiceNotifyRules.Notice("報表", "網站跳出人工驗證").Should().Be("「報表」通知你：網站跳出人工驗證");
+        VoiceNotifyRules.Notice("報表", null).Should().Be("「報表」有事通知你");
+        VoiceNotifyRules.Notice(null, " ").Should().Be("對話有事通知你");
         VoiceNotifyRules.HeadFor("alert", "報表").Should().BeNull();
     }
 

@@ -377,6 +377,16 @@ public sealed class ConversationEventRulesTests
     }
 
     [Fact]
+    public void Attention的notice_選填布林_不帶時和以前逐位元組相同()
+    {
+        Check(ConversationEventKinds.Attention, """{"kind":"question","speech":"「甲」通知你：乙","notice":true}""").Should().BeNull();
+        Check(ConversationEventKinds.Attention, """{"kind":"question","notice":null}""").Should().BeNull();
+        Check(ConversationEventKinds.Attention, """{"kind":"question","notice":"yes"}""").Should().Be("invalid");
+        SyncJson.Serialize(new ConversationAttentionPayload("question", null, "句子", Notice: true)).Should().Be("""{"kind":"question","speech":"句子","notice":true}""");
+        SyncJson.Serialize(new ConversationAttentionPayload("question", null, "句子")).Should().Be("""{"kind":"question","speech":"句子"}""");
+    }
+
+    [Fact]
     public void AttentionWithoutSpeech_拿掉speech_沒有就回null()
     {
         ConversationEventRules.AttentionWithoutSpeech("""{"kind":"completed","itemId":"0f3c9a52b7e94d0c8a61f2d4e5b6c7d8","speech":"「甲」已完成：說明"}""")

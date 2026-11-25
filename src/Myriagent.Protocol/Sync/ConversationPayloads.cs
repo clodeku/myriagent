@@ -118,7 +118,11 @@ internal static class ConversationAttentionKinds
 /// <paramref name="Speech"/>＝語音通知念的句子（VoiceNotifyRules，≤ <see cref="ConversationEventRules.MaxSpeechLength"/> 字；sync-protocol 14.2）：
 /// 對話是完整同步才帶簡要說明，否則只有「標題＋發生什麼事」；空字串＝這件事不念（背景工作還在跑時的完成）；不帶（舊版桌面）時伺服器自己組只有標題的句子
 /// </summary>
-internal sealed record ConversationAttentionPayload(string Kind, string? ItemId = null, string? Speech = null);
+/// <param name="Notice">
+/// true＝代理主動通知使用者（PushNotification，2026-11-25）：<paramref name="Speech"/> 就是通知的內容，瀏覽器版的通知與其他電腦直接顯示它。
+/// 不是就不帶；不認得這個欄位的舊伺服器照 <paramref name="Kind"/>（question）處理
+/// </param>
+internal sealed record ConversationAttentionPayload(string Kind, string? ItemId = null, string? Speech = null, bool? Notice = null);
 
 /// <summary><c>conv.deleted</c>（meta 類）：線上是 <c>{}</c>（遠端刪除是移到回收區，D10，也是這一筆）</summary>
 internal sealed record ConversationDeletedPayload;

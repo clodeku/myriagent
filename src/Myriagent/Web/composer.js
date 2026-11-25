@@ -27,7 +27,7 @@ import { isHandheld } from './voicemsgrules.js';
 import { calmMotion } from './theme.js';
 import { createVoiceMessage } from './voicemsg.js';
 import { LEDS, LED_LABEL, LED_HOLD_MS, LED_HOLD_CALM_MS, ledPulse, ledTitle, CPU_WAVE_STEP, CPU_WAVE_HEIGHT, CPU_WAVE_CANVAS, CPU_STALE_MS, CPU_SLOW_DRAW_MS, cpuOf, pushCpu, cpuWaveScale, cpuWavePoints, cpuColor, cpuSlideFrom, cpuSlideMs, cpuText, cpuTitle, memOf, memText } from './activityrules.js';
-import { styleLabel, styleMenu, showStyle, agentLocked, defaultAgentDesc, steeredLabel, agentChipShown, styleChipShown, claudeMenuEntries, cacheResumeWarning, quotaWaitView, cacheCountdown, quotaWaitCells } from './claudeoptrules.js';
+import { styleLabel, styleMenu, showStyle, agentLocked, defaultAgentDesc, steeredLabel, canReadSteerNow, modelSwitchView, agentChipShown, styleChipShown, claudeMenuEntries, cacheResumeWarning, quotaWaitView, cacheCountdown, quotaWaitCells } from './claudeoptrules.js';
 
 const MAX_PASTE = 30 * 1024 * 1024;
 /** Chromium 把剪貼簿裡的點陣圖（截圖、Office 複製時附帶的 CF_DIB）包成這個檔名的 image/png */
@@ -221,9 +221,17 @@ export class Composer {
       this.renderSteered();
       post({ cmd: 'cancelSteer', conversationId: this.conv.id, id: s.id });
     });
+    // 還在等前景的指令或子代理跑完：把它們移到背景，代理馬上讀到插入的訊息（backgroundTasks，2026-11-25；宿主讀到了就收掉這一行）
+    this.steerNowBtn = h('button', { type: 'button', class: 'btn sm steer-now', hidden: true, text: '立即讀到', dataset: { field: 'steerNow' },
+      title: '把正在跑的指令或子代理移到背景繼續跑，代理馬上讀到這則訊息' });
+    this.steerNowBtn.addEventListener('click', () => {
+      post({ cmd: 'backgroundTasks', conversationId: this.conv.id });
+      this.steerNowBtn.disabled = true;
+      setTimeout(() => { this.steerNowBtn.disabled = false; }, 5000);
+    });
     // 自己的類別名（不用 .queue／.queue-head：排在佇列前面，會被找佇列的選擇器先抓到）
     this.steerEl = h('div', { class: 'steered', hidden: true, dataset: { field: 'steered' } },
-      h('div', { class: 'steer-head' }, icon('insert', 'steer-ic'), this.steerText, this.steerCancelBtn));
+      h('div', { class: 'steer-head' }, icon('insert', 'steer-ic'), this.steerText, this.steerNowBtn, this.steerCancelBtn));
     this.chips = h('div', { class: 'atts in-composer', hidden: true });
     // 〔遠端〕網頁上傳的晶片（上傳中、加入中、已附加、失敗）與迴紋針開的檔案選擇（隱藏的 input）
     this.upChips = h('div', { class: 'atts in-composer up-chips', hidden: true, dataset: { field: 'uploads' } });
@@ -326,9 +334,20 @@ export class Composer {
     this.quotaSig = '';
     this.quotaEl = h('div', { class: 'steered quotawait', hidden: true, dataset: { field: 'quotaWait' } },
       h('div', { class: 'steer-head' }, icon('clock', 'steer-ic'), this.quotaText, this.quotaCells, this.quotaCancelBtn));
+    // 安全機制把對話換到別的模型（Header.modelSwitch，2026-11-25）：常駐到換回來為止（modelSwitchBack）
+    this.msSig = '';
+    this.msText = h('span', { class: 'steer-sum' });
+    this.msBtn = h('button', { type: 'button', class: 'btn sm steer-cancel', dataset: { field: 'modelSwitchBack' } });
+    this.msBtn.addEventListener('click', () => {
+      post({ cmd: 'modelSwitchBack', conversationId: this.conv.id });
+      this.msBtn.disabled = true;
+      setTimeout(() => { this.msBtn.disabled = false; }, 5000);
+    });
+    this.msEl = h('div', { class: 'steered modelswitch', hidden: true, dataset: { field: 'modelSwitch' } },
+      h('div', { class: 'steer-head' }, icon('warning', 'steer-ic'), this.msText, this.msBtn));
     // 輸入框草稿的同步（draftsync.js）：別處有不同的草稿、這裡又正在打時，在輸入框上方提示「換成它／保留這裡的」
     this.draftSync = createDraftSync(this);
-    this.el = h('div', { class: 'dock' }, this.queueEl, this.steerEl, this.quotaEl, this.todo, this.draftSync.el, this.settleEl, this.box, this.roEl, this.gateEl, this.info);
+    this.el = h('div', { class: 'dock' }, this.queueEl, this.steerEl, this.quotaEl, this.msEl, this.todo, this.draftSync.el, this.settleEl, this.box, this.roEl, this.gateEl, this.info);
 
     this.ta.addEventListener('input', () => { this.draftSync.input(); this.autosize(); this.updateSend(); this.checkTrigger(); });
     this.ta.addEventListener('keydown', (e) => this.onKeyDown(e));
@@ -396,6 +415,8 @@ export class Composer {
     // 〔桌面遠端操作〕遠端草稿換回這台（draftSetDevice 沒帶 deviceId）：附加的檔在伺服器上、宿主已丟掉，晶片跟著清掉（2026-11-13）
     if (!isHub && this.uploads.length && hd && hd.isDraft && !hd.deviceId) this.uploadsClosed();
     this.renderQuotaWait(hd);
+    this.renderModelSwitch(hd);
+    this.renderSteered(); // 「立即讀到」看標頭的 canBackground
     this.renderToolbar();
     this.renderInfo();
     this.updatePlaceholder();
@@ -560,12 +581,27 @@ export class Composer {
     return true;
   }
 
-  /** 輸入區上方「已插入這一輪：…」與取消（cancelSteer）：宿主說取消了才把文字放回輸入框（steerCancelled） */
+  /** 輸入框上方「安全機制把這個對話換成…」與換回（Header.modelSwitch；只有桌面這台的對話） */
+  renderModelSwitch(hd) {
+    const v = isHub || this.isReplica() ? null : modelSwitchView(hd && hd.modelSwitch);
+    const sig = v ? v.text : '';
+    if (sig === this.msSig) return;
+    this.msSig = sig;
+    setHidden(this.msEl, !v);
+    if (!v) return;
+    setText(this.msText, v.text);
+    setText(this.msBtn, v.button);
+    this.msEl.title = v.title;
+    this.msBtn.disabled = false;
+  }
+
+  /** 輸入區上方「已插入這一輪：…」、立即讀到（backgroundTasks）與取消（cancelSteer）：宿主說取消了才把文字放回輸入框（steerCancelled） */
   renderSteered() {
     const s = this.state.steered;
-    this.steerEl.hidden = !s || isHub;
+    setHidden(this.steerEl, !s || isHub);
     if (!s || isHub) return;
     setText(this.steerText, steeredLabel(s));
+    setHidden(this.steerNowBtn, !canReadSteerNow(s, this.header));
     this.steerEl.title = s.text || '';
   }
 

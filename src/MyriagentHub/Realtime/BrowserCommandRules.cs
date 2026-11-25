@@ -84,6 +84,8 @@ internal static class BrowserCommandRules
         "rewindPreview", "rewind",
         // 取消等額度重置後自動接著做：等待只記在那台（瀏覽器版的標頭沒有）
         "quotaWaitCancel",
+        // 安全機制換過的模型換回來：以那台活著的 Claude 程序（瀏覽器版的標頭沒有 modelSwitch）
+        "modelSwitchBack",
         // 匯入本機外部 CLI 歷史對話：唯讀掃描與匯入這台電腦上的 CLI 對話紀錄（瀏覽器版無此按鈕）
         "listExternalConversations", "importExternalConversation", "openCodexThread",
         // 延伸成新對話：複製那台的對話資料夾與 Claude 逐字稿（瀏覽器版的選單沒有這一項）

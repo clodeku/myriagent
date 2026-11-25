@@ -15,6 +15,9 @@ internal sealed record VoiceLine(string Full, string Head)
 {
     public static VoiceLine Silent { get; } = new(string.Empty, string.Empty);
 
+    /// <summary>代理主動通知使用者的句子（PushNotification）：句子本身就是通知的內容，其他電腦與瀏覽器版的通知直接顯示它（conv.attention 的 notice）</summary>
+    public bool Notice { get; init; }
+
     public bool IsSilent => Full.Length == 0;
 }
 
@@ -115,6 +118,10 @@ internal static class VoiceNotifyRules
     /// <summary>計畫等確認：接計畫的第一行（通常是計畫的標題）</summary>
     public static string Plan(string? title, string? plan)
         => Compose($"{Name(title)}的計畫等你確認", TextRules.FirstLine(plan));
+
+    /// <summary>代理主動通知使用者（PushNotification）：接它要通知的話</summary>
+    public static string Notice(string? title, string? message)
+        => Fit(message, int.MaxValue).Length == 0 ? $"{Name(title)}有事通知你" : Compose($"{Name(title)}通知你", message);
 
     /// <summary>「對話標題」；沒有標題時說「對話」</summary>
     public static string Name(string? title)

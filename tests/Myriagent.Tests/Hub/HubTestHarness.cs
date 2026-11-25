@@ -678,6 +678,11 @@ internal sealed class FakeSession : IAgentSession
         return Task.FromResult(MoveToBackgroundError);
     }
 
+    /// <summary>SetWatched 收到的（有沒有人在看；AgentHub.StreamWatch.cs）</summary>
+    public Recorder<bool> WatchedChanges { get; } = new();
+
+    public void SetWatched(bool watched) => WatchedChanges.Add(watched);
+
     /// <summary>StopBackgroundWorkAsync 收到的 stopId（全部記成 "*"）與要回的結果</summary>
     public Recorder<string> StopRequests { get; } = new();
 

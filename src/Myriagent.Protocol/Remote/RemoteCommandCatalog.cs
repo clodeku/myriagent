@@ -192,6 +192,8 @@ internal static class RemoteCommandCatalog
         "rewindPreview", "rewind",
         // 取消等額度重置後自動接著做：等待只記在這台（遠端的標頭沒有）
         "quotaWaitCancel",
+        // 安全機制換過的模型換回來：以這台活著的 Claude 程序（遠端的標頭沒有 modelSwitch）
+        "modelSwitchBack",
         // 匯入本機外部 CLI 歷史對話：唯讀掃描與匯入這台電腦上的 CLI 對話紀錄
         "listExternalConversations", "importExternalConversation", "openCodexThread",
         // 延伸成新對話：複製這台的對話資料夾與 Claude 逐字稿

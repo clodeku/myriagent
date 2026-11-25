@@ -130,6 +130,24 @@ export function rewindPlan(msg) {
   return { canConversation, conversationNote, canFiles, filesNote, fileList, fileCount };
 }
 
+/**
+ * 插入的那則還在等前景的指令或子代理跑完（標頭帶 canBackground）：可以「立即讀到」——把它們移到背景，代理馬上讀到插入的訊息（backgroundTasks）
+ */
+export function canReadSteerNow(steered, header) {
+  return !!(steered && steered.id && header && header.running === true && header.canBackground === true);
+}
+
+/** 安全機制把對話換到別的模型（Header.modelSwitch：{from, to}）→ 輸入框上方那一行；沒有回 null */
+export function modelSwitchView(ms) {
+  if (!ms || typeof ms !== 'object' || typeof ms.to !== 'string' || !ms.to) return null;
+  const from = typeof ms.from === 'string' && ms.from ? ms.from : '原本的模型';
+  return {
+    text: '安全機制把這個對話換成 ' + ms.to + '（原本是 ' + from + '）',
+    button: '換回 ' + from,
+    title: 'Claude 的安全機制攔下了一則回覆，之後的回覆都是 ' + ms.to + '。換回之後下一次回覆就用 ' + from + '（同樣的內容可能再被攔）；也可以在模型選單自己選。',
+  };
+}
+
 /** 已插進這一輪的那則（composer.steered）：輸入區上方那一行的文字 */
 export function steeredLabel(steered) {
   const t = steered && typeof steered.text === 'string' ? steered.text.trim() : '';

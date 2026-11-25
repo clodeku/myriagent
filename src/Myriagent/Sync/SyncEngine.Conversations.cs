@@ -1045,7 +1045,8 @@ internal sealed partial class SyncEngine
             {
                 var attention = (AttentionChange)change!;
                 if (ConversationAttentionKinds.IsKnown(attention.Kind))
-                    Add(pass, appends, projector.Attention(wire, epoch, attention.Kind, attention.ItemId, VoiceNotifyRules.ForPolicy(attention.Speech, PolicyOf(meta))));
+                    Add(pass, appends, projector.Attention(wire, epoch, attention.Kind, attention.ItemId, VoiceNotifyRules.ForPolicy(attention.Speech, PolicyOf(meta)),
+                        notice: attention.Speech is { Notice: true }));
                 return true;
             }
 

@@ -110,7 +110,8 @@ internal sealed partial class ConversationMaterializer(ConversationDirectoryCach
             case ConversationAction.Attention:
                 TouchConversation(context, conversationId, seq);
                 change = new ConversationChange(conversationId, ConversationChangeKind.Attention, seq, author, AttentionKind: (string)payload["kind"]!, Fresh: fresh,
-                    Speech: payload["speech"] is JValue { Type: JTokenType.String, Value: string speech } ? speech : null);
+                    Speech: payload["speech"] is JValue { Type: JTokenType.String, Value: string speech } ? speech : null,
+                    Notice: payload["notice"] is JValue { Type: JTokenType.Boolean, Value: true });
                 break;
             case ConversationAction.Delete:
                 // 在伺服器上刪除（答 4、D34；含改成只在這台電腦）：同一個交易清掉內容，墓碑列保留，之後的事件一律回 deleted、不能改回同步。

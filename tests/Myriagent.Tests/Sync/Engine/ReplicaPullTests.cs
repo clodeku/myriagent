@@ -192,6 +192,23 @@ public sealed class ReplicaPullTests
     }
 
     [Fact]
+    public async Task 其他電腦的代理主動通知_交給中樞_一般的提醒與沒有複本的不交()
+    {
+        await using var rig = new Rig();
+        await rig.StartAsync();
+        var id = NewId();
+        rig.Publish(ConversationEventKinds.Created, id, MetaJson("別台的對話"));
+        rig.Publish(ConversationEventKinds.Attention, id, ConversationWire.Serialize(new ConversationAttentionPayload("question", null, "「別台的對話」有問題想問你")));
+        rig.Publish(ConversationEventKinds.Attention, id, ConversationWire.Serialize(new ConversationAttentionPayload("question", null, "「別台的對話」通知你：要驗證", Notice: true)));
+        rig.Publish(ConversationEventKinds.Attention, NewId(), ConversationWire.Serialize(new ConversationAttentionPayload("question", null, "沒有複本", Notice: true)));
+        await rig.NotifyAsync(SyncClasses.Meta);
+
+        var notice = rig.Ui.ReplicaDeltas.SelectMany(d => d.Notices ?? []).Should().ContainSingle().Subject;
+        (notice.ConversationId, notice.Text).Should().Be((id, "「別台的對話」通知你：要驗證"));
+        notice.CreatedAtMs.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
     public async Task v1的cursors只有catalog與usage()
     {
         await using var rig = new Rig();

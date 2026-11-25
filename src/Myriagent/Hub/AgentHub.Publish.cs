@@ -258,10 +258,15 @@ internal sealed partial class AgentHub : IConversationPublishSource
     {
         ArgumentNullException.ThrowIfNull(conversationIds);
         remoteWatched = conversationIds;
+        RefreshStreamWatch();
     }
 
     /// <summary>接收者換了或拿掉（AttachConversationSink；解除配對）：之前推來的觀看集合不再算數，本機照常提醒</summary>
-    private void ResetRemoteWatched() => remoteWatched = NoRemoteWatched;
+    private void ResetRemoteWatched()
+    {
+        remoteWatched = NoRemoteWatched;
+        RefreshStreamWatch();
+    }
 
     /// <summary>
     /// 其他地方（瀏覽器）看得到這個對話（NotifyAttention 問，計畫步 11，D19）：在引擎推來的觀看集合裡（伺服器說看得到、引擎以本機政策過濾、

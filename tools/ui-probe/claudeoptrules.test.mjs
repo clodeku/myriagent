@@ -74,6 +74,12 @@ test('插入的那則：輸入區上方的文字', () => {
   assert.equal(R.steeredLabel({ id: 'i1', text: '順便跑測試' }), '已插入這一輪：順便跑測試');
   assert.equal(R.steeredLabel({ id: 'i1', text: '' }), '已插入這一輪：（附件）');
   assert.match(R.steeredLabel({ id: 'i1', text: 'x'.repeat(80) }), /…$/);
+  // 立即讀到：執行中、前景有能移到背景的才有
+  assert.equal(R.canReadSteerNow({ id: 'i1' }, { running: true, canBackground: true }), true);
+  assert.equal(R.canReadSteerNow({ id: 'i1' }, { running: true }), false);
+  assert.equal(R.canReadSteerNow({ id: 'i1' }, { running: false, canBackground: true }), false);
+  assert.equal(R.canReadSteerNow(null, { running: true, canBackground: true }), false);
+  assert.equal(R.canReadSteerNow({ id: 'i1' }, null), false);
 });
 
 test('回溯：只有本機的 Claude 對話、不在執行中；預覽的說明', () => {
@@ -227,4 +233,15 @@ test('quotaWaitView_帳戶與重置時間_剩不到一分鐘不寫還有多久',
   assert.match(R.quotaWaitView({ until: NOW + 30000 }, NOW).text, /等這個帳戶在/);
   assert.equal(R.quotaWaitView(null, NOW), null);
   assert.equal(R.quotaWaitView({ until: 'x' }, NOW), null);
+});
+
+test('modelSwitchView_安全機制換過的模型與換回鈕_沒有接手的模型就不顯示', () => {
+  const v = R.modelSwitchView({ from: 'Fable 5.2', to: 'Opus 4.8' });
+  assert.equal(v.text, '安全機制把這個對話換成 Opus 4.8（原本是 Fable 5.2）');
+  assert.equal(v.button, '換回 Fable 5.2');
+  assert.match(v.title, /之後的回覆都是 Opus 4\.8/);
+  assert.equal(R.modelSwitchView({ to: 'Opus 4.8' }).button, '換回 原本的模型');
+  assert.equal(R.modelSwitchView({ from: 'Fable 5.2' }), null);
+  assert.equal(R.modelSwitchView({ to: 5 }), null);
+  assert.equal(R.modelSwitchView(null), null);
 });

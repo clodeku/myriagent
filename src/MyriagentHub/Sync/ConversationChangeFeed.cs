@@ -42,6 +42,7 @@ internal enum ConversationChangeKind
 /// <param name="Body"><c>conv.item</c> 的 payload JSON（解碼後）；超過 <see cref="ConversationChangeFeed.MaxInlineBodyBytes"/> 時 null</param>
 /// <param name="AttentionKind"><c>conv.attention</c> 的 kind（D28）</param>
 /// <param name="Speech"><c>conv.attention</c> 的 speech（語音通知念的句子；null＝擁有者沒帶，閘道自己組只有標題的句子；空字串＝不念）</param>
+/// <param name="Notice"><c>conv.attention</c> 的 notice（代理主動通知使用者：speech 就是通知的內容）</param>
 /// <param name="Status">項目的狀態名稱（疊加層的清除規則，提案 C4）</param>
 /// <param name="TurnPhase"><c>conv.turn</c> 的 phase（未讀，D45）</param>
 /// <param name="Fresh">新的上行事件（<see cref="ConversationApplyRules.IsFresh"/>）：對帳重送的舊事件與重建都不帶（未讀，D45）</param>
@@ -51,7 +52,8 @@ internal enum ConversationChangeKind
 /// </param>
 internal sealed record ConversationChange(string ConversationId, ConversationChangeKind Kind, long Seq, string Author,
     string? ItemId = null, long? Ord = null, long? Ver = null, bool Final = false, string? Body = null, string? AttentionKind = null,
-    string? Status = null, string? TurnPhase = null, bool Fresh = false, long ReceivedAt = 0, string? Speech = null);
+    string? Status = null, string? TurnPhase = null, bool Fresh = false, long ReceivedAt = 0, string? Speech = null,
+    bool Notice = false);
 
 /// <summary>
 /// 對話的變更通知（WP4.2 計畫 D13）：寫入者的 AfterCommit 以 <see cref="Post"/> 放進有界的佇列（O(1)），消費者（閘道迴圈）以

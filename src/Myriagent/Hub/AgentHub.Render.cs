@@ -976,6 +976,9 @@ internal sealed partial class AgentHub
             if (c.Meta.ColdResume is { } coldResume)
                 header["coldResume"] = new JObject { ["perMillion"] = coldResume.PercentPerMillionTokens, ["minPercent"] = coldResume.MinPercent };
         }
+        // 安全機制把對話換到別的模型（AgentHub.ModelRefusal.cs；沒有就不帶）
+        if (RenderModelSwitch(c) is { } modelSwitch)
+            header["modelSwitch"] = modelSwitch;
         // 前景有指令或子代理在跑、可以移到背景（AgentHub.MoveToBackground.cs；不能就不帶）
         if (CanMoveToBackground(c))
             header["canBackground"] = true;

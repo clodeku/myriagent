@@ -331,6 +331,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                 OnConversationViewRemoved(c);
         }
         MarkAccountsDirty();
+        RefreshStreamWatch();
     }
 
     private IEnumerable<IAgentView> ViewsOf(ConversationState c)
@@ -478,6 +479,10 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                     break;
                 case "quotaWaitCancel":
                     CancelQuotaWait(Conv());
+                    break;
+                case "modelSwitchBack":
+                    // 安全機制換過的模型換回對話設定的（AgentHub.ModelRefusal.cs）
+                    _ = SwitchModelBackAsync(view, Conv());
                     break;
                 case "goalClear":
                     ClearGoal(view, Conv());
@@ -1008,6 +1013,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         else if (removed)
             OnConversationViewRemoved(c);
         MarkAccountsDirty();
+        RefreshStreamWatch();
     }
 
     /// <summary>
@@ -1043,6 +1049,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         if (changed)
             MarkListDirty();
         ScheduleActivity(); // 看得到的對話變了：對話框的燈號要開始（或停止）取樣（AgentHub.Activity.cs）
+        RefreshStreamWatch(); // 沒人看的對話要 CLI 合併逐字片段（AgentHub.StreamWatch.cs）
     }
 
     /// <summary>沒送出的草稿：刪掉附件資料夾、從清單移除</summary>
@@ -1686,6 +1693,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         PersistQueueIfChanged(c);
         c.BlockItems.Clear();
         c.ToolItems.Clear();
+        c.MovableTools.Clear();
         c.UnapprovedTools.Clear();
         foreach (var key in c.RequestItems.Where(kv => !kv.Value.AnswerAsMessage).Select(kv => kv.Key).ToList())
             c.RequestItems.Remove(key);
@@ -1724,6 +1732,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                 OnSessionEvent(state, ev);
         });
         c.Session = session;
+        OnSessionCreated(c);
         return session;
     }
 
@@ -1766,6 +1775,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             workingDirectory,
             conversationDirectory,
             AgentHubRules.BuildAgentInstructions(settings.Instructions, account.Provider, workingDirectory, store.GetAttachmentDirectory(c.Meta.Id))
+                + (account.Provider == AgentProvider.Claude ? AgentHubRules.NotifyUserHint : string.Empty)
                 + RemoteExecInstructions() + TimedInstructions(),
             UseLocalCustomizations: !account.SafeMode,
             HistoryRecap: historyRecap,
@@ -2230,8 +2240,14 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
                 TryAutoApprove(c, item);
         // 換模型、推理強度：活著的程序立即改用（Claude、Grok 一輪中途也從下一次模型呼叫起；Claude 閒置的程序也套用，下一輪不必重開），
         // 執行中做不到（Codex、Antigravity）就明說下一則訊息才生效
-        if (key is "model" or "effort" && c.Session != null && (c.Meta.Model != previousModel || c.Meta.Effort != previousEffort))
+        // （安全機制換過模型時選同一個模型也要送：程序實際用的是接手的模型）
+        if (key is "model" or "effort" && c.Session != null
+            && (c.Meta.Model != previousModel || c.Meta.Effort != previousEffort || (key == "model" && c.ModelSwitch != null)))
+        {
+            if (key == "model")
+                ForgetModelSwitch(c);
             _ = ApplyModelNowAsync(view, c, c.Session, key, c.Meta.Model, c.Meta.Effort);
+        }
     }
 
     private async Task ApplyModelNowAsync(IAgentView view, ConversationState c, IAgentSession session, string key, string? model, string? effort)

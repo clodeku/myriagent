@@ -142,6 +142,15 @@ public sealed class ConversationGatewayRulesTests
     public void notify的kind(string? attention, string? expected) => ConversationGatewayRules.NotifyKind(attention).Should().Be(expected);
 
     [Theory]
+    [InlineData(true, "「甲」通知你：乙", "「甲」通知你：乙")]
+    [InlineData(true, null, "「標題」有事通知你")]
+    [InlineData(true, "", "「標題」有事通知你")]
+    [InlineData(false, "「甲」有問題想問你：乙", null)]
+    public void 代理主動通知的內容_沒帶句子用只有標題的_不是這種提醒沒有(bool notice, string? speech, string? expected)
+        => ConversationGatewayRules.NoticeText(
+            new ConversationChange(C1, ConversationChangeKind.Attention, 1, Owner, AttentionKind: "question", Fresh: true, Speech: speech, Notice: notice), "標題").Should().Be(expected);
+
+    [Theory]
     [InlineData("「甲」已完成：說明", "completed", "甲", "「甲」已完成：說明")]
     [InlineData("", "completed", "甲", null)]
     [InlineData(null, "completed", "甲", "「甲」已完成")]
@@ -314,6 +323,9 @@ public sealed class ConversationGatewayRulesTests
         var notify = ConversationGatewayRules.NotifyMessage(C1, "approval", "<b>標題</b>", null);
         JObject.Parse(notify.Json).ShouldBeJson((
             $$"""{"type":"notify","conversationId":"{{C1}}","kind":"approval","title":"<b>標題</b>","deviceName":null}"""));
+        // 代理主動通知使用者（2026-11-25）：kind 是 notice、帶要通知的話
+        JObject.Parse(ConversationGatewayRules.NotifyMessage(C1, ConversationGatewayRules.NoticeKind, "標題", "PC", "「標題」通知你：要人工驗證").Json).ShouldBeJson((
+            $$"""{"type":"notify","conversationId":"{{C1}}","kind":"notice","title":"標題","deviceName":"PC","text":"「標題」通知你：要人工驗證"}"""));
         var clipboard = ConversationGatewayRules.ClipboardMessage(C1, "i9", "原文\n\"引號\"");
         JObject.Parse(clipboard.Json)["text"]!.Value<string>().Should().Be("原文\n\"引號\"");
         new[] { notify, clipboard }.Should().OnlyContain(m => ClientOutboxRules.KeptAcrossInit(m.Type) && m.Key == null);

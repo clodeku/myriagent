@@ -15,12 +15,29 @@ internal sealed partial class AgentHub
     {
         /// <summary>移到背景的請求還在進行（連按只送一次；這段時間標頭不帶 canBackground）</summary>
         public bool MovingToBackground;
+
+        /// <summary>
+        /// CLI 已登記成前景工作的工具（task_started 的 is_backgrounded 是 false；鍵是工具 id）：只有它們移得動。
+        /// 指令開始約 3 秒後才登記（實測 2.1.332），之前送 background_tasks 會回成功卻沒有作用；子代理一開始就登記
+        /// </summary>
+        public readonly HashSet<string> MovableTools = new(StringComparer.Ordinal);
     }
 
-    /// <summary>前景有能移到背景的工作：執行中的指令（Bash、PowerShell）或子代理</summary>
+    /// <summary>前景有能移到背景的工作：CLI 已登記的執行中指令（Bash、PowerShell）或子代理</summary>
     private static bool CanMoveToBackground(ConversationState c)
-        => c.Running && !c.IsReplica && !c.IsDraft && !c.MovingToBackground && c.Session is { CanMoveToBackground: true }
-           && ForegroundRunningTools(c).Any(i => i.ToolKind is "bash" or "agent");
+    {
+        if (!c.Running || c.IsReplica || c.IsDraft || c.MovingToBackground || c.MovableTools.Count == 0 || c.Session is not { CanMoveToBackground: true })
+            return false;
+        var running = ForegroundRunningTools(c).Where(i => i.ToolKind is "bash" or "agent").ToHashSet();
+        return running.Count > 0 && c.MovableTools.Any(id => c.ToolItems.TryGetValue(id, out var item) && running.Contains(item));
+    }
+
+    /// <summary>CLI 登記了一個前景工作：移得動了</summary>
+    private void OnForegroundTaskStarted(ConversationState c, string toolUseId)
+    {
+        if (c.MovableTools.Add(toolUseId))
+            MarkHeaderDirty(c);
+    }
 
     private async Task MoveToBackgroundAsync(IAgentView view, ConversationState? c)
     {

@@ -37,6 +37,15 @@ internal static partial class AgentHubRules
         "工作資料夾：{cwd}\n" +
         "使用者上傳的附件放在：{attachments}";
 
+    /// <summary>
+    /// 附在給 Claude 的說明後面：PushNotification 由 app 轉成自己的通知（AgentHub.NotifyUser.cs）。CLI 的工具結果只講終端機與手機推播，
+    /// 沒開 Remote Control 時寫 not sent，代理會以為沒通知到而重送或換別的方式
+    /// </summary>
+    public const string NotifyUserHint =
+        "\n\n要使用者馬上知道的事（有時限的人工驗證、等使用者決定才能繼續、使用者離開時長工作做完了）用 PushNotification：" +
+        "Clode Myriagent 會轉成這台電腦的系統通知與語音，並送到使用者其他電腦與開著的網頁版；" +
+        "工具結果寫 Mobile push not sent 或 Not sent 也已經通知到了，不必重送。";
+
     /// <summary>輸入區「繼續」鈕預設送出的那一句（2026-10-24 使用者指定的原文，不加標點；網頁 sendrules.js 的 CONTINUE_TEXT 同值）</summary>
     public const string DefaultContinueText = "進度如何呢如果還沒做完就繼續";
 

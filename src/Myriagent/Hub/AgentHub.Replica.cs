@@ -159,6 +159,9 @@ internal sealed partial class AgentHub
                 listChanged |= ApplyReplicaItems(c, items);
         }
 
+        foreach (var notice in delta.Notices ?? [])
+            ApplyReplicaNotice(notice);
+
         if (listChanged)
             MarkListDirty();
     }
