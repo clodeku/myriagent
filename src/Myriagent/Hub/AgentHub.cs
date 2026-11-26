@@ -1808,7 +1808,8 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             AutoCompactTokens: AutoCompactRules.ForProvider(account.Provider, ProviderDefaults(account.Provider).AutoCompactTokens),
             AutoCompactPercent: AutoCompactRules.PercentForProvider(account.Provider, ProviderDefaults(account.Provider).AutoCompactPercent))
         {
-            ProcessHost = settings.CliViaHost ? processHost : null,
+            // 接上了代理主機就一律經它開（2026-11-26 擁有者決定：不做開關）；主機開不起來時 AgentProcess 自己退回直接開
+            ProcessHost = processHost,
         };
     }
 
@@ -1816,7 +1817,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
     private IAgentProcessHost? processHost;
 
     /// <summary>
-    /// 接上代理主機（設計 docs/plans/2026-11-26-agent-host.md）：設定 cliViaHost 開著時，對話的 CLI 程序經它開。
+    /// 接上代理主機（設計 docs/plans/2026-11-26-agent-host.md）：接上之後對話的 CLI 程序一律經它開（沒有開關）。
     /// 中樞預設沒接（直接開程序），只有 AppController 接上真的；中樞測試要測主機就自己接暫存資料夾的
     /// </summary>
     internal void AttachProcessHost(IAgentProcessHost host) => processHost = host ?? throw new ArgumentNullException(nameof(host));
@@ -2779,10 +2780,6 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             case "shareAgentMemory":
                 // 下次送出時程序會重開（AccountKey 帶著這個開關）；已經建立的 CLI 對話裡給過的說明不收回
                 settings.ShareAgentMemory = value.Type == JTokenType.Boolean && value.Value<bool>();
-                break;
-            case "cliViaHost":
-                // 不重開已經在跑的程序：下一次啟動程序（新對話、閒置回收之後、換版之後）才照新的設定
-                settings.CliViaHost = value.Type == JTokenType.Boolean && value.Value<bool>();
                 break;
             case "shareCrossCliCustomizations":
             {

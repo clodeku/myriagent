@@ -1598,17 +1598,6 @@ async function runMain(vp, full) {
   const sm3 = await until(() => host.last('setting', (m) => m.key === 'shareAgentMemory' && m.value === true), 2000);
   if (full) check('settingsShareAgentMemory', sm0.checked === true && sm0.label === '各家代理共用記憶' && /Codex、Antigravity 與 Grok/.test(sm0.desc) && /memory/.test(sm0.desc)
     && !!sm1 && sm2 === false && !!sm3, { initial: sm0, off: sm1, afterOff: sm2, on: sm3 });
-  // CLI 程序由代理主機啟動（CLI 分頁的「更新」區，預設關）：開了送出 cliViaHost=true，再關回 false
-  const hostRow = '.dlg-settings .set-sec[data-sec="cliUpdate"] .set-row[data-setting="cliViaHost"]';
-  const vh0 = await page.$eval(hostRow, (r) => ({ checked: r.querySelector('input').checked, label: r.querySelector('.set-label').textContent, desc: r.querySelector('.set-desc').textContent }));
-  await page.click(hostRow + ' .switch');
-  const vh1 = await until(() => host.last('setting', (m) => m.key === 'cliViaHost' && m.value === true), 2000);
-  await sleep(120);
-  const vh2 = await page.$eval(hostRow + ' input', (i) => i.checked);
-  await page.click(hostRow + ' .switch');
-  const vh3 = await until(() => host.last('setting', (m) => m.key === 'cliViaHost' && m.value === false), 2000);
-  if (full) check('settingsCliViaHost', vh0.checked === false && vh0.label === 'CLI 程序由代理主機啟動（實驗）' && /代理主機/.test(vh0.desc) && /自動改回直接啟動/.test(vh0.desc)
-    && !!vh1 && vh2 === true && !!vh3, { initial: vh0, on: vh1, afterOn: vh2, off: vh3 });
   await page.keyboard.press('Escape');
 
   // app 自我更新：橫幅（已備妥 → 現在更新；排空中 → 取消這次）、設定頁的 Clode Myriagent 區塊

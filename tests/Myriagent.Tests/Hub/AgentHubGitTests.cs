@@ -198,9 +198,16 @@ public sealed class AgentHubGitTests
     {
         var (h, reader) = Create();
         using var dispose = h;
-        reader.Status = folder => Repo(folder, ahead: 0, behind: 1, tracked: RemoteSha);
+        // 先開始這一輪、遠端才多出提交：開草稿的那一下就會讀一次狀態（那時還沒在執行，落後的話照規則會拉——
+        // 一開始就設成落後時，那次讀取和送出誰先誰後不一定，單獨跑這個測試幾乎每次都先拉了）
+        reader.Status = folder => Repo(folder, ahead: 0, behind: 0, tracked: RemoteSha);
         var (id, session) = h.StartConversation(h.Main, h.Claude);
-        await WaitGitAsync(h.Main, id, g => AutoPullText(g) == "這次不拉：這個資料夾有對話正在執行，結束後再拉");
+        await WaitGitAsync(h.Main, id, g => g != null);
+        await h.Ui.DrainAsync();
+        reader.Status = folder => Repo(folder, ahead: 0, behind: 1, tracked: RemoteSha);
+        var mark = h.Main.Mark();
+        h.Command(h.Main, "gitRefresh", new { conversationId = id });
+        await WaitGitAsync(h.Main, id, g => AutoPullText(g) == "這次不拉：這個資料夾有對話正在執行，結束後再拉", mark);
         reader.Pulls.Should().BeEmpty();
 
         h.CompleteTurn(session);

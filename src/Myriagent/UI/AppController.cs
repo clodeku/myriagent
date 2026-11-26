@@ -143,10 +143,14 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         Hub.AttachScheduleTranscripts(Hub.DefaultTranscriptRoots);
         // 輸入區的語音訊息：錄音在這台以 faster-whisper 轉成逐字稿，連錄音檔交給代理（不呼叫 Windows 的語音輸入）
         Hub.AttachVoice(voiceTranscriber);
-        // 代理主機（設定 cliViaHost 開著時對話的 CLI 經它開；第一次要開程序時才啟動主機）：每個資料根目錄各自一個
-        agentHost = new Myriagent.Agents.AgentHostClient(Path.Combine(AppContext.BaseDirectory, Myriagent.Agents.AgentHostClient.ExecutableName),
-            AppPaths.Root, Path.Combine(AppPaths.LogDirectory, "agent-host.log"));
-        Hub.AttachProcessHost(agentHost);
+        // 代理主機（對話的 CLI 一律經它開，沒有開關；第一次要開程序時才啟動主機，開不起來自動退回直接開）：每個資料根目錄各自一個。
+        // 診斷用：環境變數 MYRIAGENT_AGENT_DIRECT_CLI=1 時不接主機（這次執行的 CLI 都直接開；上一版留在主機的程序沒有人接回，主機逾時自己結束）
+        if (Environment.GetEnvironmentVariable("MYRIAGENT_AGENT_DIRECT_CLI") != "1")
+        {
+            agentHost = new Myriagent.Agents.AgentHostClient(Path.Combine(AppContext.BaseDirectory, Myriagent.Agents.AgentHostClient.ExecutableName),
+                AppPaths.Root, Path.Combine(AppPaths.LogDirectory, "agent-host.log"));
+            Hub.AttachProcessHost(agentHost);
+        }
         // 回覆裡顯示的圖片與影片在對話資料夾留一份（attachments\.kept\）：原檔之後被刪或被覆寫，對話裡照樣看得到當時那一張
         Hub.AttachMediaKeeper();
         // 上次下載或匯入網頁上傳途中被關閉（當機、重開機）留下的暫存：同步還沒接上、沒有任何上傳在下載，在背景清掉（WP4.7 合併前審查 R6）
@@ -326,7 +330,7 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
     /// <summary>遠端執行指令的桌面端（被操作與發起）</summary>
     private readonly RemoteExecService remoteExec;
 
-    /// <summary>代理主機的用戶端（設定 cliViaHost 開著時對話的 CLI 經它開）；結束時在中樞之後釋放</summary>
+    /// <summary>代理主機的用戶端（對話的 CLI 經它開；MYRIAGENT_AGENT_DIRECT_CLI=1 時是 null）；結束時在中樞之後釋放</summary>
     private Myriagent.Agents.AgentHostClient? agentHost;
 
     /// <summary>這次結束是換版，而且排空時放開了程序：代理主機交棒（留著程序）而不是結束</summary>

@@ -127,7 +127,7 @@ public sealed partial class BrowserCommandRulesTests
     public void Instructions等本機設定是桌面專屬鍵()
     {
         // SEC-24：只能在電腦本機改的設定，瀏覽器送來一律 desktop_only
-        foreach (var key in new[] { "instructions", "closeToTray", "autoUpdateCli", "autoUpdateApp", "cliRestartPolicy", "claudeRemoteControl", "autoSwitchAccount", "autoSwitchCrossProvider", "shareCrossCliCustomizations", "shareAgentMemory", "cliViaHost" })
+        foreach (var key in new[] { "instructions", "closeToTray", "autoUpdateCli", "autoUpdateApp", "cliRestartPolicy", "claudeRemoteControl", "autoSwitchAccount", "autoSwitchCrossProvider", "shareCrossCliCustomizations", "shareAgentMemory" })
             BrowserCommandRules.DesktopOnlySettingKeys.Contains(key).Should().BeTrue(key);
         BrowserCommandRules.DesktopOnlySettingKeys.Contains("theme").Should().BeFalse();
         BrowserCommandRules.DesktopOnlySettingKeys.Contains("Instructions").Should().BeFalse("比對大小寫有別；其他寫法落到 invalid");

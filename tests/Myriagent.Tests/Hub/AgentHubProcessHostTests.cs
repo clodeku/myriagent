@@ -5,8 +5,8 @@ using Newtonsoft.Json.Linq;
 namespace Myriagent.Tests.Hub;
 
 /// <summary>
-/// 代理主機的接線（設計 docs/plans/2026-11-26-agent-host.md 的 H0）：中樞預設不經主機；接上了也要設定 cliViaHost 開著才把主機交給會話，
-/// 設定只能在本機改、改了之後新啟動的程序才照新的
+/// 代理主機的接線（設計 docs/plans/2026-11-26-agent-host.md）：中樞預設不經主機（測試、沒接上時直接開）；
+/// 接上之後每種代理的會話一律經主機開程序——沒有開關（2026-11-26 擁有者決定）
 /// </summary>
 public sealed class AgentHubProcessHostTests
 {
@@ -27,7 +27,7 @@ public sealed class AgentHubProcessHostTests
     }
 
     [Fact]
-    public void 預設不經主機_接上而且設定開著才交給會話_關掉後新的程序改回直接開()
+    public void 預設不經主機_接上之後一律交給會話_沒有開關()
     {
         using var h = new HubHarness();
         var (_, bare) = h.StartConversation(h.Main, h.Claude);
@@ -36,20 +36,16 @@ public sealed class AgentHubProcessHostTests
         var host = new FakeHost();
         h.Ui.Invoke(() => h.Hub.AttachProcessHost(host));
         h.Command(h.Main, "ready");
-        h.Main.Last("init")!["settings"]!["cliViaHost"]!.Value<bool>().Should().BeFalse("預設關");
-        var (_, off) = h.StartConversation(h.Main, h.Codex);
-        off.Sent.All.Single().Settings.ProcessHost.Should().BeNull("設定關著：照舊直接開");
-
-        h.Command(h.Main, "setting", new { key = "cliViaHost", value = true });
-        h.OnUi(() => h.Settings.CliViaHost).Should().BeTrue();
+        ((JObject)h.Main.Last("init")!["settings"]!).ContainsKey("cliViaHost").Should().BeFalse("不是設定：網頁沒有這個開關");
         foreach (var account in new[] { h.Claude, h.Codex })
         {
             var (_, on) = h.StartConversation(h.Main, account);
             on.Sent.All.Single().Settings.ProcessHost.Should().BeSameAs(host, $"{account.Provider} 的會話經主機開程序");
         }
 
+        // 以前的版本送的 cliViaHost 不再是設定：不認得的鍵不改變行為
         h.Command(h.Main, "setting", new { key = "cliViaHost", value = false });
         var (_, again) = h.StartConversation(h.Main, h.Claude);
-        again.Sent.All.Single().Settings.ProcessHost.Should().BeNull();
+        again.Sent.All.Single().Settings.ProcessHost.Should().BeSameAs(host);
     }
 }

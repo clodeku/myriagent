@@ -57,11 +57,7 @@ public sealed class AppUpdateDetachIntegrationTests
         CliLocator.Locate(provider).Should().NotBeNull($"這台電腦要安裝 {provider} CLI");
         var first = NewHost();
         AgentHostClient? second = null;
-        h.Ui.Invoke(() =>
-        {
-            h.Settings.CliViaHost = true;
-            h.Hub.AttachProcessHost(first);
-        });
+        h.Ui.Invoke(() => h.Hub.AttachProcessHost(first));
 
         try
         {
