@@ -17,7 +17,9 @@ internal sealed class Sessions
         {
             AgentProvider.Claude => new ClaudeAgentSession(),
             AgentProvider.Codex => new CodexAgentSession(),
-            _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "整合測試只跑 Claude 與 Codex"),
+            AgentProvider.Grok => new GrokAgentSession(),
+            AgentProvider.Antigravity => new AntigravityAcpSession(),
+            _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "整合測試沒有這種代理"),
         };
         var recorded = new Recorded(session);
         session.EventReceived += recorded.Add;

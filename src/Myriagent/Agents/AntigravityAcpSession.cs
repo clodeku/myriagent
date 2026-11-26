@@ -14,7 +14,7 @@ namespace Myriagent.Agents;
 /// <item>停止以 <c>session/cancel</c> 平滑中斷進行中回合，不強殺常駐程序；CLI 熱更新與自我更新排空遵循與 Codex／Grok 相同的兩階段安全點契約</item>
 /// </list>
 /// </summary>
-internal sealed class AntigravityAcpSession : IAgentSession
+internal sealed partial class AntigravityAcpSession : IAgentSession
 {
     private const string ConversationLostNotice = "agy 找不到這個對話先前的紀錄，已改開新對話並附上前文節錄";
 
@@ -501,13 +501,7 @@ internal sealed class AntigravityAcpSession : IAgentSession
             ct,
             host: settings.ProcessHost);
 
-        var conn = new GrokAcpConnection(started);
-        conn.Response += message => OnResponse(started, message);
-        conn.Request += message => OnRequest(started, message);
-        conn.Notification += message => OnNotification(started, message);
-        started.LineReceived += (_, line) => conn.OnLine(line);
-        started.StderrReceived += OnStderr;
-        started.Exited += OnExited;
+        var conn = Wire(started);
 
         lock (gate)
         {
@@ -518,6 +512,8 @@ internal sealed class AntigravityAcpSession : IAgentSession
             }
             process = started;
             connection = conn;
+            // 經代理主機開的：app 更新時放得開（AntigravityAcpSession.Detach.cs）
+            processHost = started.CanDetach ? settings.ProcessHost : null;
             processSignature = Signature(settings);
             processCli = settings.Cli;
             parser = new AntigravityAcpUpdateParser("agy-" + started.InstanceId[..8], TranscriptPathResolver);
@@ -1621,6 +1617,7 @@ internal sealed class AntigravityAcpSession : IAgentSession
         int had = parser.ClearBackgroundTasks();
         promptImages = true;
         process = null;
+        processHost = null;
         connection = null;
         processSessionId = null;
         processCli = null;

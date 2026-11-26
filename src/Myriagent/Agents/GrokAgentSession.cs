@@ -21,7 +21,7 @@ namespace Myriagent.Agents;
 /// </list>
 /// 執行中旗標從 SendAsync 一開始就成立：啟動程序、建立對話的期間按停止，送出前會放棄。
 /// </summary>
-internal sealed class GrokAgentSession : IAgentSession
+internal sealed partial class GrokAgentSession : IAgentSession
 {
     private const string SessionLostNotice = "grok 找不到這個對話先前的紀錄，已改開新對話並附上前文節錄";
 
@@ -545,12 +545,7 @@ internal sealed class GrokAgentSession : IAgentSession
 
         var started = await AgentProcess.StartWithRetryAsync(launcher, GrokAcpRules.AgentArguments, settings.WorkingDirectory,
             env => ApplyLaunchEnvironment(env, settings), ct, host: settings.ProcessHost);
-        var conn = new GrokAcpConnection(started);
-        conn.Response += message => OnResponse(started, message);
-        conn.Request += message => OnRequest(started, message);
-        conn.Notification += message => OnNotification(started, message);
-        started.LineReceived += (_, line) => conn.OnLine(line);
-        started.Exited += OnExited;
+        var conn = Wire(started);
         lock (gate)
         {
             if (disposed)
@@ -560,6 +555,8 @@ internal sealed class GrokAgentSession : IAgentSession
             }
             process = started;
             connection = conn;
+            // 經代理主機開的：app 更新時放得開（GrokAgentSession.Detach.cs）
+            processHost = started.CanDetach ? settings.ProcessHost : null;
             processSignature = Signature(settings);
             processCli = settings.Cli;
             parser = new GrokUpdateParser("grok-" + started.InstanceId[..8]);
@@ -1213,6 +1210,9 @@ internal sealed class GrokAgentSession : IAgentSession
             PublishSafePoint();
             return;
         }
+        // 到發出 TurnCompleted 為止不放開程序（這時會話看起來已經閒置，中樞卻還算執行中）
+        lock (gate)
+            turnFinishing++;
         FinishTurnAfterBilling(source, completed, limitNotice);
     }
 
@@ -1241,11 +1241,19 @@ internal sealed class GrokAgentSession : IAgentSession
             {
                 Log.Warn($"Grok 這一輪結束後查額度失敗：{ex.Message}");
             }
-            if (quota != null)
-                Raise(quota);
-            if (limitNotice != null)
-                Raise(new AgentNoticeEvent(limitNotice, IsError: false));
-            Raise(completed);
+            try
+            {
+                if (quota != null)
+                    Raise(quota);
+                if (limitNotice != null)
+                    Raise(new AgentNoticeEvent(limitNotice, IsError: false));
+                Raise(completed);
+            }
+            finally
+            {
+                lock (gate)
+                    turnFinishing--;
+            }
             PublishSafePoint();
         });
     }
@@ -1614,6 +1622,7 @@ internal sealed class GrokAgentSession : IAgentSession
         background.Clear();
         promptImages = false;
         process = null;
+        processHost = null;
         connection = null;
         processSessionId = null;
         attachedFresh = null;

@@ -274,6 +274,82 @@ public abstract class AntigravityAcpSessionFakeCliTestsBase : IDisposable
                     continue
                 }
 
+                # h2turn: a turn in three parts, gated by files in $env:FAKE_GATE (gate-a, gate-b): text + a running command | its result + half a reply | the rest + end
+                if ($scenario -eq 'h2turn' -and $turn -eq 1) {
+                    Send ([ordered]@{
+                        jsonrpc = '2.0'; method = 'session/update'
+                        params = [ordered]@{ sessionId = $sid; update = [ordered]@{ sessionUpdate = 'agent_message_chunk'; content = [ordered]@{ type = 'text'; text = 'working' } } }
+                    })
+                    Send ([ordered]@{
+                        jsonrpc = '2.0'; method = 'session/update'
+                        params = [ordered]@{
+                            sessionId = $sid
+                            update = [ordered]@{
+                                sessionUpdate = 'tool_call'; toolCallId = 'call-h2'; name = 'run_command'
+                                status = 'in_progress'; args = [ordered]@{ CommandLine = 'npm test' }
+                            }
+                        }
+                    })
+                    while (-not (Test-Path (Join-Path $env:FAKE_GATE 'gate-a'))) { Start-Sleep -Milliseconds 30 }
+                    Send ([ordered]@{
+                        jsonrpc = '2.0'; method = 'session/update'
+                        params = [ordered]@{
+                            sessionId = $sid
+                            update = [ordered]@{
+                                sessionUpdate = 'tool_call_update'; toolCallId = 'call-h2'; name = 'run_command'; status = 'completed'
+                                rawOutput = [ordered]@{ output = "12 passed`r`n"; exit_code = 0 }
+                            }
+                        }
+                    })
+                    Send ([ordered]@{
+                        jsonrpc = '2.0'; method = 'session/update'
+                        params = [ordered]@{ sessionId = $sid; update = [ordered]@{ sessionUpdate = 'agent_message_chunk'; content = [ordered]@{ type = 'text'; text = 'half' } } }
+                    })
+                    while (-not (Test-Path (Join-Path $env:FAKE_GATE 'gate-b'))) { Start-Sleep -Milliseconds 30 }
+                    Send ([ordered]@{
+                        jsonrpc = '2.0'; method = 'session/update'
+                        params = [ordered]@{ sessionId = $sid; update = [ordered]@{ sessionUpdate = 'agent_message_chunk'; content = [ordered]@{ type = 'text'; text = ' rest' } } }
+                    })
+                    Send ([ordered]@{
+                        jsonrpc = '2.0'; id = $id
+                        result = [ordered]@{
+                            stopReason = 'end_turn'
+                            usage = [ordered]@{ inputTokens = 100; outputTokens = 20; cachedReadTokens = 50; cachedWriteTokens = 0; thoughtTokens = 5; totalTokens = 175 }
+                        }
+                    })
+                    continue
+                }
+
+                # h2bg: a daemon command that stays in the background after the turn ends
+                if ($scenario -eq 'h2bg' -and $turn -eq 1) {
+                    Send ([ordered]@{
+                        jsonrpc = '2.0'; method = 'session/update'
+                        params = [ordered]@{
+                            sessionId = $sid
+                            update = [ordered]@{
+                                sessionUpdate = 'tool_call'; toolCallId = 'call-bg'; name = 'run_command'
+                                status = 'in_progress'; args = [ordered]@{ CommandLine = 'npm run dev'; IsDaemon = $true }
+                            }
+                        }
+                    })
+                    Send ([ordered]@{
+                        jsonrpc = '2.0'; method = 'session/update'
+                        params = [ordered]@{
+                            sessionId = $sid
+                            update = [ordered]@{
+                                sessionUpdate = 'tool_call_update'; toolCallId = 'call-bg'; name = 'run_command'; status = 'completed'
+                                rawOutput = [ordered]@{ output = 'Command is running in the background as task-dev1'; exit_code = 0 }
+                            }
+                        }
+                    })
+                    Send ([ordered]@{
+                        jsonrpc = '2.0'; method = 'session/update'
+                        params = [ordered]@{ sessionId = $sid; update = [ordered]@{ sessionUpdate = 'agent_message_chunk'; content = [ordered]@{ type = 'text'; text = 'started' } } }
+                    })
+                    Send ([ordered]@{ jsonrpc = '2.0'; id = $id; result = [ordered]@{ stopReason = 'end_turn' } })
+                    continue
+                }
+
                 if ($scenario -eq 'cancel_turn' -and $turn -eq 1) {
                     Send ([ordered]@{
                         jsonrpc = '2.0'; method = 'session/update'

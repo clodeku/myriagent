@@ -13,10 +13,18 @@ internal sealed class GrokAcpConnection
     private readonly ConcurrentDictionary<long, TaskCompletionSource<(JToken? Result, GrokAcpError? Error)>> pending = new();
     private long nextId;
 
-    public GrokAcpConnection(AgentProcess process)
+    /// <param name="lastId">已經用掉的最後一個請求 id（接回放開的程序：接著編，不和之前送過的撞號）</param>
+    public GrokAcpConnection(AgentProcess process, long lastId = 0)
     {
         Process = process;
+        nextId = lastId;
     }
+
+    /// <summary>已經用掉的最後一個請求 id</summary>
+    public long LastId => Interlocked.Read(ref nextId);
+
+    /// <summary>有送出去、還在等回應的請求（RequestAsync；session/prompt 不算，它由 Response 事件收尾）</summary>
+    public bool HasPending => !pending.IsEmpty;
 
     public AgentProcess Process { get; }
 
@@ -105,6 +113,19 @@ internal sealed class GrokAcpConnection
     public Task RespondAsync(JToken id, JToken result) => Process.WriteLineAsync(GrokAcpRules.BuildResult(id, result));
 
     public Task RespondErrorAsync(JToken id, int code, string message) => Process.WriteLineAsync(GrokAcpRules.BuildError(id, code, message));
+
+    /// <summary>
+    /// 把另一條連線還在等的請求搬過來（放開程序途中反悔、以同一個位移重新接上：回應會從新的連線進來）。
+    /// 兩條連線的請求 id 是同一個序列，不會撞號
+    /// </summary>
+    public void AdoptPending(GrokAcpConnection other)
+    {
+        foreach (var (id, waiter) in other.pending.ToArray())
+        {
+            if (other.pending.TryRemove(id, out _))
+                pending[id] = waiter;
+        }
+    }
 
     /// <summary>還在等的請求一律以 error 結束（程序結束、連線關閉）</summary>
     public void FailAll(string error)

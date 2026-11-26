@@ -12,6 +12,34 @@ namespace Myriagent.Agents;
 /// <item>停止後 grok 不再送執行中工具的結束更新：FinishTurn 把還在執行的工具結束成「已停止」</item>
 /// </list>
 /// </summary>
+internal sealed class GrokParserState
+{
+    public string? Prefix { get; set; }
+
+    public int BlockSequence { get; set; }
+
+    public string? TextBlock { get; set; }
+
+    public string? Text { get; set; }
+
+    public string? ThoughtBlock { get; set; }
+
+    public Dictionary<string, GrokParserTool> Tools { get; set; } = new();
+}
+
+internal sealed class GrokParserTool
+{
+    public JObject? Call { get; set; }
+
+    public bool Announced { get; set; }
+
+    public bool Hidden { get; set; }
+
+    public bool Finished { get; set; }
+
+    public string? Output { get; set; }
+}
+
 internal sealed class GrokUpdateParser
 {
     private readonly string prefix;
@@ -33,6 +61,54 @@ internal sealed class GrokUpdateParser
     public GrokUpdateParser(string prefix = "grok")
     {
         this.prefix = prefix;
+    }
+
+    /// <summary>
+    /// 解析器現在的狀態（放開程序時帶著走，代理主機 H2）：區塊的編號、開著的文字區塊與到目前為止的文字、這一輪的工具。
+    /// 一輪中的狀態就這些，直接匯出，不必像 Claude／Codex 那樣從檢查點重播
+    /// </summary>
+    public GrokParserState ExportState() => new()
+    {
+        Prefix = prefix,
+        BlockSequence = blockSequence,
+        TextBlock = textBlock,
+        Text = text.ToString(),
+        ThoughtBlock = thoughtBlock,
+        Tools = tools.ToDictionary(t => t.Key, t => new GrokParserTool
+        {
+            Call = (JObject)t.Value.Call.DeepClone(),
+            Announced = t.Value.Announced,
+            Hidden = t.Value.Hidden,
+            Finished = t.Value.Finished,
+            Output = t.Value.Output,
+        }, StringComparer.Ordinal),
+    };
+
+    /// <summary>照 <see cref="ExportState"/> 的內容還原（新的 app 接回放開的程序）</summary>
+    public static GrokUpdateParser FromState(GrokParserState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        var parser = new GrokUpdateParser(string.IsNullOrEmpty(state.Prefix) ? "grok" : state.Prefix)
+        {
+            blockSequence = Math.Max(0, state.BlockSequence),
+            textBlock = state.TextBlock,
+            thoughtBlock = state.ThoughtBlock,
+        };
+        parser.text.Append(state.Text ?? string.Empty);
+        foreach (var (id, tool) in state.Tools ?? new Dictionary<string, GrokParserTool>())
+        {
+            if (string.IsNullOrEmpty(id) || tool == null)
+                continue;
+            parser.tools[id] = new ToolState
+            {
+                Call = tool.Call ?? new JObject(),
+                Announced = tool.Announced,
+                Hidden = tool.Hidden,
+                Finished = tool.Finished,
+                Output = tool.Output ?? string.Empty,
+            };
+        }
+        return parser;
     }
 
     /// <summary>執行中（已開始、還沒結束）的工具 id（含還沒發 AgentToolStartedEvent 的；不含不畫成卡片的提問與計畫確認）</summary>

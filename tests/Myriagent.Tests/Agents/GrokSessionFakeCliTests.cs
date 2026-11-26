@@ -25,6 +25,7 @@ public abstract class GrokSessionFakeCliTestsBase : IDisposable
     /// images＝initialize 宣告 promptCapabilities.image；quota＝_x.ai/billing 回鎖定；compact＝記 compact、先送 auto_compact_completed 再以 end_turn 結束；
     /// autocompact＝一般的一輪，但結束前先送 auto_compact_completed（tokens_after 120）；background＝先送 task_backgrounded、等 work\bg-go.txt 再送 will_wake false 的 task_completed；
     /// background_idle＝開一個 ping 子程序（PID 寫進 work\bg-pid.txt）、把輸出寫進 work\bg.log 並在 task_backgrounded 帶 output_file，這一輪照常結束、背景工作一直不結束。
+    /// h2turn＝第一輪分三段、以工作資料夾裡的 gate-a、gate-b 兩個檔當閘門（文字與執行中的指令｜指令的結果與半句回覆｜剩下的回覆與結束），之後同 basic。
     /// rewind/points、rewind/execute、session/fork 都有回應（rewindfail 的 execute 失敗、forkfail 的 fork 回錯誤）。未鎖定的 billing 不寫記錄
     /// </summary>
     private protected const string FakeGrok = """"
@@ -205,6 +206,25 @@ public abstract class GrokSessionFakeCliTestsBase : IDisposable
             EndTurn $id 'cancelled' $null
         }
 
+        # h2turn: a turn in three parts, gated by files in $work (gate-a, gate-b): text + a running tool | the tool result + half a reply | the rest + end
+        function WaitGate([string]$name) { while (-not (Test-Path (Join-Path $work $name))) { Start-Sleep -Milliseconds 30 } }
+        function H2Turn($id) {
+            Chunk 'agent_message_chunk' 'working'
+            $tc = 'call-h2'
+            Update ([ordered]@{ sessionUpdate = 'tool_call'; toolCallId = $tc; title = 'run_terminal_command'; rawInput = [ordered]@{ command = 'npm test' }; _meta = (Tool 'run_terminal_command' 'execute') })
+            Update ([ordered]@{ sessionUpdate = 'tool_call_update'; toolCallId = $tc; kind = 'execute'; title = 'Execute `npm test`'; content = (TextContent 'Run tests'); rawInput = [ordered]@{ variant = 'Bash'; command = 'npm test' } })
+            Update (BashUpdate $tc 'in_progress' 'partial' 0)
+            Log 'tool-running'
+            WaitGate 'gate-a'
+            Update (BashUpdate $tc 'in_progress' 'partial more' 0)
+            Update (BashUpdate $tc 'completed' 'partial more done' 0)
+            Chunk 'agent_message_chunk' 'half'
+            Log 'half'
+            WaitGate 'gate-b'
+            Chunk 'agent_message_chunk' ' rest'
+            EndTurn $id 'end_turn' $null
+        }
+
         # client requests other than session/prompt (also answered while waiting for our own requests)
         function HandleRequest($m) {
             if ($m.method -eq 'initialize') {
@@ -274,6 +294,7 @@ public abstract class GrokSessionFakeCliTestsBase : IDisposable
                 if ($imageCount -gt 0) { $logged = $logged + ' images=' + $imageCount }
                 Log $logged
                 if ($scenario -eq 'permission') { Permission $m.id $text }
+                elseif ($scenario -eq 'h2turn' -and $script:turn -eq 1) { H2Turn $m.id }
                 elseif ($scenario -eq 'question') { Question $m.id }
                 elseif ($scenario -eq 'plan') { Plan $m.id }
                 elseif ($scenario -eq 'hang' -or $scenario -eq 'hangstuck' -or ($scenario -eq 'restart' -and $n -eq 1)) { Hang $m.id }

@@ -57,6 +57,48 @@ public sealed class AppUpdateDetachIntegrationTests
             + "一定要等它真的結束（還沒結束就繼續等），結束之後只回覆 finished 這個字。",
             "finished", "fg.txt", "我第一則訊息請你執行的指令裡，要睡幾秒？只回覆那個數字", "30");
 
+    [EnvFact("MYRIAGENT_IT", Reason)]
+    public Task Grok_指令跑到一半換版_這一輪不停下_新中樞接回後照常做完()
+        => RunTurnAsync(AgentProvider.Grok, "grok-4.6",
+            "用終端機工具執行這個指令（不要放到背景，要等它結束）：ping -n 31 127.0.0.1。等它結束之後，只回覆 finished 這個字。",
+            "finished", "ping -n 31", "我第一則訊息請你執行的指令裡，ping 的 -n 後面是哪個數字？只回覆那個數字", "31");
+
+    [EnvFact("MYRIAGENT_IT", Reason)]
+    public Task Antigravity_指令跑到一半換版_這一輪不停下_新中樞接回後照常做完()
+        => RunTurnAsync(AgentProvider.Antigravity, "gemini-3.8-flash",
+            "用 run_command 執行這個指令並等它結束（不要放到背景）：ping -n 31 127.0.0.1。等它結束之後，只回覆 finished 這個字。",
+            "finished", "ping -n 31", "我第一則訊息請你執行的指令裡，ping 的 -n 後面是哪個數字？只回覆那個數字", "31");
+
+    /// <summary>
+    /// Grok 的帳戶同 GrokIntegrationTests：已登入的隔離 GROK_HOME（MYRIAGENT_IT_GROK_HOME，沒設就用探針的 home-a）；
+    /// MYRIAGENT_IT_GROK_HOME=default 改用這台系統預設的 ~/.grok（探針的登入過期時用）
+    /// </summary>
+    private static AgentAccount SeedGrok(HubHarness h)
+    {
+        var home = Environment.GetEnvironmentVariable("MYRIAGENT_IT_GROK_HOME");
+        bool systemDefault = string.Equals(home, "default", StringComparison.OrdinalIgnoreCase);
+        var account = new AgentAccount
+        {
+            Id = "it-grok",
+            Provider = AgentProvider.Grok,
+            Label = "Grok（整合測試）",
+            ConfigDirectory = systemDefault
+                ? null
+                : home ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "myriagent-probes", "grok", "home-a"),
+        };
+        if (!systemDefault)
+            GrokAcpRules.EnsureIsolatedHome(account.ConfigDirectory!);
+        h.Ui.Invoke(() => h.Accounts.Seed(new[] { account }, AccountStatus.Ready));
+        return account;
+    }
+
+    private static AgentAccount SeedAntigravity(HubHarness h)
+    {
+        var account = new AgentAccount { Id = "local-antigravity", Provider = AgentProvider.Antigravity, Label = "Antigravity（本機）" };
+        h.Ui.Invoke(() => h.Accounts.Seed(new[] { account }, AccountStatus.Ready));
+        return account;
+    }
+
     /// <summary>一輪執行到一半（前景的指令還在跑）時換版：放開、新的中樞還原並接回、這一輪照常做完</summary>
     /// <param name="answer">這一輪最後的回覆要有的字</param>
     /// <param name="command">那個指令的工具卡認得出來的字</param>
@@ -71,9 +113,12 @@ public sealed class AppUpdateDetachIntegrationTests
         {
             AgentProvider.Claude => h.Claude,
             AgentProvider.Codex => SeedCodexDefault(h),
+            AgentProvider.Grok => SeedGrok(h),
+            AgentProvider.Antigravity => SeedAntigravity(h),
             _ => throw new ArgumentOutOfRangeException(nameof(provider)),
         };
-        account.SafeMode = true;
+        // 精簡模式（不載入這台的自訂）：Claude、Codex 同其他整合測試；Grok、Antigravity 照平常的
+        account.SafeMode = provider is AgentProvider.Claude or AgentProvider.Codex;
         CliLocator.Locate(provider).Should().NotBeNull($"這台電腦要安裝 {provider} CLI");
         var first = NewHost();
         AgentHostClient? second = null;
@@ -139,14 +184,17 @@ public sealed class AppUpdateDetachIntegrationTests
             await WaitUntilAsync(() => after.Of<AgentTurnCompletedEvent>().Count >= 1 && !h.IsRunning(id), "接回的那一輪做完", TurnTimeout);
             after.Of<AgentTurnCompletedEvent>().First().Event.Outcome.Should().Be(AgentTurnOutcome.Completed);
             after.Of<AgentTextCompletedEvent>().Last().Event.Text.Should().Contain(answer);
-            var done = h.Items(id).Last(IsCommandCard);
-            done.Id.Should().Be(card.Id, "同一張卡");
-            done.Status.Should().Be(AgentItemStatus.Done, "不是「被中斷、結果未知」");
-            h.Items(id).Count(IsCommandCard).Should().Be(commandCards, "沒有多出重複的卡片");
+            // 放開前那張卡收到了真正的結果（不是「被中斷、結果未知」）：接回之後的輸出寫進原本那張卡。
+            // 代理看了結果再跑一次（Antigravity 的沙箱裡 ping 有時失敗）會多一張新的卡，那不是重複
+            var original = h.Items(id).Single(i => i.Id == card.Id);
+            original.Status.Should().BeOneOf(new[] { AgentItemStatus.Done, AgentItemStatus.Failed }, "不是「被中斷、結果未知」");
+            if (original.Status == AgentItemStatus.Done)
+                h.Items(id).Count(IsCommandCard).Should().Be(commandCards, "沒有多出重複的卡片");
+            h.Items(id).Last(IsCommandCard).Status.Should().Be(AgentItemStatus.Done);
             if (provider == AgentProvider.Codex)
                 File.ReadAllText(Path.Combine(workspace, "fg.txt")).Trim().Should().Be("done", "指令真的跑完了");
             h.Items(id).Should().NotContain(i => i.Kind == AgentItemKind.Notice && i.NoticeKind == AgentNoticeKind.AppUpdate, "這一輪沒有中斷：沒有接續的提示");
-            h.Items(id).Should().NotContain(i => i.Status == AgentItemStatus.Running || i.Status == AgentItemStatus.Cancelled);
+            h.Items(id).Where(i => i.Kind != AgentItemKind.Notice).Should().NotContain(i => i.Status == AgentItemStatus.Running || i.Status == AgentItemStatus.Cancelled);
             RunningTurnStore.TryLoad(h.Store.GetConversationDirectory(id)).Record.Should().BeNull("這一輪結束了");
 
             // 4. 之後的訊息：同一個程序（不重開、記得前文）
