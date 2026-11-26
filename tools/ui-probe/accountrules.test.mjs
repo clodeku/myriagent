@@ -749,26 +749,36 @@ test('backgroundSwitchCommand_一律帶when_現在換是now_其他都是等背�
   assert.equal(A.SWITCH_NOW, 'now', '同中樞 AccountSwitchRules.WhenNow');
 });
 
-test('側欄的用量圓環：Claude Code 不列每週・Fable，其他照原本的前兩個', () => {
+test('側欄的用量圓環：Claude Code 另外在最後列每週・Fable，其他照原本的前兩個', () => {
   const session = { key: 'session', label: '5 小時', percent: 20 };
   const weekly = { key: 'weekly', label: '每週', percent: 52 };
   const fable = { key: 'weekly:Fable', label: '每週・Fable', percent: 0 };
   const opus = { key: 'weekly:Opus', label: '每週・Opus', percent: 10 };
-  // 每週用完、沒有 5 小時時，以前第二個圓環就是 Fable
-  assert.deepEqual(A.sidebarWindows('Claude', [weekly, fable]), [weekly]);
-  assert.deepEqual(A.sidebarWindows('Claude', [session, weekly, fable]), [session, weekly]);
-  // 其他模型的每週照樣列
-  assert.deepEqual(A.sidebarWindows('Claude', [weekly, fable, opus]), [weekly, opus]);
+  // Fable 固定在最後、不佔前兩個的位置（每週用完、沒有 5 小時時也一樣）
+  assert.deepEqual(A.sidebarWindows('Claude', [session, weekly, fable]), [session, weekly, fable]);
+  assert.deepEqual(A.sidebarWindows('Claude', [weekly, fable]), [weekly, fable]);
+  assert.deepEqual(A.sidebarWindows('Claude', [fable, session, weekly]), [session, weekly, fable], '宿主的順序不同也一樣');
+  assert.deepEqual(A.sidebarWindows('Claude', [session, weekly, fable, opus]), [session, weekly, fable], '其他模型的每週不擠掉 Fable');
+  assert.deepEqual(A.sidebarWindows('Claude', [weekly, fable, opus]), [weekly, opus, fable]);
+  assert.deepEqual(A.sidebarWindows('Claude', [session, weekly]), [session, weekly], '沒有 Fable 時照舊兩個');
+  assert.deepEqual(A.sidebarWindows('Claude', [fable]), [fable]);
   // 不分大小寫；沒有 key 時看標籤
-  assert.deepEqual(A.sidebarWindows('Claude', [weekly, { key: 'WEEKLY:fable', label: 'x' }]), [weekly]);
-  assert.deepEqual(A.sidebarWindows('Claude', [weekly, { label: '每週・Fable' }]), [weekly]);
-  // 其他代理種類不濾
+  const upper = { key: 'WEEKLY:fable', label: 'x' };
+  assert.deepEqual(A.sidebarWindows('Claude', [upper, weekly]), [weekly, upper]);
+  const byLabel = { label: '每週・Fable' };
+  assert.deepEqual(A.sidebarWindows('Claude', [byLabel, weekly]), [weekly, byLabel]);
+  assert.equal(A.isFableWindow(fable), true);
+  assert.equal(A.isFableWindow(byLabel), true);
+  assert.equal(A.isFableWindow(weekly), false);
+  assert.equal(A.isFableWindow(null), false);
+  // 其他代理種類照舊前兩個
   const odd = { key: 'weekly:Fable', label: '每週・Fable' };
   assert.deepEqual(A.sidebarWindows('Codex', [weekly, odd, session]), [weekly, odd]);
+  assert.deepEqual(A.sidebarWindows('Antigravity', [session, weekly, odd]), [session, weekly]);
   // 不是陣列、元素不是物件
   assert.deepEqual(A.sidebarWindows('Claude', null), []);
   assert.deepEqual(A.sidebarWindows('Claude', [null, 3, weekly]), [weekly]);
-  const input = [weekly, fable];
+  const input = [fable, weekly];
   A.sidebarWindows('Claude', input);
-  assert.equal(input.length, 2, '不改傳入的陣列');
+  assert.deepEqual(input, [fable, weekly], '不改傳入的陣列');
 });

@@ -20,7 +20,7 @@ import { setDecodedText } from './textfx.js';
 import { tokensOf, tokenSplit, showTokens, tokensTitle, fmtShort, fmtTokens, MATRIX_GLYPHS } from './tokenrules.js';
 import { searchTerms, searchKey, filterConversations, hitsFrom, markParts, MAX_QUERY } from './searchrules.js';
 import { loginExpiry, loginExpiryText } from './loginrules.js';
-import { sidebarWindows } from './accountrules.js';
+import { sidebarWindows, isFableWindow } from './accountrules.js';
 import { openImportDialog } from './importconv.js';
 import { isFlashing } from './attnflash.js';
 
@@ -348,10 +348,10 @@ function updateMiniCard(card, a) {
     if (strip) e.devs.append(strip);
     e.devs.hidden = !strip;
   }
-  // 用量圓環：前兩個時間窗（Claude Code 略過每週・Fable），百分比與重置倒數寫在圈內。資料過時（例如權杖過期查不到）時圓環變灰，狀態那一行加時鐘與資料的年紀。
+  // 用量圓環：前兩個時間窗（Claude Code 另外在最後加上每週・Fable），百分比與重置倒數寫在圈內。資料過時（例如權杖過期查不到）時圓環變灰，狀態那一行加時鐘與資料的年紀。
   // 圓環就地更新（數值變了弧線滑過去），時間窗的個數變了才重建
   const u = a.usage;
-  const wins = sidebarWindows(a.provider, u && u.windows);   // Claude Code 不列「每週・Fable」
+  const wins = sidebarWindows(a.provider, u && u.windows);   // Claude Code 最後一個是「每週・Fable」
   const stale = !!(u && u.stale);
   const staleAt = stale && u.fetchedAt ? u.fetchedAt : 0;
   const sig = JSON.stringify(wins.map((w) => [w.label, Math.round(w.percent || 0), w.severity, w.resetsAt || 0]))
@@ -364,6 +364,8 @@ function updateMiniCard(card, a) {
     }
     wins.forEach((w, i) => updateGauge(e.meters.children[i], w, staleAt, stale ? u.error : null));
     e.meters.classList.toggle('stale', stale);
+    // 三個圓環（Claude Code 加上每週・Fable）：縮小一點、間距收緊，名稱與 token 數字才放得下（app.css 的 .macct-meters.tri）
+    e.meters.classList.toggle('tri', wins.length > 2);
     e.stale.textContent = '';
     if (staleAt && wins.length) e.stale.append(staleBadge(staleAt, u.error));
     e.stale.hidden = !e.stale.firstChild;
@@ -467,8 +469,10 @@ function createGauge() {
   const num = h('span', { class: 'mmeter-num' });
   const pct = h('span', { class: 'mmeter-pct', text: '%' });
   const n = h('span', { class: 'mmeter-n' }, num, pct);
-  const m = h('span', { class: 'mmeter' }, svg, h('span', { class: 'mmeter-txt' }, n, h('span', { class: 'mmeter-reset' })));
-  m._els = { arc, n, num, pct };
+  // 每週・Fable 的小標（右上角的 F）：::before／::after 是外圈刻度與雷達，不能拿來用
+  const tag = h('span', { class: 'mmeter-tag', text: 'F', hidden: true, 'aria-hidden': 'true' });
+  const m = h('span', { class: 'mmeter' }, svg, h('span', { class: 'mmeter-txt' }, n, h('span', { class: 'mmeter-reset' })), tag);
+  m._els = { arc, n, num, pct, tag };
   // 第一次出現：弧線從 0 長到目前的數值。兩個影格後寫入當下最新的目標值，這段期間到的更新不會被初值蓋回去
   arc.style.strokeDasharray = '0 100';
   requestAnimationFrame(() => requestAnimationFrame(() => { m._grown = true; arc.style.strokeDasharray = m._dash; }));
@@ -498,6 +502,8 @@ function updateGauge(m, w, staleAt, staleErr) {
   x.pct.hidden = text === '–';
   x.n.className = 'mmeter-n sev-' + sev;
   m.dataset.label = w.label || '';
+  // 每週・Fable 的圓環在右上角標一個 F，和「每週」分得出來
+  setHidden(x.tag, !isFableWindow(w));
   m.dataset.pct = text;
   if (w.resetsAt) m.dataset.resetAt = String(w.resetsAt); else delete m.dataset.resetAt;
   if (staleAt) m.dataset.staleAt = String(staleAt); else delete m.dataset.staleAt;

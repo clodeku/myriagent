@@ -3028,15 +3028,15 @@ async function runTokens(vp) {
   const byKey = (rows) => Object.fromEntries(rows.map((r) => [r.key, r]));
   const r0 = byKey(await page.evaluate(tokenRows));
   // a1 的 in 1,226,418、out 57,913（精簡格式，無條件捨去）；a4 未登入（狀態那一行照舊是「尚未登入」）；a5 已登入、今天 0；a6 不到 1 萬照舊千分位
-  check('tokensInitial', r0.a1.shown && r0.a1.inSubRow && r0.a1.in === '1.226M' && r0.a1.out === '57.91K' && r0.a1.tags.join('/') === 'in/out' && !r0.a1.sep
+  check('tokensInitial', r0.a1.shown && r0.a1.inSubRow && r0.a1.in === '1.226M' && r0.a1.out === '57.91K' && r0.a1.tags.length === 0 && r0.a1.sep && r0.a5.tags.join('/') === 'in/out'
     && r0.a2.in === '318.0K' && r0.a2.out === '12.87K' && r0.a5.shown && r0.a5.in === '0' && r0.a5.out === '0' && r0.a6.in === '12.33K' && r0.a6.out === '880'
     && !r0.a4.shown && r0.a4.subText === '尚未登入'
     && /token 合計：1,284,331/.test(r0.a1.title) && !/今日/.test(r0.a1.title + r0.a1.rowText) && /in（輸入）：1,226,418（其中快取讀取 1,018,772）/.test(r0.a1.title) && /out（輸出）：57,913/.test(r0.a1.title)
     && /近 30 天：in 31,870,552・out 1,388,410/.test(r0.a1.title) && !/子代理/.test(r0.a1.title), r0);   // Claude 子代理 2026-10-25 起即時記，不再寫晚到的說明
   // 放得下：兩個數字都在狀態那一行之內，沒有蓋到過時的時鐘與裝置小點，也沒用到右緣的裁切；最寬的值（6 個字）也一樣。
-  // a1（兩個圓環）照樣有 in／out 標籤；a2 同一行還有過時的時鐘，收起標籤、改用斜線
+  // 兩個圓環的 a5、a6 照樣有 in／out 標籤；a1（Claude 加上每週・Fable 共三個圓環）與 a2（同一行還有過時的時鐘）收起標籤、改用斜線
   check('tokensFit', Object.values(r0).filter((r) => r.shown).every((r) => r.fit && r.fit.ok && !r.fit.clipped)
-    && !!r0.a2.fit && r0.a2.fit.nextLeft !== null && r0.a2.tags.length === 0 && r0.a2.sep && r0.a6.tags.join('/') === 'in/out',
+    && !!r0.a2.fit && r0.a2.fit.nextLeft !== null && r0.a2.tags.length === 0 && r0.a2.sep && r0.a1.tags.length === 0 && r0.a1.sep && r0.a6.tags.join('/') === 'in/out',
     Object.fromEntries(Object.entries(r0).map(([k, v]) => [k, { fit: v.fit, tags: v.tags, sep: v.sep }])));
   // 狀態那一行的方案名稱換成 token 數，卡片背景沒有淡淡的方案名稱（2026-10-23 拿掉）；卡片還是兩行高（跟沒有 token 的 a4 一樣高）；沒有數字雨的 canvas
   check('tokensReplacePlan', r0.a1.subText === null && Object.values(r0).every((r) => !r.mark)
@@ -5169,9 +5169,12 @@ async function runShell(vp) {
       const before = getComputedStyle(m, '::before'), after = getComputedStyle(m, '::after');
       return {
         text: m.querySelector('.mmeter-n').textContent, size: [Math.round(mb.width), Math.round(mb.height)],
-        spansRows: mb.top <= top.top + 1 && mb.bottom >= sub.bottom - 1 && mb.left >= Math.max(top.right, sub.right),
+        // 三個圓環時是 34px（兩行 40px 的中間），上下各容許 3.5px
+        spansRows: mb.top <= top.top + (mb.height < 39 ? 3.5 : 1) && mb.bottom >= sub.bottom - (mb.height < 39 ? 3.5 : 1) && mb.left >= Math.max(top.right, sub.right),
         inside: Math.abs(tb.left + tb.width / 2 - cx) <= 1.5 && Math.abs(tb.top + tb.height / 2 - cy) <= 1.5 && tb.width <= 28 && tb.height <= 28,
         anim: [before.animationName, after.content === 'none' ? 'none' : after.animationName],
+        fable: !m.querySelector('.mmeter-tag').hidden, label: m.dataset.label,
+        cardOk: mb.right <= c.getBoundingClientRect().right + 0.5 && top.width >= 30,
       };
     })];
   })));
@@ -5181,7 +5184,10 @@ async function runShell(vp) {
   // 沒在執行的卡：已登入的是怠速（fxrules.accountPulse 的 idle：外圈一段淡的亮格繞，fx-rot，沒有雷達），沒登入的不動
   const pulses = await page.$$eval('.macct', (cards) => Object.fromEntries(cards.map((c) => [c.dataset.key, c.dataset.pulse || null])));
   const restAnim = (k) => (pulses[k] === 'idle' ? 'fx-rot,none' : 'none,none');
-  check('accountCardGauge', gaugesOk(gz.a1, 2, 'fx-rot,spin') && gaugesOk(gz.a3, 1, restAnim('a3')) && gaugesOk(gz.a5, 2, restAnim('a5')) && gaugesOk(gz.a6, 1, restAnim('a6'))
+  // Claude Code 最後多一個「每週・Fable」（右上角的 F；2026-11-26 使用者要求），三個圓環照樣放在卡片裡、名稱還有位置
+  const triOk = (list, anim) => list.length === 3 && list.every((g) => g.size.join() === '34,34' && g.spansRows && g.inside && g.anim.join() === anim);
+  check('accountCardGauge', triOk(gz.a1, 'fx-rot,spin') && gz.a1.map((g) => g.fable).join() === 'false,false,true' && gz.a1[2].label === '每週・Fable'
+    && gz.a1[2].text === '41%' && gz.a1.every((g) => g.cardOk) && gz.a2.every((g) => !g.fable) && gaugesOk(gz.a3, 1, restAnim('a3')) && gaugesOk(gz.a5, 2, restAnim('a5')) && gaugesOk(gz.a6, 1, restAnim('a6'))
     && gz.a1[0].text === '34%' && gz.a3[0].text === '100%' && gz.a4.length === 0 && gz.a5[0].text === '19%' && gz.a5[1].text === '8%', Object.assign({ pulses }, gz));
   host.accounts.find((a) => a.id === 'a3').usage.windows[0].percent = 18;
   host.pushAccounts();
@@ -5213,9 +5219,9 @@ async function runShell(vp) {
   await page.evaluate((shift) => { window.__realNow = Date.now; Date.now = () => window.__realNow() + shift; }, 2 * hr);
   const rs1 = await until(async () => { const r = await readResets(); return r.a1[0] && r.a1[0].text === '13m' ? r : null; }, 3000) || await readResets();
   await page.evaluate(() => { Date.now = window.__realNow; });
-  check('accountCardResetCountdown', resetsAre(rs0.a1, ['2h', '3d']) && resetsAre(rs0.a2, ['47m', '<1m']) && resetsAre(rs0.a3, [null])
+  check('accountCardResetCountdown', resetsAre(rs0.a1, ['2h', '3d', '3d']) && resetsAre(rs0.a2, ['47m', '<1m']) && resetsAre(rs0.a3, [null])
     && /5 小時：\d+%，2 小時 13 分後重置/.test(rs0.a1[0].title) && (rs0.a4 || []).length === 0
-    && resetsAre(rs1.a1, ['13m', '3d']) && resetsAre(rs1.a2, [null, null]),
+    && resetsAre(rs1.a1, ['13m', '3d', '3d']) && resetsAre(rs1.a2, [null, null]),
     { initial: rs0, afterTwoHours: rs1 });
 
   // 用量過時（權杖過期查不到等）：圓環前面有時鐘＋資料的年紀（琥珀色），圓環變灰；滑過看取得時間與原因；每分鐘刷新年紀；恢復後標示消失

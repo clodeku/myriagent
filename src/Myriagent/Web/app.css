@@ -464,12 +464,26 @@ input[type="search"]::-webkit-search-cancel-button { filter: grayscale(1); opaci
 .macct-sub-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .macct-meters { grid-area: 1 / 2 / span 2; display: flex; gap: 5px; margin-left: 8px; }
 .macct-meters:empty { display: none; }
+/* 三個圓環（Claude Code 另外列每週・Fable）：40px 的三個加上間距佔掉 138px，名稱與 token 數字放不下；
+   縮成 34px、間距 0（比兩個圓環多佔約 11px；圓與圓之間還有約 5px，方框的左右邊是空的）。圈內的字跟著縮一點 */
+.macct-meters.tri { gap: 0; margin-left: 2px; }
+.macct-meters.tri .mmeter { width: 34px; height: 34px; }
+.macct-meters.tri .mmeter-n { font-size: 10px; line-height: 11px; }
+.macct-meters.tri .mmeter-pct { font-size: 6.5px; }
+.macct-meters.tri .mmeter-reset { font-size: 8px; line-height: 9px; }
+.macct-meters.tri .mmeter-tag { top: -1px; right: -1px; }
 /* 用量圓環（40px）：弧線的顏色跟著嚴重度；第一次出現從 0 長到目前的數值，之後數值變了滑過去 */
 .mmeter { --gauge: var(--acc); position: relative; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: none; }
 .mmeter[data-sev="warn"] { --gauge: var(--sev-warn); }
 .mmeter[data-sev="high"] { --gauge: var(--sev-high); }
 .mmeter[data-sev="max"] { --gauge: var(--sev-max); }
 .mring { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* Claude Code 的「每週・Fable」：右上角的小字，和旁邊的「每週」分得出來 */
+.mmeter-tag {
+  position: absolute; top: 0; right: 0; z-index: 1; min-width: 11px; height: 11px; padding: 0 2px; border-radius: 6px;
+  background: var(--bg-elev); box-shadow: inset 0 0 0 1px var(--gauge); color: var(--gauge);
+  font-size: 8px; font-weight: 700; line-height: 11px; text-align: center; pointer-events: none;
+}
 .mring-track { fill: none; stroke: var(--ring-track); stroke-width: 3; }
 .mring-arc { fill: none; stroke: var(--gauge); stroke-width: 3; stroke-linecap: round; transition: stroke-dasharray 900ms var(--ease-out), opacity 200ms ease; }
 /* 圈內：百分比在上、重置倒數在下（疊在 fx.css 的雷達掃描上面） */

@@ -45,13 +45,22 @@ export const SIDEBAR_GAUGES = 2;
 
 /**
  * 側欄帳戶卡的用量圓環要畫哪幾個時間窗（照宿主給的順序取前 SIDEBAR_GAUGES 個）。
- * Claude Code 不列「每週・Fable」（2026-10-31 使用者要求）：每週額度用完時沒有「5 小時」，前兩個就變成「每週」＋「每週・Fable」；
- * 儀表板照舊全部列。認 key（weekly:Fable，不分大小寫），沒有 key 時看標籤（每週・Fable）。不改傳入的陣列
+ * Claude Code 另外在最後加上「每週・Fable」（2026-11-26 使用者要求：帳戶列表也要看得到 Fable 的用量），最多 SIDEBAR_GAUGES＋1 個：
+ * 其他時間窗照舊取前兩個（Fable 不佔它們的位置——2026-10-31 使用者要求拿掉它，是因為每週額度用完、沒有「5 小時」時它擠進第二個，
+ * 「5 小時」回來後順序一直變），Fable 固定是最後一個。儀表板照舊全部列。認 key（weekly:Fable，不分大小寫），沒有 key 時看標籤（每週・Fable）。
+ * 不改傳入的陣列
  */
 export function sidebarWindows(provider, windows) {
   const list = Array.isArray(windows) ? windows.filter((w) => isObj(w)) : [];
-  const kept = provider === 'Claude' ? list.filter((w) => !isClaudeFableWindow(w)) : list;
-  return kept.slice(0, SIDEBAR_GAUGES);
+  if (provider !== 'Claude') return list.slice(0, SIDEBAR_GAUGES);
+  const fable = list.find((w) => isClaudeFableWindow(w));
+  const rest = list.filter((w) => !isClaudeFableWindow(w)).slice(0, SIDEBAR_GAUGES);
+  return fable ? [...rest, fable] : rest;
+}
+
+/** 這個時間窗是 Claude Code 的「每週・Fable」（側欄的圓環另外標出來） */
+export function isFableWindow(w) {
+  return isObj(w) && isClaudeFableWindow(w);
 }
 
 function isClaudeFableWindow(w) {
