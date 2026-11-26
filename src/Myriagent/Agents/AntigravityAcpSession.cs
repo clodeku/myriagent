@@ -880,6 +880,42 @@ internal sealed class AntigravityAcpSession : IAgentSession
             Raise(ev);
         if (events.Count > 0)
             PublishSafePoint();
+        ScheduleTimerExpiry();
+    }
+
+    /// <summary>已排定的單次計時器到期檢查的時間（gate 保護；同一個時間不重複排）</summary>
+    private DateTime? timerCheckAtUtc;
+
+    /// <summary>
+    /// 單次計時器（schedule 的 DurationSeconds）到期時把它從背景工作移除、通知中樞（ACP 沒有「計時器到了」的更新，
+    /// AntigravityAcpUpdateParser.ExpireTimers 照時間算）：不然中樞記著的背景工作清單要等下一則更新才變，閒置的對話就一直掛著
+    /// </summary>
+    private void ScheduleTimerExpiry()
+    {
+        TimeSpan delay;
+        lock (gate)
+        {
+            if (disposed || parser.NextTimerExpiryUtc is not { } next || (timerCheckAtUtc is { } scheduled && scheduled <= next))
+                return;
+            timerCheckAtUtc = next;
+            delay = next - parser.UtcNow() + TimeSpan.FromMilliseconds(200);
+        }
+        _ = Task.Delay(delay < TimeSpan.Zero ? TimeSpan.Zero : delay).ContinueWith(_ =>
+        {
+            List<AgentEvent> events;
+            lock (gate)
+            {
+                timerCheckAtUtc = null;
+                if (disposed)
+                    return;
+                events = parser.ExpireTimers();
+            }
+            foreach (var ev in events)
+                Raise(ev);
+            if (events.Count > 0)
+                PublishSafePoint();
+            ScheduleTimerExpiry();
+        }, TaskScheduler.Default);
     }
 
     private void OnModeUpdate(string? modeId)

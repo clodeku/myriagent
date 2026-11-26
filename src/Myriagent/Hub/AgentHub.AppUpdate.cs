@@ -31,7 +31,7 @@ internal interface IAppUpdateCommands
 
     void RestartNow();
 
-    /// <summary>「強制更新」：不等背景工作開始排空（排空中按就改成強制），滿 10 分鐘還沒停下的照立即套用停下</summary>
+    /// <summary>「強制更新」：不等背景工作開始排空（排空中按就改成強制），滿 AppUpdateRestartRules.ForceStopAfter 還沒停下的照立即套用停下</summary>
     void ForceRestart();
 
     void CancelRestart();
@@ -91,7 +91,7 @@ internal sealed partial class AgentHub
 
     /// <summary>
     /// 「強制更新」（2026-10-28 使用者要求）：這次排空不等背景工作結束——對話照常陸續到安全點停下，按下後滿
-    /// AppUpdateRestartRules.ForceStopAfter（10 分鐘）還沒停下的（在等背景工作、前景的指令、你的回應）一律照「立即套用」停下，
+    /// AppUpdateRestartRules.ForceStopAfter（1 分鐘）還沒停下的（在等背景工作、前景的指令、你的回應）一律照「立即套用」停下，
     /// 停掉的背景工作記進 running.json，新版馬上請代理確認。排空中才呼叫（協調器在開始排空之後、或排空中按下時）；重複呼叫不重設時間
     /// </summary>
     internal void ForceAppUpdate()
@@ -101,6 +101,12 @@ internal sealed partial class AgentHub
         appUpdateForcedAt = RestartClock();
         Log.Info($"強制更新：{AppUpdateRestartRules.ForceStopAfter.TotalMinutes:0} 分鐘後還沒停下的對話照立即套用停下");
         JournalApp("update.force", new JObject { ["stopAfterSec"] = AppUpdateRestartRules.ForceStopAfter.TotalSeconds });
+        // 時間到了就檢查，不等維護計時器（每 30 秒一次，最多會晚半分鐘）
+        _ = Task.Delay(AppUpdateRestartRules.ForceStopAfter + TimeSpan.FromMilliseconds(300)).ContinueWith(_ => host.BeginInvoke(() =>
+        {
+            if (!disposed && AppUpdateDraining && appUpdateForcedAt != null)
+                TickRestarts();
+        }), TaskScheduler.Default);
     }
 
     /// <summary>網頁的 app 更新指令交給誰（AppUpdateCoordinator 建立時設定；沒有時忽略）</summary>
@@ -274,6 +280,7 @@ internal sealed partial class AgentHub
                     InterruptedTools = plan.InterruptedTools.ToList(),
                     PendingRequests = plan.PendingRequests.ToList(),
                     BackgroundWorkStopped = plan.HadBackground,
+                    BackgroundTasks = plan.BackgroundTasks.ToList(),
                     RiskOperation = plan.Risk?.Operation,
                     CliVersion = plan.FromVersion,
                 });
@@ -425,7 +432,8 @@ internal sealed partial class AgentHub
                     continue;
                 EnsureItems(c);
                 var context = new ContinuationContext(c.Meta.Provider, entry.CliVersion, cli.GetIdentity(c.Meta.Provider)?.Version,
-                    entry.InterruptedTools, entry.PendingRequests, entry.BackgroundWorkStopped, AppFrom: appFrom, AppTo: pending.AppTo);
+                    entry.InterruptedTools, entry.PendingRequests, entry.BackgroundWorkStopped, AppFrom: appFrom, AppTo: pending.AppTo,
+                    BackgroundTasks: (entry.BackgroundTasks ?? new List<string>()).Where(t => t != null).ToList());
                 if (ResumeIntentRules.ShouldContinue(entry, pending.Validity) && !c.Running)
                 {
                     int index = perProvider.TryGetValue(c.Meta.Provider, out var n) ? n : 0;

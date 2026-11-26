@@ -449,6 +449,28 @@ public sealed class AgentHubInterruptedTurnTests
     }
 
     [Fact]
+    public async Task 接續的一輪正常結束後又在等背景工作_不累計連續自動接續_每次重新啟動都照常接續()
+    {
+        using var h = new HubHarness();
+        var (id, s) = h.StartConversation(h.Main, h.Claude, "跑幾個小時的批次");
+        Background(h, s, DevServer);
+        h.CompleteTurn(s);
+        for (int i = 1; i <= InterruptedTurnRules.MaxAutoResumes + 2; i++)
+        {
+            await h.RestartAsync();
+            (await ReadyAsync(h)).Should().Be((1, 0), $"第 {i} 次重新啟動照常自動接續");
+            var resumed = h.Sessions[^1];
+            Marker(h, id)!.AutoResumes.Should().Be(1, "接續的這一輪記著是自動接續的");
+            // 代理確認後重新以背景執行、回一句「等它跑完」：這一輪正常結束
+            Background(h, resumed, DevServer);
+            h.CompleteTurn(resumed);
+            var waiting = Marker(h, id)!;
+            waiting.WaitingBackground.Should().BeTrue();
+            waiting.AutoResumes.Should().Be(0, "接續的一輪正常結束了：這次接續是成功的，不算連續被中斷");
+        }
+    }
+
+    [Fact]
     public async Task 等背景工作時當掉_照最後的快照接續_說明是意外結束()
     {
         using var h = new HubHarness();

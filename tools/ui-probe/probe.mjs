@@ -51,6 +51,7 @@ const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inl
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' };
 const ONLY = (() => { const i = process.argv.indexOf('--only'); return i > 0 ? process.argv[i + 1] : null; })();
 const HOT_ONLY = process.argv.includes('--hot');
+const BANNER_GUARD_WAIT = 1300;   // app 更新橫幅的按鈕剛換上的 1.2 秒內不收點擊（appupdate.js 的 BANNER_GUARD_MS）
 const SYNC_ONLY = process.argv.includes('--sync'); // 〔同步〕只跑設定頁「多電腦同步」的檢查（sync-settings.mjs）
 const MONITOR_ONLY = process.argv.includes('--monitor'); // 只跑電腦狀態面板的檢查（monitor-probe.mjs）
 const MAIN_ONLY = process.argv.includes('--main'); // 只跑主視窗流程（runMain：還原版面、背景分頁、單窗格與多窗格）
@@ -1599,7 +1600,7 @@ async function runMain(vp, full) {
     && !!sm1 && sm2 === false && !!sm3, { initial: sm0, off: sm1, afterOff: sm2, on: sm3 });
   await page.keyboard.press('Escape');
 
-  // app 自我更新：橫幅（已備妥 → 立即重啟；排空中 → 取消這次）、設定頁的 Clode Myriagent 區塊
+  // app 自我更新：橫幅（已備妥 → 現在更新；排空中 → 取消這次）、設定頁的 Clode Myriagent 區塊
   await host.send({ type: 'appUpdate', state: F.appUpdate('staged') });
   await page.waitForSelector('#appBanner:not([hidden])');
   const stagedBanner = await page.textContent('#appBanner');
@@ -1607,10 +1608,17 @@ async function runMain(vp, full) {
   const stagedLayout = await page.evaluate(bannerLayoutOf);
   const verStaged = await page.evaluate(versionBadgeOf);
   await shot(page, `app-banner-staged-${tag}`);
-  await page.click('#appBanner button:has-text("立即重啟")');
+  await sleep(BANNER_GUARD_WAIT);   // 橫幅的按鈕剛換上的 1.2 秒內不收點擊（appupdate.js 的 bannerClickAllowed）
+  await page.click('#appBanner button:has-text("現在更新")');
   const restartNow = await until(() => host.last('appUpdateRestartNow'), 2000);
   await host.send({ type: 'appUpdate', state: F.appUpdate('draining') });
   await sleep(150);
+  // 按鈕剛換成排空中的那一批：連點的第二下落在「取消這次」上不算（2026-11-26 實機因此取消了更新）
+  const cancelBeforeGuard = host.received.filter((m) => m.cmd === 'appUpdateCancel').length;
+  await page.click('#appBanner button:has-text("取消這次")');
+  await sleep(200);
+  check('appBannerClickGuard_' + tag, host.received.filter((m) => m.cmd === 'appUpdateCancel').length === cancelBeforeGuard,
+    { cancelBeforeGuard, after: host.received.filter((m) => m.cmd === 'appUpdateCancel').length });
   const drainBanner = await page.textContent('#appBanner');
   const drainContrast = await page.evaluate(contrastOf, '#appBanner .app-banner-text');
   const drainLayout = await page.evaluate(bannerLayoutOf);
@@ -1623,6 +1631,7 @@ async function runMain(vp, full) {
     const b = document.querySelector('#appBanner button');
     return { kept: !!b && b.dataset.probeKeep === '1', focused: !!b && document.activeElement === b, text: document.querySelector('#appBanner .app-banner-text').textContent };
   });
+  await sleep(BANNER_GUARD_WAIT);
   await page.click('#appBanner button:has-text("取消這次")');
   const cancel = await until(() => host.last('appUpdateCancel'), 2000);
   await host.send({ type: 'appUpdate', state: F.appUpdate('idle') });
@@ -1685,7 +1694,7 @@ async function runMain(vp, full) {
     blockedStatus.includes(`新版 0.2.1530 已下載；${remoteBlocker}`) && !blockedStatus.includes('閒置時自動重啟') && blockedBanner.includes(remoteBlocker)
       && !blockedBanner.includes('閒置時自動重啟') && freeStatus.includes('新版 0.2.1530 已下載，閒置時自動重啟套用'),
     { blockedStatus, blockedBanner, freeStatus });
-  // 強制更新（2026-10-28 使用者要求）：設定頁在已備妥時、排空中還沒強制時有「強制更新」（提示說明不等背景工作、10 分鐘後強制停下），
+  // 強制更新（2026-10-28 使用者要求）：設定頁在已備妥時、排空中還沒強制時有「強制更新」（提示說明不等背景工作、1 分鐘後強制停下），
   // 按了送 appUpdateForce；強制了就拿掉。橫幅在設定頁關掉之後檢查（forceBanner）
   const forceCount = () => host.received.filter((m) => m.cmd === 'appUpdateForce').length;
   const bgBlocker = '有對話的背景工作還在跑，全部結束後再重啟';   // AppUpdateRestartRules.DescribeBlocker(BackgroundWork)
@@ -1706,9 +1715,11 @@ async function runMain(vp, full) {
   await host.send({ type: 'appUpdate', state: F.appUpdate('draining', { handoverTo: '0.2.9' }) });
   await sleep(150);
   const forceSetHandover = await setButtons('.dlg-settings .app-actions button');
-  const hasForce = (list) => list.some((b) => b.text === '強制更新');
+  const FORCE_LABEL = '不等待，強制更新';   // appupdate.js 的 FORCE_ACTION；有背景工作在跑時另一個按鈕寫「等背景工作結束再更新」
+  const hasForce = (list) => list.some((b) => b.text === FORCE_LABEL);
   if (full) check('appUpdateForceSettings',
-    hasForce(forceSetStaged) && /不等背景工作.*10 分鐘/.test(forceSetStaged.find((b) => b.text === '強制更新').title) && !!setForceSent
+    hasForce(forceSetStaged) && /不等背景工作.*1 分鐘後/.test(forceSetStaged.find((b) => b.text === FORCE_LABEL).title) && !!setForceSent
+      && forceSetStaged.some((b) => b.text === '等背景工作結束再更新' && /背景工作都結束後馬上開始/.test(b.title))
       && hasForce(forceSetDraining) && !hasForce(forceSetForced) && !hasForce(forceSetHandover)
       && forcedStatus.includes('正在強制更新：等 2 個對話到安全點（01:23 起還沒停下的強制停下）'),
     { forceSetStaged, setForceSent, forceSetDraining, forceSetForced, forceSetHandover, forcedStatus });
@@ -1716,8 +1727,8 @@ async function runMain(vp, full) {
   await sleep(100);
   await page.click('.dlg-settings .set-sec[data-sec="app"] .switch');
   await page.keyboard.press('Escape');
-  // 強制更新的橫幅：已備妥時「立即重啟」旁邊有「強制更新」，按了送 appUpdateForce；排空中還沒強制的「強制更新」＋「取消這次」，
-  // 強制了只剩「取消這次」、說明幾點起強制停下
+  // 強制更新的橫幅：已備妥時「現在更新」（有背景工作時寫「等背景工作結束再更新」）旁邊有「不等待，強制更新」，按了送 appUpdateForce；排空中是「取消這次」＋「強制更新」
+  // （「強制更新」的位置不變），強制了變成不能按的「強制更新中」（「取消這次」不會跑到剛按過的位置）、說明幾點起強制停下
   await host.send({ type: 'appUpdate', state: F.appUpdate('staged', { blocker: bgBlocker }) });
   await page.waitForSelector('#appBanner:not([hidden])');
   await sleep(150);
@@ -1725,25 +1736,31 @@ async function runMain(vp, full) {
   const forceBannerStaged = { text: await page.textContent('#appBanner'), buttons: await bannerButtons(), layout: await page.evaluate(bannerLayoutOf) };
   await shot(page, `app-banner-force-${tag}`);
   const bannerForce0 = forceCount();
+  await sleep(BANNER_GUARD_WAIT);
   await page.click('#appBanner button:has-text("強制更新")');
   const bannerForceSent = await until(() => forceCount() === bannerForce0 + 1, 2000);
   await host.send({ type: 'appUpdate', state: F.appUpdate('draining') });
   await sleep(150);
   const forceBannerDraining = { buttons: await bannerButtons(), layout: await page.evaluate(bannerLayoutOf) };
+  const forceLeft = () => page.$eval('#appBanner button:nth-of-type(2)', (b) => ({ left: Math.round(b.getBoundingClientRect().left), disabled: b.disabled, text: b.textContent })).catch(() => null);
+  const forcePosDraining = await forceLeft();
   await host.send({ type: 'appUpdate', state: F.appUpdate('draining', { forced: true, forceAt: new Date(2026, 9, 28, 1, 23).getTime() }) });
   await sleep(150);
   const forceBannerForced = { text: await page.textContent('#appBanner'), buttons: await bannerButtons(), layout: await page.evaluate(bannerLayoutOf) };
+  const forcePosForced = await forceLeft();
   await shot(page, `app-banner-forced-${tag}`);
   check('appUpdateForceBanner_' + tag,
-    forceBannerStaged.text.includes(bgBlocker) && forceBannerStaged.buttons.join('|') === '立即重啟|強制更新' && !!bannerForceSent
-      && forceBannerDraining.buttons.join('|') === '強制更新|取消這次'
-      && forceBannerForced.buttons.join('|') === '取消這次' && forceBannerForced.text.includes('01:23 起還沒停下的強制停下')
+    forceBannerStaged.text.includes(bgBlocker) && forceBannerStaged.buttons.join('|') === '等背景工作結束再更新|不等待，強制更新' && !!bannerForceSent
+      && forceBannerDraining.buttons.join('|') === '取消這次|不等待，強制更新'
+      && forceBannerForced.buttons.join('|') === '取消這次|強制更新中' && forceBannerForced.text.includes('01:23 起還沒停下的強制停下')
+      && !!forcePosDraining && !!forcePosForced && !forcePosDraining.disabled && forcePosForced.disabled && forcePosForced.text === '強制更新中'
       && [forceBannerStaged.layout, forceBannerDraining.layout, forceBannerForced.layout].every(bannerLayoutOk),
-    { forceBannerStaged, bannerForceSent, forceBannerDraining, forceBannerForced });
+    { forceBannerStaged, bannerForceSent, forceBannerDraining, forceBannerForced, forcePosDraining, forcePosForced });
   await host.send({ type: 'appUpdate', state: F.appUpdate('disabled') });
   await sleep(150);
   const installBanner = await page.textContent('#appBanner');
   const installLayout = await page.evaluate(bannerLayoutOf);
+  await sleep(BANNER_GUARD_WAIT);
   await page.click('#appBanner button:has-text("安裝到這台電腦")');
   const install = await until(() => host.last('appInstallHere'), 2000);
   await page.click('#appBanner .app-banner-close');

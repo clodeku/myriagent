@@ -366,4 +366,44 @@ public sealed class AntigravityAcpRulesTests
         var finishEvs = updateParser.FinishTurn(AgentTurnOutcome.Completed);
         finishEvs.OfType<AgentQuestionEvent>().Single().AnswerAsMessage.Should().BeTrue();
     }
+
+    [Fact]
+    public void 單次計時器到期後不再算背景工作_常駐與定期的照舊()
+    {
+        // 2026-11-26 實機：10 秒、120 秒的計時器 1.7 小時後還列在背景工作，app 更新一直被「有對話的背景工作還在跑」擋住
+        var now = new DateTime(2026, 11, 26, 5, 0, 0, DateTimeKind.Utc);
+        var parser = new AntigravityAcpUpdateParser("acp") { UtcNow = () => now };
+        JObject Schedule(string id, string args) => JObject.Parse(
+            $$"""{"sessionUpdate":"tool_call","toolCallId":"{{id}}","name":"schedule","args":{{args}},"status":"completed"}""");
+
+        parser.HandleUpdate(Schedule("t1", """{"DurationSeconds":10,"Prompt":"wait"}"""))
+            .OfType<AgentBackgroundWorkEvent>().Last().Count.Should().Be(1);
+        parser.HandleUpdate(Schedule("t2", """{"DurationSeconds":120,"Prompt":"wait"}"""));
+        parser.HandleUpdate(Schedule("t3", """{"CronExpression":"*/5 * * * *","Prompt":"定期檢查"}"""));
+        parser.HandleUpdate(Schedule("t4", """{"DurationSeconds":"abc","Prompt":"時間不明"}"""));
+        parser.LiveBackgroundTools.Should().HaveCount(4);
+        parser.NextTimerExpiryUtc.Should().Be(now + TimeSpan.FromSeconds(10) + AntigravityAcpUpdateParser.TimerGrace);
+
+        // 還沒到期（含寬限）：照算
+        now += TimeSpan.FromSeconds(10 + AntigravityAcpUpdateParser.TimerGrace.TotalSeconds - 1);
+        parser.ExpireTimers().Should().BeEmpty();
+        parser.LiveBackgroundTools.Should().HaveCount(4);
+
+        // 第一個到期：不必等下一則更新，旗標就不算它；ExpireTimers 移除並回報新的清單
+        now += TimeSpan.FromSeconds(2);
+        parser.LiveBackgroundTools.Should().HaveCount(3);
+        parser.ExpireTimers().OfType<AgentBackgroundWorkEvent>().Single().Count.Should().Be(3);
+        parser.ExpireTimers().Should().BeEmpty("已經移除，不重複回報");
+
+        // 第二個到期時剛好有別的更新進來：更新本身先帶出新的清單
+        now += TimeSpan.FromMinutes(5);
+        parser.HandleUpdate(JObject.Parse("""{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"好"}}"""))
+            .OfType<AgentBackgroundWorkEvent>().Single().Count.Should().Be(2);
+
+        // 定期的、時間不明的不照時間移除
+        now += TimeSpan.FromDays(2);
+        parser.ExpireTimers().Should().BeEmpty();
+        parser.HasLiveBackgroundWork.Should().BeTrue();
+        parser.NextTimerExpiryUtc.Should().BeNull();
+    }
 }

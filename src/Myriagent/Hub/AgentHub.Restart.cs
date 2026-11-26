@@ -449,8 +449,14 @@ internal sealed partial class AgentHub
         var background = BackgroundOf(c)?.ToolIds is { Count: > 0 } ids
             ? ids.Select(id => c.ToolItems.TryGetValue(id, out var card) ? card : null).OfType<AgentChatItem>().ToHashSet()
             : null;
-        return c.Items.Where(i => i.Kind == AgentItemKind.Tool && i.Status == AgentItemStatus.Running && background?.Contains(i) != true);
+        return c.Items.Where(i => i.Kind == AgentItemKind.Tool && i.Status == AgentItemStatus.Running && background?.Contains(i) != true && !IsTurnDiffCard(c, i));
     }
+
+    /// <summary>
+    /// 中樞自己畫的「本輪變更」彙整卡（AgentHub.TurnDiff.cs，Codex）：這一輪結束前一直是執行中，但它不是代理在執行的工具——
+    /// 不能當成在等的工具（2026-11-20 排空顯示在等「本輪變更 · 22 個檔案」），也不能寫進接續訊息說「重啟時你正在執行它、結果未知」
+    /// </summary>
+    private static bool IsTurnDiffCard(ConversationState c, AgentChatItem item) => ReferenceEquals(c.TurnDiff?.Card, item);
 
     /// <summary>
     /// 依政策表處理這個對話排定的換版（換版、安全點事件、工具結束、使用者回應、這一輪結束、計時器都會呼叫；沒有排定的就不做事）
@@ -805,14 +811,15 @@ internal sealed partial class AgentHub
             plan.Risk = record ? FindRunningToolRisk(c) ?? (plan.HadBackground ? FindBackgroundToolRisk(c) : null) : null;
             // CLI 換版停下只在等背景工作的對話：這一輪早就結束了、不會接續，重開或更新結束後另外請代理確認背景工作（QueueBackgroundCheck）
             plan.BackgroundCheck = !plan.AppUpdate && !c.Running && plan.HadBackground;
-            plan.BackgroundTasks = plan.BackgroundCheck
+            // 停下時跟著被停掉的背景工作：這一輪會接續的寫進接續訊息（ContinuationContext.BackgroundTasks、resume.json），只在等背景工作的另外請代理確認
+            plan.BackgroundTasks = plan.HadBackground
                 ? BackgroundWorkRules.Labels(c.Session?.LiveBackgroundTools ?? Array.Empty<AgentBackgroundTool>())
                 : new List<string>();
         }
         plan.NoContinueReason = CliRestartRules.WhyNotContinue(c.StopRequested, c.Running, plan.InterruptedAt, now,
             previousTurnFailed: false, continuationFailed: false, riskyTool: plan.Risk != null);
         plan.Continuation = new ContinuationContext(provider, plan.FromVersion, target?.Version, plan.InterruptedTools, plan.PendingRequests, plan.HadBackground,
-            AppFrom: plan.AppVersion, AppTo: plan.AppVersion);
+            AppFrom: plan.AppVersion, AppTo: plan.AppVersion, BackgroundTasks: plan.BackgroundTasks.ToList());
 
         AgentSessionSettings? sessionSettings = null;
         if (!stopOnly)
@@ -846,7 +853,7 @@ internal sealed partial class AgentHub
 
     /// <summary>執行中的工具卡，不含還在等核准的（它們代表還沒核准、還沒執行的操作）</summary>
     private static IEnumerable<AgentChatItem> ExecutingTools(ConversationState c)
-        => c.Items.Where(i => i.Kind == AgentItemKind.Tool && i.Status == AgentItemStatus.Running && !IsUnapproved(c, i));
+        => c.Items.Where(i => i.Kind == AgentItemKind.Tool && i.Status == AgentItemStatus.Running && !IsUnapproved(c, i) && !IsTurnDiffCard(c, i));
 
     /// <summary>這張工具卡還在等核准（AgentApprovalEvent 的 ToolId 對到它，使用者還沒回應）</summary>
     private static bool IsUnapproved(ConversationState c, AgentChatItem tool) => c.UnapprovedTools.Values.Any(t => ReferenceEquals(t, tool));

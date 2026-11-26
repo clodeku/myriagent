@@ -131,10 +131,11 @@ internal static class AppUpdateRestartRules
     public static readonly TimeSpan RetryAfterBackground = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// 「強制更新」按下後多久，還沒停下的對話（在等背景工作、前景的指令、你的回應）一律照「立即套用」停下（2026-10-28 使用者要求：
-    /// 背景工作超過 10 分鐘還在跑就強制重啟）。停掉的背景工作記進 running.json，新版馬上請代理確認
+    /// 「強制更新」按下後多久，還沒停下的對話（在等背景工作、前景的指令、你的回應）一律照「立即套用」停下。停掉的背景工作記進 running.json，
+    /// 新版馬上請代理確認。2026-10-28 定的是 10 分鐘；2026-11-26 改成 1 分鐘——日誌裡 7 次強制更新有 4 次使用者等不了，自己去按停止、
+    /// 停背景工作讓它快點過（30～180 秒內），被按停止的 9 個對話照規則新版都不接續。1 分鐘夠在安全點的對話正常停下，其餘的由 app 停下、新版自動接續
     /// </summary>
-    public static readonly TimeSpan ForceStopAfter = TimeSpan.FromMinutes(10);
+    public static readonly TimeSpan ForceStopAfter = TimeSpan.FromMinutes(1);
 
     /// <summary>換版幫手啟動不了或 10 秒內沒寫 .armed：多半是環境問題（防毒、權限），6 小時後再試（設計第 12 節）</summary>
     public static readonly TimeSpan RetryAfterHelperFailure = TimeSpan.FromHours(6);

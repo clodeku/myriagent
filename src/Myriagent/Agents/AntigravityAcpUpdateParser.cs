@@ -11,7 +11,17 @@ namespace Myriagent.Agents;
 internal sealed partial class AntigravityAcpUpdateParser
 {
     private sealed record PlanReviewCandidate(string? Path, string? Summary, string? InlineMarkdown = null);
-    private sealed record BackgroundEntry(string Key, AgentBackgroundTool Tool, bool IsOneShotTimer, bool IsDaemon);
+    /// <param name="ExpiresAtUtc">單次計時器（schedule 的 DurationSeconds）到期的時間，過了就不算背景工作（<see cref="ExpireTimers"/>）</param>
+    private sealed record BackgroundEntry(string Key, AgentBackgroundTool Tool, bool IsOneShotTimer, bool IsDaemon, DateTime? ExpiresAtUtc = null);
+
+    /// <summary>
+    /// 單次計時器到期後多留多久才不算背景工作（到期時 agy 會自己開一輪處理；ACP 沒有「計時器到了」的更新，只能照時間算）。
+    /// 2026-11-26 實機：10 秒、120 秒的計時器 1.7 小時後還列在背景工作，app 更新一直顯示「有對話的背景工作還在跑」、排空也一直等它
+    /// </summary>
+    public static readonly TimeSpan TimerGrace = TimeSpan.FromSeconds(30);
+
+    /// <summary>時鐘（測試可換）</summary>
+    internal Func<DateTime> UtcNow { get; set; } = () => DateTime.UtcNow;
 
     private sealed class ToolState
     {
@@ -58,10 +68,42 @@ internal sealed partial class AntigravityAcpUpdateParser
 
     public bool HasRunningTools => tools.Values.Any(t => !t.Finished && !t.Hidden);
 
-    public bool HasLiveBackgroundWork => liveBackgroundTasks.Count > 0;
+    public bool HasLiveBackgroundWork => LiveEntries().Any();
 
     public IReadOnlyList<AgentBackgroundTool> LiveBackgroundTools
-        => liveBackgroundTasks.Count == 0 ? Array.Empty<AgentBackgroundTool>() : liveBackgroundTasks.Values.Select(e => e.Tool).ToArray();
+        => liveBackgroundTasks.Count == 0 ? Array.Empty<AgentBackgroundTool>() : LiveEntries().Select(e => e.Tool).ToArray();
+
+    /// <summary>還算數的背景工作：到期的單次計時器不算（還沒被 <see cref="ExpireTimers"/> 移除的也一樣）</summary>
+    private IEnumerable<BackgroundEntry> LiveEntries()
+    {
+        var now = UtcNow();
+        return liveBackgroundTasks.Values.Where(e => e.ExpiresAtUtc is not { } at || now < at);
+    }
+
+    /// <summary>最早到期的單次計時器的時間（會話據此排一次檢查）；沒有就是 null</summary>
+    public DateTime? NextTimerExpiryUtc
+        => liveBackgroundTasks.Values.Where(e => e.ExpiresAtUtc != null).Select(e => e.ExpiresAtUtc).Min();
+
+    /// <summary>移除到期的單次計時器；有移除就回一則背景工作清單的事件（沒有回空的）</summary>
+    public List<AgentEvent> ExpireTimers()
+    {
+        var events = new List<AgentEvent>();
+        ExpireTimers(events);
+        return events;
+    }
+
+    private void ExpireTimers(List<AgentEvent> events)
+    {
+        if (liveBackgroundTasks.Count == 0)
+            return;
+        var now = UtcNow();
+        var expired = liveBackgroundTasks.Values.Where(e => e.ExpiresAtUtc is { } at && now >= at).Select(e => e.Key).ToList();
+        if (expired.Count == 0)
+            return;
+        foreach (var key in expired)
+            liveBackgroundTasks.Remove(key);
+        EmitBackgroundWorkEvent(events);
+    }
 
     public string? LastGeneratedTitle { get; private set; }
 
@@ -88,6 +130,7 @@ internal sealed partial class AntigravityAcpUpdateParser
     public List<AgentEvent> HandleUpdate(JObject update)
     {
         var events = new List<AgentEvent>();
+        ExpireTimers(events);
         var kind = update.Value<string>("sessionUpdate");
         switch (kind)
         {
@@ -458,11 +501,13 @@ internal sealed partial class AntigravityAcpUpdateParser
             var key = ExtractTaskKey(output) ?? $"sched-{id}";
             var prompt = AntigravityTranscriptRules.FindString(args, "Prompt");
             var title = !string.IsNullOrWhiteSpace(prompt) ? ClaudeStreamRules.FirstLine(prompt.Trim()) : (state.Title ?? "排程計時");
+            bool oneShot = !isDaemon && !hasCron;
             liveBackgroundTasks[key] = new BackgroundEntry(
                 key,
                 new AgentBackgroundTool(state.DisplayName ?? "排程計時", "other", title, state.Detail),
-                IsOneShotTimer: !isDaemon && !hasCron,
-                IsDaemon: isDaemon);
+                IsOneShotTimer: oneShot,
+                IsDaemon: isDaemon,
+                ExpiresAtUtc: oneShot && TimerSeconds(args) is { } seconds ? UtcNow() + TimeSpan.FromSeconds(seconds) + TimerGrace : null);
             EmitBackgroundWorkEvent(events);
             return;
         }
@@ -483,9 +528,27 @@ internal sealed partial class AntigravityAcpUpdateParser
     }
 
     private void EmitBackgroundWorkEvent(List<AgentEvent> events)
-        => events.Add(new AgentBackgroundWorkEvent(
-            liveBackgroundTasks.Count,
-            liveBackgroundTasks.Values.Select(e => e.Tool).ToArray()));
+    {
+        var live = LiveEntries().Select(e => e.Tool).ToArray();
+        events.Add(new AgentBackgroundWorkEvent(live.Length, live));
+    }
+
+    /// <summary>schedule 的 DurationSeconds（單次計時器幾秒後觸發）；沒有、不是正數或大得不合理回 null（不照時間移除）</summary>
+    private static double? TimerSeconds(JObject? args)
+    {
+        if (AntigravityTranscriptRules.FindToken(args, "DurationSeconds") is not JValue { Value: not null } value)
+            return null;
+        double seconds;
+        try
+        {
+            seconds = value.Type == JTokenType.String ? double.Parse((string)value!, System.Globalization.CultureInfo.InvariantCulture) : value.Value<double>();
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException)
+        {
+            return null;
+        }
+        return seconds > 0 && seconds <= TimeSpan.FromDays(30).TotalSeconds ? seconds : null;
+    }
 
     private static IReadOnlyList<string> ExtractMediaPathsFromOutput(string? output)
     {

@@ -116,6 +116,11 @@ internal sealed partial class AgentHub
         c.TurnEndedByProcessExit = false;
         if (disposed)
             return;
+        // 這一輪正常結束：不再算「連續自動接續」。上限（InterruptedTurnRules.MaxAutoResumes）擋的是每次重開都在完成前又被中斷（app 或代理一直當掉）；
+        // 接續後代理確認了背景工作、重新執行、回覆完，這次接續就是成功的——不歸零的話，等背景工作的快照帶著次數，
+        // 背景工作跑得比換版的間隔久的對話，第四次換版起就不再自動接續
+        if (outcome == AgentTurnOutcome.Completed)
+            c.RunAutoResumes = 0;
         c.RunMarkerWaitingBackground = outcome == AgentTurnOutcome.Completed && !c.StopRequested && BackgroundOf(c) != null;
         c.RunMarkerStoppedByApp = false;
         if (WantsRunMarker(c))

@@ -45,6 +45,11 @@ internal sealed class ResumeConversation
 
     public bool BackgroundWorkStopped { get; set; }
 
+    /// <summary>
+    /// 停下時跟著被停掉的背景工作（「執行指令：npm test」；2026-11-26 起，舊版寫的沒有）：接續訊息列出來，代理才知道要確認、重新執行哪幾個
+    /// </summary>
+    public List<string> BackgroundTasks { get; set; } = new();
+
     /// <summary>WhyNot=RiskyTool 時被打斷的操作（一行摘要）</summary>
     public string? RiskOperation { get; set; }
 

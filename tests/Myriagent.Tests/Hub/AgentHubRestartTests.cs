@@ -1893,7 +1893,8 @@ public sealed class AgentHubRestartTests
         h.Items(riskyId).Last().Text.Should().Contain("〈npm publish〉");
         var plainRequest = plain.Restarts.All.Should().ContainSingle().Subject;
         plainRequest.AutoContinue.Should().BeTrue("一般的背景工作（dev server）照常接續");
-        plainRequest.ContinuationText.Should().Contain("背景工作已停止，結果未知").And.Contain("不可重複的操作").And.NotContain("需要的話重跑");
+        plainRequest.ContinuationText.Should().MatchRegex("重啟時還在跑的背景工作〈.+〉已停止，結果未知", "列出被停掉的是哪幾個")
+            .And.Contain("不可重複的操作").And.NotContain("需要的話重跑");
         State(h, plainId).Should().Be("continued");
     }
 

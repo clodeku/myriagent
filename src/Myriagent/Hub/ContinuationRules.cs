@@ -99,7 +99,13 @@ internal static class ContinuationRules
 
         // 背景工作被停在哪一步不知道：同被打斷的工具，先確認再決定（背景跑的部署、發布重跑一次就是做兩次）
         if (context.BackgroundWorkStopped)
-            lines.Add("重啟時還在跑的背景工作已停止，結果未知；請先確認它們做到哪裡，可安全重跑才重跑，不可重複的操作（例如部署、發布、付款）不要直接重跑。");
+        {
+            // 知道是哪幾個就列出來（2026-11-26：以前只有「在等背景工作」的接續才列），代理才知道要確認、重新執行哪些，不會漏掉
+            var stopped = (context.BackgroundTasks ?? Array.Empty<string>()).Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+            var which = stopped.Count == 0 ? "背景工作" : "背景工作" + string.Join("、", stopped.Select(t => $"〈{Shorten(t)}〉"));
+            lines.Add($"重啟時還在跑的{which}已停止，結果未知；請先確認它們做到哪裡，可安全重跑才重跑，不可重複的操作（例如部署、發布、付款）不要直接重跑。"
+                      + (stopped.Count == 0 ? string.Empty : "原本的工作還需要它們的話，確認後重新以背景執行、照原本的計畫等它們完成。"));
+        }
 
         lines.Add(context.UserRequested
             ? "使用者看過狀況後按了「繼續」，沒有另外傳送新訊息；請從中斷處繼續原本的工作並回報。）"

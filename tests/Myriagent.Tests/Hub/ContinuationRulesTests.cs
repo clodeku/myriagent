@@ -38,6 +38,20 @@ public class ContinuationRulesTests
     }
 
     [Fact]
+    public void 這一輪被停下時還有背景工作_列出是哪幾個_請代理確認後重新以背景執行()
+    {
+        var text = ContinuationRules.Build(Context(background: true) with { BackgroundTasks = new[] { "執行指令：npm run dev", "子代理：修第三批", " " } });
+
+        text.Should().Contain("重啟時還在跑的背景工作〈執行指令：npm run dev〉、〈子代理：修第三批〉已停止，結果未知");
+        text.Should().Contain("可安全重跑才重跑").And.Contain("確認後重新以背景執行、照原本的計畫等它們完成");
+        text.Should().EndWith("使用者在重啟後尚未傳送新訊息；請繼續原本的工作並回報。）");
+
+        // 不知道是哪幾個（舊版留下的 resume.json、清單是空的）：照原本的說法
+        ContinuationRules.Build(Context(background: true) with { BackgroundTasks = Array.Empty<string>() })
+            .Should().Contain("重啟時還在跑的背景工作已停止，結果未知").And.NotContain("重新以背景執行");
+    }
+
+    [Fact]
     public void 工具情境_多個工具各自列出經過時間()
     {
         var text = ContinuationRules.Build(Context(tools: new[]

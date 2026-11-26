@@ -208,11 +208,11 @@ public sealed class AgentHubAppUpdateTests
     }
 
     /// <summary>
-    /// 「強制更新」（2026-10-28 使用者要求）：按下後滿 10 分鐘，還沒停下的對話——在等背景工作的、前景指令還在跑的——
+    /// 「強制更新」（2026-10-28 使用者要求；2026-11-26 由 10 分鐘改成 1 分鐘）：按下後滿 1 分鐘，還沒停下的對話——在等背景工作的、前景指令還在跑的——
     /// 一律照立即套用停下（起算點是按下的時間，不是開始排空的時間）；放棄這次就清掉
     /// </summary>
     [Fact]
-    public async Task 強制更新_按下後滿10分鐘_等背景工作與前景指令的都照立即套用停下()
+    public async Task 強制更新_按下後滿1分鐘_等背景工作與前景指令的都照立即套用停下()
     {
         using var h = await NewHarnessAsync();
         var journal = new FakeJournal();
@@ -239,12 +239,13 @@ public sealed class AgentHubAppUpdateTests
         h.OnUi(() => h.Hub.AppUpdateForceAt).Should().Be(now + AppUpdateRestartRules.ForceStopAfter);
         journal.Of("update.force").Should().ContainSingle();
 
-        now = start.AddMinutes(14);
+        AppUpdateRestartRules.ForceStopAfter.Should().Be(TimeSpan.FromMinutes(1));
+        now = start.AddMinutes(5).AddSeconds(50);
         h.Ui.Invoke(() => h.Hub.RunMaintenance());
-        bg.Restarts.Count.Should().Be(0, "按下後還沒滿 10 分鐘（排空已過 10 分鐘的寬限也只停等回應的）");
+        bg.Restarts.Count.Should().Be(0, "按下後還沒滿 1 分鐘");
         tool.Restarts.Count.Should().Be(0);
 
-        now = start.AddMinutes(15);
+        now = start.AddMinutes(6);
         h.Ui.Invoke(() => h.Hub.RunMaintenance());
         (await prepare.WaitAsync(TimeSpan.FromSeconds(5))).Ready.Should().BeTrue("都停下了");
         bg.Restarts.All.Should().ContainSingle().Which.Mode.Should().Be(AgentRestartMode.Immediate, "背景工作照立即套用停掉");
@@ -253,6 +254,29 @@ public sealed class AgentHubAppUpdateTests
 
         h.Ui.Invoke(() => h.Hub.AbortAppUpdate("測試"));
         h.OnUi(() => h.Hub.AppUpdateForceAt).Should().BeNull("放棄這次就清掉");
+    }
+
+    /// <summary>
+    /// Codex 的「本輪變更」彙整卡是中樞自己畫的、這一輪結束前一直是執行中：不是代理在執行的工具，
+    /// 不能寫進接續訊息說「重啟時你正在執行它、結果未知」（2026-11-20 實機：被打斷的工具列的是「整輪變更彙整」）
+    /// </summary>
+    [Fact]
+    public async Task 本輪變更的彙整卡不算執行中的工具_停下時不列成被打斷的工具()
+    {
+        using var h = await NewHarnessAsync();
+        var (id, s) = StartRunning(h, h.Codex, "c1");
+        s.SafePoint = true;
+        s.SucceedRestarts("c");
+        h.Raise(s, new AgentTurnDiffEvent("t", "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b"));
+        await h.Ui.DrainAsync();
+        h.Items(id).Should().Contain(i => i.ToolName == "整輪變更彙整" && i.Status == AgentItemStatus.Running, "這一輪結束前彙整卡一直是執行中");
+
+        var prepare = Prepare(h);
+        (await prepare.WaitAsync(TimeSpan.FromSeconds(5))).Ready.Should().BeTrue();
+
+        var request = s.Restarts.All.Should().ContainSingle().Subject;
+        request.InterruptedTools.Should().BeEmpty("彙整卡不是代理在執行的工具");
+        request.ContinuationText.Should().NotContain("整輪變更彙整").And.Contain("沒有任何工具在執行");
     }
 
     [Fact]

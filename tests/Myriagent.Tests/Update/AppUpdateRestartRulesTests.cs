@@ -193,7 +193,7 @@ public sealed class AppUpdateRestartRulesTests
         AppUpdateRestartRules.DrainLimit.Should().Be(TimeSpan.FromMinutes(35));
         AppUpdateRestartRules.RetryAfterAbort.Should().Be(TimeSpan.FromHours(1), "排空逾時放棄後 1 小時再試");
         AppUpdateRestartRules.RetryAfterBackground.Should().Be(TimeSpan.FromMinutes(5), "排空中有對話開始背景工作、放棄之後 5 分鐘內不再自動開始");
-        AppUpdateRestartRules.ForceStopAfter.Should().Be(TimeSpan.FromMinutes(10), "強制更新按下後 10 分鐘，還沒停下的照立即套用停下");
+        AppUpdateRestartRules.ForceStopAfter.Should().Be(TimeSpan.FromMinutes(1), "強制更新按下後 1 分鐘（2026-11-26 由 10 分鐘改短），還沒停下的照立即套用停下");
         AppUpdateRestartRules.RetryAfterHelperFailure.Should().Be(TimeSpan.FromHours(6), "幫手啟動不了或沒寫 .armed 時 6 小時後再試");
         AppUpdateRestartRules.SnoozeAfterCancel.Should().Be(TimeSpan.FromHours(6));
         AppUpdateRestartRules.ArmedTimeout.Should().Be(TimeSpan.FromSeconds(10));

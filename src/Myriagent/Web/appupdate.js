@@ -32,13 +32,50 @@ const setText = (el, text) => { if (el.textContent !== text) el.textContent = te
 const stagedText = (a) => (a.blocker ? `新版 ${a.staged} 已下載；${a.blocker}` : `新版 ${a.staged} 已下載，閒置時自動重啟套用`);
 
 /**
- * 「強制更新」（2026-10-28 使用者要求）：不等背景工作結束就開始套用，對話陸續到安全點停下，按下後 10 分鐘還沒停下的強制停下。
- * 已備妥時與排空中（還沒強制、不是交棒）提供
+ * 「強制更新」（2026-10-28 使用者要求）：不等背景工作結束就開始套用，對話陸續到安全點停下，按下後 1 分鐘還沒停下的強制停下
+ * （2026-11-26 由 10 分鐘改短：等太久時使用者自己去按停止，被按停止的對話新版不會接續）。已備妥時與排空中（還沒強制、不是交棒）提供
  */
 export const FORCE_ACTION = {
-  label: '強制更新', cmd: 'appUpdateForce',
-  title: '不等背景工作結束就開始套用：對話陸續到安全點停下，10 分鐘後還沒停下的強制停下（被停掉的背景工作，新版會請代理確認）',
+  label: '不等待，強制更新', cmd: 'appUpdateForce',
+  title: '不等背景工作結束就開始套用：對話陸續到安全點停下，1 分鐘後還沒停下的強制停下；停下的對話與被停掉的背景工作，新版會自動請代理接著做',
 };
+
+/**
+ * 「現在更新」（指令仍是 appUpdateRestartNow；2026-11-26 使用者回報「立即重啟」和「強制更新」分不出差別，按鈕改成直接說出差別）：
+ * 不等你離開電腦就開始，對話到安全點才停下；有背景工作在跑時它會等，按鈕就寫「等背景工作結束再更新」。
+ * 另一個「不等待，強制更新」（FORCE_ACTION）不等背景工作、1 分鐘後還沒停下的強制停下
+ */
+export function restartAction(a) {
+  const waitsBackground = /背景工作/.test((a && a.blocker) || '');
+  return {
+    label: waitsBackground ? '等背景工作結束再更新' : '現在更新',
+    cmd: 'appUpdateRestartNow',
+    title: waitsBackground
+      ? '背景工作都結束後馬上開始更新（不必等你離開電腦）：對話到安全點才停下，新版自動接續。不想等就按「不等待，強制更新」'
+      : '現在就開始更新（不必等你離開電腦）：對話到安全點才停下，新版自動接續；工具還在跑的會等它跑完',
+  };
+}
+
+/** 已經按了強制更新：留在原本的位置、不能再按（「取消這次」不會跑到它的位置上） */
+const FORCING_ACTION = { label: '強制更新中', cmd: 'appUpdateForce', disabled: true, title: '已經在強制更新：還沒停下的對話時間到了會強制停下' };
+
+/**
+ * 橫幅的按鈕換了一批之後多久內的點擊不算（2026-11-26 實機：按「強制更新」後 2.2 秒又點到同一個位置，那裡已經換成「取消這次」，
+ * 更新被取消、還進了 6 小時的冷卻）：連點的第二下、畫面剛變就按下去的，都不是在回應新的按鈕
+ */
+export const BANNER_GUARD_MS = 1200;
+
+/** 橫幅按鈕的點擊算不算數：按鈕建好滿 BANNER_GUARD_MS 才算（時間不明、時鐘倒退的一律算） */
+export function bannerClickAllowed(builtAt, now) {
+  if (!Number.isFinite(builtAt) || !Number.isFinite(now) || now < builtAt) return true;
+  return now - builtAt >= BANNER_GUARD_MS;
+}
+
+/** 排空中橫幅與設定頁的「強制更新」：還沒強制的可以按，已經強制的留著不能按；交棒（使用者開了新版）不提供 */
+function drainingForceAction(a) {
+  if (a.handoverTo) return null;
+  return a.forced ? FORCING_ACTION : FORCE_ACTION;
+}
 
 /** 排空中還能改成強制更新：還沒強制、不是交棒（使用者開了新版） */
 const forceable = (a) => a.phase === 'staged' || (a.phase === 'draining' && !a.forced && !a.handoverTo);
@@ -78,11 +115,12 @@ export function bannerOf(a, dismissed) {
   if (!a) return null;
   switch (a.phase) {
     case 'staged':
-      return { tone: 'info', text: stagedText(a), actions: [{ label: '立即重啟', cmd: 'appUpdateRestartNow' }, FORCE_ACTION], dismissible: false };
+      return { tone: 'info', text: stagedText(a), actions: [restartAction(a), FORCE_ACTION], dismissible: false };
     case 'draining':
       return {
         tone: 'wait', text: appPhaseText(a),
-        actions: [forceable(a) ? FORCE_ACTION : null, { label: '取消這次', cmd: 'appUpdateCancel' }].filter(Boolean), dismissible: false,
+        // 「強制更新」固定排在第二個（同已備妥時的位置），按了之後變成不能按的「強制更新中」：「取消這次」不會出現在剛按過的位置上
+        actions: [{ label: '取消這次', cmd: 'appUpdateCancel' }, drainingForceAction(a)].filter(Boolean), dismissible: false,
       };
     case 'restarting':
       return { tone: 'wait', text: a.handoverTo ? `正在切換到 ${a.handoverTo}…` : '正在重新啟動以套用更新…', actions: [], dismissible: false };
@@ -178,7 +216,7 @@ export function renderAppBanner() {
     return;
   }
   // 結構沒變（例如排空中等的對話數變動）只換文字：按鈕不被換掉，鍵盤焦點與點擊不會落空
-  const key = JSON.stringify([b.tone, b.actions.map((a) => [a.label, a.cmd]), b.dismissible]);
+  const key = JSON.stringify([b.tone, b.actions.map((a) => [a.label, a.cmd, !!a.disabled]), b.dismissible]);
   if (key === bannerKey) {
     setText(el.querySelector('.app-banner-text'), b.text);
     paintDrainHud(el, hud);
@@ -189,7 +227,14 @@ export function renderAppBanner() {
   el.dataset.tone = b.tone;
   el.append(icon(b.tone === 'warn' ? 'warning' : 'download', 'app-banner-ic'), h('span', { class: 'app-banner-text', text: b.text }));
   paintDrainHud(el, hud);
-  for (const a of b.actions) el.append(h('button', { type: 'button', class: 'btn sm', text: a.label, title: a.title, onClick: () => post({ cmd: a.cmd }) }));
+  // 按鈕換了一批：剛換上的先不收點擊（bannerClickAllowed）
+  const builtAt = performance.now();
+  for (const a of b.actions) {
+    const btn = h('button', { type: 'button', class: 'btn sm', text: a.label, title: a.title,
+      onClick: () => { if (bannerClickAllowed(builtAt, performance.now())) post({ cmd: a.cmd }); } });
+    btn.disabled = !!a.disabled;
+    el.append(btn);
+  }
   if (b.dismissible) {
     el.append(h('button', { type: 'button', class: 'ibtn app-banner-close', title: '關閉', 'aria-label': '關閉', onClick: () => { bannerDismissed = true; renderAppBanner(); } }, icon('x')));
   }
@@ -231,7 +276,7 @@ export function appSection(set, row) {
     // 下載進度、排空的數字一直更新時按鈕不被換掉，焦點與點擊不會落空
     const buttons = [
       { label: '立即檢查', cmd: 'appUpdateCheck', disabled: a.managed === false || a.phase === 'checking' },
-      a.phase === 'staged' ? { label: '立即重啟', cmd: 'appUpdateRestartNow' } : null,
+      a.phase === 'staged' ? restartAction(a) : null,
       forceable(a) ? FORCE_ACTION : null,
       installable(a) ? { label: '安裝到這台電腦', cmd: 'appInstallHere' } : null,
     ].filter(Boolean);
