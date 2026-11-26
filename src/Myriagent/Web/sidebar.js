@@ -101,6 +101,7 @@ export function initSidebar(root, api) {
   window.addEventListener('pointercancel', release, true);
   window.addEventListener('blur', release);
   bindAccountDrag(accList);
+  watchFarRows(list.parentElement);
   // 〔同步〕電腦改名、上下線：清單的電腦徽章跟著更新（只在名稱、在線或「重新連線中」變了時重畫；sync 的推送很頻繁）
   let devSig = '';
   on('remote-changed', () => {
@@ -795,6 +796,7 @@ export function renderHistory() {
   const prevRows = els.list.childElementCount; // 只看上一次有沒有列（含分組標題）
   const fresh = [];
   reconcile(els.list, entries, (e) => (e.g !== undefined ? 'g:' + e.g : 'c:' + e.c.id), (e) => { const n = createEntry(e); if (e.g === undefined) fresh.push(n); return n; }, updateEntry);
+  scheduleFarRows();
   // 新出現的列（新對話、搜尋結果、換篩選）由上往下錯開淡入；剛啟動的第一批、超過 LIST_ENTRANCE_MAX 列的直接出現（fxrules.listEntranceCount）
   const enter = listEntranceCount(prevRows, fresh.length);
   for (let i = 0; i < enter; i++) { fresh[i].style.setProperty('--fx-i', i); replayClass(fresh[i], 'fx-row-in', 260 + i * LIST_STAGGER_MS); }
@@ -882,6 +884,43 @@ function createEntry(e) {
   row.addEventListener('contextmenu', (ev) => { ev.preventDefault(); rowMenu(row._id, null, { x: ev.clientX, y: ev.clientY }); });
   updateEntry(row, e);
   return row;
+}
+
+// ───── 離清單看得到的範圍很遠的列不排版、不畫（2026-11-27）─────
+// 對話多的時候清單有幾百列（所有電腦的對話），以前每一格畫面（串流的每一次更新）的繪製、預繪、圖層化都要把每一列走一遍。
+// 離看得到的範圍超過一個清單高度的列加上 .crow-far（app.css：content-visibility: auto），快捲進來時拿掉。
+// 不整個清單都加：content-visibility 讓列變成獨立的堆疊環境，Chrome 對裡面的字改用灰階反鋸齒（ClearType 不見；截圖逐像素比對抓到），
+// 看得到的列一律不帶它。不用 IntersectionObserver：它每一格都要對每一列重算（列多的時候吃掉一大半的效益）；
+// 改在捲動事件（這一格畫出來之前就到）、清單的框或內容的大小變了（ResizeObserver：排完版之後、畫出來之前）與清單重排之後（下一個影格之前）
+// 以二分搜尋找出範圍。一次跳很遠時也是同一格就換好；萬一沒換到，那一格照樣由瀏覽器畫出來（content-visibility: auto 不會留白）
+let farFrame = 0;
+
+/** 照目前的捲動位置標出離看得到的範圍很遠的列（清單看不到時不動：重新看得到時框的大小變了，會再算一次） */
+function updateFarRows() {
+  const sc = els.list.parentElement; // .sb-scroll（清單捲動的框）
+  const h = sc.clientHeight;
+  const rows = els.list.getElementsByClassName('crow');
+  const n = rows.length;
+  if (!h || !n) return;
+  const top = sc.getBoundingClientRect().top;
+  // 列照順序由上往下排：第一個底部在框上方一個高度以內的列、第一個頂部在框下方一個高度以外的列
+  const first = (pred) => { let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi) >> 1; if (pred(rows[m].getBoundingClientRect())) hi = m; else lo = m + 1; } return lo; };
+  const from = first((r) => r.bottom - top > -h);
+  const to = first((r) => r.top - top >= 2 * h);
+  for (let i = 0; i < n; i++) rows[i].classList.toggle('crow-far', i < from || i >= to);
+}
+
+function scheduleFarRows() {
+  if (!farFrame) farFrame = requestAnimationFrame(() => { farFrame = 0; updateFarRows(); });
+}
+
+function watchFarRows(scroll) {
+  scroll.addEventListener('scroll', updateFarRows, { passive: true });
+  if (typeof ResizeObserver === 'function') {
+    const ro = new ResizeObserver(updateFarRows);
+    ro.observe(scroll);
+    ro.observe(els.list);
+  }
 }
 
 function updateEntry(row, e) {

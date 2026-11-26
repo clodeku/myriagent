@@ -584,6 +584,12 @@ input[type="search"]::-webkit-search-cancel-button { filter: grayscale(1); opaci
   display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 3px 0 9px; border-radius: 6px;
   cursor: pointer; color: var(--text); user-select: none;
 }
+/* 離清單看得到的範圍超過一個清單高度的列不排版、不畫（2026-11-27；sidebar.js 的 updateFarRows 加上、快捲進來時拿掉 .crow-far）：
+   對話多的時候清單有幾百列（所有電腦的對話），以前每一格畫面的繪製、預繪、圖層化都要把每一列走一遍。列的高度寫死 28px，畫不畫捲動的長度都一樣。
+   不整個清單都加：content-visibility 讓列變成獨立的堆疊環境，Chrome 對裡面的字改用灰階反鋸齒（ClearType 不見），看得到的列一律不帶它。
+   繪製限制會裁掉畫到列外的東西（「更多」按鈕鍵盤聚焦時的光暈超出列 1px），overflow-clip-margin 放寬 6px；搜尋結果帶摘要的列高度不固定，照常畫 */
+.crow.crow-far { content-visibility: auto; overflow-clip-margin: 6px; }
+.crow.has-snip { content-visibility: visible; }
 .crow:hover { background: var(--bg-hover); }
 .crow.open .crow-title { color: var(--text-hi); }
 .crow.active { background: var(--bg-active); color: var(--text-hi); }

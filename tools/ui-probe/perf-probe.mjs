@@ -6,6 +6,7 @@
 // 檢查：執行中的畫面沒有任何「動非合成屬性」的無限循環動畫（perfNoMainThreadLoops*）；減少動態、設定關掉動態效果時只剩載入中的轉圈。
 // 耗用的數字只記在報告（機器與負載不同，不設門檻）。
 import fs from 'node:fs';
+import path from 'node:path';
 import { pumpSetup, devices, SELF } from './monitor-probe.mjs';
 import { syncStatus } from './sync-settings.mjs';
 import { groupOf } from './fixtures.mjs';
@@ -84,6 +85,8 @@ async function measure(page, ms) {
   if (process.env.MYRIAGENT_PERF_JSPROFILE) r.jsProfile = await jsProfile(cdp);
   // MYRIAGENT_PERF_INVALIDATION=1：另外錄 2 秒帶失效追蹤的追蹤，列出樣式重算是誰觸發的（traceInvalidations）
   if (process.env.MYRIAGENT_PERF_INVALIDATION) r.invalidations = await traceInvalidations(cdp);
+  // MYRIAGENT_PERF_EVAL=<檔案>：在頁面裡執行那個檔的運算式（回傳可序列化的結果），結果記在 eval（離線分析用）
+  if (process.env.MYRIAGENT_PERF_EVAL) r.eval = await page.evaluate(fs.readFileSync(process.env.MYRIAGENT_PERF_EVAL, 'utf8')).catch((e) => String(e));
   // MYRIAGENT_PERF_LAYERS=1：列出合成圖層（依建立的原因與元素統計）
   if (process.env.MYRIAGENT_PERF_LAYERS) r.layers = await layerReasons(cdp);
   // MYRIAGENT_PERF_RAWTRACE=<檔案>：另外錄 2 秒完整的追蹤（含失效追蹤與堆疊）存成 JSON，給離線分析（trace-frames.py：依觸發來源分類每一格畫面）
@@ -120,14 +123,26 @@ async function animationEvents(page, ms) {
 }
 
 async function layerReasons(cdp) {
-  await cdp.send('DOM.getDocument', { depth: 0 });
+  // 偽元素的圖層要知道是誰的偽元素：整份文件（含偽元素）先建好 backendNodeId → 說明
+  const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true });
+  const nodeDesc = new Map();
+  const clsOf = (n) => { const a = n.attributes || []; for (let i = 0; i < a.length; i += 2) if (a[i] === 'class') return a[i + 1].split(/\s+/).filter(Boolean).slice(0, 2).join('.'); return ''; };
+  const walk = (n, parent) => {
+    const me = (n.nodeName || '').toLowerCase() + (clsOf(n) ? '.' + clsOf(n) : '');
+    if (n.backendNodeId) nodeDesc.set(n.backendNodeId, n.pseudoType ? parent + '::' + n.pseudoType : me);
+    for (const c of n.children || []) walk(c, me);
+    for (const c of n.pseudoElements || []) walk(c, me);
+    if (n.contentDocument) walk(n.contentDocument, me);
+  };
+  walk(root, '');
   const tree = new Promise((resolve) => cdp.once('LayerTree.layerTreeDidChange', resolve));
   await cdp.send('LayerTree.enable');
   const { layers } = await tree;
-  const byReason = new Map(), byNode = new Map();
+  const byReason = new Map(), byNode = new Map(), big = [];
   let drawn = 0, area = 0;
   for (const l of layers || []) {
     if (l.drawsContent) { drawn++; area += l.width * l.height; }
+    if (l.drawsContent) big.push({ a: l.width * l.height, l });
     let reasons = [];
     try { reasons = (await cdp.send('LayerTree.compositingReasons', { layerId: l.layerId })).compositingReasonIds || []; } catch { /* 沒有原因 */ }
     let desc = '(無節點)';
@@ -140,12 +155,18 @@ async function layerReasons(cdp) {
       } catch { desc = '(找不到節點)'; }
     }
     const rk = reasons.join(',') || '(無)';
+    l._desc = (l.backendNodeId && nodeDesc.get(l.backendNodeId)) || desc;
+    l._rk = rk;
     byReason.set(rk, (byReason.get(rk) || 0) + 1);
     byNode.set(desc + ' ← ' + rk, (byNode.get(desc + ' ← ' + rk) || 0) + 1);
   }
   await cdp.send('LayerTree.disable').catch(() => {});
   const list = (m, n) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => v + ' × ' + k);
-  return { total: (layers || []).length, drawn, megapixels: Math.round(area / 1e5) / 10, byReason: list(byReason, 20), byNode: list(byNode, 60) };
+  const biggest = big.sort((x, y) => y.a - x.a).slice(0, 30).map(({ l }) => Math.round(l.width) + '×' + Math.round(l.height) + ' ' + l._desc + ' ← ' + l._rk);
+  const byOwner = new Map();
+  for (const l of layers || []) if (l._desc) { const k = l._desc + ' ← ' + l._rk; const v = byOwner.get(k) || { n: 0, a: 0 }; v.n++; v.a += l.drawsContent ? l.width * l.height : 0; byOwner.set(k, v); }
+  const owners = [...byOwner.entries()].sort((x, y) => y[1].a - x[1].a).slice(0, 40).map(([k, v]) => v.n + ' 層 ' + Math.round(v.a / 1e4) / 100 + ' MP ' + k);
+  return { total: (layers || []).length, drawn, megapixels: Math.round(area / 1e5) / 10, byReason: list(byReason, 20), byNode: list(byNode, 60), biggest, owners };
 }
 
 async function rawTrace(cdp, file) {
@@ -398,7 +419,9 @@ function manySetup(ids) {
   const base = multiStreamSetup(ids);
   return (host) => {
     const proto = Object.fromEntries(host.conversations.map((s) => [s.accountId, s]));
-    for (let i = host.conversations.length + 1; i <= MANY_IDS.length; i++) {
+    // MYRIAGENT_PERF_MANY_EXTRA=<數量>：另外補這麼多個不在任何窗格裡的對話（只在側欄的清單；對話多的時候有幾百列）
+    const extra = Math.max(0, Number(process.env.MYRIAGENT_PERF_MANY_EXTRA) || 0);
+    for (let i = host.conversations.length + 1; i <= MANY_IDS.length + extra; i++) {
       const id = 'c' + i;
       if (host.conversations.some((s) => s.id === id)) continue;
       const src = proto[['a1', 'a2', 'a3'][i % 3]];
@@ -896,6 +919,78 @@ export async function runPerf(ctx) {
     const table = Object.fromEntries(Object.entries(out).map(([n, r]) => [n, Object.fromEntries(Object.entries(r).map(([k, v]) => [k, med(v)]))]));
     check('perfLayoutBench', true, table);
     console.log(JSON.stringify(table, null, 1));
+    return;
+  }
+  // MYRIAGENT_PERF_SIDEBAR_SHOTS=<資料夾>（2026-11-27）：窗格與分頁很多的版面＋側欄 MYRIAGENT_PERF_MANY_EXTRA 個對話，不串流、所有動畫停在同一個時間點，
+  // 對側欄的幾種狀態各拍一張、記捲動的長度，存到那個資料夾；改前改後各拍一次、逐張比對（側欄的列畫面外不畫，看得到的要一模一樣）
+  if (process.env.MYRIAGENT_PERF_SIDEBAR_SHOTS) {
+    const dir = process.env.MYRIAGENT_PERF_SIDEBAR_SHOTS;
+    fs.mkdirSync(dir, { recursive: true });
+    // 子對話（委派、延伸）掛在主對話底下：c30 底下兩個、c60 底下一個
+    const setup = manySetup([...MANY_SHOWN, ...MANY_HIDDEN]);
+    const hostSetup = (host) => {
+      setup(host);
+      for (const [kid, parent] of [['c31', 'c30'], ['c32', 'c30'], ['c61', 'c60']]) { const c = host.conversations.find((x) => x.id === kid); if (c) c.parentId = parent; }
+    };
+    const app = await openApp('perf-sidebar-shots', { vp: { w: 2480, h: 1400 }, layout: MANY_PANES, hostSetup });
+    const { page } = app;
+    if (process.env.MYRIAGENT_PERF_CSS) await page.addStyleTag({ content: process.env.MYRIAGENT_PERF_CSS });
+    await sleep(2500);
+    // 動畫一律停在同一個時間點（看得到才開始跑的那些也是）；轉場直接跑完
+    const freeze = async () => {
+      await page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))));
+      await page.evaluate(() => { for (const a of document.getAnimations()) { if (a instanceof CSSTransition) a.finish(); else { a.pause(); a.currentTime = 700; } } });
+    };
+    const shots = [];
+    const shot = async (name) => {
+      await freeze();
+      const geo = await page.evaluate(() => { const s = document.querySelector('.sb-scroll'); return { top: s.scrollTop, height: s.scrollHeight, rows: document.querySelectorAll('.sb-list .crow').length }; });
+      await page.locator('#sidebar').screenshot({ path: path.join(dir, name + '.png'), animations: 'allow' });
+      shots.push(Object.assign({ name }, geo));
+    };
+    const scrollTo = (where) => page.evaluate((w) => { const s = document.querySelector('.sb-scroll'); s.scrollTop = w === 'end' ? s.scrollHeight : Math.round(s.scrollHeight * w); }, where);
+    await shot('01-top');
+    if (process.env.MYRIAGENT_PERF_LAYERS) {
+      const cdp = await page.context().newCDPSession(page);
+      fs.writeFileSync(path.join(dir, 'layers.json'), JSON.stringify(await layerReasons(cdp), null, 1));
+      await cdp.detach().catch(() => {});
+    }
+    await page.locator('.sb-list .crow').nth(4).hover();
+    await shot('02-hover');
+    await page.mouse.move(1200, 700);
+    await page.evaluate(() => document.querySelectorAll('.sb-list .crow')[5].querySelector('.crow-more').focus({ focusVisible: true }));
+    await shot('03-focus-more');
+    await page.evaluate(() => document.querySelectorAll('.sb-list .crow')[7].focus({ focusVisible: true }));
+    await shot('04-focus-row');
+    await page.evaluate(() => { document.activeElement && document.activeElement.blur(); for (const i of [2, 9]) document.querySelectorAll('.sb-list .crow')[i].classList.add('attn-flash'); });
+    await shot('05-attn');
+    for (const [i, w] of [[6, 0.25], [7, 0.5], [8, 0.75], [9, 'end']]) { await scrollTo(w); await shot('0' + i + '-scroll-' + String(w).replace('.', '')); }
+    // 一次跳很遠：同一個影格（捲動事件之後、畫出來之前的 rAF）看得到的列不可以還帶著 .crow-far（灰階反鋸齒）
+    const jump = await page.evaluate(() => new Promise((res) => {
+      const s = document.querySelector('.sb-scroll');
+      s.scrollTop = Math.round(s.scrollHeight * 0.6);
+      requestAnimationFrame(() => {
+        const t = s.getBoundingClientRect();
+        res([...document.querySelectorAll('.sb-list .crow.crow-far')].filter((r) => { const b = r.getBoundingClientRect(); return b.bottom > t.top && b.top < t.bottom; }).length);
+      });
+    }));
+    shots.push({ name: 'jump', visibleFar: jump });
+    // 捲回最上面（畫過又離開畫面的列，之後再出現）
+    await scrollTo(0);
+    await shot('10-back-top');
+    // 標題的搜尋（宿主沒有內容結果：只篩標題）
+    await page.fill('.sb-search input', '部署');
+    await sleep(600);
+    await shot('11-search');
+    await page.fill('.sb-search input', '');
+    await sleep(600);
+    // 淺色主題
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await shot('12-light');
+    fs.writeFileSync(path.join(dir, 'geometry.json'), JSON.stringify(shots, null, 1));
+    await closeApp(app);
+    check('perfSidebarShots', true, shots);
+    check('perfSidebarJumpNoFar', jump === 0, { visibleFar: jump });
     return;
   }
   // 只跑窗格與分頁很多的版面（MYRIAGENT_PERF_MANY=1）：9 窗格側排、101 個分頁、3 個看得見的在串流、4 個在背景分頁執行
