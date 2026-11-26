@@ -16,7 +16,9 @@ namespace Myriagent.Tests.Integration;
 /// Claude Code／Codex CLI、真的代理主機驗證整條路：對話的程序經主機開 → 這一輪結束、背景指令還在跑 → 排空時放開程序（不等、不停）→
 /// resume.json 存檔再讀回 → 舊的 app 交棒主機後結束 → 同一個資料夾建新的中樞、新的主機用戶端、新的會話物件（等於新版啟動）→
 /// 主視窗 ready 後接回同一個程序 → 背景指令照常跑完、結果照常回到對話，沒有「上次結束時停掉了背景工作」的接續訊息，之後的訊息沿用同一個程序。
-/// 帳戶與精簡模式同 <see cref="AppUpdateResumeIntegrationTests"/>。會用到訂閱額度：各約 3 輪（haiku／gpt-6-luna、low）。
+/// 一輪還在執行時換版（H2，設計第 10 節）：指令跑到一半就排空 → 不停下這一輪、放開程序 → 新的中樞還原這一輪再接回 →
+/// 指令照常跑完、結果寫進原本那張卡、這一輪照常回覆完，沒有接續訊息。
+/// 帳戶與精簡模式同 <see cref="AppUpdateResumeIntegrationTests"/>。會用到訂閱額度：各約 2～3 輪（haiku／gpt-6-luna、low）。
 /// 執行：MYRIAGENT_IT=1 dotnet test ... --filter "FullyQualifiedName~AppUpdateDetachIntegrationTests"
 /// </summary>
 [Collection(AppPathsCollection.Name)]
@@ -40,6 +42,139 @@ public sealed class AppUpdateDetachIntegrationTests
         => RunAsync(AgentProvider.Codex, "gpt-6-luna",
             "直接執行這個 PowerShell 指令：`Start-Sleep 40; Set-Content bg.txt done`（不要用 Start-Process、Start-Job 或任何方式另開程序）。"
             + "它要跑約 40 秒：執行時只等 1 秒就好，讓它留在終端機裡繼續跑，不要等它結束、也不要再查看它，立刻只回覆 started 這個字。");
+
+    [EnvFact("MYRIAGENT_IT", Reason)]
+    public Task Claude_指令跑到一半換版_這一輪不停下_新中樞接回後照常做完()
+        => RunTurnAsync(AgentProvider.Claude, "haiku",
+            // Claude 的 Bash 工具不准前景執行 sleep 30（要求改用背景或 Monitor）：用 ping 佔住約 30 秒
+            "用 Bash 工具（不要設 run_in_background，要等它結束）執行 ping -n 31 127.0.0.1 > /dev/null && echo fgdone，等它結束之後，只回覆最後印出的那個英文單字",
+            "fgdone", "ping -n 31", "我第一則訊息請你執行的指令裡，ping 的 -n 後面是哪個數字？只回覆那個數字", "31");
+
+    [EnvFact("MYRIAGENT_IT", Reason)]
+    public Task Codex_指令跑到一半換版_這一輪不停下_新中樞接回後照常做完()
+        => RunTurnAsync(AgentProvider.Codex, "gpt-6-luna",
+            "直接執行這個 PowerShell 指令（不要用 Start-Process、Start-Job 或任何方式另開程序）：`Start-Sleep 30; Set-Content fg.txt done`。"
+            + "一定要等它真的結束（還沒結束就繼續等），結束之後只回覆 finished 這個字。",
+            "finished", "fg.txt", "我第一則訊息請你執行的指令裡，要睡幾秒？只回覆那個數字", "30");
+
+    /// <summary>一輪執行到一半（前景的指令還在跑）時換版：放開、新的中樞還原並接回、這一輪照常做完</summary>
+    /// <param name="answer">這一輪最後的回覆要有的字</param>
+    /// <param name="command">那個指令的工具卡認得出來的字</param>
+    /// <param name="followUp">接回之後再問的一則（確認是同一個程序、記得前文）與回覆要有的字</param>
+    private async Task RunTurnAsync(AgentProvider provider, string model, string prompt, string answer, string command, string followUp, string followUpAnswer)
+    {
+        var sessions = new Sessions();
+        using var hostRoot = new TempDirectory("it-detach-turn");
+        AgentHostClient NewHost() => new(Path.Combine(AppContext.BaseDirectory, AgentHostClient.ExecutableName), hostRoot.Root, hostRoot.Combine("host.log"));
+        using var h = new HubHarness(sessionFactory: sessions.Create);
+        var account = provider switch
+        {
+            AgentProvider.Claude => h.Claude,
+            AgentProvider.Codex => SeedCodexDefault(h),
+            _ => throw new ArgumentOutOfRangeException(nameof(provider)),
+        };
+        account.SafeMode = true;
+        CliLocator.Locate(provider).Should().NotBeNull($"這台電腦要安裝 {provider} CLI");
+        var first = NewHost();
+        AgentHostClient? second = null;
+        h.Ui.Invoke(() =>
+        {
+            h.Hub.AttachProcessHost(first);
+            h.Hub.HandoffPoll = TimeSpan.FromMilliseconds(50);
+        });
+
+        bool IsCommandCard(AgentChatItem i) => i.Kind == AgentItemKind.Tool && $"{i.Title}\n{i.Detail}".Contains(command, StringComparison.OrdinalIgnoreCase);
+
+        try
+        {
+            var id = h.NewConversation(h.Main, account);
+            SetOptions(h, id, model, "low");
+            var workspace = h.Store.GetDefaultWorkingDirectory(id);
+            h.Send(h.Main, id, prompt);
+            await WaitUntilAsync(() => sessions.Count == 1 && h.Items(id).Any(i => IsCommandCard(i) && i.Status == AgentItemStatus.Running), "指令開始執行", TurnTimeout);
+            var before = sessions[0];
+            await WaitUntilAsync(() => before.Session.CanDetachProcess, "執行中的一輪放得開（有檢查點、沒有等回應的請求）", TimeSpan.FromSeconds(20));
+            h.IsRunning(id).Should().BeTrue();
+            before.Of<AgentTurnCompletedEvent>().Should().BeEmpty("指令還在跑");
+            var instance = before.Session.ProcessInstance;
+            var card = h.Items(id).Last(IsCommandCard);
+            int commandCards = h.Items(id).Count(IsCommandCard);
+
+            // 1. 排空：不等這一輪、也不停下它——放開程序
+            var startedAt = DateTime.UtcNow;
+            var preparation = await h.OnUi(() => h.Hub.PrepareForAppUpdateAsync(CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(30));
+            output.WriteLine($"排空：{preparation}（{(DateTime.UtcNow - startedAt).TotalSeconds:F1} 秒）");
+            preparation.Ready.Should().BeTrue(preparation.Reason);
+            preparation.Held.Should().Be(0, "沒有停下任何一輪");
+            before.Session.HasLiveProcess.Should().BeFalse("程序交給主機了");
+            before.Of<AgentProcessExitedEvent>().Should().BeEmpty("放開不是結束程序");
+            before.Of<AgentTurnCompletedEvent>().Should().BeEmpty("這一輪沒有被結束");
+            h.IsRunning(id).Should().BeTrue();
+            var built = h.OnUi(() => h.Hub.BuildAppResume(Token, "0.2.1-aaaaaa1", "0.2.2-bbbbbb2"));
+            ResumeFileStore.Save(AppPaths.Root, built);
+            var file = ResumeFileStore.Load(AppPaths.Root)!;
+            var attached = file.Attached.Should().ContainSingle(a => a.Id == id, "resume.json 存檔再讀回，接回要用的狀態還在").Subject;
+            attached.Turn.Should().NotBeNull("這一輪在中樞的狀態跟著過去");
+            attached.Turn!.Statuses.Should().ContainKey(card.Id);
+            file.Conversations.Should().BeEmpty();
+            output.WriteLine($"接回的狀態：{attached.State!.ToString(Newtonsoft.Json.Formatting.None)[..Math.Min(1500, attached.State.ToString(Newtonsoft.Json.Formatting.None).Length)]}");
+
+            // 2. 舊的 app 結束（中樞收尾、主機交棒），新版啟動：同一個資料夾建新的中樞、新的主機用戶端、新的會話物件
+            await h.RestartAsync();
+            first.Handoff(TimeSpan.FromMinutes(3)).Should().BeTrue("主機留著放開的程序等新版");
+            second = NewHost();
+            var newHost = second;
+            h.Ui.Invoke(() =>
+            {
+                h.Hub.AttachProcessHost(newHost);
+                h.Hub.ScheduleAppResume(new PendingAppResume(file, ResumeIntentRules.Validate(file, Token, DateTime.UtcNow), "0.2.2", RolledBack: false));
+            });
+            h.Command(h.Main, "ready");
+            await WaitUntilAsync(() => sessions.Count == 2 && sessions[1].Session.HasLiveProcess && sessions[1].Of<AgentProcessStartedEvent>().Count > 0, "新的會話接回程序", TimeSpan.FromSeconds(30));
+            var after = sessions[1];
+            after.Session.ProcessInstance.Should().Be(instance, "同一個程序");
+            output.WriteLine($"接回：{(DateTime.UtcNow - startedAt).TotalSeconds:F1} 秒後");
+
+            // 3. 這一輪照常做完：指令的結果寫進原本那張卡，回覆完
+            await WaitUntilAsync(() => after.Of<AgentTurnCompletedEvent>().Count >= 1 && !h.IsRunning(id), "接回的那一輪做完", TurnTimeout);
+            after.Of<AgentTurnCompletedEvent>().First().Event.Outcome.Should().Be(AgentTurnOutcome.Completed);
+            after.Of<AgentTextCompletedEvent>().Last().Event.Text.Should().Contain(answer);
+            var done = h.Items(id).Last(IsCommandCard);
+            done.Id.Should().Be(card.Id, "同一張卡");
+            done.Status.Should().Be(AgentItemStatus.Done, "不是「被中斷、結果未知」");
+            h.Items(id).Count(IsCommandCard).Should().Be(commandCards, "沒有多出重複的卡片");
+            if (provider == AgentProvider.Codex)
+                File.ReadAllText(Path.Combine(workspace, "fg.txt")).Trim().Should().Be("done", "指令真的跑完了");
+            h.Items(id).Should().NotContain(i => i.Kind == AgentItemKind.Notice && i.NoticeKind == AgentNoticeKind.AppUpdate, "這一輪沒有中斷：沒有接續的提示");
+            h.Items(id).Should().NotContain(i => i.Status == AgentItemStatus.Running || i.Status == AgentItemStatus.Cancelled);
+            RunningTurnStore.TryLoad(h.Store.GetConversationDirectory(id)).Record.Should().BeNull("這一輪結束了");
+
+            // 4. 之後的訊息：同一個程序（不重開、記得前文）
+            int turns = after.Of<AgentTurnCompletedEvent>().Count;
+            h.Send(h.Main, id, followUp);
+            await WaitUntilAsync(() => after.Of<AgentTurnCompletedEvent>().Count > turns && !h.IsRunning(id), "接回之後的一輪", TurnTimeout);
+            after.Of<AgentTextCompletedEvent>().Last().Event.Text.Should().Contain(followUpAnswer);
+            sessions.Count.Should().Be(2, "沒有另開會話");
+            after.Of<AgentProcessStartedEvent>().Should().ContainSingle("接回之後沒有重開程序");
+            after.Session.ProcessInstance.Should().Be(instance);
+        }
+        catch (Exception)
+        {
+            for (int i = 0; i < sessions.Count; i++)
+            {
+                output.WriteLine($"── 會話 {i} ──");
+                foreach (var (at, ev) in sessions[i].Of<AgentEvent>().TakeLast(60))
+                    output.WriteLine($"{at:HH:mm:ss.fff} {ev.GetType().Name} {ev}");
+            }
+            WriteLogTail(output);
+            throw;
+        }
+        finally
+        {
+            second?.Dispose();
+            first.Dispose();
+        }
+    }
 
     private async Task RunAsync(AgentProvider provider, string model, string prompt)
     {

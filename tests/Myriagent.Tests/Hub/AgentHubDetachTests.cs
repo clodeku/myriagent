@@ -49,6 +49,7 @@ public sealed class AgentHubDetachTests
         h.Ui.Invoke(() =>
         {
             h.Hub.BackgroundSettle = TimeSpan.Zero;
+            h.Hub.HandoffPoll = TimeSpan.FromMilliseconds(15);
             h.Hub.AttachProcessHost(host);
         });
         return (h, host);
@@ -133,25 +134,37 @@ public sealed class AgentHubDetachTests
     {
         var (h, _) = await NewHarnessAsync();
         using var _h = h;
-        var (directId, direct) = WaitingBackground(h, detachable: false, instance: "d1");
-        h.OnUi(() => h.Hub.BackgroundWorkRunning).Should().BeTrue("直接開的程序留不住：照舊等背景工作");
+        // 放開失敗的：排空的最後一步試一次，放不開就照原本的規則等背景工作
         var (failId, fail) = WaitingBackground(h, instance: "f1");
         fail.FailDetach = true;
 
         var prepare = Prepare(h);
-        await h.Ui.DrainAsync();
+        await h.WaitUntilAsync(() => fail.Detaches == 1 && State(h, failId) == "waitingBackground", "試過一次，放不開就照舊等背景工作");
 
         prepare.IsCompleted.Should().BeFalse();
-        direct.Detaches.Should().Be(0);
-        State(h, directId).Should().Be("waitingBackground");
-        fail.Detaches.Should().Be(1, "試過一次，放不開就不再試");
-        State(h, failId).Should().Be("waitingBackground");
         fail.HasLiveProcess.Should().BeTrue();
         Marker(h, failId)!.ClosedByApp.Should().BeFalse("沒有放開：快照改回平常的等背景工作");
+        h.OnUi(() => h.Hub.BackgroundWorkRunning).Should().BeTrue("這次排空放不開：照舊為它的背景工作擋住更新");
         h.Ui.Invoke(() => h.Hub.RunMaintenance());
-        fail.Detaches.Should().Be(1);
+        await Task.Delay(60);
+        fail.Detaches.Should().Be(1, "不再試");
         h.OnUi(() => h.Hub.DetachedProcessCount).Should().Be(0);
         Resume(h).Attached.Should().BeEmpty();
+        h.Ui.Invoke(() => h.Hub.AbortAppUpdate("測試"));
+        (await prepare.WaitAsync(TimeSpan.FromSeconds(5))).Ready.Should().BeFalse();
+
+        // 直接開的程序：根本不試
+        fail.HasLiveBackgroundWork = false;
+        fail.LiveBackgroundTools = [];
+        h.Raise(fail, new AgentBackgroundWorkEvent(0, []));
+        var (directId, direct) = WaitingBackground(h, detachable: false, instance: "d1");
+        h.OnUi(() => h.Hub.BackgroundWorkRunning).Should().BeTrue("直接開的程序留不住：照舊等背景工作");
+        var second = Prepare(h);
+        await h.Ui.DrainAsync();
+        await Task.Delay(60);
+        second.IsCompleted.Should().BeFalse();
+        direct.Detaches.Should().Be(0);
+        State(h, directId).Should().Be("waitingBackground");
         h.Ui.Invoke(() => h.Hub.AbortAppUpdate("測試"));
     }
 

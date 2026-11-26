@@ -27,6 +27,104 @@ internal sealed class ResumeAttached
     /// 接回之前把這幾張改回執行中、對回工具 id，之後跑完的結果才寫得進卡片
     /// </summary>
     public Dictionary<string, string> Cards { get; set; } = new();
+
+    /// <summary>
+    /// 放開時這個對話還在執行一輪（代理主機 H2，2026-11-26 起）：中樞這一輪的狀態，新版接回之前還原。null＝閒置、只是在等背景工作。
+    /// 不認得這個欄位的舊版接不回執行中的一輪（會話的狀態它也讀不懂）：照 running.json 當成被中斷的一輪接續
+    /// </summary>
+    public ResumeTurn? Turn { get; set; }
+}
+
+/// <summary>
+/// 放開時還在執行的一輪在中樞這邊的狀態（<see cref="ResumeAttached.Turn"/>）：項目照磁碟上的留著，這裡只記「哪個事件的鍵對到哪個項目」
+/// 與載入紀錄時會被收尾掉的執行中／等待狀態。只加欄位（設計 8.8）；列舉存成名稱
+/// </summary>
+internal sealed class ResumeTurn
+{
+    public int Version { get; set; } = 1;
+
+    /// <summary>這一輪開始的時間（Unix 毫秒）</summary>
+    public long StartedAt { get; set; }
+
+    /// <summary>狀態列的文字（「思考中…」「執行指令…」）</summary>
+    public string? Status { get; set; }
+
+    /// <summary>這一輪是交給 CLI 的 /clear</summary>
+    public bool ClearTurn { get; set; }
+
+    /// <summary>這一輪使用者拒絕過核准</summary>
+    public bool Denied { get; set; }
+
+    /// <summary>這一輪是 CLI 自己開的（背景工作結束後的一輪）</summary>
+    public bool StartedByCli { get; set; }
+
+    /// <summary>這一輪已經是連續第幾次自動接續（running.json 的 AutoResumes）</summary>
+    public int AutoResumes { get; set; }
+
+    /// <summary>這一輪已記進 token 計數的增量</summary>
+    public AgentUsage? Tokens { get; set; }
+
+    /// <summary>執行中或等待中的項目（項目 id → 狀態的名稱）：載入紀錄時一律被收尾，接回之前改回來</summary>
+    public Dictionary<string, string> Statuses { get; set; } = new();
+
+    /// <summary>串流區塊的鍵 → 項目 id</summary>
+    public Dictionary<string, string> Blocks { get; set; } = new();
+
+    /// <summary>工具 id → 工具卡</summary>
+    public Dictionary<string, string> Tools { get; set; } = new();
+
+    /// <summary>請求的鍵 → 卡片（放開時沒有等回應的；留著的是「回答當成下一則訊息」的那種）</summary>
+    public Dictionary<string, string> Requests { get; set; } = new();
+
+    /// <summary>還沒核准、還沒執行的工具（核准的鍵 → 工具卡）</summary>
+    public Dictionary<string, string> Unapproved { get; set; } = new();
+
+    /// <summary>背景工作的工具 id → 工具卡（一輪結束後還找得到卡片）</summary>
+    public Dictionary<string, string> BackgroundTools { get; set; } = new();
+
+    /// <summary>可以移到背景的工具</summary>
+    public List<string> Movable { get; set; } = new();
+
+    /// <summary>計畫卡</summary>
+    public string? PlanItem { get; set; }
+
+    /// <summary>子代理的 tool_use_id → 工具卡</summary>
+    public Dictionary<string, string>? SubagentCards { get; set; }
+
+    /// <summary>這一輪中跑完、等這一輪結束才請代理處理的背景指令</summary>
+    public List<ResumeBackgroundFinished> BackgroundFinished { get; set; } = new();
+
+    /// <summary>Codex 的「本輪變更」彙整卡</summary>
+    public ResumeTurnDiff? Diff { get; set; }
+}
+
+internal sealed class ResumeBackgroundFinished
+{
+    public string ToolId { get; set; } = string.Empty;
+
+    public string? Title { get; set; }
+
+    /// <summary>AgentItemStatus 的名稱</summary>
+    public string? Status { get; set; }
+
+    public int? ExitCode { get; set; }
+
+    public long? DurationMs { get; set; }
+
+    public bool StoppedByUser { get; set; }
+}
+
+internal sealed class ResumeTurnDiff
+{
+    public string? TurnId { get; set; }
+
+    /// <summary>彙整卡的項目 id（還沒畫出來是 null）</summary>
+    public string? Card { get; set; }
+
+    public string? BaselineNote { get; set; }
+
+    /// <summary>這一輪開始前的 Git 快照（太大的不帶：接回之後只顯示 CLI 回報的差異）</summary>
+    public Myriagent.Git.GitTurnSnapshot? Before { get; set; }
 }
 
 /// <summary>

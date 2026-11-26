@@ -71,6 +71,25 @@ internal sealed partial class AgentProcess : IDisposable
 
     private void CountPipe(string line) => Interlocked.Add(ref pipeBytes, Encoding.UTF8.GetByteCount(line) + 1);
 
+    /// <summary>接回時重播到這個 stdout 位移為止的行不算進 PipeBytes（上一個 app 已經算過）；-1＝沒有重播</summary>
+    private long replayUntil = -1;
+
+    /// <summary>
+    /// stdout 讀到哪裡（經代理主機開的程序：剛交給 LineReceived 的那一行結束的位移，從程序啟動起算的位元組數）；直接開的程序是 -1。
+    /// 只在 LineReceived 的處理裡讀才有意義（同一條讀取執行緒）
+    /// </summary>
+    public long StdoutOffset => backend is HostedBackend hosted ? hosted.Process.Output.ConsumedOffset : -1;
+
+    /// <summary>主機留著這個 stdout 位移之後的輸出、不確認（會話的檢查點；見 HostedProcess.HoldOutputFrom）。直接開的程序不做事</summary>
+    public void HoldOutputFrom(long offset)
+    {
+        if (backend is HostedBackend hosted && offset >= 0)
+            hosted.Process.HoldOutputFrom(offset);
+    }
+
+    /// <summary>主機目前留著的 stdout 起點；-1＝沒有（直接開的程序、沒設過、量太大被放掉）</summary>
+    public long OutputHeldFrom => backend is HostedBackend hosted ? hosted.Process.OutputHeldFrom : -1;
+
     /// <summary>燈號來源（IAgentSession.ActivitySource）；程序已結束回 null</summary>
     public AgentActivitySource? Activity => HasExited ? null : new AgentActivitySource(ProcessId, InstanceId, PipeBytes);
 
@@ -250,11 +269,21 @@ internal sealed partial class AgentProcess : IDisposable
     /// 接回上一個 app 放開的程序（<see cref="DetachAsync"/> 的狀態）：實例代號沿用（核准卡的有效範圍認它），輸出從記下的位移接著讀。
     /// 同 Start：事件掛好後呼叫 BeginReading。接不回去丟 <see cref="AgentHostUnavailableException"/>
     /// </summary>
-    public static AgentProcess Attach(IAgentProcessHost host, AgentProcessDetachState state)
+    /// <param name="replayFrom">
+    /// 從這個 stdout 位移（會話的檢查點，要在放開時的位移之前、主機還留著）開始補送：到放開的位移為止是上一個 app 已經處理過的，
+    /// 會話只拿來重建解析器的狀態（<see cref="StdoutOffset"/> 不超過 state.OutOffset 的行）。null＝從放開的位移接著讀
+    /// </param>
+    public static AgentProcess Attach(IAgentProcessHost host, AgentProcessDetachState state, long? replayFrom = null)
     {
-        var hosted = host.Attach(state);
+        long from = replayFrom is { } requested && requested >= 0 && requested < state.OutOffset ? requested : state.OutOffset;
+        var hosted = host.Attach(state with { OutOffset = from });
         var attached = new AgentProcess(new HostedBackend(hosted)) { ProcessId = hosted.ProcessId, InstanceId = state.InstanceId };
         Interlocked.Exchange(ref attached.pipeBytes, state.PipeBytes);
+        if (from < state.OutOffset)
+        {
+            attached.replayUntil = state.OutOffset;
+            hosted.HoldOutputFrom(from);   // 重播的那一段先留著：會話接好之後自己移動下限
+        }
         return attached;
     }
 
@@ -267,7 +296,8 @@ internal sealed partial class AgentProcess : IDisposable
                 var line = backend.Output.ReadLine();
                 if (line == null)
                     break;
-                CountPipe(line);
+                if (replayUntil < 0 || StdoutOffset > replayUntil)
+                    CountPipe(line);
                 try
                 {
                     LineReceived?.Invoke(this, line);

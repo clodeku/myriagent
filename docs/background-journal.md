@@ -114,9 +114,11 @@
 | `restart.expired` | 等背景工作滿 30 分鐘，照立即套用停下 | `waitedSec`、`bg`、`programs` |
 | `restart.call` | 停下或重開一個對話的程序 | `stopOnly`、`reason`、`mode`、`autoContinue`、`noContinue`、`interrupted`（被打斷的工具）、`pending`（沒回應的請求）、`hadBackground`、`bg`（被停掉的背景工作）、`subagents`、`risk` |
 | `restart.result` | 停下或重開的結果 | `outcome`、`error` |
-| `restart.detach` | app 更新排空時放開一個對話的程序（代理主機：背景工作照跑，不等也不停） | `bg`、`bgCount` |
-| `restart.detached` | 放開的結果 | `ok`（false＝放不開，照舊等背景工作） |
-| `restart.attach` | 接回放開的程序（新版啟動後、或放棄更新時就地） | `ok`（false＝接不回去：那個程序結束掉，照 running.json 請代理確認背景工作）、`afterAppRestart` |
+| `restart.keep` | app 更新排空：這個對話記成（或不再記成）「交棒時放開」——放得開的執行中對話、等背景工作的對話不停也不等，排空的最後一步才放開程序 | `keep`、`running`、`situation`、`bgCount`；`keep` 是 false 時 `reason`（會話一直放不開、放開失敗）或 `situation`（情況變了：開始等你回應、這一輪結束而且沒有背景工作） |
+| `restart.detach` | app 更新排空的最後一步放開一個對話的程序（代理主機：這一輪與背景工作照跑，不等也不停） | `running`（放開時一輪還在執行）、`bg`、`bgCount` |
+| `restart.detached` | 放開的結果 | `ok`（false＝放不開，照原本的規則到安全點停下或等背景工作）、`running` |
+| `restart.attach` | 接回放開的程序（新版啟動後、或放棄更新時就地） | `ok`（false＝接不回去：那個程序結束掉，照 running.json 接續被中斷的一輪或請代理確認背景工作）、`afterAppRestart`、`running`（接的是還在執行的一輪） |
+| `update.detached` | 排空的最後一步做完：放開了幾個程序（之後就交棒） | `count`、`started` |
 | `restart.snapshot` | 排空中每 2 分鐘記一次 | `barriers`；`conversations` 列出還在等的對話：`state`、`subject`、`waitedSec`、`bg` |
 | `update.abort` | 放棄這次 app 更新 | `reason` |
 | `update.handoff` | 交棒給新版之前 | `conversations`：每個停下的對話的 `mode`、`whyNot`、`backgroundStopped` 等，也就是 resume.json 的摘要；另有 `drainSec` |
@@ -128,7 +130,7 @@
 | ev | 何時 | 主要欄位 |
 |---|---|---|
 | `app.start` | app 啟動 | `release`、`build`、`afterUpdate` |
-| `app.exit` | app 結束（含換版） | `conversations`：還在執行或在等背景工作、有背景程式或子代理的對話。結束會停掉的都在這裡 |
+| `app.exit` | app 結束（含換版） | `conversations`：還在執行或在等背景工作、有背景程式或子代理的對話。結束會停掉的都在這裡；`detached` 是 true 的例外——程序放開在代理主機上，這一輪與背景工作沒有停、新版接回 |
 | `app.exitQuery` | Windows 問能不能登出關機時的同一份快照 | 同 `app.exit` |
 | `resume.app` | app 更新後接續 | `result`：`continued`／`notContinued`；另有 `reason`、`detail`、`backgroundStopped` |
 | `resume.turn` | 上次結束時還在跑的一輪接續 | `result`、`waitingBackground`、`closedByApp`、`autoResumes`、`bg` |

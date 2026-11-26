@@ -118,7 +118,7 @@ public sealed class CodexSessionDetachTests : CodexAgentSessionTestsBase
     }
 
     [Fact]
-    public async Task 直接開的程序_執行中的一輪_都放不開_狀態讀不懂的接不回去()
+    public async Task 直接開的程序放不開_狀態讀不懂的接不回去()
     {
         using var host = NewHost();
         // MYRIAGENT_TEST_VIA_HOST=1 時沒指定主機的程序也經主機開（HostedProcessMode）：這一段只在平常的模式有意義
@@ -139,9 +139,6 @@ public sealed class CodexSessionDetachTests : CodexAgentSessionTestsBase
         using var hosted = new CodexAgentSession();
         var hostedEvents = Collect(hosted);
         await hosted.SendAsync(Input("開始"), Settings("background_stop") with { ProcessHost = host });
-        await TakeUntilAsync(hostedEvents, ev => ev is AgentProcessStartedEvent);
-        hosted.CanDetachProcess.Should().BeFalse("一輪正在進行");
-        (await hosted.DetachProcessAsync()).Should().BeNull();
         await TakeUntilAsync(hostedEvents, ev => ev is AgentTurnCompletedEvent);
         await WaitDetachableAsync(hosted);
         var state = await hosted.DetachProcessAsync();

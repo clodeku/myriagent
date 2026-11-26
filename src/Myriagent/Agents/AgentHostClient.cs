@@ -190,6 +190,32 @@ internal sealed class HostedProcess
     /// <summary>主機會在 app 交棒後保留程序（協定第 2 版起）：才放得開、接得回</summary>
     public bool CanDetach => connection.Keeps;
 
+    /// <summary>從下限起最多留這麼多沒確認的 stdout（主機每個程序的暫存上限是 64 MB：超過就整個接不回去，所以先放掉下限）</summary>
+    internal const long MaxHeldOutput = 32L * 1024 * 1024;
+
+    /// <summary>stdout 的確認下限；-1＝沒有（收到就確認）</summary>
+    private long ackFloor = -1;
+
+    /// <summary>
+    /// 主機留著這個位移之後的 stdout（代理主機 H2：會話的檢查點——接回時解析器從這裡重播）：之後的確認不超過它。
+    /// 位移要是還沒確認過的（目前讀到的位置一定是）。留的量超過 <see cref="MaxHeldOutput"/> 就自己放掉（<see cref="OutputHeldFrom"/> 變回 -1）
+    /// </summary>
+    public void HoldOutputFrom(long offset)
+    {
+        Interlocked.Exchange(ref ackFloor, Math.Max(0, offset));
+        MaybeAck();
+    }
+
+    /// <summary>不再留：收到的照常確認</summary>
+    public void ReleaseOutputHold()
+    {
+        Interlocked.Exchange(ref ackFloor, -1);
+        MaybeAck();
+    }
+
+    /// <summary>目前留著的起點；-1＝沒有留（沒設過、放掉了、或量太大被放掉）</summary>
+    public long OutputHeldFrom => Interlocked.Read(ref ackFloor);
+
     /// <summary>程序結束（主機兩條輸出都轉完之後才通知）；主機的連線斷了也算結束，結束碼不明（null）</summary>
     public Task<int?> ExitTask => exited.Task;
 
@@ -257,6 +283,14 @@ internal sealed class HostedProcess
         if (!connection.Keeps)
             return;
         long outOffset = Output.ConsumedOffset, errOffset = Error.ConsumedOffset;
+        long floor = Interlocked.Read(ref ackFloor);
+        if (floor >= 0)
+        {
+            if (outOffset - floor > MaxHeldOutput)
+                Interlocked.CompareExchange(ref ackFloor, -1, floor);   // 這一輪的輸出太多：不留了（接回時沒有檢查點可以重播）
+            else
+                outOffset = Math.Min(outOffset, floor);
+        }
         long total = outOffset + errOffset;
         if (total - Interlocked.Read(ref acked) < AckEvery)
             return;

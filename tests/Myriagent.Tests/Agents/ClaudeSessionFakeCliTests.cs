@@ -409,6 +409,26 @@ public abstract class ClaudeSessionFakeCliTestsBase : IDisposable
                     Lifecycle 'n-1' 'completed'
                     Lifecycle 'r-6' 'completed'
                 }
+                'h2turn' {
+                    # agent host H2: a streamed reply cut in half, then a foreground tool that keeps running. Each stage waits for a
+                    # file in FAKE_GATE (the test may detach the process and attach it from another session in between)
+                    StartOwn $m
+                    Emit '{"type":"stream_event","event":{"type":"message_start","message":{"id":"m_h2","model":"fake-model","usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}},"parent_tool_use_id":null}'
+                    Emit '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},"parent_tool_use_id":null}'
+                    Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"half one, "}},"parent_tool_use_id":null}'
+                    while (-not (Test-Path (Join-Path $env:FAKE_GATE 'text'))) { Start-Sleep -Milliseconds 50 }
+                    Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"half two"}},"parent_tool_use_id":null}'
+                    Emit '{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}'
+                    Emit '{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_h2","name":"Bash","input":{}}},"parent_tool_use_id":null}'
+                    Emit '{"type":"assistant","message":{"id":"m_h2","content":[{"type":"tool_use","id":"tu_h2","name":"Bash","input":{"command":"npm run build"}}]},"parent_tool_use_id":null}'
+                    Emit '{"type":"stream_event","event":{"type":"content_block_stop","index":1},"parent_tool_use_id":null}'
+                    Emit '{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":20}},"parent_tool_use_id":null}'
+                    Emit '{"type":"stream_event","event":{"type":"message_stop"},"parent_tool_use_id":null}'
+                    while (-not (Test-Path (Join-Path $env:FAKE_GATE 'tool'))) { Start-Sleep -Milliseconds 50 }
+                    Emit '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_h2","content":"built ok"}]},"parent_tool_use_id":null}'
+                    Say 'all done'
+                    DoneFor $m.uuid
+                }
                 'bgtask' {
                     # Measured E-11 (2.1.296): a run_in_background command lists itself in background_tasks_changed and
                     # task_started (tool_use_id), the tool result says it runs in the background and the turn ends; later it

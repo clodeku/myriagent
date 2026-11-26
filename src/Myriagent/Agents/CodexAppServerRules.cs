@@ -848,6 +848,20 @@ internal static partial class CodexAppServerRules
     private static partial Regex McpServerName();
 }
 
+/// <summary>Codex 解析器在主對話一輪結束之後的跨輪狀態（寫進 resume.json：只加欄位）</summary>
+internal sealed class CodexParserCheckpoint
+{
+    /// <summary>各 thread 上一則 tokenUsage 的 total（token 計數取差）</summary>
+    public Dictionary<string, AgentUsage> TokenTotals { get; set; } = new();
+
+    public Dictionary<string, string> ThreadModels { get; set; } = new();
+
+    public string? MainModel { get; set; }
+
+    /// <summary>主對話的持續目標還在進行</summary>
+    public bool GoalActive { get; set; }
+}
+
 /// <summary>
 /// 解析 codex app-server 的輸出（一個程序一個實例，只由讀取 stdout 的執行緒呼叫）。
 /// 工具類項目（指令、改檔、MCP、搜尋、生圖）在 item/started 建立工具卡、item/completed 收尾；
@@ -913,6 +927,26 @@ internal sealed partial class CodexEventParser
         }
         if (!string.IsNullOrEmpty(mainModel))
             MainModel = mainModel;
+    }
+
+    /// <summary>
+    /// 現在的跨輪狀態（會話在主對話每一輪結束之後叫；代理主機 H2，CodexAgentSession.Detach.cs）：接回程序時解析器從這份狀態起、
+    /// 把之後的 stdout 重播一遍，一輪之內的狀態（這一輪的 token、改檔項目、子代理的卡片）就由重播重建。
+    /// 新增「跨過一輪還要用」的欄位時要加進 <see cref="CodexParserCheckpoint"/>
+    /// </summary>
+    public CodexParserCheckpoint ExportCheckpoint()
+    {
+        var usage = ExportUsage();
+        return new CodexParserCheckpoint { TokenTotals = usage.Totals, ThreadModels = usage.Models, MainModel = MainModel, GoalActive = GoalActive };
+    }
+
+    public static CodexEventParser FromCheckpoint(CodexParserCheckpoint checkpoint)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoint);
+        var parser = new CodexEventParser();
+        parser.RestoreUsage(checkpoint.TokenTotals, checkpoint.ThreadModels, checkpoint.MainModel);
+        parser.GoalActive = checkpoint.GoalActive;
+        return parser;
     }
 
     /// <summary>改檔項目的差異（核准卡顯示用；核准請求本身不帶差異）</summary>

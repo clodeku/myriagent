@@ -689,6 +689,8 @@ internal sealed partial class CodexAgentSession : IAgentSession
         // 在讀這個程序的輸出之前發：中樞據此作廢其他實例的待回應卡片，之後建立的卡片都屬於這個實例
         Raise(new AgentProcessStartedEvent(started.InstanceId, settings.Cli));
         PublishSafePoint();
+        // 第一個檢查點：位移 0、剛建立的解析器（經代理主機開的程序才有；之後主對話每一輪結束往前移）
+        UpdateCheckpoint(started, parser);
         started.BeginReading();
 
         var version = AppVersionInfo.VersionText;
@@ -719,6 +721,8 @@ internal sealed partial class CodexAgentSession : IAgentSession
     /// <summary>換程序或程序結束時：屬於那個程序的狀態一律作廢（請求 id 每個程序各自從 0 數，舊的待回應請求不能留給新程序）</summary>
     private void ResetProcessStateLocked()
     {
+        checkpoint = null;
+        replay = null;
         pendingRequests.Clear();
         requestKeys.Clear();
         runningTools.Clear();
@@ -1011,6 +1015,7 @@ internal sealed partial class CodexAgentSession : IAgentSession
         CodexEventParser currentParser;
         string? mainThread;
         bool stoppingForRestart;
+        ReplayState? replaying;
         lock (gate)
         {
             if (!ReferenceEquals(source, process))
@@ -1018,6 +1023,14 @@ internal sealed partial class CodexAgentSession : IAgentSession
             currentParser = parser;
             mainThread = threadId;
             stoppingForRestart = restart is { } op && ReferenceEquals(op.Stopping, source);
+            replaying = replay;
+        }
+
+        // 接回程序之後的重播（CodexAgentSession.Detach.cs）：放開之前上一個 app 已經處理過的輸出，只拿來重建解析器的狀態
+        if (replaying != null)
+        {
+            ReplayLine(source, currentParser, mainThread, line, replaying);
+            return;
         }
 
         if (!line.TrimStart().StartsWith('{'))
@@ -1026,7 +1039,6 @@ internal sealed partial class CodexAgentSession : IAgentSession
             return;
         }
 
-        Interlocked.Increment(ref linesSeen);
         var result = currentParser.Parse(line, mainThread);
         if (result.Response is { } response)
         {
@@ -1187,7 +1199,11 @@ internal sealed partial class CodexAgentSession : IAgentSession
         }
 
         if (result.TurnCompleted != null)
+        {
             CompleteTurn(source, result.TurnCompleted);
+            // 主對話的一輪結束：解析器一輪之內的狀態都收尾了，從這裡記新的檢查點（主機不必再留更早的輸出）
+            UpdateCheckpoint(source, currentParser);
+        }
 
         // 這一輪的事件（工具結束、請求被撤銷、TurnCompleted）之後才發：中樞先處理完這些，再依新的安全點決定要不要重開
         if (safePointMayChange)

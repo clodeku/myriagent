@@ -455,7 +455,13 @@ internal sealed class FakeSession : IAgentSession
     /// <summary>測試指定：這個會話的程序是經代理主機開的、放得開（預設不行：既有測試照舊走等背景工作）</summary>
     public bool Detachable { get; set; }
 
-    public bool CanDetachProcess => Detachable && HasLiveProcess && !IsRunning;
+    /// <summary>測試指定：一輪還在執行時也放得開（代理主機 H2：會話有檢查點）；預設只有閒置時放得開</summary>
+    public bool DetachableWhileRunning { get; set; }
+
+    /// <summary>測試指定：會話一時放不開（控制請求在途、等使用者回應…）</summary>
+    public bool DetachBlocked { get; set; }
+
+    public bool CanDetachProcess => Detachable && HasLiveProcess && !DetachBlocked && (!IsRunning || DetachableWhileRunning);
 
     private int detaches;
 
@@ -487,8 +493,12 @@ internal sealed class FakeSession : IAgentSession
             ["Instance"] = ProcessInstance,
             ["Tools"] = JArray.FromObject(LiveBackgroundTools),
             ["ToolIds"] = LiveBackgroundToolIds == null ? null : JArray.FromObject(LiveBackgroundToolIds),
+            ["Running"] = IsRunning,
         };
-        // 同真的會話：放開之後沒有程序、不回報背景工作沒了
+        if (IsRunning)
+            state["Version"] = 2;
+        // 同真的會話：放開之後沒有程序、不回報背景工作沒了、這一輪不聲不響地放下（不發一輪結束）
+        IsRunning = false;
         LiveProcess = false;
         HasLiveBackgroundWork = false;
         LiveBackgroundTools = Array.Empty<AgentBackgroundTool>();
@@ -513,6 +523,9 @@ internal sealed class FakeSession : IAgentSession
             return false;
         var tools = state["Tools"]?.ToObject<List<AgentBackgroundTool>>() ?? new List<AgentBackgroundTool>();
         Detachable = true;
+        // 放開時還在執行的一輪：接回之後照舊在執行（不發一輪開始：中樞自己還原）
+        IsRunning = state.Value<bool?>("Running") ?? false;
+        DetachableWhileRunning |= IsRunning;
         LiveProcess = null;
         ProcessInstance = state.Value<string>("Instance");
         HasLiveBackgroundWork = tools.Count > 0;

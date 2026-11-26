@@ -207,7 +207,19 @@ internal sealed partial class AgentHub
         /// </summary>
         public JObject? Detached;
 
-        /// <summary>這次排空試過放開、放不開：照原本的規則等背景工作，不再試</summary>
+        /// <summary>放開時還在執行的一輪在中樞的狀態（AgentHub.DetachTurn.cs；Detached 不是 null 時才有意義，閒置的是 null）</summary>
+        public ResumeTurn? Turn;
+
+        /// <summary>
+        /// app 更新排空：這個對話不停也不等，排空的最後一步（其他對話都停好之後）才放開程序（AgentHub.Detach.cs）。
+        /// 這段時間對話照常執行；每次重新檢查時情況變了（開始等你回應、這一輪結束而且沒有背景工作）就拿掉、照原本的規則
+        /// </summary>
+        public bool DetachAtHandoff;
+
+        /// <summary>進行中的是放開程序（InFlight 也是 true）</summary>
+        public bool Detaching;
+
+        /// <summary>這次排空試過放開、放不開：照原本的規則（到安全點停下、等背景工作），不再試</summary>
         public bool CannotDetach;
     }
 
@@ -520,10 +532,11 @@ internal sealed partial class AgentHub
         }
 
         var situation = SituationOf(c);
-        // app 更新：閒置、還在等背景工作而且放得開的，不等也不停——放開程序留給新版接回（AgentHub.Detach.cs）
-        if (ShouldDetachForAppUpdate(c, plan, situation))
+        // app 更新：還在工作（一輪執行中、等背景工作）而且放得開的，不等也不停——記成交棒時放開，排空的最後一步才放開程序、
+        // 留給新版接回（AgentHub.Detach.cs）；這種對話不算還沒停好
+        if (KeepForHandoff(c, plan, situation))
         {
-            StartRestartDetach(c, plan);
+            CheckBarrier(provider);
             return;
         }
         if (situation is CliRestartSituation.IdleWithBackground or CliRestartSituation.BackgroundRunning)
@@ -1636,7 +1649,7 @@ internal sealed partial class AgentHub
     internal TimeSpan RejectedSendRetryDelay { get; set; } = TimeSpan.FromSeconds(1);
 
     /// <summary>這個對話的換版步驟（關掉舊程序或 RestartAsync）進行中：不能呼叫 SendAsync</summary>
-    private static bool IsRestartInFlight(ConversationState c) => c.Restart.Plan is { InFlight: true } || c.Restart.Attaching;
+    private static bool IsRestartInFlight(ConversationState c) => c.Restart.Plan is { InFlight: true } or { Detached: not null } || c.Restart.Attaching;
 
     /// <summary>
     /// 送出的最後一關（SendCoreAsync 開頭，CLI 更新的延後之後）：這個對話正在換版就不呼叫 SendAsync——Codex 會話會丟
@@ -2010,8 +2023,8 @@ internal sealed partial class AgentHub
             var plan = c.Restart.Plan;
             if (plan is { Held: true })
                 held++;
-            else if (plan is { InFlight: true } || (plan is not { Drained: true } && LiveProcess(c)))
-                busy++;
+            else if (plan is { InFlight: true } || (plan is not { Drained: true } and not { DetachAtHandoff: true } && LiveProcess(c)))
+                busy++;   // 記成交棒時放開的（DetachAtHandoff）不算：它照常執行，最後一步才放開
         }
         return (held, busy);
     }
@@ -2051,6 +2064,7 @@ internal sealed partial class AgentHub
             plan.AppVersion = null;
             plan.ApplyNow = false;
             plan.Drained = false;
+            plan.DetachAtHandoff = false;
             plan.Waiting = null;
             MarkHeaderDirty(c);
         }
@@ -2098,11 +2112,14 @@ internal sealed partial class AgentHub
             plan.Drained = false;
             plan.Waiting = null;
             plan.CannotDetach = false;
+            plan.DetachAtHandoff = false;
             if (plan.Detached is { } detached)
             {
-                // 排空時放開的程序：這次更新沒有換掉 app（放棄了），就地接回
+                // 排空時放開的程序：這次更新沒有換掉 app（放棄了），就地接回（還在執行的一輪在中樞的狀態原封不動）
+                var detachedTurn = plan.Turn;
                 plan.Detached = null;
-                _ = ReattachDetachedAsync(c, detached, afterAppRestart: false);
+                plan.Turn = null;
+                _ = ReattachDetachedAsync(c, detached, afterAppRestart: false, turn: detachedTurn);
                 continue;
             }
             if (plan is { InFlight: true, StopOnly: true })
@@ -2254,6 +2271,9 @@ internal sealed partial class AgentHub
     {
         foreach (var c in released)
         {
+            // 程序放開在代理主機上的（app 更新排空）：沒有人會接回了，結束它
+            if (c.Restart.Plan?.Detached is { } detached)
+                DiscardDetached(detached);
             bool had = c.Restart.Plan != null || c.Restart.Result != null;
             c.Restart.ResetProcess();
             c.Restart.Plan = null;

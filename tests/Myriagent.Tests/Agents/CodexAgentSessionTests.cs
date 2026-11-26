@@ -113,8 +113,15 @@ public abstract class CodexAgentSessionTestsBase : IDisposable
             }
         }
 
-        function Pump {
-            $line = $in.ReadLine()
+        # one pending ReadLineAsync at a time, so a gate (see Gate) can keep answering host requests while it waits
+        $script:pendingLine = $null
+        function ReadIn {
+            if ($script:pendingLine -eq $null) { $script:pendingLine = $in.ReadLineAsync() }
+            $line = $script:pendingLine.Result
+            $script:pendingLine = $null
+            return $line
+        }
+        function Handle([string]$line) {
             if ($line -eq $null) { exit 0 }
             if ($line.Trim().Length -eq 0) { return $null }
             $msg = $line | ConvertFrom-Json
@@ -123,6 +130,18 @@ public abstract class CodexAgentSessionTestsBase : IDisposable
                 return $null
             }
             return $msg
+        }
+        function Pump { return (Handle (ReadIn)) }
+        # wait for a file in FAKE_GATE (the test lets each stage go on), answering host requests meanwhile
+        function Gate([string]$name) {
+            while (-not (Test-Path (Join-Path $env:FAKE_GATE $name))) {
+                if ($script:pendingLine -eq $null) { $script:pendingLine = $in.ReadLineAsync() }
+                if ($script:pendingLine.Wait(40)) {
+                    $line = $script:pendingLine.Result
+                    $script:pendingLine = $null
+                    $null = Handle $line
+                }
+            }
         }
 
         function WaitFor([int]$id) {
@@ -247,6 +266,26 @@ public abstract class CodexAgentSessionTestsBase : IDisposable
                 if ($scenario -eq 'background_exit') { exit 0 }
                 Emit '{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"bg1","command":"npm test","cwd":"C:/w1","status":"completed","exitCode":1,"durationMs":26891,"aggregatedOutput":"1 failed","source":"unifiedExecStartup","processId":"12"},"threadId":"thread-fake","turnId":"turn-1"}}'
             }
+            'h2turn' {
+                # agent host H2: a foreground command that keeps running, then a reply streamed in two halves; each stage waits for a
+                # file in FAKE_GATE (the test may detach the process and attach it from another session in between)
+                Emit '{"method":"item/started","params":{"item":{"type":"commandExecution","id":"c9","command":"npm run build","cwd":"C:/w1","status":"inProgress","source":"unifiedExecStartup","processId":"31"},"threadId":"thread-fake","turnId":"turn-1"}}'
+                Gate 'tool'
+                Emit '{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"c9","command":"npm run build","cwd":"C:/w1","status":"completed","exitCode":0,"durationMs":900,"aggregatedOutput":"built ok","source":"unifiedExecStartup","processId":"31"},"threadId":"thread-fake","turnId":"turn-1"}}'
+                Emit '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-fake","turnId":"turn-1","tokenUsage":{"total":{"totalTokens":70,"inputTokens":60,"cachedInputTokens":0,"outputTokens":10},"last":{"totalTokens":70,"inputTokens":60,"cachedInputTokens":0,"outputTokens":10}}}}'
+                Emit '{"method":"item/agentMessage/delta","params":{"threadId":"thread-fake","turnId":"turn-1","itemId":"msg-h2","delta":"half one, "}}'
+                Gate 'text'
+                Emit '{"method":"item/agentMessage/delta","params":{"threadId":"thread-fake","turnId":"turn-1","itemId":"msg-h2","delta":"half two"}}'
+                Emit '{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-h2","text":"half one, half two"},"threadId":"thread-fake","turnId":"turn-1"}}'
+                Emit '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-fake","turnId":"turn-1","tokenUsage":{"total":{"totalTokens":120,"inputTokens":100,"cachedInputTokens":0,"outputTokens":20},"last":{"totalTokens":50,"inputTokens":40,"cachedInputTokens":0,"outputTokens":10}}}}'
+                Emit '{"method":"turn/completed","params":{"threadId":"thread-fake","turn":{"id":"turn-1","items":[],"status":"completed","error":null}}}'
+                $script:turnStarted = $false
+                while (-not $script:turnStarted) { $null = Pump }
+                Emit '{"method":"turn/started","params":{"threadId":"thread-fake","turn":{"id":"turn-1","status":"inProgress"}}}'
+                Emit '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-fake","turnId":"turn-1","tokenUsage":{"total":{"totalTokens":180,"inputTokens":150,"cachedInputTokens":0,"outputTokens":30},"last":{"totalTokens":60,"inputTokens":50,"cachedInputTokens":0,"outputTokens":10}}}}'
+                Emit ('{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-3","text":"second:' + [string]::Join(',', $calls) + '"},"threadId":"thread-fake","turnId":"turn-1"}}')
+                Emit '{"method":"turn/completed","params":{"threadId":"thread-fake","turn":{"id":"turn-1","items":[],"status":"completed","error":null}}}'
+            }
             'background_keep' {
                 # detach/attach (agent host H1): the background command outlives the turn by FAKE_BG_DELAY_MS, then the same
                 # process serves one more turn; token totals keep counting up across both turns
@@ -287,7 +326,7 @@ public abstract class CodexAgentSessionTestsBase : IDisposable
             }
             default { Finish ([string]::Join(',', $calls)) 'completed' }
         }
-        while ($in.ReadLine() -ne $null) { }
+        while ((ReadIn) -ne $null) { }
         """";
 
     private protected readonly TempDirectory temp = new("fake-codex");

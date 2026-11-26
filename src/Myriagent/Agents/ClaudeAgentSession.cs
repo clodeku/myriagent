@@ -1019,6 +1019,8 @@ internal sealed partial class ClaudeAgentSession : IAgentSession
         Raise(new AgentProcessStartedEvent(started.InstanceId, settings.Cli));
         if (autoTurnStart != null)
             Raise(new AgentTurnStartedByCliEvent(AgentAutoTurnKind.ResumeInterruptedTurn));
+        // 第一個檢查點：位移 0、剛建立的解析器（經代理主機開的程序才有；之後每則 result 往前移）
+        UpdateCheckpoint(started, parser);
         started.BeginReading();
         lock (gate)
             capabilityReplies = (started, null, null);
@@ -1426,6 +1428,8 @@ internal sealed partial class ClaudeAgentSession : IAgentSession
     /// <summary>換了程序（或程序沒了）：清掉上一個程序的版本、工具與背景工作狀態</summary>
     private void ResetProcessStateLocked()
     {
+        checkpoint = null;
+        replay = null;
         pendingSteer = null;
         modelSwapped = false;
         remoteControlActive = false;
@@ -1478,11 +1482,20 @@ internal sealed partial class ClaudeAgentSession : IAgentSession
     private void OnLine(AgentProcess source, string line)
     {
         ClaudeStreamParser currentParser;
+        ReplayState? replaying;
         lock (gate)
         {
             if (!ReferenceEquals(source, process))
                 return;
             currentParser = parser;
+            replaying = replay;
+        }
+
+        // 接回程序之後的重播（ClaudeAgentSession.Detach.cs）：放開之前上一個 app 已經處理過的輸出，只拿來重建解析器的狀態
+        if (replaying != null)
+        {
+            ReplayLine(source, currentParser, line, replaying);
+            return;
         }
 
         if (!line.TrimStart().StartsWith('{'))
@@ -1561,6 +1574,8 @@ internal sealed partial class ClaudeAgentSession : IAgentSession
         {
             HandleTurnCompleted(source, result.TurnCompleted, fromOther);
             RequestContextUsage(source);
+            // 一輪的 result 處理完：解析器一輪之內的狀態都收尾了，從這裡記新的檢查點（主機不必再留更早的輸出）
+            UpdateCheckpoint(source, currentParser);
         }
         UpdateSafePoint();
     }

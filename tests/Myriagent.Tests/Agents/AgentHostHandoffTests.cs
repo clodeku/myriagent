@@ -60,6 +60,107 @@ public sealed class AgentHostHandoffTests
         }
     }
 
+    /// <summary>
+    /// H2：會話的檢查點——主機從檢查點起留著 stdout 不確認，新的 app 從檢查點重播到放開的位移（只拿來重建解析器的狀態），
+    /// 再照常讀之後的。每一行結束的位移讀得到（會話靠它分辨重播的與新的），重播的那一段不重複算進管線位元組
+    /// </summary>
+    [Fact]
+    public async Task 留著檢查點之後的輸出_接回時從檢查點重播_位移分得出哪些是重播的()
+    {
+        using var temp = new TempDirectory("agent-host-h2");
+        var first = NewClient(temp);
+        var process = AgentProcess.Start(Echo, EchoArguments, temp.Root, null, host: first);
+        var offsets = new List<(string Line, long End)>();
+        process.LineReceived += (p, line) => { lock (offsets) offsets.Add((line, p.StdoutOffset)); };
+        process.BeginReading();
+        process.OutputHeldFrom.Should().Be(-1, "沒設過就不留");
+        await process.WriteLineAsync("before");
+        await WaitUntilAsync(() => { lock (offsets) return offsets.Count == 1; });
+        long checkpoint;
+        lock (offsets)
+            checkpoint = offsets[0].End;
+        checkpoint.Should().Be("before".Length + 2, "一行結束的位移：內容加上 CRLF");
+        process.HoldOutputFrom(checkpoint);
+        // 檢查點之後的輸出超過確認的門檻（64 KB）：沒有下限的話主機早就丟掉了
+        var big = new string('x', 2000);
+        for (int i = 0; i < 60; i++)
+            await process.WriteLineAsync($"{i:D3}{big}");
+        await WaitUntilAsync(() => { lock (offsets) return offsets.Count == 61; }, seconds: 30);
+        process.OutputHeldFrom.Should().Be(checkpoint);
+        long pipeBefore = process.PipeBytes;
+
+        var state = await process.DetachAsync(TimeSpan.FromSeconds(10));
+
+        state.Should().NotBeNull();
+        state!.OutOffset.Should().BeGreaterThan(checkpoint + 60 * 2000);
+        first.Handoff(TimeSpan.FromSeconds(60)).Should().BeTrue();
+        process.Dispose();
+
+        using var second = NewClient(temp);
+        using var attached = AgentProcess.Attach(second, state, replayFrom: checkpoint);
+        var replayed = new List<string>();
+        var fresh = new List<string>();
+        attached.LineReceived += (p, line) => { lock (replayed) (p.StdoutOffset <= state.OutOffset ? replayed : fresh).Add(line); };
+        attached.OutputHeldFrom.Should().Be(checkpoint, "重播的那一段先留著");
+        attached.BeginReading();
+        await attached.WriteLineAsync("after");
+        await WaitUntilAsync(() => { lock (replayed) return fresh.Count == 1; }, seconds: 30);
+
+        lock (replayed)
+        {
+            replayed.Should().HaveCount(60, "檢查點之後、放開之前的每一行都重播一次；檢查點之前的不重播");
+            replayed[0].Should().StartWith("000");
+            replayed[^1].Should().StartWith("059");
+            fresh.Should().Equal("after");
+        }
+        attached.PipeBytes.Should().Be(pipeBefore + 2 * ("after".Length + 1), "只多了這一行的寫入與讀回：重播的那一段上一個 app 算過了");
+
+        // 沒有檢查點（或檢查點不在放開的位移之前）：照舊從放開的位移接著讀
+        var again = await attached.DetachAsync(TimeSpan.FromSeconds(10));
+        again.Should().NotBeNull();
+        using var third = AgentProcess.Attach(second, again!, replayFrom: again!.OutOffset + 100);
+        var plain = new Lines(third);
+        third.OutputHeldFrom.Should().Be(-1);
+        third.BeginReading();
+        await third.WriteLineAsync("plain");
+        (await plain.WaitAsync(1)).Should().Equal("plain");
+        await third.CloseAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public async Task 留著的輸出超過上限_自己放掉下限_不拖垮主機的暫存()
+    {
+        using var temp = new TempDirectory("agent-host-h2");
+        using var client = NewClient(temp);
+        using var process = AgentProcess.Start(Echo, EchoArguments, temp.Root, null, host: client);
+        int count = 0;
+        process.LineReceived += (_, _) => Interlocked.Increment(ref count);
+        process.BeginReading();
+        process.HoldOutputFrom(0);
+        process.OutputHeldFrom.Should().Be(0);
+        // 超過 HostedProcess.MaxHeldOutput（32 MB）
+        var chunk = new string('y', 64 * 1024);
+        int lines = (int)(HostedProcess.MaxHeldOutput / chunk.Length) + 40;
+        for (int i = 0; i < lines; i++)
+            await process.WriteLineAsync(chunk);
+        await WaitUntilAsync(() => Volatile.Read(ref count) == lines, seconds: 120);
+
+        process.OutputHeldFrom.Should().Be(-1, "這一輪的輸出太多：放掉檢查點（接回時不重播，會話退回原本的做法）");
+        process.CanDetach.Should().BeTrue("程序本身照樣放得開");
+        await process.CloseAsync(TimeSpan.FromSeconds(10));
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, int seconds = 15)
+    {
+        for (int i = 0; i < seconds * 20; i++)
+        {
+            if (condition())
+                return;
+            await Task.Delay(50);
+        }
+        throw new TimeoutException("等不到條件成立");
+    }
+
     [Fact]
     public async Task 放開_交棒_新的用戶端接回_輸出不重複不遺漏_stdin照樣可寫()
     {

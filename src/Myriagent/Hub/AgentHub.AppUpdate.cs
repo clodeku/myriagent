@@ -66,7 +66,7 @@ internal sealed partial class AgentHub
     /// </summary>
     internal bool BackgroundWorkRunning
         => conversations.Values.Any(c => !c.IsReplica && c.Session is { HasLiveBackgroundWork: true } && LiveProcess(c) && IsLive(c)
-                                         && !CanKeepBackgroundAcrossUpdate(c));
+                                         && !KeepsProcessAcrossUpdate(c));
 
     /// <summary>
     /// 有沒有開著 Claude Remote Control 的對話可能正從 claude.ai 或 Claude App 在用（設計 9.1 條件 1；AppUpdateRestartRules.IsRemoteInUse）：
@@ -144,6 +144,7 @@ internal sealed partial class AgentHub
         }
 
         appUpdateForcedAt = null;
+        int generation = ++appDrainGeneration;
         var tasks = new List<Task<CliUpdatePreparation>>();
         try
         {
@@ -186,20 +187,34 @@ internal sealed partial class AgentHub
                     ["programs"] = ShownPrograms(c) is { Count: > 0 } programs ? ProgramList(programs) : null,
                 })),
         });
-        return CombineAppPreparationsAsync(tasks);
+        return CombineAppPreparationsAsync(tasks, generation);
     }
 
-    private static async Task<AppUpdatePreparation> CombineAppPreparationsAsync(List<Task<CliUpdatePreparation>> tasks)
+    private async Task<AppUpdatePreparation> CombineAppPreparationsAsync(List<Task<CliUpdatePreparation>> tasks, int generation)
     {
         try
         {
             var results = await Task.WhenAll(tasks);
-            return new AppUpdatePreparation(
-                results.All(r => r.Ready),
-                results.Sum(r => r.ClosedIdle),
-                results.Sum(r => r.Held),
-                results.Sum(r => r.Busy),
-                results.Select(r => r.Reason).FirstOrDefault(r => r != null));
+            if (!results.All(r => r.Ready))
+            {
+                return new AppUpdatePreparation(false, results.Sum(r => r.ClosedIdle), results.Sum(r => r.Held), results.Sum(r => r.Busy),
+                    results.Select(r => r.Reason).FirstOrDefault(r => r != null));
+            }
+            // 最後一步：還在工作、記成交棒時放開的對話現在一起放開程序（AgentHub.Detach.cs）；這之間改照原本的規則處理的等它停好
+            var failed = await DetachAtHandoffAsync(generation);
+            int closed = 0, held = 0, busy = 0;
+            foreach (var provider in AppUpdateProviders)
+            {
+                if (!barriers.TryGetValue(provider, out var barrier) || !barrier.AppUpdate)
+                    continue;
+                var counts = CountBarrier(provider);
+                closed += barrier.ClosedIdle;
+                held += counts.Held;
+                busy += counts.Busy;
+            }
+            if (failed != null)
+                Log.Info($"app 更新：排空的最後一步沒有做成（{failed}）");
+            return new AppUpdatePreparation(failed == null, closed, held, busy, failed);
         }
         catch (OperationCanceledException)
         {
@@ -216,6 +231,7 @@ internal sealed partial class AgentHub
     internal void AbortAppUpdate(string reason)
     {
         appUpdateForcedAt = null;
+        appDrainGeneration++;
         // FinishUpdateBarrier 會清掉這些標記：先記下來（停下的這一輪會就地接續，接回時看到在執行或有程序就略過）
         var now = DateTime.Now;
         var reattach = conversations.Values.Where(c => !c.IsDraft && c.Restart.Plan is { AppUpdate: true, RemoteControl: true }
@@ -289,7 +305,7 @@ internal sealed partial class AgentHub
             }
             // 排空時放開的程序（背景工作照跑）：新版照這份狀態接回
             if (c.Restart.Plan is { AppUpdate: true, Detached: { } detached } && !c.IsDraft)
-                file.Attached.Add(new ResumeAttached { Id = c.Meta.Id, State = detached, Cards = DetachedCards(c) });
+                file.Attached.Add(new ResumeAttached { Id = c.Meta.Id, State = detached, Cards = DetachedCards(c), Turn = c.Restart.Plan.Turn });
             if (c.Restart.DeferredSend != null && !c.IsDraft)
                 file.DeferredSends.Add(c.Meta.Id);
             // 排空關掉或停下時開著 Remote Control 的：新版沒有自動接續、也沒有延後送出的就重開程序接回遠端工作階段。
@@ -632,7 +648,8 @@ internal sealed partial class AgentHub
         barrier.Overdue = true;
         foreach (var c in ConversationsOf(barrier.Provider).ToList())
         {
-            if (c.Restart.Plan is not { AppUpdate: true, Drain: true, Held: false, Drained: false, InFlight: false } plan
+            // 記成交棒時放開的不必停：它不擋更新
+            if (c.Restart.Plan is not { AppUpdate: true, Drain: true, Held: false, Drained: false, InFlight: false, DetachAtHandoff: false } plan
                 || plan.ApplyNow || (!forced && plan.Waiting != CliRestartState.WaitingUser))
                 continue;
             if (forced)

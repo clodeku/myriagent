@@ -1877,6 +1877,12 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
     {
         if (c?.Session == null || !c.Running)
             return;
+        // app 更新交棒中：這一輪的程序放開在代理主機上（或正在放開、接回），這時停不了——接回之後再按
+        if (c.Restart.Plan is { Detaching: true } or { Detached: not null } || c.Restart.Attaching)
+        {
+            Toast("Clode Myriagent 正在更新，這個對話的程序暫時由背景保管，接回後再按停止");
+            return;
+        }
         c.StopRequested = true;
         // 按了停止：這一輪結束前 app 就結束（或當掉）也不在下次啟動接續
         DeleteRunMarker(c);

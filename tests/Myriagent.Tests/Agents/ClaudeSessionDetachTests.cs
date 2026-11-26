@@ -98,7 +98,7 @@ public sealed class ClaudeSessionDetachTests : ClaudeSessionFakeCliTestsBase
     }
 
     [Fact]
-    public async Task 直接開的程序_執行中的一輪_都放不開()
+    public async Task 直接開的程序放不開()
     {
         using var host = NewHost();
         // MYRIAGENT_TEST_VIA_HOST=1 時沒指定主機的程序也經主機開（HostedProcessMode）：這一段只在平常的模式有意義
@@ -112,25 +112,6 @@ public sealed class ClaudeSessionDetachTests : ClaudeSessionFakeCliTestsBase
             direct.HasLiveProcess.Should().BeTrue("放不開：程序照舊是這個會話的");
             await direct.CloseAsync();
         }
-
-        using var hosted = new ClaudeAgentSession();
-        using var hostedLog = new EventLog(hosted);
-        // 一輪進行中、還有等回應的問卷：不是靜止點
-        await hosted.SendAsync(Input("開始"), Settings("elicitstop") with { ProcessHost = host });
-        bool asked = false;
-        await hostedLog.UntilAsync(e => e is AgentTurnCompletedEvent, async ev =>
-        {
-            if (ev is not AgentQuestionEvent || asked)
-                return;
-            asked = true;
-            hosted.IsRunning.Should().BeTrue();
-            hosted.CanDetachProcess.Should().BeFalse("一輪正在進行");
-            (await hosted.DetachProcessAsync()).Should().BeNull();
-            hosted.HasLiveProcess.Should().BeTrue();
-            await hosted.InterruptAsync();
-        });
-        asked.Should().BeTrue();
-        await hosted.CloseAsync();
     }
 
     [Fact]

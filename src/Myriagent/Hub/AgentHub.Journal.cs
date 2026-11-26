@@ -482,6 +482,8 @@ internal sealed partial class AgentHub
                     ["conv"] = c.Meta.Id,
                     ["title"] = BackgroundJournalRules.Clip(c.Meta.Title, 60),
                     ["running"] = c.Running,
+                    // 程序放開在代理主機上（app 更新交棒）：這一輪與背景工作沒有被停掉，新版接回
+                    ["detached"] = c.Restart.Plan is { Detached: not null } ? true : null,
                     ["stopRequested"] = c.StopRequested ? true : null,
                     ["bgCount"] = work?.Count,
                     ["bg"] = work is { Tools.Count: > 0 } ? BackgroundJournalRules.Tools(work.Tools) : null,
