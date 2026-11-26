@@ -176,6 +176,14 @@ internal sealed record AgentRateLimitEvent(AgentProvider Provider, JObject Raw) 
 /// </summary>
 internal sealed record AgentQuotaExhaustedEvent(AgentProvider Provider, DateTimeOffset? ResetsAt) : AgentEvent;
 
+/// <summary>
+/// 這一輪因為帳戶的登入失效而失敗，要重新登入才能再用這個帳戶：Claude 合成的 assistant 訊息（或失敗的 result）帶 CLI 說要重新登入的那幾句
+/// （登入到了使用期限、過期、被撤銷、已登出；ClaudeStreamRules.LoginLostOf）。Cloudflare 擋下的 403、暫時的網路錯誤不算。
+/// 只在主對話發，一輪最多一次、在 TurnCompleted 之前；中樞照額度用完的做法在這一輪結束時決定要不要自動換帳戶繼續（AgentHub.AccountSwitch.cs）。
+/// TimeLimit＝登入到了 Anthropic 的使用期限（約 30 天，不能換發、只能重新登入）
+/// </summary>
+internal sealed record AgentLoginLostEvent(AgentProvider Provider, bool TimeLimit) : AgentEvent;
+
 internal sealed record AgentNoticeEvent(string Message, bool IsError) : AgentEvent;
 
 /// <summary>

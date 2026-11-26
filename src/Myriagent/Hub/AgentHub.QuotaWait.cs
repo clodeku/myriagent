@@ -103,14 +103,8 @@ internal sealed partial class AgentHub
         if (!AccountSwitchRules.Supports(c.Meta.Provider))
             return null;
         var now = AccountSwitchClock();
-        var candidates = accounts.Accounts.Select(a => new AccountSwitchCandidate(
-            a.Id,
-            a.Provider,
-            accounts.GetState(a.Id).Status,
-            settings.Models.TryGetValue(a.Id, out var models) ? models.Select(m => m.Value).ToList() : null,
-            accounts.GetUsage(a.Id)?.Windows,
-            a.Order));
-        var choice = AccountSwitchRules.Choose(c.Meta.Provider, c.Meta.AccountId, c.Meta.Model, candidates, exhaustedAccounts, now, settings.AutoSwitchCrossProviderOnLimit);
+        var choice = AccountSwitchRules.Choose(c.Meta.Provider, c.Meta.AccountId, c.Meta.Model, SwitchCandidates(now), exhaustedAccounts, now,
+            settings.AutoSwitchCrossProviderOnLimit);
         return choice != null && accounts.Find(choice.AccountId) is { } account
             ? new AccountSwitchPlan(account, wait.Until - QuotaWaitRules.Grace, choice.ResetsAt, null)
             : null;

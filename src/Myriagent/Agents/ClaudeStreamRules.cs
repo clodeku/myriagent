@@ -1859,6 +1859,62 @@ internal static partial class ClaudeStreamRules
     }
 
     /// <summary>
+    /// 這一輪是不是因為帳戶的登入失效而結束、要重新登入才能再用（AgentLoginLostEvent）：CLI 合成的 API 錯誤訊息（頂層的 assistant 訊息，
+    /// model 是 &lt;synthetic&gt;）帶頂層 error authentication_failed 與 is_api_error_message（逐字稿是 isApiErrorMessage），或失敗的 result（is_error），
+    /// 而且文字是 CLI 要人重新登入的那幾句（<see cref="LoginLostText"/>）。回 null＝不是；true＝登入到了使用期限（Anthropic 的登入約 30 天、不能換發）；
+    /// false＝過期、被撤銷或已登出。
+    /// 實錄（逐字稿，2.1.32x～2.1.328；2026-11-18～11-26 兩台電腦的幾個帳戶）：error authentication_failed、isApiErrorMessage、沒有狀態碼，文字
+    /// 「Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` …」，接著失敗的 result 是同一段文字；
+    /// 2.1.288 是「Not logged in · Please run /login」。
+    /// 同樣是 authentication_failed 卻不算的：Cloudflare 擋下的「Failed to authenticate. API Error: 403 Attention Required! | Cloudflare」、
+    /// 「Request blocked before it reached Anthropic's API (HTTP 403)」（網路被擋，重新登入沒有用）、「Authentication error · This may be a temporary network issue」、
+    /// 「Could not refresh your login…」（另一個程序正在換發、磁碟滿這類暫時的狀況）、API Key 與環境變數的錯誤（app 不給 CLI API Key）
+    /// </summary>
+    public static bool? LoginLostOf(JObject? message)
+    {
+        if (message == null)
+            return null;
+        string? text;
+        if (string.Equals(message.Value<string>("type"), "result", StringComparison.Ordinal))
+        {
+            if (message["is_error"] is not JValue { Type: JTokenType.Boolean } isError || !(bool)isError.Value!)
+                return null;
+            text = message["result"]?.Type == JTokenType.String ? message["result"]!.ToString() : null;
+        }
+        else
+        {
+            bool apiError = message["is_api_error_message"] is JValue { Type: JTokenType.Boolean } snake && (bool)snake.Value!
+                            || message["isApiErrorMessage"] is JValue { Type: JTokenType.Boolean } camel && (bool)camel.Value!;
+            if (!apiError
+                || message["error"] is not JValue { Type: JTokenType.String } error || !string.Equals((string?)error, "authentication_failed", StringComparison.Ordinal)
+                || (message["message"] as JObject)?["content"] is not JArray content)
+                return null;
+            text = content.OfType<JObject>()
+                .Select(b => b["text"]?.Type == JTokenType.String ? b["text"]!.ToString() : null)
+                .FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
+        }
+        return LoginLostText(text);
+    }
+
+    /// <summary>
+    /// CLI 要人重新登入的錯誤文字（2.1.33x 執行檔裡的說法；只比對開頭，「·」之後的說明各版與各種登入方式不同）：
+    /// 到了使用期限的「Failed to authenticate: this login reached its time limit…」「Login reached its time limit · …」回 true；
+    /// 「Login expired · …」「OAuth token revoked · …」「Not logged in · …」「Authentication required · Sign in again to continue」回 false；其他回 null
+    /// </summary>
+    public static bool? LoginLostText(string? text)
+    {
+        var t = text?.TrimStart();
+        if (string.IsNullOrEmpty(t))
+            return null;
+        if (t.StartsWith("Failed to authenticate: this login reached its time limit", StringComparison.OrdinalIgnoreCase)
+            || t.StartsWith("Login reached its time limit", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return LoginLostPrefixes.Any(p => t.StartsWith(p, StringComparison.OrdinalIgnoreCase)) ? false : null;
+    }
+
+    private static readonly string[] LoginLostPrefixes = { "Login expired", "OAuth token revoked", "Not logged in", "Authentication required" };
+
+    /// <summary>
     /// 額度用完的合成訊息帶的重置時間（stream-json 的 api_error_params.rate_limit_info，或逐字稿的 quotaLimits、apiErrorParams.rate_limit_info 的
     /// resetsAt，秒）；沒有回 null
     /// </summary>
@@ -2154,6 +2210,9 @@ internal sealed partial class ClaudeStreamParser
     /// <summary>這一輪收到 API 過載（529）的合成訊息：接著失敗的 result 標成 ServerBusy＝Overloaded（中樞等一下自動重試）</summary>
     private bool overloadedThisTurn;
 
+    /// <summary>這一輪已發過 AgentLoginLostEvent（一輪最多一次；合成訊息與接著失敗的 result 都帶同一段文字）</summary>
+    private bool loginLostReported;
+
     /// <summary>
     /// 已提示過以 API Key 計費（init 每輪都送；會話重開程序時把這個值帶給新的解析器，一個對話只提示一次）
     /// </summary>
@@ -2214,6 +2273,12 @@ internal sealed partial class ClaudeStreamParser
                 // CLI 合成的「API Error: 529 Overloaded」：CLI 自己的重試用完了，這一輪接著以錯誤結束
                 if (ClaudeStreamRules.IsOverloadedApiError(message))
                     overloadedThisTurn = true;
+                // CLI 合成的「登入到了使用期限／已登出，要重新登入」：這一輪接著以錯誤結束，中樞照額度用完的做法改用其他帳戶接著做
+                if (!loginLostReported && ClaudeStreamRules.LoginLostOf(message) is { } timeLimit)
+                {
+                    loginLostReported = true;
+                    result.Events.Add(new AgentLoginLostEvent(AgentProvider.Claude, timeLimit));
+                }
                 break;
             case "user":
                 if (IsSubagent(message))
@@ -2272,6 +2337,10 @@ internal sealed partial class ClaudeStreamParser
                 if (result.TurnCompleted.Outcome == AgentTurnOutcome.Failed && (overloadedThisTurn || ClaudeStreamRules.IsOverloadedApiError(message)))
                     result.TurnCompleted = result.TurnCompleted with { ServerBusy = AgentServerBusy.Overloaded };
                 overloadedThisTurn = false;
+                // 沒看到合成訊息、失敗的 result 本身是要重新登入的那幾句：同樣算登入失效；被停止的不算
+                if (!loginLostReported && result.TurnCompleted.Outcome == AgentTurnOutcome.Failed && ClaudeStreamRules.LoginLostOf(message) is { } timeLimitAtEnd)
+                    result.Events.Add(new AgentLoginLostEvent(AgentProvider.Claude, timeLimitAtEnd));
+                loginLostReported = false;
                 result.ResumeReason = ClaudeStreamRules.ParseResumeReason(message);
                 result.TurnFromOtherOrigin = !ClaudeStreamRules.IsUserTurnResult(message);
                 result.UserMessageUuid = StringOf(message["user_message_uuid"]);

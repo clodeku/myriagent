@@ -333,6 +333,11 @@ internal sealed partial class AgentHub
                 OnQuotaExhausted(c, quota);
                 break;
 
+            case AgentLoginLostEvent loginLost:
+                // 登入失效（要重新登入）：比照額度用完，這一輪結束時決定要不要換帳戶繼續（AgentHub.AccountSwitch.cs）
+                OnLoginLost(c, loginLost);
+                break;
+
             case AgentSubagentUsageEvent subagent:
                 OnSubagentUsage(c, subagent.Usage);
                 break;
@@ -537,9 +542,14 @@ internal sealed partial class AgentHub
         // 執行中手動選了另一個帳戶：立即換的（這一輪是為了換帳戶停下的）結束時換過去、從中斷處接著做；
         // 這一輪結束時才換的照一般的結束收尾再換（只有原帳戶額度用完而失敗時接著做，AccountSwitchRules.ContinuesAfterUserSwitch）
         var userSwitch = TakeUserAccountSwitch(c);
-        bool quotaExhausted = c.QuotaExhausted != null && !c.StopRequested && settings.AutoSwitchAccountOnLimit;
-        // 額度用完：決定要不要換到還有額度的帳戶繼續（取用並清掉這一輪的 QuotaExhausted；使用者按了停止或自己選了帳戶就不換）
+        // 登入失效（要重新登入）比照額度用完：選了「這一輪結束時才換」的照樣換過去接著做
+        var loginLost = c.LoginLost;
+        bool quotaExhausted = (c.QuotaExhausted != null || loginLost != null) && !c.StopRequested && settings.AutoSwitchAccountOnLimit;
+        // 額度用完、登入失效：決定要不要換到能用的帳戶繼續（取用並清掉這一輪的 QuotaExhausted、LoginLost；使用者按了停止或自己選了帳戶就不換）
         var accountSwitch = PlanAccountSwitch(c, turn.Outcome, c.StopRequested || userSwitch != null);
+        // 有一輪正常結束：之後再登入失效時重新提示怎麼重新登入
+        if (turn.Outcome == AgentTurnOutcome.Completed)
+            c.LoginLostNoticeAccount = null;
         bool continueOnChosen = userSwitch != null && AccountSwitchRules.ContinuesAfterUserSwitch(userSwitch.AtTurnEnd, turn.Outcome, quotaExhausted);
         // 換帳戶接著做（或立即換、停止還沒生效就做完了）：佇列不暫停、拒絕的說明排進佇列；這一輪結束時才換、不接續的照一般的結束
         bool switching = accountSwitch?.Account != null || userSwitch is { AtTurnEnd: false } || continueOnChosen;
@@ -667,7 +677,7 @@ internal sealed partial class AgentHub
         {
             if (continueOnChosen)
             {
-                ContinueOnChosenAccount(c, userSwitch);
+                ContinueOnChosenAccount(c, userSwitch, loginLost);
                 return;
             }
             if (accounts.Find(userSwitch.AccountId) is { } chosen)

@@ -196,7 +196,7 @@ export function openSettings(opts = {}) {
     idleWarnSw && row('閒置很久的 Claude 對話送出前提醒', 'Claude 的提示快取保留 1 小時：閒置超過 1 小時的對話，下一則會把整份上下文重算一次。開著時，Claude 估計這一則會用掉 5 小時額度的 5% 以上（Claude 給的門檻）才在送出前先問一聲。', idleWarnSw, 'claudeIdleResumeWarning'),
     cont.node);
   put('quota', '額度用完時',
-    switchSw && row('自動換帳戶繼續', '對話執行到一半碰到用量上限（例如 Claude 的 5 小時額度）時，自動改用同一種代理、能用同一個模型、還有額度的其他帳戶接著做；有好幾個時選最快重置的（先用掉快要重置的額度）。新帳戶會收到先前對話的節錄，從中斷處繼續，但看不到先前的工具結果。原本的帳戶額度恢復後，對話閒置時或下一則訊息送出之前會自動換回原帳戶（你自己換過帳戶的對話不換回）。支援 Claude Code、Codex、Antigravity 與 Grok Build；關掉時照舊停下，等你手動換帳戶或等額度重置。', switchSw, 'autoSwitchAccount'),
+    switchSw && row('自動換帳戶繼續', '對話執行到一半碰到用量上限（例如 Claude 的 5 小時額度），或 Claude 的登入到期時，自動改用同一種代理、能用同一個模型、還有額度的其他帳戶接著做；有好幾個時選最快重置的（先用掉快要重置的額度）。新帳戶會收到先前對話的節錄，從中斷處繼續，但看不到先前的工具結果。原本的帳戶額度恢復（登入到期的：重新登入）後，對話閒置時或下一則訊息送出之前會自動換回原帳戶（你自己換過帳戶的對話不換回）。支援 Claude Code、Codex、Antigravity 與 Grok Build；關掉時照舊停下，等你手動換帳戶或等額度重置。', switchSw, 'autoSwitchAccount'),
     resumeSw && row('沒有帳戶可換時等重置後自動接著做', '額度用完、又沒有其他帳戶可以接手時，等這個帳戶的額度重置（12 小時內的）後自動送出接續訊息，從中斷處接著做；等待期間有其他帳戶恢復就換過去。輸入框上方可以取消，你自己送出訊息也會取消等待。', resumeSw, 'autoResumeAfterQuota'),
     crossSw && row('同種代理都沒額度時跨代理備援', '開啟「自動換帳戶繼續」時，若同一種代理沒有其他可用帳戶（例如只有一個 Antigravity 帳戶，或同種帳戶額度都滿了），自動改用其他已登入訂閱且還有額度的代理種類（Claude Code、Codex、Antigravity、Grok Build）開新對話並帶著前文節錄接手。預設關閉。', crossSw, 'autoSwitchCrossProvider'));
   put('remote', 'Remote Control',

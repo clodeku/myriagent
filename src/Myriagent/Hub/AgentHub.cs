@@ -1585,6 +1585,7 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         c.StopRequested = false;
         c.DeniedThisTurn = false;
         c.QuotaExhausted = null;
+        c.LoginLost = null;
         // 交給 Claude CLI 的 /clear（佇列、CLI 更新後延後送出的也經過這裡；前面附了前文節錄就不是指令）：這一輪正常結束才清畫面
         c.ClearTurn = hiddenNotice == null && ReferenceEquals(sendText, text) && AgentHubRules.IsClearCommand(text) && AgentHubRules.CliHandlesClear(c.Meta.Provider);
         c.StatusText = SendingStatus;

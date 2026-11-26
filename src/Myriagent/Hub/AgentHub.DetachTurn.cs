@@ -144,6 +144,7 @@ internal sealed partial class AgentHub
         c.DeniedThisTurn = turn.Denied;
         c.ClearTurn = turn.ClearTurn;
         c.QuotaExhausted = null;
+        c.LoginLost = null;
         c.StatusText = string.IsNullOrEmpty(turn.Status) || turn.Status == DetachedStatus ? "思考中…" : turn.Status;
         c.TurnStartedAt = turn.StartedAt > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(turn.StartedAt).LocalDateTime : now;
         c.TurnTokens = turn.Tokens;

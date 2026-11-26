@@ -165,12 +165,13 @@ internal static class AccountSwitchRules
     /// <summary>
     /// 換回原帳戶時對話裡的提示（noticeKind accountSwitch）：
     /// 「「A」的額度已恢復，已從「B」換回「A」繼續這個對話；接下來的訊息會附上先前對話的節錄，讓代理了解前情。」
+    /// 原帳戶是登入失效換走的（<paramref name="loginLost"/>）寫「「A」已重新登入，…」
     /// </summary>
-    public static string BuildReturnNotice(string homeLabel, string? fromLabel)
+    public static string BuildReturnNotice(string homeLabel, string? fromLabel, bool loginLost = false)
     {
         var home = homeLabel.Trim();
-        var from = string.IsNullOrWhiteSpace(fromLabel) ? "備援帳戶" : $"「{fromLabel.Trim()}」";
-        return $"「{home}」的額度已恢復，已從{from}換回「{home}」繼續這個對話；接下來的訊息會附上先前對話的節錄，讓代理了解前情。";
+        var from = AccountName(fromLabel, "備援帳戶");
+        return $"「{home}」{(loginLost ? "已重新登入" : "的額度已恢復")}，已從{from}換回「{home}」繼續這個對話；接下來的訊息會附上先前對話的節錄，讓代理了解前情。";
     }
 
     /// <summary>模型是「帳戶預設」（沒指定、空白或 default）</summary>
@@ -312,18 +313,34 @@ internal static class AccountSwitchRules
     }
 
     /// <summary>
+    /// 換帳戶時把登入已經到了使用期限的帳戶當成未登入（Claude 的 <paramref name="loginExpiresAt"/>，毫秒：Anthropic 的登入到期後不能換發，
+    /// 手上的存取權杖最多再用幾個小時，換過去很快就會失敗；2026-11-26 實例：登入 11:10 到期，對話到 18:11 才失敗）。
+    /// 只用在自動換帳戶挑候選與換回原帳戶，其他狀態照舊；使用者自己選的帳戶不看這個
+    /// </summary>
+    public static AccountStatus SwitchStatus(AccountStatus status, long? loginExpiresAt, DateTimeOffset now)
+        => status == AccountStatus.Ready && loginExpiresAt is { } expires && expires > 0 && expires <= now.ToUnixTimeMilliseconds()
+            ? AccountStatus.NotLoggedIn
+            : status;
+
+    /// <summary>
     /// 對話裡的提示（隱藏送出的那則 Notice，noticeKind accountSwitch）：
     /// 「「A」的額度已用完（10/24 06:10 重置），已自動改用「B」（2 小時 5 分後重置）繼續這個對話；新帳戶會收到先前對話的節錄，從中斷處接著做。」
-    /// <paramref name="homeLabel"/> 不為 null（原帳戶的額度恢復後會換回去）時接著「「A」的額度恢復後會自動換回去。」
+    /// <paramref name="loginLost"/> 不為 null（因為登入失效而換）時第一句改成「「A」的登入已到期（…）」。
+    /// <paramref name="homeLabel"/> 不為 null（原帳戶恢復後會換回去）時接著「「A」的額度恢復後會自動換回去。」，原帳戶是登入失效換走的
+    /// （<paramref name="homeLoginLost"/>）寫「「A」重新登入後會自動換回去。」
     /// </summary>
     public static string BuildNotice(string? fromLabel, DateTimeOffset? fromResetsAt, string toLabel, DateTimeOffset? toResetsAt, DateTimeOffset now, TimeZoneInfo? zone = null,
-        string? homeLabel = null)
+        string? homeLabel = null, AgentLoginLostEvent? loginLost = null, bool homeLoginLost = false)
     {
-        var from = string.IsNullOrWhiteSpace(fromLabel) ? "原帳戶" : $"「{fromLabel.Trim()}」";
-        var fromReset = fromResetsAt is { } r && r > now ? $"（{FormatLocal(r, zone)} 重置）" : string.Empty;
+        var from = AccountName(fromLabel, "原帳戶");
         var toReset = toResetsAt is { } t && t > now ? $"（{UsageRules.DescribeReset(t, now)}）" : string.Empty;
-        var back = string.IsNullOrWhiteSpace(homeLabel) ? string.Empty : $"「{homeLabel.Trim()}」的額度恢復後會自動換回去。";
-        return $"{from}的額度已用完{fromReset}，已自動改用「{toLabel.Trim()}」{toReset}繼續這個對話；新帳戶會收到先前對話的節錄，從中斷處接著做。{back}";
+        var back = string.IsNullOrWhiteSpace(homeLabel)
+            ? string.Empty
+            : homeLoginLost ? $"「{homeLabel.Trim()}」重新登入後會自動換回去。" : $"「{homeLabel.Trim()}」的額度恢復後會自動換回去。";
+        var cause = loginLost != null
+            ? LoginLostPhrase(loginLost.TimeLimit)
+            : "額度已用完" + (fromResetsAt is { } r && r > now ? $"（{FormatLocal(r, zone)} 重置）" : string.Empty);
+        return $"{from}的{cause}，已自動改用「{toLabel.Trim()}」{toReset}繼續這個對話；新帳戶會收到先前對話的節錄，從中斷處接著做。{back}";
     }
 
     /// <summary>沒有可以接手的帳戶時的提示（只在有其他同種帳戶，或開啟跨代理備援且有其他帳戶時加，只用一個帳戶的人不必看到）</summary>
@@ -333,15 +350,44 @@ internal static class AccountSwitchRules
             : $"其他 {CliRestartRules.ProductName(provider)} 帳戶也沒有可用的額度（或沒有登入、不支援這個模型），沒有自動換帳戶；可以等額度重置後按送出繼續。";
 
     /// <summary>
+    /// 登入失效、沒有換帳戶時的提示（設定關著、這種代理不支援、沒有其他帳戶）：CLI 的錯誤叫人執行 claude auth login，在 app 裡要在帳戶卡重新登入。
+    /// 只用一個帳戶的人也加（和額度用完不同：原本的錯誤沒說在 app 裡怎麼處理）
+    /// </summary>
+    public static string BuildLoginLostHint(string? fromLabel, bool timeLimit)
+        => $"{AccountName(fromLabel, "這個帳戶")}的{LoginLostPhrase(timeLimit)}：{ReloginHint}";
+
+    /// <summary>登入失效、其他帳戶也不能接手時的提示（有其他同種帳戶，或開啟跨代理備援且有其他帳戶）</summary>
+    public static string BuildLoginLostNoCandidateNotice(string? fromLabel, bool timeLimit, AgentProvider provider, bool crossProvider = false)
+        => $"{AccountName(fromLabel, "這個帳戶")}的{LoginLostPhrase(timeLimit)}；" +
+           (crossProvider
+               ? "其他已設定的代理帳戶也沒有可用的額度（或沒有登入），沒有自動換帳戶。"
+               : $"其他 {CliRestartRules.ProductName(provider)} 帳戶也沒有可用的額度（或沒有登入、不支援這個模型），沒有自動換帳戶。") +
+           ReloginHint;
+
+    /// <summary>登入失效的提示最後一句：在 app 裡怎麼重新登入</summary>
+    public const string ReloginHint = "到儀表板的帳戶卡重新登入之後，再按送出繼續。";
+
+    /// <summary>登入失效的說法：到了使用期限（Anthropic 的登入到期後不能換發）或過期、被撤銷、已登出</summary>
+    public static string LoginLostPhrase(bool timeLimit)
+        => timeLimit ? "登入已到期（Anthropic 的登入有使用期限，到期就要重新登入）" : "登入已失效（過期、被撤銷或已經登出）";
+
+    private static string AccountName(string? label, string fallback)
+        => string.IsNullOrWhiteSpace(label) ? fallback : $"「{label.Trim()}」";
+
+    /// <summary>
     /// 給接手帳戶的接續訊息（接在前文節錄後面隱藏送出，不顯示成使用者訊息）：誰為什麼換了帳戶（不是使用者中斷）、新帳戶看不到先前的工具結果、
     /// 中斷前這一輪做過的步驟（已完成的不要重做，先確認實際狀態）、背景工作已停止、使用者沒有送新訊息。
-    /// <paramref name="fromProvider"/> 與 <paramref name="provider"/> 不同時寫成跨代理備援
+    /// <paramref name="fromProvider"/> 與 <paramref name="provider"/> 不同時寫成跨代理備援；<paramref name="loginLost"/> 是原帳戶的登入失效（不是額度用完）
     /// </summary>
-    public static string BuildContinuation(AgentProvider provider, IReadOnlyList<string> recentSteps, bool backgroundWorkStopped, AgentProvider? fromProvider = null)
+    public static string BuildContinuation(AgentProvider provider, IReadOnlyList<string> recentSteps, bool backgroundWorkStopped, AgentProvider? fromProvider = null,
+        bool loginLost = false)
         => Continuation(fromProvider is { } from && from != provider
-            ? $"（系統通知：原本的 {CliRestartRules.ProductName(from)} 帳戶訂閱額度用完，這一輪在中途停下；Clode Myriagent 已自動改用 {CliRestartRules.ProductName(provider)} 帳戶接續這個對話，這不是使用者中斷。"
-            : $"（系統通知：原本的帳戶訂閱額度用完，這一輪在中途停下；Clode Myriagent 已自動改用另一個 {CliRestartRules.ProductName(provider)} 帳戶接續這個對話，這不是使用者中斷。",
+            ? $"（系統通知：原本的 {CliRestartRules.ProductName(from)} 帳戶{SwitchCause(loginLost)}，這一輪在中途停下；Clode Myriagent 已自動改用 {CliRestartRules.ProductName(provider)} 帳戶接續這個對話，這不是使用者中斷。"
+            : $"（系統通知：原本的帳戶{SwitchCause(loginLost)}，這一輪在中途停下；Clode Myriagent 已自動改用另一個 {CliRestartRules.ProductName(provider)} 帳戶接續這個對話，這不是使用者中斷。",
             recentSteps, backgroundWorkStopped);
+
+    /// <summary>接續訊息裡換帳戶的原因</summary>
+    private static string SwitchCause(bool loginLost) => loginLost ? "登入失效（要使用者重新登入才能再用）" : "訂閱額度用完";
 
     /// <summary>執行中手動換帳戶時的提示（對話裡的 noticeKind accountSwitch）</summary>
     public static string BuildUserSwitchNotice(string? fromLabel, string toLabel)
@@ -350,11 +396,14 @@ internal static class AccountSwitchRules
         return $"已從{from}改用「{toLabel.Trim()}」繼續：這一輪在中途停下，新帳戶會收到先前對話的節錄，從中斷處接著做。";
     }
 
-    /// <summary>選了「這一輪結束時才換」、這一輪卻因為原帳戶額度用完而失敗時的提示（接著由選的帳戶從中斷處做）</summary>
-    public static string BuildChosenAfterQuotaNotice(string? fromLabel, string toLabel)
+    /// <summary>
+    /// 選了「這一輪結束時才換」、這一輪卻因為原帳戶額度用完（或登入失效，<paramref name="loginLost"/>）而失敗時的提示（接著由選的帳戶從中斷處做）
+    /// </summary>
+    public static string BuildChosenAfterQuotaNotice(string? fromLabel, string toLabel, AgentLoginLostEvent? loginLost = null)
     {
-        var from = string.IsNullOrWhiteSpace(fromLabel) ? "原帳戶" : $"「{fromLabel.Trim()}」";
-        return $"{from}的額度已用完，這一輪在中途停下；改用你選的「{toLabel.Trim()}」繼續，新帳戶會收到先前對話的節錄，從中斷處接著做。";
+        var from = AccountName(fromLabel, "原帳戶");
+        var cause = loginLost != null ? LoginLostPhrase(loginLost.TimeLimit) : "額度已用完";
+        return $"{from}的{cause}，這一輪在中途停下；改用你選的「{toLabel.Trim()}」繼續，新帳戶會收到先前對話的節錄，從中斷處接著做。";
     }
 
     /// <summary>
@@ -372,10 +421,11 @@ internal static class AccountSwitchRules
     /// 選了「這一輪結束時才換」、這一輪卻因為原帳戶額度用完而失敗時給選的帳戶的接續訊息（同 <see cref="BuildContinuation"/>，
     /// 寫成改用使用者事先選的帳戶；另一種代理時寫成改用那種代理）
     /// </summary>
-    public static string BuildChosenAfterQuotaContinuation(AgentProvider fromProvider, AgentProvider provider, IReadOnlyList<string> recentSteps, bool backgroundWorkStopped)
+    public static string BuildChosenAfterQuotaContinuation(AgentProvider fromProvider, AgentProvider provider, IReadOnlyList<string> recentSteps, bool backgroundWorkStopped,
+        bool loginLost = false)
         => Continuation(fromProvider == provider
-            ? $"（系統通知：原本的帳戶訂閱額度用完，這一輪在中途停下；Clode Myriagent 已改用使用者事先選的另一個 {CliRestartRules.ProductName(provider)} 帳戶接續這個對話，這不是使用者中斷。"
-            : $"（系統通知：原本的 {CliRestartRules.ProductName(fromProvider)} 帳戶訂閱額度用完，這一輪在中途停下；Clode Myriagent 已依使用者事先的選擇改用 {CliRestartRules.ProductName(provider)} 接續這個對話，這不是使用者中斷。",
+            ? $"（系統通知：原本的帳戶{SwitchCause(loginLost)}，這一輪在中途停下；Clode Myriagent 已改用使用者事先選的另一個 {CliRestartRules.ProductName(provider)} 帳戶接續這個對話，這不是使用者中斷。"
+            : $"（系統通知：原本的 {CliRestartRules.ProductName(fromProvider)} 帳戶{SwitchCause(loginLost)}，這一輪在中途停下；Clode Myriagent 已依使用者事先的選擇改用 {CliRestartRules.ProductName(provider)} 接續這個對話，這不是使用者中斷。",
             recentSteps, backgroundWorkStopped);
 
     /// <summary>

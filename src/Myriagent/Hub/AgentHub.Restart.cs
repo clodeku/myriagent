@@ -1161,6 +1161,7 @@ internal sealed partial class AgentHub
             c.StopRequested = false;
             c.DeniedThisTurn = false;
             c.QuotaExhausted = null;
+            c.LoginLost = null;
             c.TurnStartedAt = now;
             c.LastActivity = now;
             c.Meta.UpdatedAt = now;

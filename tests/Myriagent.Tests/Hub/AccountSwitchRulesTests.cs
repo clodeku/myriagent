@@ -457,4 +457,66 @@ public class AccountSwitchRulesTests
             .Should().HaveCount(AccountSwitchRules.MaxRecentSteps);
         AccountSwitchRules.BackgroundSteps(null).Should().BeEmpty();
     }
+
+    // ───────────────────────────── 登入失效比照額度用完（2026-11-27） ─────────────────────────────
+
+    [Fact]
+    public void 換帳戶時登入已到期的帳戶當成未登入_其他狀態照舊()
+    {
+        long past = Now.AddMinutes(-1).ToUnixTimeMilliseconds();
+        long future = Now.AddDays(3).ToUnixTimeMilliseconds();
+        AccountSwitchRules.SwitchStatus(AccountStatus.Ready, past, Now).Should().Be(AccountStatus.NotLoggedIn);
+        AccountSwitchRules.SwitchStatus(AccountStatus.Ready, Now.ToUnixTimeMilliseconds(), Now).Should().Be(AccountStatus.NotLoggedIn, "到期那一刻就算");
+        AccountSwitchRules.SwitchStatus(AccountStatus.Ready, future, Now).Should().Be(AccountStatus.Ready);
+        AccountSwitchRules.SwitchStatus(AccountStatus.Ready, null, Now).Should().Be(AccountStatus.Ready, "不知道到期時間（Codex 等）照舊");
+        AccountSwitchRules.SwitchStatus(AccountStatus.Ready, 0, Now).Should().Be(AccountStatus.Ready, "不合格的到期時間不算");
+        AccountSwitchRules.SwitchStatus(AccountStatus.ApiKey, past, Now).Should().Be(AccountStatus.ApiKey, "只改已登入訂閱的");
+        AccountSwitchRules.SwitchStatus(AccountStatus.Error, past, Now).Should().Be(AccountStatus.Error);
+
+        // 換帳戶的候選因此不選它
+        var expired = new AccountSwitchCandidate("b", AgentProvider.Claude, AccountSwitchRules.SwitchStatus(AccountStatus.Ready, past, Now), null, null, 1);
+        AccountSwitchRules.Choose(AgentProvider.Claude, "a", null, [expired, Claude("c", 2)], NoneExhausted, Now)!.AccountId.Should().Be("c");
+    }
+
+    [Fact]
+    public void 登入失效的提示_換過去_換不了_換回()
+    {
+        var timeLimit = new AgentLoginLostEvent(AgentProvider.Claude, TimeLimit: true);
+        var other = new AgentLoginLostEvent(AgentProvider.Claude, TimeLimit: false);
+        AccountSwitchRules.BuildNotice("主帳戶", null, "副帳戶", Now.AddMinutes(125), Now, homeLabel: "主帳戶", loginLost: timeLimit, homeLoginLost: true)
+            .Should().Be("「主帳戶」的登入已到期（Anthropic 的登入有使用期限，到期就要重新登入），已自動改用「副帳戶」（2 小時 5 分後重置）繼續這個對話；" +
+                         "新帳戶會收到先前對話的節錄，從中斷處接著做。「主帳戶」重新登入後會自動換回去。");
+        AccountSwitchRules.BuildNotice(null, null, "副帳戶", null, Now, loginLost: other)
+            .Should().Be("原帳戶的登入已失效（過期、被撤銷或已經登出），已自動改用「副帳戶」繼續這個對話；新帳戶會收到先前對話的節錄，從中斷處接著做。");
+        // 額度用完換走、原帳戶是之前登入失效換走的：換回去的說法照原帳戶的原因
+        AccountSwitchRules.BuildNotice("副帳戶", null, "第三帳戶", null, Now, homeLabel: "主帳戶", homeLoginLost: true)
+            .Should().StartWith("「副帳戶」的額度已用完，").And.EndWith("「主帳戶」重新登入後會自動換回去。");
+
+        AccountSwitchRules.BuildLoginLostHint("主帳戶", timeLimit: true)
+            .Should().Be("「主帳戶」的登入已到期（Anthropic 的登入有使用期限，到期就要重新登入）：到儀表板的帳戶卡重新登入之後，再按送出繼續。");
+        AccountSwitchRules.BuildLoginLostHint(null, timeLimit: false).Should().StartWith("這個帳戶的登入已失效（過期、被撤銷或已經登出）：");
+        AccountSwitchRules.BuildLoginLostNoCandidateNotice("主帳戶", true, AgentProvider.Claude)
+            .Should().Be("「主帳戶」的登入已到期（Anthropic 的登入有使用期限，到期就要重新登入）；其他 Claude Code 帳戶也沒有可用的額度（或沒有登入、不支援這個模型），" +
+                         "沒有自動換帳戶。到儀表板的帳戶卡重新登入之後，再按送出繼續。");
+        AccountSwitchRules.BuildLoginLostNoCandidateNotice("主帳戶", false, AgentProvider.Claude, crossProvider: true)
+            .Should().Contain("其他已設定的代理帳戶也沒有可用的額度").And.EndWith(AccountSwitchRules.ReloginHint);
+
+        AccountSwitchRules.BuildReturnNotice("主帳戶", "副帳戶", loginLost: true)
+            .Should().Be("「主帳戶」已重新登入，已從「副帳戶」換回「主帳戶」繼續這個對話；接下來的訊息會附上先前對話的節錄，讓代理了解前情。");
+        AccountSwitchRules.BuildChosenAfterQuotaNotice("主帳戶", "副帳戶", timeLimit)
+            .Should().Be("「主帳戶」的登入已到期（Anthropic 的登入有使用期限，到期就要重新登入），這一輪在中途停下；改用你選的「副帳戶」繼續，新帳戶會收到先前對話的節錄，從中斷處接著做。");
+    }
+
+    [Fact]
+    public void 登入失效的接續訊息_寫登入失效不是額度用完()
+    {
+        AccountSwitchRules.BuildContinuation(AgentProvider.Claude, [], backgroundWorkStopped: false, loginLost: true).Split('\n')[0]
+            .Should().Be("（系統通知：原本的帳戶登入失效（要使用者重新登入才能再用），這一輪在中途停下；Clode Myriagent 已自動改用另一個 Claude Code 帳戶接續這個對話，" +
+                         "這不是使用者中斷。上面是先前對話的節錄，你看不到先前的工具結果與讀過的檔案內容。");
+        AccountSwitchRules.BuildContinuation(AgentProvider.Codex, [], false, AgentProvider.Claude, loginLost: true)
+            .Should().StartWith("（系統通知：原本的 Claude Code 帳戶登入失效（要使用者重新登入才能再用），這一輪在中途停下；Clode Myriagent 已自動改用 Codex 帳戶接續");
+        AccountSwitchRules.BuildChosenAfterQuotaContinuation(AgentProvider.Claude, AgentProvider.Claude, [], false, loginLost: true)
+            .Should().StartWith("（系統通知：原本的帳戶登入失效（要使用者重新登入才能再用），這一輪在中途停下；Clode Myriagent 已改用使用者事先選的另一個 Claude Code 帳戶");
+        AccountSwitchRules.BuildContinuation(AgentProvider.Claude, [], false).Should().StartWith("（系統通知：原本的帳戶訂閱額度用完", "額度用完的說法不變");
+    }
 }

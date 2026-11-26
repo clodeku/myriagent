@@ -9,7 +9,9 @@ namespace Myriagent.Hub;
 /// 額度用完時自動換帳戶繼續（設定 autoSwitchAccount，預設開；規則在 AccountSwitchRules）：會話回報這一輪因為訂閱額度用完而失敗
 /// （AgentQuotaExhaustedEvent），這一輪結束時改用同一種代理、同一個模型、還有額度、下一次重置最早的帳戶，
 /// 隱藏送出接續訊息（前文節錄照換帳戶的規則附在前面），對話加一則 noticeKind accountSwitch 的提示。
-/// 用完的帳戶記在記憶體到重置為止（不知道何時重置就 30 分鐘），這段時間不再被選，同一個對話連續用完也不會在帳戶之間來回
+/// 用完的帳戶記在記憶體到重置為止（不知道何時重置就 30 分鐘），這段時間不再被選，同一個對話連續用完也不會在帳戶之間來回。
+/// 登入失效（AgentLoginLostEvent：Claude 的登入到了約 30 天的使用期限、過期、被撤銷或已登出；2026-11-27 使用者要求）比照額度用完：
+/// 同一個設定、同樣的挑法與接續，原帳戶在 30 分鐘內不當候選；不等重置（不知道何時會重新登入），原帳戶重新登入、查得到用量之後換回去
 /// </summary>
 internal sealed partial class AgentHub
 {
@@ -17,6 +19,15 @@ internal sealed partial class AgentHub
     {
         /// <summary>這一輪收到的額度用完（ResetsAt 已補上用量快照推得的重置時間）；這一輪結束時取用並清掉，新的一輪開始時也清掉</summary>
         public AgentQuotaExhaustedEvent? QuotaExhausted;
+
+        /// <summary>這一輪收到的登入失效（AgentLoginLostEvent）；同 <see cref="QuotaExhausted"/>，這一輪結束時取用並清掉，新的一輪開始時也清掉</summary>
+        public AgentLoginLostEvent? LoginLost;
+
+        /// <summary>
+        /// 登入失效、沒有換帳戶時已經提示過怎麼重新登入的帳戶（只在記憶體）：CLI 自己開的一輪（排程、背景工作的通知）會一輪接一輪失敗，
+        /// 同一個帳戶不重複提示；有一輪正常結束就清掉
+        /// </summary>
+        public string? LoginLostNoticeAccount;
 
         /// <summary>
         /// 執行中手動選了另一個帳戶（SwitchAccountWhileRunning）：這一輪結束時（CompleteTurn）換過去——立即換的這一輪已在停下，
@@ -33,8 +44,9 @@ internal sealed partial class AgentHub
 
     /// <summary>這一輪結束時要不要換帳戶：Account 不為 null＝換到它；NoCandidateNotice 不為 null＝換不了、要加的提示</summary>
     /// <param name="WaitUntil">換不了：等這個帳戶的額度重置到這個時間後自動接著做（AgentHub.QuotaWait.cs）；不等是 null</param>
+    /// <param name="LoginLost">要換是因為登入失效（不是額度用完）：提示與接續訊息照這個寫</param>
     private sealed record AccountSwitchPlan(AgentAccount? Account, DateTimeOffset? FromResetsAt, DateTimeOffset? ToResetsAt, string? NoCandidateNotice,
-        DateTimeOffset? WaitUntil = null);
+        DateTimeOffset? WaitUntil = null, AgentLoginLostEvent? LoginLost = null);
 
     /// <summary>最近用完額度的帳戶與到什麼時候之前不當候選（只在記憶體；AccountSwitchRules.ExhaustedUntil）</summary>
     private readonly Dictionary<string, DateTimeOffset> exhaustedAccounts = new(StringComparer.Ordinal);
@@ -57,14 +69,47 @@ internal sealed partial class AgentHub
     }
 
     /// <summary>
-    /// 這一輪結束時（CompleteTurn）：取用並清掉這一輪的額度用完，決定要不要換帳戶。設定關著、使用者按了停止、這一輪是被停止的、
-    /// 這種代理不支援時不換；挑不到接手的帳戶時，有其他同種帳戶才給提示（只用一個帳戶的人原本的錯誤就夠了）。
-    /// 只做決定、不改狀態（提示由 CompleteTurn 依項目順序加、換帳戶由 ContinueOnAnotherAccount 做）
+    /// 會話回報登入失效：這個帳戶 30 分鐘內不當換帳戶的候選（CLI 換發被拒時清空憑證檔，監看會把帳戶改判未登入；這段時間先擋著），
+    /// 在執行中的一輪就記給這一輪結束時用
+    /// </summary>
+    private void OnLoginLost(ConversationState c, AgentLoginLostEvent ev)
+    {
+        exhaustedAccounts[c.Meta.AccountId] = AccountSwitchRules.ExhaustedUntil(null, AccountSwitchClock());
+        Log.Info($"對話 {c.Meta.Id} 的帳戶 {c.Meta.AccountId} 登入失效（{(ev.TimeLimit ? "到了使用期限" : "過期、被撤銷或已登出")}）");
+        if (c.Running)
+            c.LoginLost = ev;
+    }
+
+    /// <summary>
+    /// 換帳戶的候選（PlanAccountSwitch、等額度時的 PlanIdleAccountSwitch）：登入已經到了使用期限的照未登入算（AccountSwitchRules.SwitchStatus）
+    /// </summary>
+    private IEnumerable<AccountSwitchCandidate> SwitchCandidates(DateTimeOffset now)
+        => accounts.Accounts.Select(a =>
+        {
+            var state = accounts.GetState(a.Id);
+            return new AccountSwitchCandidate(
+                a.Id,
+                a.Provider,
+                AccountSwitchRules.SwitchStatus(state.Status, state.LoginExpiresAt, now),
+                settings.Models.TryGetValue(a.Id, out var models) ? models.Select(m => m.Value).ToList() : null,
+                accounts.GetUsage(a.Id)?.Windows,
+                a.Order);
+        });
+
+    /// <summary>
+    /// 這一輪結束時（CompleteTurn）：取用並清掉這一輪的額度用完與登入失效，決定要不要換帳戶。設定關著、使用者按了停止、這一輪是被停止的、
+    /// 這種代理不支援時不換；挑不到接手的帳戶時，有其他同種帳戶才給提示（只用一個帳戶的人原本的錯誤就夠了）。登入失效另見 PlanLoginLostSwitch。
+    /// 只做決定、不改狀態（提示由 CompleteTurn 依項目順序加、換帳戶由 ContinueOnAnotherAccount 做；例外是登入失效記下提示過的帳戶）
     /// </summary>
     private AccountSwitchPlan? PlanAccountSwitch(ConversationState c, AgentTurnOutcome outcome, bool stopRequested)
     {
         var quota = c.QuotaExhausted;
+        var login = c.LoginLost;
         c.QuotaExhausted = null;
+        c.LoginLost = null;
+        // 登入失效優先：額度用不用完，這個帳戶在重新登入之前都不能用
+        if (login != null)
+            return PlanLoginLostSwitch(c, login, outcome, stopRequested);
         if (quota == null || outcome == AgentTurnOutcome.Interrupted || stopRequested || c.IsDraft || c.IsReplica)
             return null;
         // 換不了帳戶時等重置後自動接著做（設定 autoResumeAfterQuota；12 小時內重置的）
@@ -74,26 +119,58 @@ internal sealed partial class AgentHub
 
         var now = AccountSwitchClock();
         bool allowCross = settings.AutoSwitchCrossProviderOnLimit;
-        var candidates = accounts.Accounts.Select(a => new AccountSwitchCandidate(
-            a.Id,
-            a.Provider,
-            accounts.GetState(a.Id).Status,
-            settings.Models.TryGetValue(a.Id, out var models) ? models.Select(m => m.Value).ToList() : null,
-            accounts.GetUsage(a.Id)?.Windows,
-            a.Order));
-        var choice = AccountSwitchRules.Choose(c.Meta.Provider, c.Meta.AccountId, c.Meta.Model, candidates, exhaustedAccounts, now, allowCross);
+        var choice = AccountSwitchRules.Choose(c.Meta.Provider, c.Meta.AccountId, c.Meta.Model, SwitchCandidates(now), exhaustedAccounts, now, allowCross);
         if (choice != null && accounts.Find(choice.AccountId) is { } account)
             return new AccountSwitchPlan(account, quota.ResetsAt, choice.ResetsAt, null);
 
-        bool hasOthers = allowCross
-            ? accounts.Accounts.Any(a => a.Id != c.Meta.AccountId)
-            : accounts.Accounts.Any(a => a.Provider == c.Meta.Provider && a.Id != c.Meta.AccountId);
+        bool hasOthers = HasOtherSwitchAccounts(c, allowCross);
         Log.Info($"對話 {c.Meta.Id} 額度用完，沒有可以接手的帳戶（{(hasOthers ? "其他帳戶都不合格" : "沒有其他可選帳戶")}）");
         // 會等重置的不另外說「可以等額度重置後按送出繼續」（等待的提示已經寫了沒有帳戶可以接手）
         if (wait != null)
             return new AccountSwitchPlan(null, quota.ResetsAt, null, null, wait);
         return hasOthers ? new AccountSwitchPlan(null, quota.ResetsAt, null, AccountSwitchRules.BuildNoCandidateNotice(c.Meta.Provider, allowCross)) : null;
     }
+
+    /// <summary>
+    /// 登入失效的這一輪結束時（PlanAccountSwitch）：照額度用完的挑法換到別的帳戶（設定、按了停止、被停止的一輪、這種代理不支援時不換），
+    /// 不等重置（不知道什麼時候會重新登入）。換不了時提示在 app 裡怎麼重新登入——CLI 的錯誤叫人執行 claude auth login；只用一個帳戶的人也提示。
+    /// CLI 自己開的一輪（排程、背景工作的通知）會一輪接一輪失敗（2026-11-26 實例：一個對話 23 分鐘失敗 8 次），同一個帳戶只提示一次（LoginLostNoticeAccount）
+    /// </summary>
+    private AccountSwitchPlan? PlanLoginLostSwitch(ConversationState c, AgentLoginLostEvent login, AgentTurnOutcome outcome, bool stopRequested)
+    {
+        // 這一輪照樣正常結束了（登入其實還能用）：不換、不提示
+        if (outcome != AgentTurnOutcome.Failed || stopRequested || c.IsDraft || c.IsReplica)
+            return null;
+        var label = accounts.Find(c.Meta.AccountId)?.Label;
+        string notice;
+        if (settings.AutoSwitchAccountOnLimit && AccountSwitchRules.Supports(c.Meta.Provider))
+        {
+            var now = AccountSwitchClock();
+            bool allowCross = settings.AutoSwitchCrossProviderOnLimit;
+            var choice = AccountSwitchRules.Choose(c.Meta.Provider, c.Meta.AccountId, c.Meta.Model, SwitchCandidates(now), exhaustedAccounts, now, allowCross);
+            if (choice != null && accounts.Find(choice.AccountId) is { } account)
+                return new AccountSwitchPlan(account, null, choice.ResetsAt, null, LoginLost: login);
+            bool hasOthers = HasOtherSwitchAccounts(c, allowCross);
+            Log.Info($"對話 {c.Meta.Id} 的帳戶登入失效，沒有可以接手的帳戶（{(hasOthers ? "其他帳戶都不合格" : "沒有其他可選帳戶")}）");
+            notice = hasOthers
+                ? AccountSwitchRules.BuildLoginLostNoCandidateNotice(label, login.TimeLimit, c.Meta.Provider, allowCross)
+                : AccountSwitchRules.BuildLoginLostHint(label, login.TimeLimit);
+        }
+        else
+        {
+            notice = AccountSwitchRules.BuildLoginLostHint(label, login.TimeLimit);
+        }
+        if (string.Equals(c.LoginLostNoticeAccount, c.Meta.AccountId, StringComparison.Ordinal))
+            return null;
+        c.LoginLostNoticeAccount = c.Meta.AccountId;
+        return new AccountSwitchPlan(null, null, null, notice, LoginLost: login);
+    }
+
+    /// <summary>有沒有其他可以考慮的帳戶（同種代理；開了跨代理備援時任何種類）：挑不到接手的帳戶時決定要不要說「其他帳戶也不能用」</summary>
+    private bool HasOtherSwitchAccounts(ConversationState c, bool allowCross)
+        => allowCross
+            ? accounts.Accounts.Any(a => a.Id != c.Meta.AccountId)
+            : accounts.Accounts.Any(a => a.Provider == c.Meta.Provider && a.Id != c.Meta.AccountId);
 
     /// <summary>
     /// 執行中手動換帳戶（同一種代理或換到另一種代理，呼叫端已以 AccountSwitchRules.WhileRunningBlock 確認）：記下目標並停下這一輪；這一輪結束時
@@ -305,9 +382,10 @@ internal sealed partial class AgentHub
 
     /// <summary>
     /// 執行中手動換帳戶、這一輪停下（或失敗）之後：換過去並隱藏送出接續訊息（同 ContinueOnAnotherAccount，提示與接續訊息寫使用者換了帳戶）。
-    /// 選了「這一輪結束時才換」的只有原帳戶額度用完而失敗時才走到這裡（AccountSwitchRules.ContinuesAfterUserSwitch）：提示與接續訊息寫額度用完
+    /// 選了「這一輪結束時才換」的只有原帳戶額度用完（或登入失效，<paramref name="loginLost"/>）而失敗時才走到這裡
+    /// （AccountSwitchRules.ContinuesAfterUserSwitch）：提示與接續訊息寫額度用完或登入失效
     /// </summary>
-    private void ContinueOnChosenAccount(ConversationState c, PendingAccountSwitch pending)
+    private void ContinueOnChosenAccount(ConversationState c, PendingAccountSwitch pending, AgentLoginLostEvent? loginLost = null)
     {
         var account = accounts.Find(pending.AccountId)!;
         var previous = accounts.Find(c.Meta.AccountId);
@@ -325,10 +403,10 @@ internal sealed partial class AgentHub
         PublishAccountChange(c);
 
         var notice = pending.AtTurnEnd
-            ? AccountSwitchRules.BuildChosenAfterQuotaNotice(previous?.Label, account.Label)
+            ? AccountSwitchRules.BuildChosenAfterQuotaNotice(previous?.Label, account.Label, loginLost)
             : AccountSwitchRules.BuildUserSwitchNotice(previous?.Label, account.Label);
         var text = pending.AtTurnEnd
-            ? AccountSwitchRules.BuildChosenAfterQuotaContinuation(fromProvider, account.Provider, steps, backgroundStopped)
+            ? AccountSwitchRules.BuildChosenAfterQuotaContinuation(fromProvider, account.Provider, steps, backgroundStopped, loginLost: loginLost != null)
             : AccountSwitchRules.BuildUserSwitchContinuation(account.Provider, steps, backgroundStopped, fromProvider);
         // 遠端換的（RememberAccount＝false）：接續的送出也不寫「上次使用的帳戶」（D23）
         _ = SendCoreAsync(c, text, new List<AgentAttachment>(), hiddenNotice: notice, hiddenNoticeKind: AgentNoticeKind.AccountSwitch,
@@ -338,7 +416,8 @@ internal sealed partial class AgentHub
     /// <summary>
     /// 換到接手的帳戶並隱藏送出接續訊息（這一輪已收尾、Running 已是 false）：中斷前的步驟與背景工作要在關掉舊程序之前記下；
     /// 換帳戶同手動（ApplyAccountChange：關舊程序、新帳戶開新 session，送出時附前文節錄），不寫「上次使用的帳戶」以外的設定。
-    /// 記下原帳戶（meta 的 QuotaHome；連續換了好幾個帳戶時一直是第一個），它的額度恢復後換回去（TryReturnHome）；接手的就是原帳戶時當成換回
+    /// 記下原帳戶（meta 的 QuotaHome；連續換了好幾個帳戶時一直是第一個），它的額度恢復（登入失效換走的：重新登入）後換回去（TryReturnHome）；
+    /// 接手的就是原帳戶時當成換回
     /// </summary>
     private void ContinueOnAnotherAccount(ConversationState c, AccountSwitchPlan plan)
     {
@@ -348,10 +427,10 @@ internal sealed partial class AgentHub
         var steps = AccountSwitchRules.RecentSteps(c.Items);
         bool backgroundStopped = c.Session?.HasLiveBackgroundWork ?? false;
         var now = AccountSwitchClock();
-        Log.Info($"對話 {c.Meta.Id} 額度用完，自動由帳戶 {c.Meta.AccountId} 改用 {account.Id} 繼續");
+        Log.Info($"對話 {c.Meta.Id} {(plan.LoginLost != null ? "的帳戶登入失效" : "額度用完")}，自動由帳戶 {c.Meta.AccountId} 改用 {account.Id} 繼續");
 
         var home = c.Meta.QuotaHome ?? new QuotaHomeAccount(c.Meta.AccountId, plan.FromResetsAt, now, c.Meta.Model, c.Meta.Effort, c.Meta.PermissionMode,
-            c.Meta.Agent, c.Meta.OutputStyle);
+            c.Meta.Agent, c.Meta.OutputStyle, LoginLost: plan.LoginLost != null);
         var modelBefore = c.Meta.Model;
         var effortBefore = c.Meta.Effort;
         ApplyAccountChange(c, account);
@@ -368,13 +447,14 @@ internal sealed partial class AgentHub
         PublishAccountChange(c);
 
         var homeLabel = backHome ? null : accounts.Find(home.AccountId)?.Label;
-        var notice = AccountSwitchRules.BuildNotice(previous?.Label, plan.FromResetsAt, account.Label, plan.ToResetsAt, now, homeLabel: homeLabel);
-        var text = AccountSwitchRules.BuildContinuation(account.Provider, steps, backgroundStopped, fromProvider);
+        var notice = AccountSwitchRules.BuildNotice(previous?.Label, plan.FromResetsAt, account.Label, plan.ToResetsAt, now, homeLabel: homeLabel,
+            loginLost: plan.LoginLost, homeLoginLost: home.LoginLost);
+        var text = AccountSwitchRules.BuildContinuation(account.Provider, steps, backgroundStopped, fromProvider, loginLost: plan.LoginLost != null);
         _ = SendCoreAsync(c, text, new List<AgentAttachment>(), hiddenNotice: notice, hiddenNoticeKind: AgentNoticeKind.AccountSwitch, rememberLocal: false);
     }
 
     /// <summary>
-    /// 額度用完自動換到別的帳戶之後，原帳戶的額度恢復了就換回去（2026-10-26 使用者要求）。只在安全的時候換：不在執行中、
+    /// 額度用完自動換到別的帳戶之後，原帳戶的額度恢復了就換回去（2026-10-26 使用者要求；登入失效換走的：重新登入、查得到用量之後）。只在安全的時候換：不在執行中、
     /// 沒有存活的背景工作（換帳戶會關掉程序，背景工作跟著停）、沒有等你回應的卡片、沒有在換版、沒有排著過載重試或 CLI 換版後的背景確認、
     /// 沒有回溯點、沒有進行中的 /goal 目標、使用者沒有選了別的帳戶在等背景工作結束才換；閒置時（維護）另外避開 10 分鐘內有動靜的 Remote Control（AccountSwitchRules.ReturnRemoteIdle）。
     /// 換回時同手動換帳戶（關掉程序、下一則訊息附前文節錄），跨代理換回的另外還原換走之前的模型、推理強度、權限模式等，加一則提示。
@@ -404,7 +484,9 @@ internal sealed partial class AgentHub
             return false;
         var now = AccountSwitchClock();
         DateTimeOffset? exhaustedUntil = exhaustedAccounts.TryGetValue(account.Id, out var until) ? until : null;
-        if (!AccountSwitchRules.HomeRecovered(home, accounts.GetState(account.Id).Status, accounts.GetUsage(account.Id), exhaustedUntil, now))
+        var homeState = accounts.GetState(account.Id);
+        if (!AccountSwitchRules.HomeRecovered(home, AccountSwitchRules.SwitchStatus(homeState.Status, homeState.LoginExpiresAt, now), accounts.GetUsage(account.Id),
+                exhaustedUntil, now))
             return false;
         // 紀錄檔暫時讀不到：下次再換（不跳提示：維護每 30 秒一次，送出時 SendCoreAsync 自己會提示）；
         // 等你回應的卡片（核准、問卷、計畫確認，含以訊息回答的）：答案要給問的那個程序
@@ -416,14 +498,14 @@ internal sealed partial class AgentHub
         var fromProvider = c.Meta.Provider;
         var modelBefore = c.Meta.Model;
         var effortBefore = c.Meta.Effort;
-        Log.Info($"對話 {c.Meta.Id} 的原帳戶 {account.Id} 額度已恢復，由帳戶 {c.Meta.AccountId} 換回（{(fromSend ? "送出之前" : "閒置時")}）");
+        Log.Info($"對話 {c.Meta.Id} 的原帳戶 {account.Id} {(home.LoginLost ? "已重新登入" : "額度已恢復")}，由帳戶 {c.Meta.AccountId} 換回（{(fromSend ? "送出之前" : "閒置時")}）");
         c.Meta.QuotaHome = null;
         ApplyAccountChange(c, account);
         RestoreHomeSettings(c, home, crossProvider: fromProvider != account.Provider, modelBefore, effortBefore);
         AddItem(c, new AgentChatItem
         {
             Kind = AgentItemKind.Notice,
-            Text = AccountSwitchRules.BuildReturnNotice(account.Label, previous?.Label),
+            Text = AccountSwitchRules.BuildReturnNotice(account.Label, previous?.Label, home.LoginLost),
             NoticeKind = AgentNoticeKind.AccountSwitch,
         });
         if (!fromSend)

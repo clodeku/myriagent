@@ -684,6 +684,10 @@ internal sealed record DeferredAccountSwitch(string AccountId, bool RememberAcco
 /// <param name="OutputStyle">換走之前的輸出風格（跨代理換回時還原）</param>
 /// <param name="SwitchedModel">最近一次自動換帳戶之後的模型：換回時目前的模型還是它，就是使用者沒自己改過</param>
 /// <param name="SwitchedEffort">最近一次自動換帳戶之後的推理強度</param>
+/// <param name="LoginLost">
+/// 原帳戶是登入失效換走的（不是額度用完；2026-11-27）：重新登入、查得到用量之後才換回去，提示寫「重新登入」。
+/// 舊版讀到這個欄位會略過、當成額度用完（照樣等用量顯示有額度才換回，只是提示的說法不同）
+/// </param>
 internal sealed record QuotaHomeAccount(
     string AccountId,
     DateTimeOffset? ResetsAt,
@@ -694,7 +698,8 @@ internal sealed record QuotaHomeAccount(
     string? Agent,
     string? OutputStyle,
     string? SwitchedModel = null,
-    string? SwitchedEffort = null);
+    string? SwitchedEffort = null,
+    bool LoginLost = false);
 
 /// <summary>工作資料夾的跨電腦參照的種類（<see cref="PathRef.Kind"/>）</summary>
 internal static class PathRefKinds
