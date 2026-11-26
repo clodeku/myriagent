@@ -19,7 +19,7 @@ internal sealed partial class AgentProcess : IDisposable
 {
     private const int StderrTailLines = 40;
 
-    private readonly Process process;
+    private readonly IBackend backend;
     private readonly SemaphoreSlim writeLock = new(1, 1);
     private readonly Queue<string> stderrTail = new();
     private readonly TaskCompletionSource<int?> exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -35,10 +35,13 @@ internal sealed partial class AgentProcess : IDisposable
     /// <summary>程序結束（stdout 讀完之後才觸發，確保最後幾行已處理）</summary>
     public event Action<AgentProcess, int?>? Exited;
 
-    private AgentProcess(Process process)
+    private AgentProcess(IBackend backend)
     {
-        this.process = process;
+        this.backend = backend;
     }
+
+    /// <summary>這個程序是經代理主機開的（<see cref="IAgentProcessHost"/>）；直接開的是 false</summary>
+    public bool Hosted => backend is HostedBackend;
 
     public int ProcessId { get; private set; }
 
@@ -76,10 +79,11 @@ internal sealed partial class AgentProcess : IDisposable
         string workingDirectory,
         Action<IDictionary<string, string?>>? configureEnvironment,
         CancellationToken cancellationToken = default,
-        bool joinJob = true)
+        bool joinJob = true,
+        IAgentProcessHost? host = null)
     {
         var args = arguments.ToList();
-        return RetryTransientStartAsync(() => Start(launcher, args, workingDirectory, configureEnvironment, joinJob), StartRetryDelays, cancellationToken);
+        return RetryTransientStartAsync(() => Start(launcher, args, workingDirectory, configureEnvironment, joinJob, host), StartRetryDelays, cancellationToken);
     }
 
     /// <summary>重試的骨架（測試注入啟動函式與間隔）：暫時失敗就等下一個間隔再試，間隔用完後的失敗原樣丟出</summary>
@@ -104,6 +108,12 @@ internal sealed partial class AgentProcess : IDisposable
         => ex is Win32Exception { NativeErrorCode: 2 or 3 or 32 };
 
     /// <summary>
+    /// 只給測試：沒有指定主機的啟動也經這個主機（測試專案在 MYRIAGENT_TEST_VIA_HOST=1 時設定，讓既有的假 CLI 與真的 CLI 測試整批改走主機，
+    /// 驗證經主機開的程序和直接開的行為一樣）。app 不設它——主機一律由中樞經 AgentSessionSettings.ProcessHost 交給會話
+    /// </summary>
+    internal static IAgentProcessHost? AmbientHostForTests { get; set; }
+
+    /// <summary>
     /// 啟動程序。configureEnvironment 調整子程序的環境變數（帳戶的設定資料夾、剝除 API Key…）。
     /// 事件要在 BeginReading 之前掛好，才不會漏掉最早的輸出。
     /// </summary>
@@ -112,8 +122,23 @@ internal sealed partial class AgentProcess : IDisposable
         IEnumerable<string> arguments,
         string workingDirectory,
         Action<IDictionary<string, string?>>? configureEnvironment,
-        bool joinJob = true)
+        bool joinJob = true,
+        IAgentProcessHost? host = null)
     {
+        // 經代理主機開（對話的 CLI；中樞接上主機時才會帶 host）。主機用不了就照舊直接開——對話不能因為主機開不起來就用不了
+        host ??= AmbientHostForTests;
+        if (host != null && joinJob)
+        {
+            try
+            {
+                return StartHosted(host, launcher, arguments, workingDirectory, configureEnvironment);
+            }
+            catch (AgentHostUnavailableException ex)
+            {
+                Log.Warn($"代理主機用不了，改成直接開程序：{ex.Message}");
+            }
+        }
+
         var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
         var psi = new ProcessStartInfo
         {
@@ -136,11 +161,25 @@ internal sealed partial class AgentProcess : IDisposable
         if (!process.Start())
             throw new InvalidOperationException($"無法啟動 {launcher.FileName}");
 
-        var agentProcess = new AgentProcess(process) { ProcessId = process.Id };
+        var agentProcess = new AgentProcess(new LocalBackend(process)) { ProcessId = process.Id };
         // joinJob＝false：不跟著 app 結束（CLI 代查用量時可能正在換發權杖，ClaudeControlClient）
         if (joinJob)
             ChildProcessJob.TryAssign(process);
         return agentProcess;
+    }
+
+    /// <summary>
+    /// 經代理主機開：環境變數照直接開的算法（這個程序的環境套上 configureEnvironment）算好整份交給主機，主機不帶自己的
+    /// </summary>
+    private static AgentProcess StartHosted(IAgentProcessHost host, AgentLauncher launcher, IEnumerable<string> arguments, string workingDirectory,
+        Action<IDictionary<string, string?>>? configureEnvironment)
+    {
+        // ProcessStartInfo.Environment 的初值就是這個程序目前的環境（不分大小寫的字典），和直接開程序時子程序拿到的一樣
+        var environment = new ProcessStartInfo().Environment;
+        configureEnvironment?.Invoke(environment);
+        var pairs = environment.Where(pair => pair.Value != null).Select(pair => new KeyValuePair<string, string>(pair.Key, pair.Value!)).ToList();
+        var hosted = host.Spawn(launcher.FileName, launcher.PrefixArguments.Concat(arguments).ToList(), workingDirectory, pairs);
+        return new AgentProcess(new HostedBackend(hosted)) { ProcessId = hosted.ProcessId };
     }
 
     /// <summary>
@@ -159,7 +198,7 @@ internal sealed partial class AgentProcess : IDisposable
         {
             while (true)
             {
-                var line = process.StandardOutput.ReadLine();
+                var line = backend.Output.ReadLine();
                 if (line == null)
                     break;
                 CountPipe(line);
@@ -186,15 +225,7 @@ internal sealed partial class AgentProcess : IDisposable
 
     private void ReportExit()
     {
-        int? exitCode = null;
-        try
-        {
-            process.WaitForExit();
-            exitCode = process.ExitCode;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
-        {
-        }
+        int? exitCode = backend.WaitForExit();
 
         exited.TrySetResult(exitCode);
         try
@@ -213,7 +244,7 @@ internal sealed partial class AgentProcess : IDisposable
         {
             while (true)
             {
-                var line = process.StandardError.ReadLine();
+                var line = backend.Error.ReadLine();
                 if (line == null)
                     break;
                 CountPipe(line);
@@ -273,10 +304,7 @@ internal sealed partial class AgentProcess : IDisposable
         {
             if (HasExited || Volatile.Read(ref disposed) != 0)
                 throw new IOException("代理程序已結束");
-            // 同一個 writer 寫完再 flush：寫入途中被 Dispose 時，Process 會先把 StandardInput 清掉，再取一次會丟 InvalidOperationException
-            var writer = process.StandardInput;
-            await writer.WriteAsync(line + "\n").ConfigureAwait(false);
-            await writer.FlushAsync().ConfigureAwait(false);
+            await backend.WriteAsync(line + "\n").ConfigureAwait(false);
             CountPipe(line);
         }
         catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException)
@@ -297,7 +325,7 @@ internal sealed partial class AgentProcess : IDisposable
             await writeLock.WaitAsync().ConfigureAwait(false);
             try
             {
-                process.StandardInput.Close();
+                await backend.CloseInputAsync().ConfigureAwait(false);
             }
             finally
             {
@@ -313,17 +341,7 @@ internal sealed partial class AgentProcess : IDisposable
             Kill();
     }
 
-    public void Kill()
-    {
-        try
-        {
-            if (!process.HasExited)
-                process.Kill(entireProcessTree: true);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException)
-        {
-        }
-    }
+    public void Kill() => backend.Kill();
 
     /// <summary>擷取這個程序目前的程序樹（根＝這個程序）；要在結束程序之前取：根程序結束後，孫程序的父程序鏈就斷了</summary>
     public ProcessTreeSnapshot CaptureTree() => ProcessTreeSnapshot.Capture(ProcessId);
@@ -347,30 +365,159 @@ internal sealed partial class AgentProcess : IDisposable
         if (Interlocked.Exchange(ref disposed, 1) != 0)
             return;
         Kill();
-        // 明確關掉三條管線（Process.Dispose 不會關，要等 GC 才釋放 handle）
-        foreach (var close in new Action[] { () => process.StandardInput.Dispose(), () => process.StandardOutput.Dispose(), () => process.StandardError.Dispose() })
-        {
-            try
-            {
-                close();
-            }
-            catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException)
-            {
-            }
-        }
-        try
-        {
-            process.Dispose();
-        }
-        catch
-        {
-        }
+        backend.Dispose();
         // writeLock 不 Dispose：寫入途中被釋放（程序結束、OnExited 釋放）時，那次寫入的 finally 還要 Release，
         // 釋放過的 SemaphoreSlim 會丟 ObjectDisposedException 蓋掉「代理程序已結束」的 IOException。沒用 AvailableWaitHandle 就沒有核心物件要釋放
     }
 
     [GeneratedRegex(@"\x1B\[[0-9;]*[A-Za-z]")]
     private static partial Regex AnsiPattern();
+
+    // ───────────────────────────── 後端：直接開的程序／經代理主機 ─────────────────────────────
+
+    /// <summary>程序的另一端：讀兩條輸出、寫 stdin、等結束、結束它。AgentProcess 其餘的行為（逐行回呼、錯誤尾段、關閉的寬限）兩種後端共用</summary>
+    private interface IBackend : IDisposable
+    {
+        TextReader Output { get; }
+
+        TextReader Error { get; }
+
+        /// <summary>寫進 stdin 並送出（text 已含換行）；程序已結束丟 IOException、ObjectDisposedException 或 InvalidOperationException</summary>
+        Task WriteAsync(string text);
+
+        Task CloseInputAsync();
+
+        /// <summary>等程序結束、回結束碼（不明回 null）。兩條輸出讀完之後才呼叫</summary>
+        int? WaitForExit();
+
+        /// <summary>結束整個程序樹（已結束就不做事）</summary>
+        void Kill();
+    }
+
+    private sealed class LocalBackend : IBackend
+    {
+        private readonly Process process;
+
+        public LocalBackend(Process process) => this.process = process;
+
+        public TextReader Output => process.StandardOutput;
+
+        public TextReader Error => process.StandardError;
+
+        public async Task WriteAsync(string text)
+        {
+            // 同一個 writer 寫完再 flush：寫入途中被 Dispose 時，Process 會先把 StandardInput 清掉，再取一次會丟 InvalidOperationException
+            var writer = process.StandardInput;
+            await writer.WriteAsync(text).ConfigureAwait(false);
+            await writer.FlushAsync().ConfigureAwait(false);
+        }
+
+        public Task CloseInputAsync()
+        {
+            process.StandardInput.Close();
+            return Task.CompletedTask;
+        }
+
+        public int? WaitForExit()
+        {
+            try
+            {
+                process.WaitForExit();
+                return process.ExitCode;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+            {
+                return null;
+            }
+        }
+
+        public void Kill()
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException)
+            {
+            }
+        }
+
+        public void Dispose()
+        {
+            // 明確關掉三條管線（Process.Dispose 不會關，要等 GC 才釋放 handle）
+            foreach (var close in new Action[] { () => process.StandardInput.Dispose(), () => process.StandardOutput.Dispose(), () => process.StandardError.Dispose() })
+            {
+                try
+                {
+                    close();
+                }
+                catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException)
+                {
+                }
+            }
+            try
+            {
+                process.Dispose();
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    /// <summary>
+    /// 經代理主機開的程序：輸出是主機轉來的位元組（以 UTF-8 解成行，同直接開時的 StandardOutputEncoding），stdin 以框送給主機。
+    /// 結束程序由 app 自己照 PID 做（主機只搬位元組）：主機回報結束之前 PID 不會被重複使用（主機還握著那個程序）
+    /// </summary>
+    private sealed class HostedBackend : IBackend
+    {
+        private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
+        private readonly HostedProcess hosted;
+
+        public HostedBackend(HostedProcess hosted)
+        {
+            this.hosted = hosted;
+            Output = new StreamReader(hosted.Output, Utf8, detectEncodingFromByteOrderMarks: false);
+            Error = new StreamReader(hosted.Error, Utf8, detectEncodingFromByteOrderMarks: false);
+        }
+
+        public TextReader Output { get; }
+
+        public TextReader Error { get; }
+
+        public Task WriteAsync(string text) => hosted.WriteAsync(Utf8.GetBytes(text));
+
+        public Task CloseInputAsync() => hosted.CloseInputAsync();
+
+        public int? WaitForExit()
+        {
+            hosted.ExitTask.Wait();
+            return hosted.ExitTask.Result;
+        }
+
+        public void Kill()
+        {
+            if (hosted.ExitTask.IsCompleted)
+                return;
+            try
+            {
+                using var process = Process.GetProcessById(hosted.ProcessId);
+                process.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception or NotSupportedException)
+            {
+                // 已經結束
+            }
+        }
+
+        public void Dispose()
+        {
+            // 讀行的執行緒不能卡在等資料上：程序已經被 Kill，主機稍後會回報結束；這裡先讓兩條串流讀到結尾
+            hosted.Output.Complete();
+            hosted.Error.Complete();
+        }
+    }
 }
 
 /// <summary>
@@ -392,10 +539,61 @@ internal static class ChildProcessJob
     /// <summary>JOBOBJECT_BASIC_PROCESS_ID_LIST 的表頭（兩個 DWORD）；PID 陣列（ULONG_PTR）從這裡開始，x64 與 x86 都是 8</summary>
     private const int ProcessIdListOffset = 8;
 
+    private const uint JOB_OBJECT_QUERY = 0x0004;
+
     private static readonly Lazy<IntPtr> Job = new(CreateJob, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>
+    /// 代理主機的工作物件（以名稱打開、只有查詢的權限）：經主機開的 CLI 與它在巢狀工作物件裡的子孫不在 app 自己的工作物件裡，
+    /// <see cref="Contains"/>、<see cref="GetProcessIds"/> 把兩邊的合起來算。每條主機連線各自打開一個、連線關了就放開
+    /// （<see cref="DetachHostJob"/>）：工作物件要最後一個把手關了，系統才結束裡面的程序——app 一直握著的話，主機當掉時 CLI 不會跟著結束
+    /// </summary>
+    private static readonly List<IntPtr> HostJobs = new();
+
+    private static readonly object HostJobGate = new();
 
     /// <summary>工作物件已建立（第一次 TryAssign 時才建立；在那之前沒有任何程序在裡面）</summary>
     public static bool IsCreated => Job.IsValueCreated && Job.Value != IntPtr.Zero;
+
+    /// <summary>
+    /// 連上代理主機時呼叫：之後查「是不是 app 的 CLI 程序」也看主機的工作物件。回傳把手，連線關了交給 <see cref="DetachHostJob"/>；
+    /// 打不開只記錄、回 0（查詢少看到主機那一邊，不影響開程序）
+    /// </summary>
+    public static IntPtr AttachHostJob(string name)
+    {
+        var opened = OpenJobObject(JOB_OBJECT_QUERY, false, name);
+        if (opened == IntPtr.Zero)
+        {
+            Log.Warn($"打不開代理主機的工作物件（{Marshal.GetLastWin32Error()}）");
+            return IntPtr.Zero;
+        }
+        lock (HostJobGate)
+            HostJobs.Add(opened);
+        return opened;
+    }
+
+    /// <summary>主機的連線關了：放開它的工作物件（主機已經不在時，這是最後一個把手，系統這時才結束它開的程序）</summary>
+    public static void DetachHostJob(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero)
+            return;
+        bool owned;
+        lock (HostJobGate)
+            owned = HostJobs.Remove(handle);
+        if (owned)
+            CloseHandle(handle);
+    }
+
+    /// <summary>要查的工作物件：app 自己的（建立了才有）與主機的（連上了才有）</summary>
+    private static List<IntPtr> Jobs()
+    {
+        var jobs = new List<IntPtr>(2);
+        if (IsCreated)
+            jobs.Add(Job.Value);
+        lock (HostJobGate)
+            jobs.AddRange(HostJobs);
+        return jobs;
+    }
 
     public static void TryAssign(Process process)
     {
@@ -416,14 +614,15 @@ internal static class ChildProcessJob
     /// </summary>
     public static bool Contains(int processId)
     {
-        if (!IsCreated || processId <= 0)
+        var jobs = Jobs();
+        if (jobs.Count == 0 || processId <= 0)
             return false;
         var handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)processId);
         if (handle == IntPtr.Zero)
             return false;
         try
         {
-            return IsStillActive(handle) && IsProcessInJob(handle, Job.Value, out var inJob) && inJob;
+            return IsStillActive(handle) && jobs.Any(job => IsProcessInJob(handle, job, out var inJob) && inJob);
         }
         finally
         {
@@ -436,13 +635,11 @@ internal static class ChildProcessJob
     /// 已結束、但還有人握著它的 handle 的程序仍掛在工作物件上，這裡排除。工作物件還沒建立或查詢失敗回空清單。
     /// 熱更新用來確認某種 CLI 的程序都已結束（呼叫端再依執行檔路徑分類）
     /// </summary>
-    public static IReadOnlyList<int> GetProcessIds() => ReadJobProcessIds().Where(IsStillActive).ToList();
+    public static IReadOnlyList<int> GetProcessIds() => Jobs().SelectMany(ReadJobProcessIds).Distinct().Where(IsStillActive).ToList();
 
     /// <summary>工作物件上登記的所有 PID（含已結束、handle 還沒全部關掉的）</summary>
-    private static IReadOnlyList<int> ReadJobProcessIds()
+    private static IReadOnlyList<int> ReadJobProcessIds(IntPtr job)
     {
-        if (!IsCreated)
-            return Array.Empty<int>();
         int capacity = 64;
         for (int attempt = 0; attempt < 8; attempt++)
         {
@@ -450,7 +647,7 @@ internal static class ChildProcessJob
             var buffer = Marshal.AllocHGlobal(size);
             try
             {
-                if (QueryInformationJobObject(Job.Value, JobObjectBasicProcessIdList, buffer, (uint)size, out _))
+                if (QueryInformationJobObject(job, JobObjectBasicProcessIdList, buffer, (uint)size, out _))
                 {
                     int count = Marshal.ReadInt32(buffer, 4);   // NumberOfProcessIdsInList
                     var ids = new int[count];
@@ -559,6 +756,9 @@ internal static class ChildProcessJob
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string? lpName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenJobObject(uint desiredAccess, bool inheritHandle, string name);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetInformationJobObject(IntPtr hJob, int infoType, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);

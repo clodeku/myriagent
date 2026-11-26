@@ -101,6 +101,12 @@ internal sealed record AgentSessionSettings(
     int? AutoCompactPercent = null,
     string? CodexMode = null)
 {
+    /// <summary>
+    /// 經代理主機開 CLI 程序（設計 docs/plans/2026-11-26-agent-host.md；中樞接上主機、設定 cliViaHost 開著時才有）；null＝直接開。
+    /// 不是程序的設定：變了不必重開程序（下一次啟動程序時才用得到）
+    /// </summary>
+    public IAgentProcessHost? ProcessHost { get; init; }
+
     /// <summary>啟動程序前取得共用設定的啟動參數（背景執行緒；不共用回 None）</summary>
     public async Task<AgentSharedLaunch> PrepareSharedAsync()
         => PrepareShared == null ? AgentSharedLaunch.None : await Task.Run(() => PrepareShared(WorkingDirectory));

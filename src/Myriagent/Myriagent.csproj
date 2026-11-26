@@ -51,6 +51,17 @@
     <!-- MyriagentDesk.exe（遠端桌面的鎖定畫面支援：以 LocalSystem 執行的服務與它的安裝器，docs/web-protocol.md 的 deskService）：同上，跟著進建置與發佈的輸出；
          安裝時由它自己把 DeskServiceRules.PayloadFiles 那幾個檔複製到 Program Files -->
     <ProjectReference Include="..\MyriagentDeskService\MyriagentDeskService.csproj" />
+    <!-- Myriagent.Host.exe（代理主機）：.NET Framework 4.8 的單一 exe，只要它先建好、把 exe 帶進輸出，
+         不參考它的組件（目標框架不同：不傳這個專案的 RuntimeIdentifier 等屬性過去） -->
+    <ProjectReference Include="..\Myriagent.Host\Myriagent.Host.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true"
+                      SetTargetFramework="TargetFramework=net48" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishSingleFile;AppEdition" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\Myriagent.Host\bin\$(Configuration)\net48\Myriagent.Host.exe" Link="Myriagent.Host.exe" Visible="false"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- 協定的編解碼和主機用同一份原始檔 -->
+    <Compile Include="..\Myriagent.Host\HostProtocol.cs" Link="Agents\HostProtocol.cs" />
   </ItemGroup>
 
   <ItemGroup>

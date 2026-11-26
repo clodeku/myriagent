@@ -659,7 +659,8 @@ internal sealed partial class CodexAgentSession : IAgentSession
             serverArguments,
             settings.WorkingDirectory,
             settings.ConfigureEnvironment,
-            ct);
+            ct,
+            host: settings.ProcessHost);
         started.LineReceived += OnLine;
         started.Exited += OnExited;
         lock (gate)

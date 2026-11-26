@@ -498,7 +498,8 @@ internal sealed class AntigravityAcpSession : IAgentSession
             args,
             settings.WorkingDirectory,
             env => AntigravityStreamRules.ApplyLaunchEnvironment(env, settings),
-            ct);
+            ct,
+            host: settings.ProcessHost);
 
         var conn = new GrokAcpConnection(started);
         conn.Response += message => OnResponse(started, message);

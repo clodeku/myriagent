@@ -143,6 +143,10 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         Hub.AttachScheduleTranscripts(Hub.DefaultTranscriptRoots);
         // 輸入區的語音訊息：錄音在這台以 faster-whisper 轉成逐字稿，連錄音檔交給代理（不呼叫 Windows 的語音輸入）
         Hub.AttachVoice(voiceTranscriber);
+        // 代理主機（設定 cliViaHost 開著時對話的 CLI 經它開；第一次要開程序時才啟動主機）：每個資料根目錄各自一個
+        agentHost = new Myriagent.Agents.AgentHostClient(Path.Combine(AppContext.BaseDirectory, Myriagent.Agents.AgentHostClient.ExecutableName),
+            AppPaths.Root, Path.Combine(AppPaths.LogDirectory, "agent-host.log"));
+        Hub.AttachProcessHost(agentHost);
         // 回覆裡顯示的圖片與影片在對話資料夾留一份（attachments\.kept\）：原檔之後被刪或被覆寫，對話裡照樣看得到當時那一張
         Hub.AttachMediaKeeper();
         // 上次下載或匯入網頁上傳途中被關閉（當機、重開機）留下的暫存：同步還沒接上、沒有任何上傳在下載，在背景清掉（WP4.7 合併前審查 R6）
@@ -317,6 +321,9 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
 
     /// <summary>遠端執行指令的桌面端（被操作與發起）</summary>
     private readonly RemoteExecService remoteExec;
+
+    /// <summary>代理主機的用戶端（設定 cliViaHost 開著時對話的 CLI 經它開）；結束時在中樞之後釋放</summary>
+    private Myriagent.Agents.AgentHostClient? agentHost;
 
     /// <summary>對話標題（myriagent-remote 的管道在背景執行緒問；回 UI 執行緒讀）</summary>
     /// <summary>在 UI 執行緒執行、等結果（管道的要求：中樞的狀態只在 UI 執行緒）</summary>
@@ -1194,6 +1201,8 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         updateManager.Dispose();
         updateHelper.Dispose();   // 只放開控制代碼，不結束幫手
         Hub.Dispose();
+        // 代理主機：中樞已經把對話的 CLI 關掉了，請主機結束（還在的程序由它的工作物件結束）
+        agentHost?.Dispose();
         // 中樞收尾時記的最後幾筆（app.exit）要落盤：換版前最重要
         backgroundJournal.Dispose();
         systemMonitor.Dispose();

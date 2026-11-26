@@ -134,6 +134,10 @@ export function openSettings(opts = {}) {
     ? switchControl({ checked: s.shareAgentMemory !== false, label: '各家代理共用記憶', onChange: (v) => set('shareAgentMemory', v) })
     : null;
   const policy = has('cliRestartPolicy') ? policyPicker(policyOf(s.cliRestartPolicy).value, (v) => set('cliRestartPolicy', v)) : null;
+  // CLI 程序由代理主機啟動（宿主的 AgentHostClient，預設關；之後的版本靠它在 app 更新時不關 CLI 程序與背景工作）
+  const hostSw = has('cliViaHost')
+    ? switchControl({ checked: s.cliViaHost === true, label: 'CLI 程序由代理主機啟動', onChange: (v) => set('cliViaHost', v) })
+    : null;
 
   let instr = null;
   let lastInstr = '';
@@ -214,7 +218,8 @@ export function openSettings(opts = {}) {
     policy && h('div', { class: 'set-row set-row-block', dataset: { setting: 'cliRestartPolicy' } },
       h('div', { class: 'set-text' }, h('div', { class: 'set-label', text: 'CLI 更新後' }),
         h('div', { class: 'set-desc', text: '對話執行中 CLI 被更新（app 更新、你在終端機更新、背景自動更新）時，什麼時候換成新版。閒置的對話一律在下一則訊息用新版。' })),
-      policy));
+      policy),
+    hostSw && row('CLI 程序由代理主機啟動（實驗）', '對話的 CLI 改由獨立的小程序（代理主機）啟動。目前行為不變；之後的版本靠它在 Clode Myriagent 更新時不關 CLI 程序、背景工作照跑。主機開不起來時自動改回直接啟動。改了之後新啟動的程序才生效。', hostSw, 'cliViaHost'));
   put('cliShare', '共用與權杖',
     shareMemSw && row('各家代理共用記憶', 'Codex、Antigravity 與 Grok 的對話也讀寫 Claude 那一份專案記憶（~/.claude 的 projects\\＜專案＞\\memory）：同一個對話換成別家的模型、同一個專案的其他對話，記得的是同一份。app 在對話建立時把記憶的位置、格式與目前的索引交給代理，並讓它寫得進那個資料夾。關掉後只有 Claude 用那份記憶；已經建立的對話下次重開才不再帶。', shareMemSw, 'shareAgentMemory'),
     shareCliSw && row('跨四家 CLI 共用技能與全域指示', '在 Claude Code、Codex、Antigravity 與 Grok Build 的系統預設目錄之間同步共用全域技能（skills）與全域指示檔（CLAUDE.md／AGENTS.md／GEMINI.md），原本各自的檔案會備份保留，關閉時自動還原。', shareCliSw, 'shareCrossCliCustomizations'),
@@ -276,6 +281,7 @@ export function openSettings(opts = {}) {
     }
     if (shareCliSw) shareCliSw.input.checked = cur.shareCrossCliCustomizations === true;
     if (shareMemSw) shareMemSw.input.checked = cur.shareAgentMemory !== false;
+    if (hostSw) hostSw.input.checked = cur.cliViaHost === true;
     if (policy) policy.setValue(policyOf(cur.cliRestartPolicy).value);
     if (instr && document.activeElement !== instr && instr.value === lastInstr) { instr.value = cur.instructions || ''; lastInstr = instr.value; }
     cont.refresh();

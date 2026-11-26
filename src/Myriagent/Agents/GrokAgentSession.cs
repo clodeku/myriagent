@@ -544,7 +544,7 @@ internal sealed class GrokAgentSession : IAgentSession
         sharedLaunch = await settings.PrepareSharedAsync();
 
         var started = await AgentProcess.StartWithRetryAsync(launcher, GrokAcpRules.AgentArguments, settings.WorkingDirectory,
-            env => ApplyLaunchEnvironment(env, settings), ct);
+            env => ApplyLaunchEnvironment(env, settings), ct, host: settings.ProcessHost);
         var conn = new GrokAcpConnection(started);
         conn.Response += message => OnResponse(started, message);
         conn.Request += message => OnRequest(started, message);

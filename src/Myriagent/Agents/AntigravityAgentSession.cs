@@ -544,7 +544,8 @@ internal sealed class AntigravityAgentSession : IAgentSession
                 sharedMemoryDirectory: shared.SharedMemoryDirectory),
             settings.WorkingDirectory,
             env => AntigravityStreamRules.ApplyLaunchEnvironment(env, settings),
-            ct);
+            ct,
+            host: settings.ProcessHost);
         started.LineReceived += OnLine;
         started.StderrReceived += OnStderr;
         started.Exited += OnExited;

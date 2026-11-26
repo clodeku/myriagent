@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    代理主機（設計 docs/plans/2026-11-26-agent-host.md）：替 app 開 CLI 程序、轉送 stdin／stdout／stderr 的小程序。
+    用 .NET Framework 4.8：Windows 10（1903 起）與 11 內建，不受 .NET 更新刪掉修補版的影響；單一 exe、不帶相依檔。
+    只參考 BCL。HostProtocol.cs 同時連結進桌面專案（app 這一側用同一份編解碼）。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <!-- 根目錄的 Directory.Build.props 開了 ImplicitUsings：net48 沒有 System.Net.Http 的預設參考，這裡關掉 -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Myriagent.Host</RootNamespace>
+    <AssemblyName>Myriagent.Host</AssemblyName>
+    <Product>Clode Myriagent</Product>
+    <AssemblyTitle>Clode Myriagent Agent Host</AssemblyTitle>
+    <Company></Company>
+    <Copyright></Copyright>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <!-- 不要把建置時的來源路徑寫進 exe -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+</Project>

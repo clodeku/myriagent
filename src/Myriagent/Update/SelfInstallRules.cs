@@ -12,6 +12,9 @@ internal static class SelfInstallRules
     public const string ExeName = "Myriagent.exe";
     public const string MainAssemblyName = "Myriagent.dll";
     public const string DepsName = "Myriagent.deps.json";
+
+    /// <summary>代理主機的執行檔（Agents.AgentHostClient.ExecutableName）</summary>
+    public const string HostName = "Myriagent.Host.exe";
     public const string RuntimeConfigName = "Myriagent.runtimeconfig.json";
 
     /// <summary>沒有這幾個檔就不是完整的發佈資料夾（framework-dependent 的 apphost 少了任何一個都啟動不了）</summary>
@@ -45,6 +48,8 @@ internal static class SelfInstallRules
 
         foreach (var required in RequiredFiles)
             Add(required);
+        // 代理主機（.NET Framework 的 exe，不在 deps.json 裡；沒有它 app 照樣能用，所以不列進 RequiredFiles）
+        Add(HostName);
         foreach (var library in Libraries(root))
         {
             foreach (var asset in Assets(library, "runtime"))

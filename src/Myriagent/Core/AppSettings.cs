@@ -258,6 +258,12 @@ internal sealed class AppSettings
     /// </summary>
     public bool ShareAgentMemory { get; set; } = true;
 
+    /// <summary>
+    /// 對話的 CLI 程序改由代理主機開（設計 docs/plans/2026-11-26-agent-host.md 的 H0；只能在本機修改）：預設關，先在開著的電腦上驗穩定。
+    /// 目前行為不變（app 結束時照舊結束全部程序）；之後的階段靠它讓 app 換版時不關 CLI 程序與背景工作。改了之後下一次啟動程序才生效
+    /// </summary>
+    public bool CliViaHost { get; set; }
+
     /// <summary>附加給代理的說明；null＝預設（AgentHubRules.DefaultInstructions）</summary>
     public string? Instructions { get; set; }
 

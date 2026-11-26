@@ -958,7 +958,8 @@ internal sealed class ClaudeAgentSession : IAgentSession
                 // 委派要等子對話做完（含使用者核准）：MCP 工具的逾時設成同一個上限
                 if (settings.DelegationMcpPipeName != null)
                     env["MCP_TOOL_TIMEOUT"] = ((long)DelegationMcpRules.ToolTimeout.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            });
+            },
+            host: settings.ProcessHost);
 
         started.LineReceived += OnLine;
         started.Exited += OnExited;
