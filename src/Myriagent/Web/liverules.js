@@ -515,7 +515,7 @@ export function trackSettle(t, msg) {
   if (!id || !t.items.has(id)) return null;
   const entry = t.items.get(id);
   t.items.delete(id);
-  return { info: entry.info, state: RESULT_STATES.has(msg.state) ? msg.state : 'unknown', code: str(msg.code), origin: str(msg.origin) };
+  return { info: entry.info, state: RESULT_STATES.has(msg.state) ? msg.state : 'unknown', code: str(msg.code), origin: str(msg.origin), message: str(msg.message) };
 }
 
 /**

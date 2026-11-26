@@ -2380,6 +2380,8 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
         {
             if (explicitNow)
                 SwitchAccountStoppingBackground(c, account, rememberAccount);
+            else if (c.Meta.DeferredAccount?.AccountId == account.Id)
+                Toast(AccountSwitchRules.BuildDeferredAgainToast(account.Label), view: view);   // 已經在等：不再加一則一樣的提示
             else
                 DeferAccountSwitch(c, account, rememberAccount);
             return;

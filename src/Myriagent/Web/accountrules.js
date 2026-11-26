@@ -150,6 +150,13 @@ export function runningSwitchCommand(conversationId, accountId, when) {
 export const SWITCH_NOW = 'now';
 
 /**
+ * 〔遠端〕那台閒置而背景工作還在跑、這邊的 setAccount 沒帶 when 時被拒的說明（同電腦的 AccountSwitchRules.RemoteNeedsWhen，照字面比對；
+ * 2026-11-26 使用者回報：手機上選了帳戶只出現延後的提示、提示叫人再選一次並選現在換，手機卻從來不問）。
+ * 瀏覽器版與其他電腦的對話看不到那台的背景工作，沒辦法事先問：收到這個再問「現在換／背景工作結束後再換」、帶 when 重送
+ */
+export const SWITCH_NEEDS_WHEN = '還有背景工作在跑，換帳戶會停掉它們：請選現在換，或等背景工作結束後再換';
+
+/**
  * 這一輪結束了、背景工作還在跑時選了另一個帳戶的選擇框（2026-10-27：換帳戶會關掉程序，背景工作跟著停；ui.choiceDialog 的參數）：
  * choices 的 value 是 'now'（現在換，背景工作停掉，新帳戶收到被停掉的背景工作再接著做）或 'turnEnd'（等背景工作都結束、代理處理完結果才換，預設）。
  * background 是標頭的 background（只有桌面這台的對話有）：列出前兩個背景工作。label、背景工作的說明都是不可信的字串，畫面以 textContent 顯示
@@ -161,9 +168,11 @@ export function backgroundSwitchConfirm(label, fromProvider, toProvider, backgro
   const n = Math.max(1, count(bg.count));
   const titles = (Array.isArray(bg.tasks) ? bg.tasks : []).map((t) => (isObj(t) ? str(t.title) || str(t.tool) : null)).filter(Boolean);
   const listed = titles.length ? '（' + titles.slice(0, 2).join('、') + (titles.length > 2 || n > titles.length ? ' 等' : '') + '）' : '';
+  // 〔遠端〕看不到那台的背景工作（被拒了才知道有，SWITCH_NEEDS_WHEN）：不說幾個
+  const known = isObj(background);
   return {
     title: '改用' + name + '繼續？',
-    message: '還有 ' + n + ' 個背景工作在跑' + listed + '。換帳戶會關掉目前的程序，背景工作會跟著停止。'
+    message: (known ? '還有 ' + n + ' 個背景工作在跑' + listed : '那台電腦還有背景工作在跑') + '。換帳戶會關掉目前的程序，背景工作會跟著停止。'
       + (cross ? productName(fromProvider) + ' 和 ' + productName(toProvider) + ' 的對話不能直接接續，' + name + '會帶著先前對話的節錄開新的對話。' : ''),
     detail: '等背景工作結束：背景工作做完、代理處理完結果後才換。現在換：背景工作會被停止，' + name + '會收到先前對話的節錄與被停掉的背景工作，確認做到哪裡再接著做。',
     choices: [

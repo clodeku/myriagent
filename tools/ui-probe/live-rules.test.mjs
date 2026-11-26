@@ -373,7 +373,7 @@ test('trackSettle_同一個id第二則回null', () => {
   const t = L.trackNew();
   assert.equal(L.trackAdd(t, '01A', { k: 1 }, NOW), true);
   assert.deepEqual(L.trackSettle(t, { type: 'commandResult', commandId: '01A', state: 'done', code: null }),
-    { info: { k: 1 }, state: 'done', code: null, origin: null });
+    { info: { k: 1 }, state: 'done', code: null, origin: null, message: null });
   assert.equal(L.trackSettle(t, { type: 'commandResult', commandId: '01A', state: 'rejected', code: 'stale' }), null);
 });
 
@@ -393,7 +393,7 @@ test('trackSettle_帶回origin', () => {
   const t = L.trackNew();
   L.trackAdd(t, '01A', 'send', NOW);
   assert.deepEqual(L.trackSettle(t, { commandId: '01A', state: 'rejected', code: 'not_sent', origin: 'transport' }),
-    { info: 'send', state: 'rejected', code: 'not_sent', origin: 'transport' });
+    { info: 'send', state: 'rejected', code: 'not_sent', origin: 'transport', message: null });
 });
 
 test('trackAbandon_回全部並清空', () => {

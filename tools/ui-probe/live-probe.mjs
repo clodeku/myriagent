@@ -2208,6 +2208,59 @@ async function runFullAccess() {
   await HP.closePage(app);
 }
 
+async function runHubAccountBackgroundSwitch() {
+  // 2026-11-26 使用者回報：手機上選了帳戶只出現「再選一次並選現在換」的提示，手機卻從來不問。瀏覽器版看不到那台的背景工作：
+  // 不帶 when 的 setAccount 被那台以 SWITCH_NEEDS_WHEN 拒絕，網頁再問「現在換／背景工作結束後再換」、帶 when 重送；
+  // 選回目前的帳戶也照樣送出（那台有在等就取消，「選回目前的帳戶就不換」）
+  const id = LF.CONV.idle;
+  const app = await openWithLayout('account-background-switch', layoutOf([[[id], id]]), {
+    initOpts: {
+      accounts: [...LF.liveAccounts(NOW), ...LF.providerAccounts(NOW)], conversations: [...LF.liveList(NOW), ...LF.providerList(NOW)].sort((a, b) => b.updatedAt - a.updatedAt),
+      providers: [{ key: 'Claude', name: 'Claude Code' }, { key: 'Codex', name: 'Codex' }, { key: 'Antigravity', name: 'Antigravity' }, { key: 'Grok', name: 'Grok Build' }],
+    },
+  });
+  const { page, hub } = app;
+  await waitLoaded(app, [id]);
+  const NEEDS_WHEN = '還有背景工作在跑，換帳戶會停掉它們：請選現在換，或等背景工作結束後再換';
+  hub.onCmd('setAccount', (cmd, arg) => ({
+    push: [cmd.when || cmd.accountId === 'la_c1'
+      ? serverResult(arg.commandId, 'done')
+      : { type: 'commandResult', commandId: arg.commandId, state: 'rejected', code: 'conflict', message: NEEDS_WHEN, tier: 2 }],
+  }));
+  const current = await page.evaluate((sel) => document.querySelector(sel + ' .ch-acct').textContent, convSel(id));
+  await page.click(convSel(id) + ' .ch-acct');
+  await page.waitForSelector('.menu');
+  const before = hub.cmds('setAccount').length;
+  await clickMenu(app, 'Codex Pro');
+  // 換到另一家：先確認以前文節錄開新對話
+  await page.waitForSelector('.dlg', { timeout: 3000 }).catch(() => {});
+  await page.locator('.dlg .dlg-foot button', { hasText: '改用 Codex 繼續' }).first().click().catch(() => {});
+  const first = await until(() => hub.cmds('setAccount')[before] || null, 3000);
+  // 被拒（那台還有背景工作）：問時機
+  await page.waitForFunction(() => [...document.querySelectorAll('.dlg .dlg-title')].some((t) => t.textContent === '改用「Codex Pro」繼續？')
+    && [...document.querySelectorAll('.dlg .dlg-foot button')].some((b) => b.textContent === '現在換（停掉背景工作）'), null, { timeout: 3000 }).catch(() => {});
+  const dlg = await page.evaluate(() => {
+    const d = [...document.querySelectorAll('.dlg')].pop();
+    return d ? { title: d.querySelector('.dlg-title').textContent, text: d.querySelector('.dlg-body').textContent, buttons: [...d.querySelectorAll('.dlg-foot button')].map((b) => b.textContent) } : null;
+  });
+  await page.locator('.dlg .dlg-foot button', { hasText: '現在換（停掉背景工作）' }).first().click().catch(() => {});
+  const second = await until(() => hub.cmds('setAccount')[before + 1] || null, 3000);
+  // 選回目前的帳戶：照樣送出
+  await page.click(convSel(id) + ' .ch-acct');
+  await page.waitForSelector('.menu', { timeout: 2000 }).catch(() => {});
+  const items = await page.evaluate(() => [...document.querySelectorAll('.menu .menu-item')].map((b) => ({ label: b.querySelector('.mi-label').textContent, checked: b.getAttribute('aria-checked') })));
+  const mine = items.find((x) => x.checked === 'true');
+  if (mine) await clickMenu(app, mine.label);
+  const third = await until(() => hub.cmds('setAccount')[before + 2] || null, 3000);
+  check('hubAccountBackgroundSwitch', !!first && first.cmd.conversationId === id && first.cmd.accountId === 'la_x1' && first.cmd.when === undefined
+    && !!dlg && dlg.text.includes('那台電腦還有背景工作在跑') && dlg.text.includes('不能直接接續')
+    && JSON.stringify(dlg.buttons) === JSON.stringify(['取消', '現在換（停掉背景工作）', '背景工作結束後再換'])
+    && !!second && second.cmd.accountId === 'la_x1' && second.cmd.when === 'now'
+    && !!third && third.cmd.accountId !== 'la_x1' && third.cmd.when === undefined,
+  { current, first: first && first.cmd, dlg, second: second && second.cmd, items, third: third && third.cmd });
+  await HP.closePage(app);
+}
+
 async function runHubAccountWhileRunning() {
   // 執行中換帳戶（使用者 2026-10-23；2026-10-24 起四種代理之間都能互換）——選單列四種的帳戶、同一種在前，選了再選時機
   // （現在停下並改用，或目前步驟完成後換），選了「目前步驟完成後換」送帶 when turnEnd 的 setAccount（那台的中樞等安全點再停下交接）；
@@ -6575,6 +6628,7 @@ const SCENARIOS = [
   { checks: ['hubSendDisabledDeviceOffline', 'hubSendDisabledPolicyView'], run: runSendGates },
   { checks: ['hubFullAccessBlocked'], run: runFullAccess },
   { checks: ['hubAccountSwitchWhileRunning'], run: runHubAccountWhileRunning },
+  { checks: ['hubAccountBackgroundSwitch'], run: runHubAccountBackgroundSwitch },
   { checks: ['hubModelSwitchWhileRunning'], run: runHubModelWhileRunning },
   { checks: ['hubApproveCarriesDigest', 'hubAnswerCarriesDigest'], run: runCardDigests },
   { checks: ['hubSkipNoDigest'], run: runSkipNoDigest },

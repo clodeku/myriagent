@@ -388,6 +388,17 @@ internal static class AccountSwitchRules
                "要現在就換，在帳戶選單再選一次並選「現在換」；選回目前的帳戶就不換。";
     }
 
+    /// <summary>
+    /// 遠端（瀏覽器版、其他電腦）不帶 when 的換帳戶，碰到這台閒置而背景工作還在跑（2026-11-26 使用者回報：手機上選了帳戶只出現延後的提示、
+    /// 提示叫人「再選一次並選現在換」，手機卻從來不問）：回 conflict 帶這一句，網頁（accountrules.js 的 SWITCH_NEEDS_WHEN，照字面比對）
+    /// 看到就問「現在換／背景工作結束後再換」，再帶 when 重送。遠端看不到這台的背景工作，沒辦法事先問
+    /// </summary>
+    public const string RemoteNeedsWhen = "還有背景工作在跑，換帳戶會停掉它們：請選現在換，或等背景工作結束後再換";
+
+    /// <summary>已經在等背景工作結束才換到這個帳戶、又選了一次（沒確認現在換）：不再加一則一樣的提示，只回這一句</summary>
+    public static string BuildDeferredAgainToast(string toLabel)
+        => $"背景工作結束後就會改用「{toLabel.Trim()}」；要現在就換，再選一次並選「現在換」";
+
     /// <summary>等背景工作結束才換的帳戶已經不能換（移除、登出、沒安裝）時的提示</summary>
     public static string BuildDeferredDroppedNotice(string? toLabel)
         => $"背景工作都結束了，但{(string.IsNullOrWhiteSpace(toLabel) ? "選的帳戶" : $"「{toLabel.Trim()}」")}已經不能用（移除、登出或沒安裝），沒有換帳戶。";

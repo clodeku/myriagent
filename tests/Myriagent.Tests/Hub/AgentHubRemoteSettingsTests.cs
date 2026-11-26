@@ -212,6 +212,41 @@ public sealed class AgentHubRemoteSettingsTests
     }
 
     [Fact]
+    public async Task 遠端setAccount_閒置而背景工作還在跑_沒帶when回conflict請網頁問_帶turnEnd等背景工作結束_帶now照換()
+    {
+        // 2026-11-26 使用者回報：手機看不到這台的背景工作，選了帳戶只出現「再選一次並選現在換」的提示，手機卻從來不問
+        using var h = new HubHarness();
+        var (id, s) = IdleConversation(h);
+        s.HasLiveBackgroundWork = true;
+        h.Raise(s, new AgentBackgroundWorkEvent(1, [new AgentBackgroundTool("執行指令", "bash", "npm run dev", null)]));
+        var items = h.Items(id).Count;
+
+        var asked = await RunAsync(h, "setAccount", id, new { accountId = "acc-claude2" }, tier: 2);
+
+        RemoteEntrySamples.ShouldBeRejected(asked, RemoteResultCodes.Conflict, RemoteGateSteps.Handler);
+        asked.Message.Should().Be(AccountSwitchRules.RemoteNeedsWhen, "網頁照字面比對，看到就問現在換還是等背景工作結束");
+        h.Conversation(id)!.AccountId.Should().Be("acc-claude");
+        h.Conversation(id)!.DeferredAccount.Should().BeNull("還沒選：什麼都不改");
+        h.Items(id).Should().HaveCount(items, "沒有加提示");
+        s.Disposed.Should().BeFalse();
+
+        // 選了等背景工作結束：記下來、加一則提示
+        (await RunAsync(h, "setAccount", id, new { accountId = "acc-claude2", when = "turnEnd" }, tier: 2)).State.Should().Be(RemoteResultStates.Done);
+        h.Conversation(id)!.DeferredAccount!.AccountId.Should().Be("acc-claude2");
+        h.Items(id).Should().HaveCount(items + 1);
+
+        // 選回目前的帳戶：不換了
+        (await RunAsync(h, "setAccount", id, new { accountId = "acc-claude" }, tier: 2)).State.Should().Be(RemoteResultStates.Done);
+        h.Conversation(id)!.DeferredAccount.Should().BeNull();
+
+        // 再選一次、這次選現在換：照換（背景工作跟著停，告訴新帳戶）
+        (await RunAsync(h, "setAccount", id, new { accountId = "acc-claude2", when = "now" }, tier: 2)).State.Should().Be(RemoteResultStates.Done);
+        h.Conversation(id)!.AccountId.Should().Be("acc-claude2");
+        s.Disposed.Should().BeTrue();
+        h.Sessions[^1].Sent.All.Should().ContainSingle().Which.Input.Text.Should().Contain("被停掉的背景工作：〈執行指令：npm run dev〉。");
+    }
+
+    [Fact]
     public async Task 遠端setAccount_換到另一家_那一家的預設是完全自動_AllowRemoteFullAccess關閉時policy_打開時done且紀錄fullAccess()
     {
         using var h = new HubHarness();

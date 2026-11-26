@@ -23,6 +23,13 @@ public class AccountSwitchRulesTests
         => new(id, AgentProvider.Claude, AccountStatus.Ready, null, windows, order);
 
     [Fact]
+    public void RemoteNeedsWhen_同網頁的SWITCH_NEEDS_WHEN_照字面比對()
+    {
+        // 網頁 accountrules.js 的 SWITCH_NEEDS_WHEN（tools/ui-probe/accountrules.test.mjs 也固定同一句）：改一邊要改另一邊
+        AccountSwitchRules.RemoteNeedsWhen.Should().Be("還有背景工作在跑，換帳戶會停掉它們：請選現在換，或等背景工作結束後再換");
+    }
+
+    [Fact]
     public void Supports_四種代理都支援_未知列舉值丟例外()
     {
         AgentProviders.All.Where(AccountSwitchRules.Supports).Should().BeEquivalentTo(AgentProviders.All);

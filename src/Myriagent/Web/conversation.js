@@ -28,7 +28,7 @@ import { entranceAllowed, turnEndTone, cardSettleFx, splitCount, titleDecodeFx, 
 import { calmMotion } from './theme.js';
 import { setDecodedText } from './textfx.js';
 import { tokenCounter } from './tokenfx.js';
-import { runningAccountMenu, runningSwitchConfirm, runningSwitchCommand, pendingSwitchView, accountChipHint, backgroundSwitchConfirm, backgroundSwitchCommand, SWITCH_NOW } from './accountrules.js';
+import { runningAccountMenu, runningSwitchConfirm, runningSwitchCommand, pendingSwitchView, accountChipHint, backgroundSwitchConfirm, backgroundSwitchCommand, SWITCH_NOW, SWITCH_NEEDS_WHEN } from './accountrules.js';
 import { SENDING_TIMEOUT_MS, ACCEPTED_LINGER_MS, matchSent, queuedSent, rejectedSent, sendKey, failureOf, failureUpdates } from './sendrules.js';
 import { pauseFramedVideos } from './framedvideo.js';
 import { ScrollAnchor } from './scrollanchor.js';
@@ -2481,6 +2481,8 @@ export class ConvView {
       // 執行中選了別的帳戶、要等這一輪結束才換：選回目前的帳戶＝取消
       const pending = pendingSwitchView(hd);
       if (pending && pending.turnEnd) this.cancelPendingSwitch();
+      // 〔遠端〕看不到那台記著的待換帳戶（標頭沒有 pendingAccount）：照樣送出，那台有在等就取消（「選回目前的帳戶就不換」），沒有就什麼都不做
+      else if (!hd.isDraft && this.remoteLike()) post({ cmd: 'setAccount', conversationId: this.id, accountId: a.id });
       return;
     }
     if (ownerRunning(hd, origin) && !hd.isDraft) {
@@ -2509,7 +2511,22 @@ export class ConvView {
       if (!r.ok) return;
     }
     if (!replica) this.ws.notePendingSwitch(this.id);
-    post({ cmd: 'setAccount', conversationId: this.id, accountId: a.id });
+    const cid = post({ cmd: 'setAccount', conversationId: this.id, accountId: a.id });
+    // 〔遠端〕那台閒置而背景工作還在跑（這邊看不到）：被拒、帶 SWITCH_NEEDS_WHEN，問了再帶 when 重送
+    if (typeof cid === 'string' && !hd.isDraft) {
+      track(cid, { onSettle: (st, code, from, elapsed, message) => { if (st === 'rejected' && message === SWITCH_NEEDS_WHEN) this.askBackgroundSwitch(a); } });
+    }
+  }
+
+  /** 〔遠端〕那台還有背景工作在跑：問現在換（背景工作停掉）還是等背景工作結束後再換，帶 when 重送 setAccount */
+  async askBackgroundSwitch(a) {
+    const hd = this.header;
+    if (!hd) return;
+    const when = await choiceDialog(backgroundSwitchConfirm(a.label, hd.provider, a.provider, null));
+    // 問的期間那個對話已經換了帳戶（別處換的）：不再送
+    if (!when || !this.header || this.header.accountId !== hd.accountId) return;
+    if (when === SWITCH_NOW && this.liveInfo().origin !== 'replica') this.ws.notePendingSwitch(this.id);
+    post(backgroundSwitchCommand(this.id, a.id, when));
   }
 
   /** 取消「這一輪結束後換帳戶」：送目前的帳戶（宿主取消、提示；沒有新的 conversation） */

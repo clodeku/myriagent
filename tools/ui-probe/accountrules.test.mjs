@@ -738,8 +738,15 @@ test('backgroundSwitchConfirm_背景工作還在跑時換帳戶_預設等背景�
     '還有 1 個背景工作在跑（npm run dev）。換帳戶會關掉目前的程序，背景工作會跟著停止。');
   assert.equal(A.backgroundSwitchConfirm('x', 'Claude', 'Claude', { count: 2, tasks: [{ tool: 'Agent', title: null }] }).message,
     '還有 2 個背景工作在跑（Agent 等）。換帳戶會關掉目前的程序，背景工作會跟著停止。', '列不下的也算進「等」，沒有摘要用工具名稱');
-  assert.equal(A.backgroundSwitchConfirm('x', 'Claude', 'Claude', null).message, '還有 1 個背景工作在跑。換帳戶會關掉目前的程序，背景工作會跟著停止。');
+  // 〔遠端〕看不到那台的背景工作（被拒了才知道有）：不說幾個
+  assert.equal(A.backgroundSwitchConfirm('x', 'Claude', 'Claude', null).message, '那台電腦還有背景工作在跑。換帳戶會關掉目前的程序，背景工作會跟著停止。');
+  assert.equal(A.backgroundSwitchConfirm('x', 'Claude', 'Claude', null).choices[0].value, 'now');
   assert.ok(A.backgroundSwitchConfirm('Codex Pro', 'Claude', 'Codex', bg).message.endsWith('Claude Code 和 Codex 的對話不能直接接續，「Codex Pro」會帶著先前對話的節錄開新的對話。'));
+});
+
+test('SWITCH_NEEDS_WHEN_同電腦的AccountSwitchRules_RemoteNeedsWhen_照字面比對', () => {
+  // 電腦端 tests 的 AccountSwitchRulesTests 固定同一句：改一邊要改另一邊
+  assert.equal(A.SWITCH_NEEDS_WHEN, '還有背景工作在跑，換帳戶會停掉它們：請選現在換，或等背景工作結束後再換');
 });
 
 test('backgroundSwitchCommand_一律帶when_現在換是now_其他都是等背景工作結束', () => {

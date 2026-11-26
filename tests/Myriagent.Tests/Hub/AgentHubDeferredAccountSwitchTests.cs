@@ -96,6 +96,31 @@ public class AgentHubDeferredAccountSwitchTests
     }
 
     [Fact]
+    public async Task 已經在等背景工作結束才換_同一個帳戶再選一次_不再加一則一樣的提示_只回說明()
+    {
+        // 2026-11-26 使用者回報：手機上選了兩次，對話裡出現兩則一模一樣的延後提示
+        using var h = new HubHarness();
+        var (id, s1) = h.StartConversation(h.Main, h.Claude);
+        StartBackground(h, s1);
+        h.CompleteTurn(s1);
+        h.Command(h.Main, "setAccount", AtTurnEnd(id, h.Claude2.Id));
+        var notices = h.Items(id).Count(i => i.NoticeKind == AgentNoticeKind.AccountSwitch);
+        var mark = h.Main.Mark();
+
+        h.Command(h.Main, "setAccount", AtTurnEnd(id, h.Claude2.Id));
+
+        h.Items(id).Count(i => i.NoticeKind == AgentNoticeKind.AccountSwitch).Should().Be(notices, "已經在等：不重複加提示");
+        (await h.Main.WaitForAsync("toast", since: mark)).Value<string>("text").Should().Be(AccountSwitchRules.BuildDeferredAgainToast("Claude 副帳戶"));
+        h.Conversation(id)!.DeferredAccount!.AccountId.Should().Be(h.Claude2.Id);
+        s1.Disposed.Should().BeFalse();
+
+        // 換成另一個帳戶：照常記下新的目標、加提示
+        h.Command(h.Main, "setAccount", AtTurnEnd(id, h.Codex.Id));
+        h.Conversation(id)!.DeferredAccount!.AccountId.Should().Be(h.Codex.Id);
+        h.Items(id).Count(i => i.NoticeKind == AgentNoticeKind.AccountSwitch).Should().Be(notices + 1);
+    }
+
+    [Fact]
     public void 閒置時有背景工作_還沒結束就送出_由原帳戶送_仍然等著()
     {
         using var h = new HubHarness();

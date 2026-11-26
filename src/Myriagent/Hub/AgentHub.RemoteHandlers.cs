@@ -466,8 +466,14 @@ internal sealed partial class AgentHub
             return;
         }
 
-        // 閒置、還有背景工作在跑時：遠端看不到這台的背景工作、不會帶 when now，等背景工作結束才換（對話裡有提示）
+        // 閒置、還有背景工作在跑時：遠端看不到這台的背景工作，不帶 when 的先不換、回 conflict 請網頁問使用者要現在換還是等背景工作結束
+        // （AccountSwitchRules.RemoteNeedsWhen；網頁問了再帶 when 重送：now 照換、turnEnd 等背景工作結束才換）
         var when = command.Value<string>("when");
+        if (when == null && !c.Running && !c.IsDraft && c.Session?.HasLiveBackgroundWork == true)
+        {
+            context.Reject(RemoteResultCodes.Conflict, AccountSwitchRules.RemoteNeedsWhen, RemoteGateSteps.Handler);
+            return;
+        }
         SetAccount(view, c, account.Id, rememberAccount: false, atTurnEnd: AccountSwitchRules.IsAtTurnEnd(when),
             explicitNow: AccountSwitchRules.IsExplicitNow(when));
         context.Complete();

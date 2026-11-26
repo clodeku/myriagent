@@ -3,6 +3,7 @@
 // 150 秒還等不到時各呼叫一次 info.onSettle(state, code, origin)：state 是 done／rejected／unknown，新的 init 與過期是 ('unknown', null, null)。
 // 沒有登記的 commandId 一律略過（網頁沒有通用的結果處理）；unknown 不自動重送（可能已執行）。
 // 結果到了（commandResult）時 onSettle 另帶第四個參數：送出到結果回來的毫秒數（輸入框下方的往返讀數，fxrules.rttLabel）；其他情況是 null。
+// 第五個參數是結果帶的說明（被拒的原因，那台電腦或伺服器寫的；沒有是 null）：要照原因決定下一步的用它（換帳戶時那台還有背景工作）。
 // WP4.8 步 12 與第 5 階段照用：import { track } from './cmdtrack.js'
 import { trackNew, trackAdd, trackSettle, trackAbandon, trackExpire } from './liverules.js';
 
@@ -23,7 +24,7 @@ export function onResult(msg) {
   const s = trackSettle(table, msg);
   if (!s) return false;
   sentAt.delete(msg.commandId);
-  settle(s.info, s.state, s.code, s.origin, typeof t0 === 'number' ? performance.now() - t0 : null);
+  settle(s.info, s.state, s.code, s.origin, typeof t0 === 'number' ? performance.now() - t0 : null, s.message);
   return true;
 }
 
@@ -48,10 +49,10 @@ export function sweep(now) {
 
 const SENT_KEEP_MS = 160_000;
 
-function settle(info, state, code, origin, elapsed = null) {
+function settle(info, state, code, origin, elapsed = null, message = null) {
   if (!info || typeof info.onSettle !== 'function') return;
   try {
-    info.onSettle(state, code, origin, elapsed);
+    info.onSettle(state, code, origin, elapsed, message);
   } catch (e) {
     // 一個畫面的處理出錯不影響其他追蹤；照常報出（主控台看得到）
     if (typeof reportError === 'function') reportError(e); else setTimeout(() => { throw e; });
