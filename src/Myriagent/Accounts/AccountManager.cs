@@ -1335,8 +1335,9 @@ internal sealed class AccountManager : IDisposable
         {
             // 一定要回報（例外也一樣），不然這個帳戶會一直停在「正在換發」
             var run = new CliRunResult(-1, string.Empty, "換發程序沒有執行", false);
-            var after = ClaudeTokenState.Unreadable;
+            var after = new TokenAfterRefresh(ClaudeTokenState.Unreadable, null, null);
             JObject? usage = null;
+            string? attempt = null;
             try
             {
                 // 起 claude -p 之前最後確認一次 CLI 沒有開始更新（CliManager 自己加鎖，背景執行緒可以讀；這個程序不在 app 的工作物件裡，更新屏障等不到它）
@@ -1345,7 +1346,7 @@ internal sealed class AccountManager : IDisposable
                     post(() => OnClaudeTokenRefreshSkipped(accountId, refresh, previousAttempt));
                     return;
                 }
-                (usage, run) = await QueryUsageWithCliAsync(account, launcher, cancel.Token);
+                (usage, run, attempt) = await QueryUsageWithCliAsync(account, launcher, cancel.Token);
                 after = await ReadTokenStateAfterRefreshAsync(credentialFile);
             }
             catch (OperationCanceledException)
@@ -1362,15 +1363,17 @@ internal sealed class AccountManager : IDisposable
             {
                 cancel.Dispose();
             }
-            post(() => OnClaudeTokenRefreshDone(accountId, refresh, after, run, usage));
+            post(() => OnClaudeTokenRefreshDone(accountId, refresh, after, run, usage, attempt));
         });
     }
 
     /// <summary>
     /// 開一個不送訊息的 Claude 程序問 get_usage（背景執行緒）：不加入 app 的工作物件（換發途中不能被砍）。回傳用量端點形狀的 rate_limits
-    /// （沒有就是 null）與給 EvaluateRefresh 的結果（成功＝結束碼 0；逾時、失敗帶原因）
+    /// （沒有就是 null）、給 EvaluateRefresh 的結果（成功＝結束碼 0；逾時、失敗帶原因）與這一次的經過（ClaudeTokenRecoveryRules.DescribeUsageAttempt：
+    /// 回應與 stderr 的最後一行，換發被拒時才記進記錄；給人看的說明照舊只看結果）
     /// </summary>
-    private static async Task<(JObject? Usage, CliRunResult Run)> QueryUsageWithCliAsync(AgentAccount account, AgentLauncher launcher, CancellationToken ct)
+    private static async Task<(JObject? Usage, CliRunResult Run, string? Attempt)> QueryUsageWithCliAsync(AgentAccount account, AgentLauncher launcher,
+        CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(ClaudeTokenRecoveryRules.RefreshTimeout);
@@ -1378,19 +1381,20 @@ internal sealed class AccountManager : IDisposable
         {
             await using var client = await ClaudeControlClient.StartAsync(launcher, env => AccountRules.ApplyCommandEnvironment(account, env), killWithApp: false, timeout.Token);
             var response = await client.RequestAsync(ClaudeTokenRecoveryRules.BuildUsageRequest(), ClaudeTokenRecoveryRules.RefreshTimeout, timeout.Token);
+            var attempt = ClaudeTokenRecoveryRules.DescribeUsageAttempt(response, client.StderrTail());
             if (response == null)
-                return (null, new CliRunResult(-1, string.Empty, client.StderrTail() is { Length: > 0 } tail ? tail : "CLI 沒有回應", true));
+                return (null, new CliRunResult(-1, string.Empty, client.StderrTail() is { Length: > 0 } tail ? tail : "CLI 沒有回應", true), attempt);
             if (!response.Success)
-                return (null, new CliRunResult(1, string.Empty, response.Error ?? "CLI 查不到用量", false));
-            return (ClaudeTokenRecoveryRules.ParseCliUsage(response.Response), new CliRunResult(0, string.Empty, string.Empty, false));
+                return (null, new CliRunResult(1, string.Empty, response.Error ?? "CLI 查不到用量", false), attempt);
+            return (ClaudeTokenRecoveryRules.ParseCliUsage(response.Response), new CliRunResult(0, string.Empty, string.Empty, false), attempt);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return (null, new CliRunResult(-1, string.Empty, "執行逾時", true));
+            return (null, new CliRunResult(-1, string.Empty, "執行逾時", true), null);
         }
         catch (InvalidOperationException ex)
         {
-            return (null, new CliRunResult(-1, string.Empty, ex.Message, false));
+            return (null, new CliRunResult(-1, string.Empty, ex.Message, false), null);
         }
     }
 
@@ -1409,24 +1413,34 @@ internal sealed class AccountManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// 換發結束後的憑證：權杖的狀況、refresh token 還在不在（讀不懂是 null）、登入到期（refreshTokenExpiresAt；CLI 清空登入時照樣留著）。
+    /// 後兩個只用來寫記錄（換發被拒時說清楚是登入到期還是別的原因）
+    /// </summary>
+    private sealed record TokenAfterRefresh(ClaudeTokenState State, bool? RefreshTokenLeft, long? LoginExpiresAt);
+
     /// <summary>換發結束後的權杖狀況：CLI 剛寫完檔時可能還讀不到或讀不懂，最多再讀兩次</summary>
-    private static async Task<ClaudeTokenState> ReadTokenStateAfterRefreshAsync(string credentialFile)
+    private static async Task<TokenAfterRefresh> ReadTokenStateAfterRefreshAsync(string credentialFile)
     {
         var state = ClaudeTokenState.Unreadable;
+        string? text = null;
         for (int attempt = 0; attempt < 3; attempt++)
         {
             if (attempt > 0)
                 await Task.Delay(500);
-            var text = ReadCredentialsQuietly(credentialFile);
+            text = ReadCredentialsQuietly(credentialFile);
             state = text == null && File.Exists(credentialFile) ? ClaudeTokenState.Unreadable : AccountRules.InspectClaudeToken(text, DateTimeOffset.UtcNow);
             if (state != ClaudeTokenState.Unreadable)
                 break;
         }
-        return state;
+        return state == ClaudeTokenState.Unreadable
+            ? new TokenAfterRefresh(state, null, null)
+            : new TokenAfterRefresh(state, ClaudeTokenRecoveryRules.HasRefreshToken(text), AccountIdentityRules.ReadClaudeLoginExpiresAt(text));
     }
 
     /// <summary>換發結束（UI 執行緒）：記下結果，重新確認登入狀態並查用量（監看也會觸發；換發沒成功時也要把說明換掉）</summary>
-    private void OnClaudeTokenRefreshDone(string accountId, TokenRefreshState refresh, ClaudeTokenState after, CliRunResult run, JObject? usage = null)
+    private void OnClaudeTokenRefreshDone(string accountId, TokenRefreshState refresh, TokenAfterRefresh after, CliRunResult run, JObject? usage = null,
+        string? attempt = null)
     {
         // 帳戶已移除（或換成新的狀態物件）：不再處理
         if (!tokenRefresh.TryGetValue(accountId, out var current) || current != refresh)
@@ -1439,7 +1453,7 @@ internal sealed class AccountManager : IDisposable
         // CLI 代查到的用量先存下（權杖沒寫回憑證檔時——例如存在 Windows 認證管理員——至少用量是新的）
         if (usage != null && UsageRules.ParseClaudeUsage(usage) is { Windows.Count: > 0 } parsed)
             StoreUsage(accountId, new UsageSnapshot(DateTimeOffset.UtcNow, "api", parsed.Windows, null, parsed.Note, null, false));
-        var (result, detail) = ClaudeTokenRecoveryRules.EvaluateRefresh(after, run);
+        var (result, detail) = ClaudeTokenRecoveryRules.EvaluateRefresh(after.State, run);
         refresh.LastError = result == ClaudeTokenRefreshResult.Refreshed ? null : detail;
         switch (result)
         {
@@ -1448,10 +1462,10 @@ internal sealed class AccountManager : IDisposable
                 break;
             case ClaudeTokenRefreshResult.LoginLost:
                 Log.Warn($"「{account.Label}」換發權杖被拒，CLI 清空了登入：要重新登入"
-                         + (ClaudeTokenRecoveryRules.CliReason(run) is { } why ? $"（CLI 說：{why}）" : "（CLI 沒有說明原因）"));
+                         + ClaudeTokenRecoveryRules.DescribeLoginLost(run, after.RefreshTokenLeft, after.LoginExpiresAt, DateTimeOffset.Now, attempt));
                 break;
             case ClaudeTokenRefreshResult.Failed:
-                Log.Warn($"「{account.Label}」讓 Claude CLI 換發權杖沒有成功：{detail}");
+                Log.Warn($"「{account.Label}」讓 Claude CLI 換發權杖沒有成功：{detail}" + (attempt != null ? $"（{attempt}）" : string.Empty));
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(result), result, null);
@@ -2327,6 +2341,8 @@ internal sealed class AccountManager : IDisposable
             : canceled ? "已取消登入"
             : success == false ? "登入沒有完成"
             : GetState(accountId).StatusText;
+        // 登入的結果記進記錄（2026-11-27：被登出的帳戶之後又能換發，記錄裡看不出是不是有人重新登入過）；不含信箱
+        Log.Info($"登入「{account.Label}」結束：{(ok ? "成功" : canceled ? "取消" : "沒有完成")}{(run.Expectation is not null ? "（遠端登入）" : string.Empty)}");
         LoginProgress?.Invoke(accountId, message, true, ok);
     }
 

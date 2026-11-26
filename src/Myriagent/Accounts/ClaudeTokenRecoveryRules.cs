@@ -1,4 +1,6 @@
+using Myriagent.Agents;
 using Myriagent.Cli;
+using Myriagent.Sync;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -196,7 +198,55 @@ internal static class ClaudeTokenRecoveryRules
     /// CLI 自己說的原因（錯誤結果或 stderr 的第一行，最多 160 字；沒有回 null）：換發被拒、登入被清空時只進記錄，
     /// 之後才查得出為什麼被登出（2026-11-25：一週內兩台電腦各有一個帳戶被拒，記錄裡只有「換發權杖被拒」、看不出原因）
     /// </summary>
-    public static string? CliReason(CliRunResult run) => FirstLine(run.Stderr) ?? ResultText(run.Stdout);
+    public static string? CliReason(CliRunResult run) => CredentialLeakRules.Mask(FirstLine(run.Stderr) ?? ResultText(run.Stdout));
+
+    /// <summary>
+    /// CLI 代查用量（get_usage）這一次的經過，給「換發被拒、登入被清空」的記錄用：回應本身（失敗時的錯誤；成功時 rate_limits_available 與方案）
+    /// 與 stderr 的最後一行（遮蔽疑似憑證、最多 160 字）。2026-11-27：代查用量回應成功時 stderr 一律不收，一台電腦的兩個帳戶被清空時記錄只寫了
+    /// 「CLI 沒有說明原因」——那時 CLI 其實在對話裡說得很清楚（this login reached its time limit）。沒有可說的回 null
+    /// </summary>
+    public static string? DescribeUsageAttempt(ClaudeControlResponse? response, string? stderrTail)
+    {
+        var parts = new List<string>();
+        if (response == null)
+            parts.Add("get_usage 沒有回應");
+        else if (!response.Success)
+            parts.Add("get_usage 錯誤：" + (FirstLine(response.Error) ?? "（沒有說明）"));
+        else if (response.Response is { } body)
+        {
+            var available = body["rate_limits_available"] is JValue { Type: JTokenType.Boolean } flag ? ((bool)flag ? "true" : "false") : "沒有";
+            var plan = body["subscription_type"] is JValue { Type: JTokenType.String } type && !string.IsNullOrWhiteSpace((string?)type)
+                ? "、方案 " + FirstLine((string?)type)
+                : string.Empty;
+            parts.Add($"get_usage 回應 rate_limits_available={available}{plan}");
+        }
+        if (LastLine(stderrTail) is { } stderr)
+            parts.Add("stderr：" + stderr);
+        return parts.Count == 0 ? null : CredentialLeakRules.Mask(string.Join("；", parts));
+    }
+
+    /// <summary>
+    /// 換發被拒、CLI 清空了登入時記錄後面的說明（括號裡）：登入到期了沒有（憑證檔的 refreshTokenExpiresAt，CLI 清空時照樣留著：
+    /// Anthropic 的登入有使用期限、到了就換發不了，2026-11-27 查到這週各台的登出都是這個）、refresh token 有沒有一起清掉、CLI 說的原因、
+    /// 代查用量的經過（<see cref="DescribeUsageAttempt"/>）。什麼都沒有時是「（CLI 沒有說明原因）」
+    /// </summary>
+    public static string DescribeLoginLost(CliRunResult run, bool? refreshTokenLeft, long? loginExpiresAt, DateTimeOffset now, string? attempt)
+    {
+        var parts = new List<string>();
+        if (loginExpiresAt is > 0 and <= AccountIdentityRules.MaxUnixMs)
+        {
+            var at = DateTimeOffset.FromUnixTimeMilliseconds(loginExpiresAt.Value).ToLocalTime();
+            var when = at.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            parts.Add(at <= now ? $"登入已在 {when} 到期（Anthropic 的登入有使用期限）" : $"登入到期是 {when}，還沒到");
+        }
+        if (refreshTokenLeft is { } left)
+            parts.Add(left ? "refresh token 還在" : "refresh token 也清空了");
+        if (CliReason(run) is { } why)
+            parts.Add("CLI 說：" + why);
+        if (!string.IsNullOrWhiteSpace(attempt))
+            parts.Add(attempt);
+        return parts.Count == 0 ? "（CLI 沒有說明原因）" : "（" + string.Join("；", parts) + "）";
+    }
 
     /// <summary>
     /// 用量查詢回「權杖已過期」時給人看的說明（儀表板與側欄提示）：依能不能讓 CLI 換發、上一次的結果，說明接下來會怎樣。
@@ -220,6 +270,13 @@ internal static class ClaudeTokenRecoveryRules
             return "稍後";
         var minutes = (int)Math.Ceiling((next - now).TotalMinutes);
         return minutes >= 60 ? $"約 {Math.Round(minutes / 60.0)} 小時後" : $"{minutes} 分鐘後";
+    }
+
+    /// <summary>最後一行不是空白的（最多 160 字）</summary>
+    private static string? LastLine(string? text)
+    {
+        var line = text?.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.Length > 0);
+        return line == null ? null : line.Length <= 160 ? line : line[..160] + "…";
     }
 
     private static string? FirstLine(string? text)

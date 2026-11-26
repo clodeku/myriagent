@@ -1,5 +1,6 @@
 using Myriagent.Usage;
 using Myriagent.Accounts;
+using Myriagent.Agents;
 using Myriagent.Cli;
 using Newtonsoft.Json.Linq;
 
@@ -181,6 +182,53 @@ public class ClaudeTokenRecoveryRulesTests
         ClaudeTokenRecoveryRules.CliReason(Run(1, """{"type":"result","is_error":true,"result":"invalid_grant"}""")).Should().Be("invalid_grant");
         ClaudeTokenRecoveryRules.CliReason(Run(0)).Should().BeNull();
         ClaudeTokenRecoveryRules.CliReason(Run(1, stderr: new string('x', 400))).Should().HaveLength(161, "最多 160 字加省略號");
+    }
+
+    [Fact]
+    public void CLI說的原因_遮蔽疑似憑證()
+    {
+        var secret = "sk-ant-oat01-" + new string('A', 40);
+        var reason = ClaudeTokenRecoveryRules.CliReason(Run(1, stderr: "refresh failed for " + secret));
+        reason.Should().NotBeNull().And.StartWith("refresh failed for ").And.NotContain(secret);
+    }
+
+    private static ClaudeControlResponse Ok(string json) => new("c2", true, JObject.Parse(json), null);
+
+    [Fact]
+    public void 代查用量的經過_回應與stderr最後一行()
+    {
+        // 2026-11-27：代查用量回應成功時 stderr 不收，被清空登入的記錄只寫「CLI 沒有說明原因」
+        ClaudeTokenRecoveryRules.DescribeUsageAttempt(null, null).Should().Be("get_usage 沒有回應");
+        ClaudeTokenRecoveryRules.DescribeUsageAttempt(new ClaudeControlResponse("c2", false, null, "OAuth token has expired\nmore"), null)
+            .Should().Be("get_usage 錯誤：OAuth token has expired");
+        ClaudeTokenRecoveryRules.DescribeUsageAttempt(new ClaudeControlResponse("c2", false, null, null), null).Should().Be("get_usage 錯誤：（沒有說明）");
+        ClaudeTokenRecoveryRules.DescribeUsageAttempt(Ok("""{"subscription_type":"max","rate_limits_available":false}"""), "  \n")
+            .Should().Be("get_usage 回應 rate_limits_available=false、方案 max");
+        ClaudeTokenRecoveryRules.DescribeUsageAttempt(Ok("""{"rate_limits_available":true,"rate_limits":{}}"""), null)
+            .Should().Be("get_usage 回應 rate_limits_available=true");
+        ClaudeTokenRecoveryRules.DescribeUsageAttempt(Ok("{}"), "warning one\nFailed to authenticate: this login reached its time limit and cannot be renewed.\n")
+            .Should().Be("get_usage 回應 rate_limits_available=沒有；stderr：Failed to authenticate: this login reached its time limit and cannot be renewed.");
+        ClaudeTokenRecoveryRules.DescribeUsageAttempt(Ok("""{"rate_limits_available":null}"""), new string('x', 400))
+            .Should().EndWith("…").And.Contain("rate_limits_available=沒有");
+        var secret = "sk-ant-oat01-" + new string('B', 40);
+        ClaudeTokenRecoveryRules.DescribeUsageAttempt(Ok("{}"), "token " + secret).Should().NotContain(secret, "stderr 裡疑似憑證的字遮掉");
+    }
+
+    [Fact]
+    public void 登入被清空的說明_到期時間_refresh_token_CLI的原因_代查經過()
+    {
+        var now = new DateTimeOffset(2026, 11, 27, 10, 0, 0, TimeSpan.FromHours(8));
+        var past = new DateTimeOffset(2026, 11, 26, 11, 10, 0, TimeSpan.FromHours(8)).ToUnixTimeMilliseconds();
+        var future = new DateTimeOffset(2026, 12, 19, 20, 38, 0, TimeSpan.FromHours(8)).ToUnixTimeMilliseconds();
+        string Local(long ms) => DateTimeOffset.FromUnixTimeMilliseconds(ms).ToLocalTime().ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
+        ClaudeTokenRecoveryRules.DescribeLoginLost(Run(0), refreshTokenLeft: false, past, now, "get_usage 回應 rate_limits_available=false")
+            .Should().Be($"（登入已在 {Local(past)} 到期（Anthropic 的登入有使用期限）；refresh token 也清空了；get_usage 回應 rate_limits_available=false）");
+        ClaudeTokenRecoveryRules.DescribeLoginLost(Run(1, stderr: "invalid_grant"), refreshTokenLeft: true, future, now, null)
+            .Should().Be($"（登入到期是 {Local(future)}，還沒到；refresh token 還在；CLI 說：invalid_grant）");
+        ClaudeTokenRecoveryRules.DescribeLoginLost(Run(0), refreshTokenLeft: null, loginExpiresAt: null, now, null).Should().Be("（CLI 沒有說明原因）");
+        ClaudeTokenRecoveryRules.DescribeLoginLost(Run(0), null, loginExpiresAt: 0, now, "  ").Should().Be("（CLI 沒有說明原因）", "不合格的到期時間與空白的經過不寫");
+        ClaudeTokenRecoveryRules.DescribeLoginLost(Run(0), null, loginExpiresAt: long.MaxValue, now, null).Should().Be("（CLI 沒有說明原因）");
     }
 
     [Fact]
