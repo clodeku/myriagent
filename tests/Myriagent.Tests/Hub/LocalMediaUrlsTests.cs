@@ -75,6 +75,25 @@ public class LocalMediaUrlsTests
     }
 
     [Fact]
+    public void Markdown檔案連結_連到圖片與影片_放行媒體端點()
+    {
+        // 網頁點回覆裡連到圖片、影片的連結時以 /media 在燈箱、播放器顯示（2026-11-27：以前只登記另存，燈箱「圖片無法載入」）
+        var urls = new LocalMediaUrls();
+
+        urls.MarkdownLinkUrl("C:/repo/output/商品/A-001/原圖排列.jpg");
+        urls.AllowMarkdownLink(@"C:\repo\output\demo.mp4");
+        urls.MarkdownLinkUrl(@"C:\repo\output\報告.pdf");
+        urls.AllowMarkdownLink(@"\\evil\share\a.png");
+
+        urls.IsMediaAllowed(@"C:\repo\output\商品\A-001\原圖排列.jpg").Should().BeTrue();
+        urls.IsSaveAllowed(@"C:\repo\output\商品\A-001\原圖排列.jpg").Should().BeTrue();
+        urls.IsMediaAllowed(@"C:\repo\output\demo.mp4").Should().BeTrue("背景轉好的 Markdown 回到 UI 執行緒補登記的也一樣");
+        urls.IsMediaAllowed(@"C:\repo\output\報告.pdf").Should().BeFalse("不能直接顯示的檔照舊只能另存");
+        urls.IsSaveAllowed(@"C:\repo\output\報告.pdf").Should().BeTrue();
+        urls.IsMediaAllowed(@"\\evil\share\a.png").Should().BeFalse();
+    }
+
+    [Fact]
     public void Markdown圖片_看正規化後的副檔名()
     {
         var urls = new LocalMediaUrls();

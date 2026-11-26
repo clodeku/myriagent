@@ -64,18 +64,25 @@ internal sealed class LocalMediaUrls : IMediaUrlBuilder
     /// <summary>Markdown 裡的本機圖片：網址用 Markdown 解析出的路徑（不正規化），登記另由 AllowMarkdownImage 在轉換成功後做</summary>
     public string MarkdownImageUrl(string path) => MarkdownImageUrlOf(path);
 
-    /// <summary>Markdown 裡的本機檔案連結：網址用解析出的路徑（不正規化），同時登記「另存新檔」的白名單（不放行 /media、/thumb）</summary>
+    /// <summary>Markdown 裡的本機檔案連結：網址用解析出的路徑（不正規化），同時登記「另存新檔」的白名單（只有圖片與影片另外放行 /media）</summary>
     public string MarkdownLinkUrl(string path)
     {
         AllowMarkdownLink(path);
         return MarkdownLinkUrlOf(path);
     }
 
-    /// <summary>回覆中的本機檔案連結登記「另存新檔」的白名單（背景轉好的 Markdown 回到 UI 執行緒時補登記，見 <see cref="Deferred"/>）</summary>
+    /// <summary>
+    /// 回覆中的本機檔案連結登記「另存新檔」的白名單（背景轉好的 Markdown 回到 UI 執行緒時補登記，見 <see cref="Deferred"/>）。
+    /// 連到可直接顯示的圖片與影片時另外放行 /media（同 <see cref="AllowMarkdownImage"/>）：網頁點這種連結是在燈箱、播放器裡以 /media 顯示
+    /// （filelinks.js），以前只登記另存，燈箱一律「圖片無法載入」（2026-11-27 使用者回報）
+    /// </summary>
     public void AllowMarkdownLink(string path)
     {
-        if (NormalizePath(path) is { } normalized)
-            allowedLinks.Add(normalized);
+        if (NormalizePath(path) is not { } normalized)
+            return;
+        allowedLinks.Add(normalized);
+        if (AgentAttachmentRules.IsDisplayableMedia(normalized))
+            allowedMedia.Add(normalized);
     }
 
     /// <summary>Markdown 圖片與檔案連結的網址：純函式，UI 執行緒與背景執行緒（<see cref="Deferred"/>）共用同一個算法</summary>
