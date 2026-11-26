@@ -450,6 +450,81 @@ internal sealed class FakeSession : IAgentSession
         };
     }
 
+    // ── 放開與接回程序（代理主機 H1；AgentHub.Detach.cs）──
+
+    /// <summary>測試指定：這個會話的程序是經代理主機開的、放得開（預設不行：既有測試照舊走等背景工作）</summary>
+    public bool Detachable { get; set; }
+
+    public bool CanDetachProcess => Detachable && HasLiveProcess && !IsRunning;
+
+    private int detaches;
+
+    public int Detaches => Volatile.Read(ref detaches);
+
+    /// <summary>設定後 DetachProcessAsync 會等它完成（模擬等主機回覆的期間）</summary>
+    public TaskCompletionSource? DetachGate { get; set; }
+
+    /// <summary>設成 true：放開失敗（回 null，程序照舊是這個會話的）</summary>
+    public bool FailDetach { get; set; }
+
+    /// <summary>背景工作的工具卡 id（Codex 的背景指令：和 LiveBackgroundTools 同順序）；放開時記進狀態、接回時隨背景工作回報</summary>
+    public IReadOnlyList<string>? LiveBackgroundToolIds { get; set; }
+
+    /// <summary>接回成功、回報了程序與背景工作之後（同真的會話：接上時補送放開期間的輸出）</summary>
+    public Action<FakeSession>? AfterAttach { get; set; }
+
+    public async Task<JObject?> DetachProcessAsync()
+    {
+        Interlocked.Increment(ref detaches);
+        if (DetachGate != null)
+            await DetachGate.Task;
+        if (!CanDetachProcess || FailDetach)
+            return null;
+        var state = new JObject
+        {
+            ["Version"] = 1,
+            ["Process"] = JObject.FromObject(new AgentProcessDetachState(7, 4242, 10, 0, ProcessInstance ?? string.Empty, 0)),
+            ["Instance"] = ProcessInstance,
+            ["Tools"] = JArray.FromObject(LiveBackgroundTools),
+            ["ToolIds"] = LiveBackgroundToolIds == null ? null : JArray.FromObject(LiveBackgroundToolIds),
+        };
+        // 同真的會話：放開之後沒有程序、不回報背景工作沒了
+        LiveProcess = false;
+        HasLiveBackgroundWork = false;
+        LiveBackgroundTools = Array.Empty<AgentBackgroundTool>();
+        return state;
+    }
+
+    /// <summary>每次接回帶的狀態與設定</summary>
+    public Recorder<(JObject State, AgentSessionSettings Settings)> Attaches { get; } = new();
+
+    /// <summary>設定後 AttachProcessAsync 會等它完成</summary>
+    public TaskCompletionSource? AttachGate { get; set; }
+
+    /// <summary>設成 true：接不回去（回 false）</summary>
+    public bool FailAttach { get; set; }
+
+    public async Task<bool> AttachProcessAsync(JObject state, AgentSessionSettings settings)
+    {
+        Attaches.Add(((JObject)state.DeepClone(), settings));
+        if (AttachGate != null)
+            await AttachGate.Task;
+        if (FailAttach)
+            return false;
+        var tools = state["Tools"]?.ToObject<List<AgentBackgroundTool>>() ?? new List<AgentBackgroundTool>();
+        Detachable = true;
+        LiveProcess = null;
+        ProcessInstance = state.Value<string>("Instance");
+        HasLiveBackgroundWork = tools.Count > 0;
+        LiveBackgroundTools = tools;
+        // 同真的會話：同一個程序實例、背景工作的清單帶回來
+        Raise(new AgentProcessStartedEvent(ProcessInstance ?? "attached", settings.Cli));
+        LiveBackgroundToolIds = state["ToolIds"]?.ToObject<List<string>>();
+        Raise(new AgentBackgroundWorkEvent(tools.Count, tools, LiveBackgroundToolIds));
+        AfterAttach?.Invoke(this);
+        return true;
+    }
+
     public int Interrupts => Volatile.Read(ref interrupts);
 
     public int Closes => Volatile.Read(ref closes);

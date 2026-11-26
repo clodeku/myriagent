@@ -305,6 +305,24 @@ internal interface IAgentSession : IDisposable
     string? ProcessInstance { get; }
 
     /// <summary>
+    /// 目前的程序現在放得開（設計 docs/plans/2026-11-26-agent-host.md 3.3）：經代理主機開的、主機會保留它，而且會話在靜止點
+    /// （閒置、沒有在途的請求）。不支援的代理種類一律 false
+    /// </summary>
+    bool CanDetachProcess => false;
+
+    /// <summary>
+    /// 放開目前的程序、不結束它（app 換版時留給新的 app 接回，背景工作照跑）：回傳接回要用的狀態，之後這個會話沒有程序。
+    /// 放不開回 null（程序照舊是這個會話的，呼叫端照原本的方式處理）。放開之後不發程序結束、背景工作清空的事件
+    /// </summary>
+    Task<JObject?> DetachProcessAsync() => Task.FromResult<JObject?>(null);
+
+    /// <summary>
+    /// 接回 <see cref="DetachProcessAsync"/> 放開的程序（新的 app、或放棄更新後的同一個 app）：成功後照常發程序啟動、版本、背景工作的事件，
+    /// 之後和沒放開過一樣。接不回去（狀態讀不懂、程序不在了、主機不在了）回 false，會話照舊沒有程序
+    /// </summary>
+    Task<bool> AttachProcessAsync(JObject state, AgentSessionSettings settings) => Task.FromResult(false);
+
+    /// <summary>
     /// 目前程序的燈號來源（對話框的資料流與硬碟燈，web-protocol 的 activity；AgentHub.Activity.cs）：PID、程序實例、
     /// app 與它之間管線的位元組累計（AgentProcess.PipeBytes）；沒有活著的程序回 null。預設 null（不取樣）
     /// </summary>

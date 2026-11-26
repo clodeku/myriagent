@@ -15,6 +15,20 @@ internal enum ResumeMode
     None,
 }
 
+/// <summary>放開的程序（<see cref="AppResumeFile.Attached"/>）：State 是會話給的狀態（IAgentSession.DetachProcessAsync），中樞不解讀</summary>
+internal sealed class ResumeAttached
+{
+    public string Id { get; set; } = string.Empty;
+
+    public Newtonsoft.Json.Linq.JObject? State { get; set; }
+
+    /// <summary>
+    /// 還在跑的背景指令的工具卡（工具 id → 項目 id；Codex）：載入紀錄時執行中的工具卡一律算被中斷（ItemLoadRules），
+    /// 接回之前把這幾張改回執行中、對回工具 id，之後跑完的結果才寫得進卡片
+    /// </summary>
+    public Dictionary<string, string> Cards { get; set; } = new();
+}
+
 /// <summary>
 /// 一個停下等新版接續的對話（設計 9.3）：ContinuationRules.Build、WhyNotContinue 與「繼續」按鈕需要的輸入。
 /// 列舉存成名稱：寫的與讀的是不同版本（舊版排空時寫、新版或退回的舊版讀），列舉順序改了也不會讀錯
@@ -97,6 +111,12 @@ internal sealed class AppResumeFile
 
     /// <summary>排空期間在閒置對話送出、被延後的（佇列第一則）：新版啟動後自動送出</summary>
     public List<string> DeferredSends { get; set; } = new();
+
+    /// <summary>
+    /// 排空時放開、沒有結束的程序（代理主機 H1，2026-11-26 起；舊版不認得這個欄位、不會接回，主機逾時後自己結束它們）：
+    /// 對話還在等背景工作，新版以同一個程序接回、背景工作不中斷
+    /// </summary>
+    public List<ResumeAttached> Attached { get; set; } = new();
 
     /// <summary>
     /// 排空關掉或停下時程序開著 Claude Remote Control 的對話（設計 9.2、9.5）：新版啟動後沒有自動接續、也沒有延後送出的，

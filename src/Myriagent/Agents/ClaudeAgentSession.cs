@@ -22,7 +22,7 @@ namespace Myriagent.Agents;
 /// （那一輪不是 SendAsync 開始的，一樣算執行中；新程序一啟動就接收事件，接續的一輪比 initialize 回應還早開始）。
 /// </para>
 /// </summary>
-internal sealed class ClaudeAgentSession : IAgentSession
+internal sealed partial class ClaudeAgentSession : IAgentSession
 {
     private static readonly TimeSpan ControlTimeout = TimeSpan.FromSeconds(10);
 

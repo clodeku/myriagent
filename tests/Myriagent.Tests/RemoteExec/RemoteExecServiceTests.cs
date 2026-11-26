@@ -43,6 +43,64 @@ public sealed class RemoteExecServiceTests : IDisposable
         line.Value<string>("code").Should().Be(RemoteExecPipeRules.ErrorToken);
     }
 
+    /// <summary>
+    /// app 換版時留下來的 CLI 程序（代理主機 H1）手上的權杖是上一版發的：新版只在上一版交棒了金鑰時才認，發新的權杖一律用自己的
+    /// </summary>
+    [Fact]
+    public async Task 上一版交棒的金鑰_它發的權杖照樣認_沒交棒的不認_金鑰檔讀一次就刪()
+    {
+        using var root = new TestSupport.TempDirectory("rexec-handoff");
+        RemoteExecSecretStore.Take(root.Root).Should().BeEmpty("沒有交棒過");
+        var oldToken = service.TokenFor(Conversation);
+        RemoteExecSecretStore.Save(root.Root, service.ExportSecrets());
+        Convert.ToHexString(File.ReadAllBytes(RemoteExecSecretStore.PathFor(root.Root))).Should().NotContain(Convert.ToHexString(service.ExportSecrets()[0]), "存的是 DPAPI 保護過的");
+
+        var inherited = RemoteExecSecretStore.Take(root.Root);
+        inherited.Should().ContainSingle().Which.Should().Equal(service.ExportSecrets()[0]);
+        File.Exists(RemoteExecSecretStore.PathFor(root.Root)).Should().BeFalse("只給緊接著的這一次啟動");
+        RemoteExecSecretStore.Take(root.Root).Should().BeEmpty();
+
+        using var next = new RemoteExecService(transport, new NeverConfirmer(), Path.Combine(Path.GetTempPath(), "myriagent-rexec-svc"),
+            "myriagent-agent-remote-test-" + Guid.NewGuid().ToString("N")[..12], _ => Task.FromResult<string?>("整理磁碟"), isElevated: () => false, inheritedSecrets: inherited);
+        next.StartPipe();
+        next.TokenFor(Conversation).Should().NotBe(oldToken, "新的權杖用這次執行的亂數");
+        next.ExportSecrets().Should().HaveCount(2, "再換版時連上一版的一起帶著");
+        transport.Directory = Paired();
+
+        async Task<string?> AskAsync(RemoteExecService target, string token)
+        {
+            var pipe = new NamedPipeClientStream(".", target.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            await pipe.ConnectAsync((int)Wait.TotalMilliseconds);
+            await using var client = new PipeClient(pipe);
+            await client.SendAsync(new JObject { ["v"] = 1, ["op"] = "list", ["conversation"] = Conversation, ["token"] = token });
+            return (await client.ReadAsync()).Value<string>("t");
+        }
+
+        (await AskAsync(next, oldToken)).Should().Be("devices", "上一版發給留下來的程序的權杖");
+        (await AskAsync(next, next.TokenFor(Conversation))).Should().Be("devices");
+        (await AskAsync(service, next.TokenFor(Conversation))).Should().Be("error", "沒有交棒的金鑰發的不認");
+
+        // 壞掉的檔：當成沒有
+        File.WriteAllBytes(RemoteExecSecretStore.PathFor(root.Root), [1, 2, 3]);
+        RemoteExecSecretStore.Take(root.Root).Should().BeEmpty();
+        File.Exists(RemoteExecSecretStore.PathFor(root.Root)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void 放進PATH的工具資料夾_受管安裝用current_換版後留下來的程序才找得到()
+    {
+        var versions = Path.Combine("C:" + Path.DirectorySeparatorChar, "Programs", "App", "versions");
+        var current = Path.Combine("C:" + Path.DirectorySeparatorChar, "Programs", "App", "current");
+        var running = Path.Combine(versions, "0.2.1-abc1234") + Path.DirectorySeparatorChar;
+        bool InCurrent(string path) => path == Path.Combine(current, RemoteExecHubRules.ToolFileName);
+
+        RemoteExecHubRules.StableToolDirectory(running, versions, current, InCurrent).Should().Be(current);
+        RemoteExecHubRules.StableToolDirectory(running, versions, current, _ => false).Should().Be(Path.Combine(versions, "0.2.1-abc1234"), "current 裡沒有工具：用自己的資料夾");
+        RemoteExecHubRules.StableToolDirectory(current + Path.DirectorySeparatorChar, versions, current, InCurrent).Should().Be(current, "從 current 啟動的本來就是");
+        var dev = Path.Combine("C:" + Path.DirectorySeparatorChar, "repo", "bin", "Release") + Path.DirectorySeparatorChar;
+        RemoteExecHubRules.StableToolDirectory(dev, versions, current, InCurrent).Should().Be(Path.TrimEndingDirectorySeparator(dev), "不是受管安裝");
+    }
+
     [Fact]
     public async Task 列出電腦_未配對時說明()
     {

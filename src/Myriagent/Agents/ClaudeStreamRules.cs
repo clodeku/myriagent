@@ -2030,6 +2030,30 @@ internal sealed partial class ClaudeStreamParser
                     ? tool with { TaskId = ClaudeStreamRules.HasTaskOutput(taskTypes.GetValueOrDefault(id), tool.ToolKind) ? id : null, StopId = id }
                     : null).OfType<AgentBackgroundTool>().ToList();
 
+    /// <summary>背景工作的登記表（放開程序時帶給接回的那個解析器；ClaudeAgentSession.Detach.cs）</summary>
+    public (List<string> Tasks, Dictionary<string, AgentBackgroundTool> Tools, Dictionary<string, string> Types) ExportBackground()
+        => (backgroundTasks.ToList(),
+            backgroundTasks.Where(taskTools.ContainsKey).ToDictionary(id => id, id => taskTools[id], StringComparer.Ordinal),
+            backgroundTasks.Where(taskTypes.ContainsKey).ToDictionary(id => id, id => taskTypes[id], StringComparer.Ordinal));
+
+    /// <summary>接回程序：還原存活的背景工作（之後 CLI 送來的 background_tasks_changed、task_notification 照常更新它）</summary>
+    public void RestoreBackground(IEnumerable<string>? tasks, IReadOnlyDictionary<string, AgentBackgroundTool>? tools, IReadOnlyDictionary<string, string>? types)
+    {
+        backgroundTasks.Clear();
+        taskTools.Clear();
+        taskTypes.Clear();
+        foreach (var id in tasks ?? Enumerable.Empty<string>())
+        {
+            if (string.IsNullOrEmpty(id) || backgroundTasks.Contains(id))
+                continue;
+            backgroundTasks.Add(id);
+            if (tools != null && tools.TryGetValue(id, out var tool) && tool != null)
+                taskTools[id] = tool with { TaskId = null, StopId = null };
+            if (types != null && types.TryGetValue(id, out var type) && type != null)
+                taskTypes[id] = type;
+        }
+    }
+
     /// <summary>最近一個主對話工具結果的 tool_use_id（重開前要等逐字稿也寫入它）</summary>
     public string? LastToolResultId { get; private set; }
 

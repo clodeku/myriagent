@@ -59,6 +59,12 @@ internal sealed partial class AgentHub
         /// <summary>CLI 更新期間或這個對話換版進行中被延後、之後要先送的訊息（在佇列裡）</summary>
         public QueuedMessage? DeferredSend;
 
+        /// <summary>
+        /// 正在接回放開的程序（AgentHub.Detach.cs）：有結果之前不能送出——會話這時沒有程序，送出會另開一個，
+        /// 和還在主機那邊的舊程序同時用同一個 CLI 對話。算成換版步驟進行中（IsRestartInFlight）
+        /// </summary>
+        public bool Attaching;
+
         /// <summary>SendAsync 因為會話正在重開而連續被拒的次數（AgentRestartInProgressException；送出成功歸零）</summary>
         public int RejectedSends;
 
@@ -194,6 +200,15 @@ internal sealed partial class AgentHub
 
         /// <summary>進行中（或最後一次）的重開要求</summary>
         public AgentRestartRequest? Request;
+
+        /// <summary>
+        /// app 更新排空時放開了這個對話的程序（AgentHub.Detach.cs）：接回要用的狀態，寫進 resume.json 的 Attached；
+        /// 放棄這次更新時就地接回。null＝沒有放開
+        /// </summary>
+        public JObject? Detached;
+
+        /// <summary>這次排空試過放開、放不開：照原本的規則等背景工作，不再試</summary>
+        public bool CannotDetach;
     }
 
     /// <summary>換版處理完的結果（標頭）；Continuation＝按「繼續」時接續訊息的內容</summary>
@@ -505,6 +520,12 @@ internal sealed partial class AgentHub
         }
 
         var situation = SituationOf(c);
+        // app 更新：閒置、還在等背景工作而且放得開的，不等也不停——放開程序留給新版接回（AgentHub.Detach.cs）
+        if (ShouldDetachForAppUpdate(c, plan, situation))
+        {
+            StartRestartDetach(c, plan);
+            return;
+        }
         if (situation is CliRestartSituation.IdleWithBackground or CliRestartSituation.BackgroundRunning)
         {
             plan.SawBackground = true;
@@ -1615,7 +1636,7 @@ internal sealed partial class AgentHub
     internal TimeSpan RejectedSendRetryDelay { get; set; } = TimeSpan.FromSeconds(1);
 
     /// <summary>這個對話的換版步驟（關掉舊程序或 RestartAsync）進行中：不能呼叫 SendAsync</summary>
-    private static bool IsRestartInFlight(ConversationState c) => c.Restart.Plan is { InFlight: true };
+    private static bool IsRestartInFlight(ConversationState c) => c.Restart.Plan is { InFlight: true } || c.Restart.Attaching;
 
     /// <summary>
     /// 送出的最後一關（SendCoreAsync 開頭，CLI 更新的延後之後）：這個對話正在換版就不呼叫 SendAsync——Codex 會話會丟
@@ -2076,6 +2097,14 @@ internal sealed partial class AgentHub
             plan.ApplyNow = false;
             plan.Drained = false;
             plan.Waiting = null;
+            plan.CannotDetach = false;
+            if (plan.Detached is { } detached)
+            {
+                // 排空時放開的程序：這次更新沒有換掉 app（放棄了），就地接回
+                plan.Detached = null;
+                _ = ReattachDetachedAsync(c, detached, afterAppRestart: false);
+                continue;
+            }
             if (plan is { InFlight: true, StopOnly: true })
             {
                 // 停下還在進行（例如停下途中按了「取消更新」，UpdateFinished 先到）：停下有了結果時照這次的結果接續或收尾（HandleRestartResult）

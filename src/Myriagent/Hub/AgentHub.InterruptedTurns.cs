@@ -58,6 +58,12 @@ internal sealed partial class AgentHub
         /// Windows 登出、關機時先結束主控台程序（CLI），接著才問、才結束 app：那段空檔裡把標記刪掉，重新開機後就不會接續
         /// </summary>
         public DateTime? RunMarkerHeldAt;
+
+        /// <summary>
+        /// app 更新排空時放開了這個對話的程序（AgentHub.Detach.cs）：running.json 是放開之前寫的（列著背景工作），有結果之前不重寫——
+        /// 會話這時沒有程序，重寫會把背景工作的清單寫成空的；接不回去時新版要照那份清單請代理確認
+        /// </summary>
+        public bool RunMarkerFrozen;
     }
 
     /// <summary>
@@ -103,6 +109,7 @@ internal sealed partial class AgentHub
         c.RunMarkerWaitingBackground = false;
         c.RunMarkerStoppedByApp = false;
         c.RunMarkerHeldAt = null;
+        c.RunMarkerFrozen = false;
         WriteRunMarker(c, closedByApp: false);
     }
 
@@ -168,7 +175,7 @@ internal sealed partial class AgentHub
     /// </summary>
     private void RefreshRunMarker(ConversationState c, DateTime? now = null)
     {
-        if (disposed)
+        if (disposed || c.RunMarkerFrozen)
             return;
         // CLI 程序自己結束後留著的標記：期限到了 app 還在，才當成真的失敗、刪掉
         if (c.RunMarkerHeldAt is { } held && !c.Running)
@@ -211,7 +218,7 @@ internal sealed partial class AgentHub
     /// </summary>
     private void WriteRunMarker(ConversationState c, bool closedByApp, bool onlyIfChanged = false)
     {
-        if (!WantsRunMarker(c))
+        if (!WantsRunMarker(c) || c.RunMarkerFrozen)
             return;
         var now = DateTime.Now;
         // WantsRunMarker 成立而沒在執行：上一輪已回覆完、在等背景工作（沒有執行中的工具與等回應的請求）
@@ -337,6 +344,9 @@ internal sealed partial class AgentHub
         {
             try
             {
+                // 正在接回上一版放開的程序：有結果再說（成功就不是中斷；失敗由 ReattachDetachedAsync 照這份紀錄接續）
+                if (c.Restart.Attaching)
+                    continue;
                 var record = c.InterruptedTurn!;
                 c.InterruptedTurn = null;
                 if (c.Running)

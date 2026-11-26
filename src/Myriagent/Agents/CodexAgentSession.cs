@@ -359,7 +359,8 @@ internal sealed partial class CodexAgentSession : IAgentSession
         {
             ObjectDisposedException.ThrowIf(disposed, this);
             // 以新版重開進行中（停下舊程序、續接、送接續訊息）：中樞把訊息放回佇列，重開做完後再送（被打斷的那一輪這時可能還算執行中）
-            if (restart != null)
+            // 正在放開程序（app 更新排空，CodexAgentSession.Detach.cs）也一樣：放開有了結果再送
+            if (restart != null || detaching)
                 throw new AgentRestartInProgressException();
             // 閒置時 codex 自己開始的一輪還在進行（持續目標的下一輪緊接在上一輪結束後開始，中樞還沒收到事件就接著送了佇列裡的訊息）：
             // 這則接手成為這一輪，turn/start 併進進行中的那一輪（0.164.0 實測），那一輪的 turn/completed 就是這則的結束。
@@ -674,6 +675,8 @@ internal sealed partial class CodexAgentSession : IAgentSession
             process = started;
             processSignature = Signature(settings);
             processCli = settings.Cli;
+            processHasDelegation = settings.UseLocalCustomizations && settings.DelegationMcpPipeName != null;
+            processHost = settings.ProcessHost;
             parser = new CodexEventParser();
             threadId = null;
             sandboxReady = null;
@@ -1023,6 +1026,7 @@ internal sealed partial class CodexAgentSession : IAgentSession
             return;
         }
 
+        Interlocked.Increment(ref linesSeen);
         var result = currentParser.Parse(line, mainThread);
         if (result.Response is { } response)
         {

@@ -35,6 +35,25 @@ namespace Myriagent.Host
         public int NativeError;
     }
 
+    /// <summary>主機手上的一個程序（List 的回覆）</summary>
+    internal sealed class HostProcessInfo
+    {
+        public int Handle;
+        public int ProcessId;
+        public bool Exited;
+        public int? ExitCode;
+
+        /// <summary>兩條輸出各自目前的結尾位移（主機讀到的總位元組數）</summary>
+        public long OutEnd;
+        public long ErrEnd;
+
+        /// <summary>暫存超過上限、已經丟掉：接不回去（從頭的輸出不完整）</summary>
+        public bool Overflow;
+
+        /// <summary>目前有 app 接著它（輸出正在轉送）</summary>
+        public bool Attached;
+    }
+
     internal sealed class HostOutput
     {
         public int Handle;
@@ -53,10 +72,16 @@ namespace Myriagent.Host
     /// </summary>
     internal static class HostProtocol
     {
-        /// <summary>協定版本：主機回報自己的，app 只和 <see cref="MinVersion"/> 以上的主機說話</summary>
-        public const int Version = 1;
+        /// <summary>
+        /// 協定版本：兩邊在 Hello／HelloOk 各報自己的，app 只和 <see cref="MinVersion"/> 以上的主機說話。
+        /// 1＝H0（開程序、轉送、app 斷線就結束全部）；2＝H1（<see cref="KeepVersion"/>：app 交棒後保留程序、暫存輸出、新 app 接回）
+        /// </summary>
+        public const int Version = 2;
 
         public const int MinVersion = 1;
+
+        /// <summary>這一版起主機會在 app 交棒後保留程序、認得 Ack／Detach／Handoff／List／Attach；用戶端也要這一版起主機才替它留著還沒確認的輸出</summary>
+        public const int KeepVersion = 2;
 
         /// <summary>單一框的上限（防止壞掉的長度讓接收端配置很大的緩衝區）</summary>
         public const int MaxFrame = 8 * 1024 * 1024;
@@ -68,6 +93,23 @@ namespace Myriagent.Host
         public const byte CloseInput = 4;
         public const byte Shutdown = 5;
 
+        // ── 第 2 版 ──
+
+        /// <summary>app 已經處理到哪裡（兩條輸出各自的位移，整行的邊界）：主機丟掉在這之前的暫存</summary>
+        public const byte Ack = 6;
+
+        /// <summary>這個程序先不要再送輸出（app 要放開它、留給之後的 app 接回）：主機回 <see cref="Detached"/></summary>
+        public const byte Detach = 7;
+
+        /// <summary>app 要結束了、之後會有新的 app 連上來：斷線後保留程序這麼多秒，沒人連上才結束它們</summary>
+        public const byte Handoff = 8;
+
+        /// <summary>列出主機手上的程序：主機回 <see cref="ListResult"/></summary>
+        public const byte List = 9;
+
+        /// <summary>接回一個程序：從給的位移起把暫存的輸出補送、之後照常轉送；主機回 <see cref="AttachResult"/></summary>
+        public const byte Attach = 10;
+
         // 主機 → app
         public const byte HelloOk = 101;
         public const byte SpawnResult = 102;
@@ -76,6 +118,13 @@ namespace Myriagent.Host
 
         /// <summary>一次 Write 的結果（寫進去了、或那個程序的 stdin 已經關了）：app 的寫入等它，才和直接寫管線一樣在失敗時馬上知道</summary>
         public const byte WriteResult = 105;
+
+        /// <summary>Detach 的回覆：到這兩個位移為止的輸出都已經送出（在這個框之前），之後的留在主機</summary>
+        public const byte Detached = 106;
+
+        public const byte ListResult = 107;
+
+        public const byte AttachResult = 108;
 
         public const byte StdOut = 1;
         public const byte StdErr = 2;
@@ -372,6 +421,147 @@ namespace Myriagent.Host
                 throw new IOException("Exited 的本文太短");
             handle = ReadInt32(payload, 0);
             exitCode = payload[4] != 0 ? ReadInt32(payload, 5) : (int?)null;
+        }
+
+        // ───────────────────────────── 第 2 版的本文 ─────────────────────────────
+
+        /// <summary>Ack、Detached：代號（4）＋stdout 的位移（8）＋stderr 的位移（8）</summary>
+        public static byte[] EncodeOffsets(int handle, long outOffset, long errOffset)
+        {
+            var payload = new byte[20];
+            WriteInt32(payload, 0, handle);
+            WriteInt64(payload, 4, outOffset);
+            WriteInt64(payload, 12, errOffset);
+            return payload;
+        }
+
+        public static void DecodeOffsets(byte[] payload, out int handle, out long outOffset, out long errOffset)
+        {
+            if (payload.Length < 20)
+                throw new IOException("位移的本文太短");
+            handle = ReadInt32(payload, 0);
+            outOffset = ReadInt64(payload, 4);
+            errOffset = ReadInt64(payload, 12);
+        }
+
+        /// <summary>Handoff：保留幾秒（4）</summary>
+        public static byte[] EncodeHandoff(int keepSeconds)
+        {
+            return EncodeHandle(keepSeconds);
+        }
+
+        public static int DecodeHandoff(byte[] payload)
+        {
+            return DecodeHandle(payload);
+        }
+
+        /// <summary>Attach：請求編號（4）＋代號（4）＋兩個位移</summary>
+        public static byte[] EncodeAttach(int requestId, int handle, long outOffset, long errOffset)
+        {
+            var payload = new byte[24];
+            WriteInt32(payload, 0, requestId);
+            WriteInt32(payload, 4, handle);
+            WriteInt64(payload, 8, outOffset);
+            WriteInt64(payload, 16, errOffset);
+            return payload;
+        }
+
+        public static void DecodeAttach(byte[] payload, out int requestId, out int handle, out long outOffset, out long errOffset)
+        {
+            if (payload.Length < 24)
+                throw new IOException("Attach 的本文太短");
+            requestId = ReadInt32(payload, 0);
+            handle = ReadInt32(payload, 4);
+            outOffset = ReadInt64(payload, 8);
+            errOffset = ReadInt64(payload, 16);
+        }
+
+        public static byte[] EncodeAttachResult(int requestId, bool ok, string? error)
+        {
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms, Encoding.UTF8))
+            {
+                w.Write(requestId);
+                w.Write(ok);
+                w.Write(error ?? string.Empty);
+                w.Flush();
+                return ms.ToArray();
+            }
+        }
+
+        public static void DecodeAttachResult(byte[] payload, out int requestId, out bool ok, out string? error)
+        {
+            using (var r = new BinaryReader(new MemoryStream(payload), Encoding.UTF8))
+            {
+                requestId = r.ReadInt32();
+                ok = r.ReadBoolean();
+                var text = r.ReadString();
+                error = text.Length == 0 ? null : text;
+            }
+        }
+
+        public static byte[] EncodeListResult(int requestId, IList<HostProcessInfo> processes)
+        {
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms, Encoding.UTF8))
+            {
+                w.Write(requestId);
+                w.Write(processes.Count);
+                foreach (var info in processes)
+                {
+                    w.Write(info.Handle);
+                    w.Write(info.ProcessId);
+                    w.Write(info.Exited);
+                    w.Write(info.ExitCode.HasValue);
+                    w.Write(info.ExitCode ?? 0);
+                    w.Write(info.OutEnd);
+                    w.Write(info.ErrEnd);
+                    w.Write(info.Overflow);
+                    w.Write(info.Attached);
+                }
+                w.Flush();
+                return ms.ToArray();
+            }
+        }
+
+        public static List<HostProcessInfo> DecodeListResult(byte[] payload, out int requestId)
+        {
+            using (var r = new BinaryReader(new MemoryStream(payload), Encoding.UTF8))
+            {
+                requestId = r.ReadInt32();
+                int count = r.ReadInt32();
+                var list = new List<HostProcessInfo>(count);
+                for (int i = 0; i < count; i++)
+                {
+                    var info = new HostProcessInfo();
+                    info.Handle = r.ReadInt32();
+                    info.ProcessId = r.ReadInt32();
+                    info.Exited = r.ReadBoolean();
+                    bool hasCode = r.ReadBoolean();
+                    int code = r.ReadInt32();
+                    info.ExitCode = hasCode ? code : (int?)null;
+                    info.OutEnd = r.ReadInt64();
+                    info.ErrEnd = r.ReadInt64();
+                    info.Overflow = r.ReadBoolean();
+                    info.Attached = r.ReadBoolean();
+                    list.Add(info);
+                }
+                return list;
+            }
+        }
+
+        private static void WriteInt64(byte[] buffer, int offset, long value)
+        {
+            for (int i = 0; i < 8; i++)
+                buffer[offset + i] = (byte)(value >> (8 * i));
+        }
+
+        private static long ReadInt64(byte[] buffer, int offset)
+        {
+            long value = 0;
+            for (int i = 0; i < 8; i++)
+                value |= (long)buffer[offset + i] << (8 * i);
+            return value;
         }
 
         private static void WriteInt32(byte[] buffer, int offset, int value)

@@ -1,6 +1,7 @@
 // 代理主機：替 app 開 CLI 程序、轉送 stdin／stdout／stderr（設計 docs/plans/2026-11-26-agent-host.md）。
 // 不懂任何 CLI 的協定，只搬位元組。.NET Framework 4.8：Windows 內建，不受 .NET 更新刪掉修補版的影響。
-// H0：app 的連線斷了（app 結束、當掉）就結束全部程序並結束自己——行為同 CLI 直接由 app 開。之後的階段才在 app 換版時保留程序。
+// H1（協定第 2 版）：app 先說要交棒（Handoff）再斷線時，程序留著、輸出暫存在這裡，等新的 app 連上來接回（Attach）；
+// 沒說就斷線（app 當掉）照舊結束全部程序並結束自己。
 #nullable enable
 using System;
 using System.Collections.Generic;
@@ -20,13 +21,27 @@ namespace Myriagent.Host
         /// <summary>啟動後多久沒有 app 連上就結束（app 啟動主機之後馬上連線；連不上多半是 app 已經不在了）</summary>
         private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(60);
 
+        /// <summary>交棒最多保留多久（app 給的秒數超過就用這個）：新版 app 一直沒起來時不能讓 CLI 無人看管地一直跑</summary>
+        private const int MaxKeepSeconds = 30 * 60;
+
         private static readonly object WriteGate = new object();
         private static readonly object ProcessGate = new object();
         private static readonly Dictionary<int, HostedProcess> Processes = new Dictionary<int, HostedProcess>();
-        private static NamedPipeServerStream? pipe;
+        private static volatile NamedPipeServerStream? client;
         private static IntPtr job = IntPtr.Zero;
         private static string? logPath;
         private static int nextHandle;
+
+        /// <summary>目前連著的 app 說的協定版本（第 2 版起才替它留著還沒確認的輸出）</summary>
+        private static volatile int clientVersion = 1;
+
+        /// <summary>app 說要交棒：斷線後保留程序到這個時間（UTC）；null＝斷線就結束全部</summary>
+        private static DateTime? keepUntilUtc;
+
+        internal static bool ClientKeeps
+        {
+            get { return clientVersion >= HostProtocol.KeepVersion; }
+        }
 
         private static int Main(string[] args)
         {
@@ -43,34 +58,64 @@ namespace Myriagent.Host
             if (string.IsNullOrEmpty(pipeName) || string.IsNullOrEmpty(jobName))
                 return 2;
 
+            int exitCode = 0;
             try
             {
                 job = CreateJob(jobName!);
-                using (var server = CreatePipe(pipeName!))
+                var deadline = DateTime.UtcNow + ConnectTimeout;
+                while (true)
                 {
-                    pipe = server;
-                    var connecting = server.BeginWaitForConnection(null, null);
-                    if (!connecting.AsyncWaitHandle.WaitOne(ConnectTimeout))
+                    using (var server = CreatePipe(pipeName!))
                     {
-                        Log("沒有 app 連上，結束");
-                        return 3;
+                        var wait = deadline - DateTime.UtcNow;
+                        var connecting = server.BeginWaitForConnection(null, null);
+                        if (wait <= TimeSpan.Zero || !connecting.AsyncWaitHandle.WaitOne(wait))
+                        {
+                            Log(Processes.Count == 0 ? "沒有 app 連上，結束" : "交棒後沒有 app 接手，結束還在的 " + Processes.Count + " 個程序");
+                            exitCode = 3;
+                            break;
+                        }
+                        server.EndWaitForConnection(connecting);
+                        keepUntilUtc = null;
+                        clientVersion = 1;
+                        client = server;
+                        bool shutdown;
+                        try
+                        {
+                            shutdown = Serve(server);
+                        }
+                        catch (Exception ex) when (ex is IOException || ex is ObjectDisposedException || ex is InvalidOperationException)
+                        {
+                            shutdown = false;   // 連線中斷
+                        }
+                        client = null;
+                        DetachAll();
+                        if (shutdown)
+                            break;
+                        // app 沒說要交棒就斷線（當掉、被結束）：照舊結束全部程序
+                        if (keepUntilUtc == null || keepUntilUtc.Value <= DateTime.UtcNow)
+                        {
+                            if (keepUntilUtc == null && Processes.Count > 0)
+                                Log("app 的連線中斷（沒有交棒），結束還在的 " + Processes.Count + " 個程序");
+                            break;
+                        }
+                        deadline = keepUntilUtc.Value;
+                        Log("app 交棒：保留 " + Processes.Count + " 個程序，等新的 app 連上（最多到 " + deadline.ToLocalTime().ToString("HH:mm:ss") + "）");
                     }
-                    server.EndWaitForConnection(connecting);
-                    Serve(server);
                 }
             }
             catch (Exception ex)
             {
                 Log("主機失敗：" + ex);
-                return 1;
+                exitCode = 1;
             }
             finally
             {
-                // app 不在了：結束所有還在的 CLI（H0；同 app 自己的工作物件在 app 結束時做的事）
+                // 結束所有還在的 CLI（同 app 自己的工作物件在 app 結束時做的事）
                 if (job != IntPtr.Zero)
                     TerminateJobObject(job, 1);
             }
-            return 0;
+            return exitCode;
         }
 
         /// <summary>只有同一個 Windows 使用者連得上（預設的存取控制會讓 Everyone 可讀）</summary>
@@ -82,7 +127,8 @@ namespace Myriagent.Host
             return new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 1 << 16, 1 << 16, security);
         }
 
-        private static void Serve(Stream stream)
+        /// <summary>處理一條連線上的指令直到它結束；回 true＝app 要主機結束（Shutdown）</summary>
+        private static bool Serve(Stream stream)
         {
             byte type;
             byte[] payload;
@@ -91,6 +137,7 @@ namespace Myriagent.Host
                 switch (type)
                 {
                     case HostProtocol.Hello:
+                        clientVersion = payload.Length >= 4 ? HostProtocol.DecodeHello(payload) : 1;
                         Send(HostProtocol.HelloOk, HostProtocol.EncodeHelloOk(HostProtocol.Version, Process.GetCurrentProcess().Id));
                         break;
                     case HostProtocol.Spawn:
@@ -116,13 +163,68 @@ namespace Myriagent.Host
                         break;
                     }
                     case HostProtocol.CloseInput:
-                        Find(HostProtocol.DecodeHandle(payload))?.CloseInput();
+                    {
+                        var target = Find(HostProtocol.DecodeHandle(payload));
+                        if (target != null)
+                            target.CloseInput();
                         break;
+                    }
+                    case HostProtocol.Ack:
+                    {
+                        int handle;
+                        long outOffset, errOffset;
+                        HostProtocol.DecodeOffsets(payload, out handle, out outOffset, out errOffset);
+                        var target = Find(handle);
+                        if (target != null)
+                            target.Ack(outOffset, errOffset);
+                        break;
+                    }
+                    case HostProtocol.Detach:
+                    {
+                        int handle = HostProtocol.DecodeHandle(payload);
+                        var target = Find(handle);
+                        long outEnd = -1, errEnd = -1;   // -1＝沒有這個程序（已經結束、回報過了）
+                        if (target != null)
+                            target.Detach(out outEnd, out errEnd);
+                        Send(HostProtocol.Detached, HostProtocol.EncodeOffsets(handle, outEnd, errEnd));
+                        break;
+                    }
+                    case HostProtocol.Handoff:
+                    {
+                        int seconds = Math.Max(0, Math.Min(HostProtocol.DecodeHandoff(payload), MaxKeepSeconds));
+                        keepUntilUtc = seconds == 0 ? (DateTime?)null : DateTime.UtcNow.AddSeconds(seconds);
+                        break;
+                    }
+                    case HostProtocol.List:
+                    {
+                        int requestId = HostProtocol.DecodeHandle(payload);
+                        var list = new List<HostProcessInfo>();
+                        lock (ProcessGate)
+                        {
+                            foreach (var hosted in Processes.Values)
+                                list.Add(hosted.Describe());
+                        }
+                        Send(HostProtocol.ListResult, HostProtocol.EncodeListResult(requestId, list));
+                        break;
+                    }
+                    case HostProtocol.Attach:
+                    {
+                        int requestId, handle;
+                        long outOffset, errOffset;
+                        HostProtocol.DecodeAttach(payload, out requestId, out handle, out outOffset, out errOffset);
+                        var target = Find(handle);
+                        if (target == null)
+                            Send(HostProtocol.AttachResult, HostProtocol.EncodeAttachResult(requestId, false, "沒有這個程序"));
+                        else
+                            target.Attach(requestId, outOffset, errOffset);
+                        break;
+                    }
                     case HostProtocol.Shutdown:
-                        return;
+                        return true;
                     // 不認得的型別略過：新版 app 對舊主機多送的指令不能讓連線斷掉
                 }
             }
+            return false;
         }
 
         private static HostedProcess? Find(int handle)
@@ -134,15 +236,31 @@ namespace Myriagent.Host
             }
         }
 
-        /// <summary>送一個框；app 已經不在（管道斷了）回 false</summary>
+        /// <summary>app 的連線沒了：每個程序都改成只暫存、不轉送</summary>
+        private static void DetachAll()
+        {
+            List<HostedProcess> all;
+            lock (ProcessGate)
+                all = new List<HostedProcess>(Processes.Values);
+            foreach (var hosted in all)
+            {
+                long ignoredOut, ignoredErr;
+                hosted.Detach(out ignoredOut, out ignoredErr);
+            }
+        }
+
+        /// <summary>送一個框；沒有 app 連著（或管道斷了）回 false</summary>
         internal static bool Send(byte type, byte[] payload)
         {
+            var pipe = client;
+            if (pipe == null)
+                return false;
             var frame = HostProtocol.Frame(type, payload);
             try
             {
                 lock (WriteGate)
                 {
-                    pipe!.Write(frame, 0, frame.Length);
+                    pipe.Write(frame, 0, frame.Length);
                     pipe.Flush();
                 }
                 return true;
@@ -302,11 +420,42 @@ namespace Myriagent.Host
         private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
     }
 
-    /// <summary>主機開的一個 CLI 程序：兩條執行緒各讀一條輸出、轉成 Output 框；兩條都讀完、程序結束後送 Exited</summary>
+    /// <summary>
+    /// 主機開的一個 CLI 程序：兩條執行緒各讀一條輸出。有 app 接著時轉成 Output 框送出；還沒被確認的輸出留著（app 是第 2 版起）、
+    /// 沒有 app 接著時只暫存，之後 Attach 從給的位移補送。兩條都讀完、程序結束後回報 Exited（沒有 app 接著就等接回時再回報）
+    /// </summary>
     internal sealed class HostedProcess
     {
+        /// <summary>一個程序最多暫存多少位元組（兩條輸出合計）：超過就不留了，這個程序之後接不回去（由 app 結束它、照舊的方式接續）</summary>
+        private const long MaxRetained = 64L * 1024 * 1024;
+
+        private sealed class Chunk
+        {
+            public long Offset;
+            public byte[] Data = new byte[0];
+        }
+
+        private sealed class OutputStream
+        {
+            public byte Id;
+            public long End;
+            public readonly List<Chunk> Retained = new List<Chunk>();
+            public bool Closed;
+        }
+
         private readonly Process process;
         private readonly object inputGate = new object();
+
+        /// <summary>保護兩條輸出的暫存、attached、結束狀態：附加與送出在同一把鎖裡，接回時補送的和之後即時的才不會重疊或顛倒</summary>
+        private readonly object gate = new object();
+        private readonly OutputStream stdout = new OutputStream { Id = HostProtocol.StdOut };
+        private readonly OutputStream stderr = new OutputStream { Id = HostProtocol.StdErr };
+        private bool attached = true;
+        private bool overflow;
+        private long retainedBytes;
+        private bool exited;
+        private int? exitCode;
+        private bool exitReported;
 
         /// <summary>
         /// 等著寫進 stdin 的資料（null＝關閉 stdin）：由這個程序自己的執行緒依序寫。不在讀指令的那條執行緒上寫——
@@ -315,25 +464,241 @@ namespace Myriagent.Host
         private readonly System.Collections.Concurrent.BlockingCollection<KeyValuePair<int, byte[]?>> input
             = new System.Collections.Concurrent.BlockingCollection<KeyValuePair<int, byte[]?>>();
 
-        private int streamsOpen = 2;
         private bool inputClosed;
 
         public HostedProcess(int handle, Process process)
         {
             Handle = handle;
             this.process = process;
+            ProcessId = process.Id;
         }
 
         public int Handle { get; private set; }
 
+        public int ProcessId { get; private set; }
+
         /// <summary>開始轉送輸出（SpawnResult 送出之後才呼叫）</summary>
         public void StartPumps()
         {
-            Start("stdout", HostProtocol.StdOut, process.StandardOutput.BaseStream);
-            Start("stderr", HostProtocol.StdErr, process.StandardError.BaseStream);
-            var writer = new Thread(WriteLoop) { IsBackground = true, Name = "host " + process.Id + " stdin" };
+            Start("stdout", stdout, process.StandardOutput.BaseStream);
+            Start("stderr", stderr, process.StandardError.BaseStream);
+            var writer = new Thread(WriteLoop) { IsBackground = true, Name = "host " + ProcessId + " stdin" };
             writer.Start();
         }
+
+        private void Start(string name, OutputStream target, Stream source)
+        {
+            var thread = new Thread(() => Pump(target, source)) { IsBackground = true, Name = "host " + ProcessId + " " + name };
+            thread.Start();
+        }
+
+        private void Pump(OutputStream target, Stream source)
+        {
+            var buffer = new byte[64 * 1024];
+            try
+            {
+                while (true)
+                {
+                    int n = source.Read(buffer, 0, buffer.Length);
+                    if (n <= 0)
+                        break;
+                    var data = new byte[n];
+                    Buffer.BlockCopy(buffer, 0, data, 0, n);
+                    Append(target, data);
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is ObjectDisposedException || ex is InvalidOperationException)
+            {
+                // 程序被結束時管線關閉
+            }
+            finally
+            {
+                bool both;
+                lock (gate)
+                {
+                    target.Closed = true;
+                    both = stdout.Closed && stderr.Closed;
+                }
+                if (both)
+                    OnBothClosed();
+            }
+        }
+
+        private void Append(OutputStream target, byte[] data)
+        {
+            lock (gate)
+            {
+                long offset = target.End;
+                target.End += data.Length;
+                bool sent = attached && Program.Send(HostProtocol.Output, HostProtocol.EncodeOutput(Handle, target.Id, offset, data, data.Length));
+                // 送出去了、app 又不會確認（第 1 版）的不必留；其餘留到 app 確認（Ack）為止
+                if (overflow || (sent && !Program.ClientKeeps))
+                    return;
+                target.Retained.Add(new Chunk { Offset = offset, Data = data });
+                retainedBytes += data.Length;
+                if (retainedBytes > MaxRetained)
+                {
+                    overflow = true;
+                    stdout.Retained.Clear();
+                    stderr.Retained.Clear();
+                    retainedBytes = 0;
+                    Program.Log("程序 " + ProcessId + " 的暫存超過上限，之後接不回去");
+                }
+            }
+        }
+
+        private void OnBothClosed()
+        {
+            int? code = null;
+            try
+            {
+                process.WaitForExit();
+                code = process.ExitCode;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is Win32Exception)
+            {
+            }
+            bool forget;
+            lock (gate)
+            {
+                exited = true;
+                exitCode = code;
+                forget = ReportExitLocked();
+            }
+            // 還排著的寫入都算失敗（app 那邊等著的寫入由 Exited 一併結束）；寫入的執行緒跟著結束
+            input.CompleteAdding();
+            if (forget)
+                Release();
+        }
+
+        /// <summary>有 app 接著才回報結束（回 true＝回報了，可以忘掉這個程序）；沒有就留著，等接回時補報</summary>
+        private bool ReportExitLocked()
+        {
+            if (exitReported || !exited || !attached)
+                return false;
+            if (!Program.Send(HostProtocol.Exited, HostProtocol.EncodeExited(Handle, exitCode)))
+                return false;
+            exitReported = true;
+            return true;
+        }
+
+        private void Release()
+        {
+            Program.Forget(this);
+            try
+            {
+                process.Dispose();
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        // ───────────────────────────── 第 2 版：確認、放開、接回 ─────────────────────────────
+
+        public void Ack(long outOffset, long errOffset)
+        {
+            lock (gate)
+            {
+                Drop(stdout, outOffset);
+                Drop(stderr, errOffset);
+            }
+        }
+
+        private void Drop(OutputStream target, long offset)
+        {
+            int remove = 0;
+            while (remove < target.Retained.Count && target.Retained[remove].Offset + target.Retained[remove].Data.Length <= offset)
+            {
+                retainedBytes -= target.Retained[remove].Data.Length;
+                remove++;
+            }
+            if (remove > 0)
+                target.Retained.RemoveRange(0, remove);
+        }
+
+        /// <summary>先不再送輸出（app 要放開它，或 app 的連線沒了）：回目前兩條輸出的結尾——在這之前的都送過了</summary>
+        public void Detach(out long outEnd, out long errEnd)
+        {
+            lock (gate)
+            {
+                attached = false;
+                outEnd = stdout.End;
+                errEnd = stderr.End;
+            }
+        }
+
+        public HostProcessInfo Describe()
+        {
+            lock (gate)
+            {
+                return new HostProcessInfo
+                {
+                    Handle = Handle,
+                    ProcessId = ProcessId,
+                    Exited = exited,
+                    ExitCode = exitCode,
+                    OutEnd = stdout.End,
+                    ErrEnd = stderr.End,
+                    Overflow = overflow,
+                    Attached = attached,
+                };
+            }
+        }
+
+        /// <summary>
+        /// 接回：從給的位移把暫存的輸出補送，之後照常即時轉送。位移以前的已經丟掉（確認過了或超過上限）就接不回去。
+        /// 回覆（AttachResult）在補送之前送出；程序已經結束的，補送完接著回報 Exited
+        /// </summary>
+        public void Attach(int requestId, long outOffset, long errOffset)
+        {
+            bool forget = false;
+            lock (gate)
+            {
+                string? error = overflow ? "暫存的輸出超過上限、已經丟掉" : Covers(stdout, outOffset) && Covers(stderr, errOffset) ? null : "要求的位移已經不在暫存裡";
+                Program.Send(HostProtocol.AttachResult, HostProtocol.EncodeAttachResult(requestId, error == null, error));
+                if (error != null)
+                    return;
+                Replay(stdout, outOffset);
+                Replay(stderr, errOffset);
+                attached = true;
+                forget = ReportExitLocked();
+            }
+            if (forget)
+                Release();
+        }
+
+        /// <summary>暫存的輸出從這個位移起是連續的（位移剛好在結尾＝沒有要補的）</summary>
+        private static bool Covers(OutputStream target, long offset)
+        {
+            if (offset < 0 || offset > target.End)
+                return false;
+            if (offset == target.End)
+                return true;
+            return target.Retained.Count > 0 && target.Retained[0].Offset <= offset;
+        }
+
+        private void Replay(OutputStream target, long offset)
+        {
+            foreach (var chunk in target.Retained)
+            {
+                long end = chunk.Offset + chunk.Data.Length;
+                if (end <= offset)
+                    continue;
+                if (chunk.Offset >= offset)
+                {
+                    Program.Send(HostProtocol.Output, HostProtocol.EncodeOutput(Handle, target.Id, chunk.Offset, chunk.Data, chunk.Data.Length));
+                    continue;
+                }
+                // 位移落在這一段中間：只送後半
+                int skip = (int)(offset - chunk.Offset);
+                var tail = new byte[chunk.Data.Length - skip];
+                Buffer.BlockCopy(chunk.Data, skip, tail, 0, tail.Length);
+                Program.Send(HostProtocol.Output, HostProtocol.EncodeOutput(Handle, target.Id, offset, tail, tail.Length));
+            }
+        }
+
+        // ───────────────────────────── stdin ─────────────────────────────
 
         private void WriteLoop()
         {
@@ -350,63 +715,6 @@ namespace Myriagent.Host
                 }
             }
             catch (Exception ex) when (ex is ObjectDisposedException || ex is InvalidOperationException)
-            {
-            }
-        }
-
-        private void Start(string name, byte stream, Stream source)
-        {
-            var thread = new Thread(() => Pump(stream, source)) { IsBackground = true, Name = "host " + process.Id + " " + name };
-            thread.Start();
-        }
-
-        private void Pump(byte stream, Stream source)
-        {
-            var buffer = new byte[64 * 1024];
-            long offset = 0;
-            try
-            {
-                while (true)
-                {
-                    int n = source.Read(buffer, 0, buffer.Length);
-                    if (n <= 0)
-                        break;
-                    if (!Program.Send(HostProtocol.Output, HostProtocol.EncodeOutput(Handle, stream, offset, buffer, n)))
-                        break;
-                    offset += n;
-                }
-            }
-            catch (Exception ex) when (ex is IOException || ex is ObjectDisposedException || ex is InvalidOperationException)
-            {
-                // 程序被結束時管線關閉
-            }
-            finally
-            {
-                if (Interlocked.Decrement(ref streamsOpen) == 0)
-                    ReportExit();
-            }
-        }
-
-        private void ReportExit()
-        {
-            int? exitCode = null;
-            try
-            {
-                process.WaitForExit();
-                exitCode = process.ExitCode;
-            }
-            catch (Exception ex) when (ex is InvalidOperationException || ex is Win32Exception)
-            {
-            }
-            Program.Send(HostProtocol.Exited, HostProtocol.EncodeExited(Handle, exitCode));
-            Program.Forget(this);
-            // 還排著的寫入都算失敗（app 那邊等著的寫入由 Exited 一併結束）；寫入的執行緒跟著結束
-            input.CompleteAdding();
-            try
-            {
-                process.Dispose();
-            }
-            catch (Exception)
             {
             }
         }

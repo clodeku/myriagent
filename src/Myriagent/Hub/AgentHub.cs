@@ -894,6 +894,8 @@ internal sealed partial class AgentHub : IDisposable, ICliUpdateParticipant
             try
             {
                 var handledByAppResume = AppResumeConversationIds();
+                // 上一版放開的程序先接回（還在等背景工作的對話）：接回成功的不算上次中斷
+                BeginAttachDetached();
                 RunPendingResume(view, restoredDrafts);
                 RunInterruptedTurnResume(handledByAppResume);
             }

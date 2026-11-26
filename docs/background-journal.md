@@ -114,6 +114,9 @@
 | `restart.expired` | 等背景工作滿 30 分鐘，照立即套用停下 | `waitedSec`、`bg`、`programs` |
 | `restart.call` | 停下或重開一個對話的程序 | `stopOnly`、`reason`、`mode`、`autoContinue`、`noContinue`、`interrupted`（被打斷的工具）、`pending`（沒回應的請求）、`hadBackground`、`bg`（被停掉的背景工作）、`subagents`、`risk` |
 | `restart.result` | 停下或重開的結果 | `outcome`、`error` |
+| `restart.detach` | app 更新排空時放開一個對話的程序（代理主機：背景工作照跑，不等也不停） | `bg`、`bgCount` |
+| `restart.detached` | 放開的結果 | `ok`（false＝放不開，照舊等背景工作） |
+| `restart.attach` | 接回放開的程序（新版啟動後、或放棄更新時就地） | `ok`（false＝接不回去：那個程序結束掉，照 running.json 請代理確認背景工作）、`afterAppRestart` |
 | `restart.snapshot` | 排空中每 2 分鐘記一次 | `barriers`；`conversations` 列出還在等的對話：`state`、`subject`、`waitedSec`、`bg` |
 | `update.abort` | 放棄這次 app 更新 | `reason` |
 | `update.handoff` | 交棒給新版之前 | `conversations`：每個停下的對話的 `mode`、`whyNot`、`backgroundStopped` 等，也就是 resume.json 的摘要；另有 `drainSec` |

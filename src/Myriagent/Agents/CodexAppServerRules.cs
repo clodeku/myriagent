@@ -891,6 +891,30 @@ internal sealed partial class CodexEventParser
     /// </summary>
     public bool GoalActive { get; private set; }
 
+    /// <summary>
+    /// 各 thread 的 token 累計與模型（放開程序時記下，CodexAgentSession.Detach.cs）：接回同一個程序的新解析器要從這裡接著算差，
+    /// 不然接回後第一則 thread/tokenUsage/updated 會把整個對話的累計當成增量再記一次
+    /// </summary>
+    public (Dictionary<string, AgentUsage> Totals, Dictionary<string, string> Models) ExportUsage()
+        => (new Dictionary<string, AgentUsage>(threadTokenTotals, StringComparer.Ordinal), new Dictionary<string, string>(threadModels, StringComparer.Ordinal));
+
+    /// <summary>接回程序：還原 <see cref="ExportUsage"/> 記下的累計與模型（在開始讀輸出之前呼叫）</summary>
+    public void RestoreUsage(IReadOnlyDictionary<string, AgentUsage>? totals, IReadOnlyDictionary<string, string>? models, string? mainModel)
+    {
+        foreach (var (thread, total) in totals ?? new Dictionary<string, AgentUsage>())
+        {
+            if (total != null)
+                threadTokenTotals[thread] = total;
+        }
+        foreach (var (thread, model) in models ?? new Dictionary<string, string>())
+        {
+            if (!string.IsNullOrEmpty(model))
+                threadModels[thread] = model;
+        }
+        if (!string.IsNullOrEmpty(mainModel))
+            MainModel = mainModel;
+    }
+
     /// <summary>改檔項目的差異（核准卡顯示用；核准請求本身不帶差異）</summary>
     public (string? Path, IReadOnlyList<AgentDiffLine>? Diff) GetFileChange(string itemId)
     {

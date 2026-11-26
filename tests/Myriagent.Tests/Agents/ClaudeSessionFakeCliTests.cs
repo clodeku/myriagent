@@ -420,7 +420,10 @@ public abstract class ClaudeSessionFakeCliTestsBase : IDisposable
                     Emit '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_bg","content":"Command running in background with ID: b9"}]},"parent_tool_use_id":null}'
                     Say 'started'
                     DoneFor $m.uuid
-                    Start-Sleep -Milliseconds 500
+                    # FAKE_BG_DELAY_MS: how long the background task keeps running after the turn (detach/attach tests need a window)
+                    $bgDelay = 500
+                    if ($env:FAKE_BG_DELAY_MS) { $bgDelay = [int]$env:FAKE_BG_DELAY_MS }
+                    Start-Sleep -Milliseconds $bgDelay
                     Emit ('{"type":"system","subtype":"task_notification","task_id":"b9","status":"completed","summary":"done","session_id":"' + $sessionId + '"}')
                     Emit ('{"type":"system","subtype":"background_tasks_changed","tasks":[],"session_id":"' + $sessionId + '"}')
                     Init

@@ -161,15 +161,19 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         // 遠端執行指令（docs/sync-protocol.md 14.11）：被操作時執行其他電腦的代理下的指令（高風險的在這台問人）；
         // 發起時以本機管道收對話裡 myriagent-remote 的要求（管道名稱與權杖經對話 CLI 的環境變數給，myriagent-remote.exe 的資料夾放到 PATH 最前面）
         remoteExec = new RemoteExecService(Sync, new RemoteExecConfirmer(this), Path.Combine(Path.GetTempPath(), "myriagent-remote-exec"),
-            RemoteExecPipeRules.PipeName(AppPaths.Root), ConversationTitleAsync);
+            RemoteExecPipeRules.PipeName(AppPaths.Root), ConversationTitleAsync,
+            // 上一版換版時留著 CLI 程序（代理主機）：它們手上的權杖是上一版發的，新版照樣認
+            inheritedSecrets: RemoteExecSecretStore.Take(AppPaths.Root));
         Hub.AttachRemoteExec(remoteExec.Runner);
         // 正在和其他電腦傳檔案時 app 自我更新不自動重啟（AppRestartBlocker.FileTransfer）
         Hub.AttachFileTransferActivity(() => Myriagent.Sync.FileTransferActivity.Active);
         Sync.AttachRemoteExec(remoteExec);
         var remoteTool = Path.Combine(AppContext.BaseDirectory, RemoteExecHubRules.ToolFileName);
+        var installLayout = Myriagent.Update.InstallLayout.Resolve();
         var remoteSync = Sync;
         Hub.AttachRemoteExecIssuer(new RemoteExecIssuerInfo(remoteExec.PipeName, remoteExec.TokenFor,
-            File.Exists(remoteTool) ? Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory) : null, () => remoteSync.IsPairedSnapshot));
+            File.Exists(remoteTool) ? RemoteExecHubRules.StableToolDirectory(AppContext.BaseDirectory, installLayout.VersionsDirectory, installLayout.Current, File.Exists) : null,
+            () => remoteSync.IsPairedSnapshot));
         // 定時訊息（myriagent-schedule，AgentHub.TimedMessages.cs）：同一條管道、同一個對話權杖，在 UI 執行緒處理
         remoteExec.TimedHandler = (conversationId, args) => InvokeOnUiAsync(() => Hub.HandleTimedCli(conversationId, args));
         // 電腦選單的喇叭音量、立即關閉螢幕（2026-11-17，AgentHub.DeviceControl.cs）
@@ -324,6 +328,12 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
 
     /// <summary>代理主機的用戶端（設定 cliViaHost 開著時對話的 CLI 經它開）；結束時在中樞之後釋放</summary>
     private Myriagent.Agents.AgentHostClient? agentHost;
+
+    /// <summary>這次結束是換版，而且排空時放開了程序：代理主機交棒（留著程序）而不是結束</summary>
+    private bool handOffAgentHost;
+
+    /// <summary>交棒後主機最多把程序留多久等新版接手（換版實測 5～10 秒；新版啟動失敗退回舊版也在這段時間內）</summary>
+    private static readonly TimeSpan AgentHostKeep = TimeSpan.FromMinutes(10);
 
     /// <summary>對話標題（myriagent-remote 的管道在背景執行緒問；回 UI 執行緒讀）</summary>
     /// <summary>在 UI 執行緒執行、等結果（管道的要求：中樞的狀態只在 UI 執行緒）</summary>
@@ -1076,8 +1086,20 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
     private async Task HandOverExitAsync(IReadOnlySet<string> keepDrafts)
     {
         InstanceHandover.ClearRunning(AppPaths.Root);
+        PrepareAgentHostHandoff();
         await ShutdownAgentsAsync(keepDrafts);
         ExitImmediately();
+    }
+
+    /// <summary>
+    /// 換版的結束之前（中樞收尾之前問：收尾之後會話都釋放了）：排空時放開了程序（還在等背景工作的對話）就記下要交棒，
+    /// 並把對話權杖的金鑰留給新版（留下來的 CLI 程序才能照常用 myriagent-remote、myriagent-schedule）
+    /// </summary>
+    private void PrepareAgentHostHandoff()
+    {
+        handOffAgentHost = agentHost != null && Hub.DetachedProcessCount > 0;
+        if (handOffAgentHost)
+            RemoteExecSecretStore.Save(AppPaths.Root, remoteExec.ExportSecrets());
     }
 
     /// <summary>交棒給換版幫手後結束：不問（使用者不在、對話都已停下）、代理程序收尾、草稿資料夾照 keepDrafts 保留</summary>
@@ -1086,6 +1108,7 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         if (Exiting)
             return;
         Exiting = true;
+        PrepareAgentHostHandoff();
         await ShutdownAgentsAsync(keepDrafts);
         ExitImmediately();
     }
@@ -1201,8 +1224,12 @@ internal sealed class AppController : ApplicationContext, IAgentHost, IAppUpdate
         updateManager.Dispose();
         updateHelper.Dispose();   // 只放開控制代碼，不結束幫手
         Hub.Dispose();
-        // 代理主機：中樞已經把對話的 CLI 關掉了，請主機結束（還在的程序由它的工作物件結束）
-        agentHost?.Dispose();
+        // 代理主機：一般的結束請它結束（還在的程序由它的工作物件結束）。換版而且排空時放開了程序（還在等背景工作的對話）：
+        // 交棒——主機留著那些程序，新版啟動後接回；新版一直沒接手，主機到時自己結束它們
+        if (handOffAgentHost && agentHost != null && agentHost.Handoff(AgentHostKeep))
+            Log.Info("代理主機交棒給新版（放開的程序留著，背景工作照跑）");
+        else
+            agentHost?.Dispose();
         // 中樞收尾時記的最後幾筆（app.exit）要落盤：換版前最重要
         backgroundJournal.Dispose();
         systemMonitor.Dispose();

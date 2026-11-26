@@ -52,6 +52,9 @@ internal sealed class RemoteExecService : IRemoteExecEndpoint, IDisposable
     private readonly IRemoteExecTransport transport;
     private readonly Func<string, Task<string?>> conversationTitle;
     private readonly byte[] secret = RandomNumberGenerator.GetBytes(32);
+
+    /// <summary>上一版交棒的金鑰（RemoteExecSecretStore）：只拿來驗證換版時留下來的 CLI 程序手上的權杖，不拿來發新的</summary>
+    private readonly IReadOnlyList<byte[]> inheritedSecrets;
     private readonly object gate = new();
     private readonly Dictionary<string, ClientSession> sessions = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource stopping = new();
@@ -63,9 +66,11 @@ internal sealed class RemoteExecService : IRemoteExecEndpoint, IDisposable
     /// <param name="scriptDirectory">被操作時 PowerShell 的暫存腳本</param>
     /// <param name="pipeName">本機管道的名稱（<see cref="RemoteExecPipeRules.PipeName"/>）</param>
     /// <param name="conversationTitle">對話的標題（UI 執行緒取；給那台的人看是哪個對話下的）</param>
+    /// <param name="inheritedSecrets">上一版交棒的金鑰（app 換版時留著 CLI 程序才有）；null＝沒有</param>
     public RemoteExecService(IRemoteExecTransport transport, IRemoteExecConfirmer confirmer, string scriptDirectory, string pipeName,
-        Func<string, Task<string?>> conversationTitle, TimeProvider? time = null, Func<bool>? isElevated = null)
+        Func<string, Task<string?>> conversationTitle, TimeProvider? time = null, Func<bool>? isElevated = null, IReadOnlyList<byte[]>? inheritedSecrets = null)
     {
+        this.inheritedSecrets = inheritedSecrets ?? Array.Empty<byte[]>();
         this.transport = transport ?? throw new ArgumentNullException(nameof(transport));
         this.conversationTitle = conversationTitle ?? throw new ArgumentNullException(nameof(conversationTitle));
         this.time = time ?? TimeProvider.System;
@@ -96,6 +101,14 @@ internal sealed class RemoteExecService : IRemoteExecEndpoint, IDisposable
 
     /// <summary>這個對話的權杖（給對話的 CLI 的環境變數）</summary>
     public string TokenFor(string conversationId) => RemoteExecPipeRules.Token(secret, conversationId);
+
+    /// <summary>這次執行認得的金鑰（這次的在前）：app 換版而且留著 CLI 程序時交給新版（RemoteExecSecretStore.Save）</summary>
+    public IReadOnlyList<byte[]> ExportSecrets() => new[] { secret }.Concat(inheritedSecrets).ToList();
+
+    /// <summary>權杖是這個對話的：這次執行發的，或上一版發給留下來的 CLI 程序的</summary>
+    private bool VerifyToken(string conversationId, string token)
+        => RemoteExecPipeRules.VerifyToken(secret, conversationId, token)
+           || inheritedSecrets.Any(old => RemoteExecPipeRules.VerifyToken(old, conversationId, token));
 
     /// <summary>結果最多等多久：指令的上限＋等待同意＋路上的時間</summary>
     internal static TimeSpan ResultLimit(int? timeoutSeconds)
@@ -209,7 +222,7 @@ internal sealed class RemoteExecService : IRemoteExecEndpoint, IDisposable
                 return;
             }
 
-            if (!RemoteExecPipeRules.VerifyToken(secret, request.Conversation, request.Token))
+            if (!VerifyToken(request.Conversation, request.Token))
             {
                 output.Writer.TryWrite(RemoteExecPipeRules.Error(RemoteExecPipeRules.ErrorToken,
                     "權杖對不上：myriagent-remote 只能在這台 Clode Myriagent 的對話裡執行（app 更新重開之後，請讓對話重新開始一輪再試）"));

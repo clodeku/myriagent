@@ -143,6 +143,9 @@ internal sealed partial class AgentHub
     {
         if (c.PendingBackgroundFinished.Count == 0)
             return false;
+        // 正在放開或接回這個對話的程序（app 更新，AgentHub.Detach.cs）：這時送不出去（隱藏送出不排隊），跑完的留著、有結果之後再接續
+        if (IsRestartInFlight(c))
+            return false;
         // 這一輪為了等提問的回答而停下、使用者還沒回答：先不接續（代理會不等答案就接著做），留到回答送出的那一輪結束後
         if (c.PausedQuestion is { Status: AgentItemStatus.Waiting })
             return false;

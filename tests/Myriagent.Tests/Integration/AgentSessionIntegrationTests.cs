@@ -598,6 +598,65 @@ public sealed class AgentSessionIntegrationTests : IDisposable
         session.IsRunning.Should().BeFalse();
     }
 
+    /// <summary>
+    /// 代理主機 H1（設計 docs/plans/2026-11-26-agent-host.md 3.3）：真的 claude 經代理主機開，背景指令還在跑時放開程序、交棒，
+    /// 另一個用戶端與另一個會話物件（等於新版的 app）接回——背景指令沒有被動到，跑完後 CLI 自己開的一輪照常收到，之後的送出沿用同一個程序
+    /// </summary>
+    [EnvFact("MYRIAGENT_IT", Reason)]
+    public async Task Claude_等背景工作時放開程序_另一個會話接回_背景指令照常跑完_之後沿用同一個程序()
+    {
+        using var hostRoot = new TempDirectory("it-claude-detach");
+        AgentHostClient NewHost() => new(Path.Combine(AppContext.BaseDirectory, AgentHostClient.ExecutableName), hostRoot.Root, hostRoot.Combine("host.log"));
+        var first = NewHost();
+        var session = new ClaudeAgentSession();
+        var settings = Settings(AgentProvider.Claude, Guid.NewGuid().ToString(), started: false, ClaudeModel, AgentPermissionMode.FullAccess) with { ProcessHost = first };
+        var turn = await RunTurnAsync(session, new AgentTurnInput(
+            "用 Bash 工具、run_in_background 設成 true，執行 sleep 25 && echo bgdone（只執行這一個指令，不要等它結束），啟動後只回覆 started",
+            Array.Empty<AgentAttachment>()), settings);
+        turn.OfType<AgentTurnCompletedEvent>().Single().Outcome.Should().Be(AgentTurnOutcome.Completed);
+        session.HasLiveBackgroundWork.Should().BeTrue("背景指令還在跑");
+        var instance = session.ProcessInstance;
+        for (int i = 0; i < 50 && !session.CanDetachProcess; i++)
+            await Task.Delay(100);
+        session.CanDetachProcess.Should().BeTrue();
+
+        var state = await session.DetachProcessAsync();
+
+        state.Should().NotBeNull();
+        output.WriteLine(state!.ToString());
+        session.HasLiveProcess.Should().BeFalse();
+        first.Handoff(TimeSpan.FromSeconds(120)).Should().BeTrue();
+        session.Dispose();
+
+        using var second = NewHost();
+        using var resumed = new ClaudeAgentSession();
+        var all = new BlockingCollection<AgentEvent>();
+        resumed.EventReceived += all.Add;
+        var attachSettings = settings with { SessionStarted = true, ProcessHost = second };
+        (await resumed.AttachProcessAsync(Newtonsoft.Json.Linq.JObject.Parse(state.ToString()), attachSettings)).Should().BeTrue();
+        resumed.ProcessInstance.Should().Be(instance);
+        resumed.HasLiveBackgroundWork.Should().BeTrue("接回之後背景指令還算在跑");
+        resumed.LiveBackgroundTools.Should().ContainSingle();
+
+        var own = new List<AgentEvent>();
+        var deadline = DateTime.UtcNow + TurnTimeout;
+        while (DateTime.UtcNow < deadline && own.LastOrDefault() is not AgentTurnCompletedEvent)
+        {
+            if (!all.TryTake(out var ev, TimeSpan.FromSeconds(1)))
+                continue;
+            own.Add(ev);
+            output.WriteLine($"{ev.GetType().Name}: {Describe(ev)}");
+        }
+        own.OfType<AgentIdleTurnStartedEvent>().Should().ContainSingle("背景指令跑完，CLI 自己開了一輪").Which.AfterBackgroundTask.Should().BeTrue();
+        own.OfType<AgentTurnCompletedEvent>().Should().ContainSingle().Which.Outcome.Should().Be(AgentTurnOutcome.Completed);
+        resumed.HasLiveBackgroundWork.Should().BeFalse();
+
+        var next = await RunTurnAsync(resumed, new AgentTurnInput("剛才那個背景指令最後印出了哪個英文單字？只回覆那個單字", Array.Empty<AgentAttachment>()), attachSettings);
+        next.OfType<AgentProcessStartedEvent>().Should().BeEmpty("沿用接回的程序，沒有重開");
+        next.OfType<AgentTextCompletedEvent>().Last().Text.Should().Contain("bgdone");
+        await resumed.CloseAsync();
+    }
+
     [EnvFact("MYRIAGENT_IT", Reason)]
     public async Task Codex_背景指令_這一輪結束時還在跑就回報背景工作_跑完回報結束碼與耗時_不會自己開一輪()
     {

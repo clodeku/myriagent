@@ -14,6 +14,16 @@ public sealed class AgentHubProcessHostTests
     {
         public HostedProcess Spawn(string fileName, IReadOnlyList<string> arguments, string workingDirectory, IReadOnlyList<KeyValuePair<string, string>> environment)
             => throw new AgentHostUnavailableException("測試用的主機不開程序");
+
+        public HostedProcess Attach(AgentProcessDetachState state) => throw new AgentHostUnavailableException("測試用的主機不接回程序");
+
+        public void Discard(AgentProcessDetachState state)
+        {
+        }
+
+        public void DiscardUnclaimed()
+        {
+        }
     }
 
     [Fact]

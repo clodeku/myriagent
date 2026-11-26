@@ -112,6 +112,18 @@ internal static class RemoteExecHubRules
     /// <summary>myriagent-remote 的執行檔名稱（和 app 放在同一個資料夾）</summary>
     public const string ToolFileName = "myriagent-remote.exe";
 
+    /// <summary>
+    /// 放進對話 CLI 的 PATH 的資料夾：app 從受管安裝的 <c>versions\&lt;版本&gt;\</c> 執行時改用 <c>current</c>（junction，換版後指到新版）——
+    /// app 換版時留下來的 CLI 程序（代理主機 H1）PATH 才不會指著之後被清掉的舊版資料夾。其他情況（開發版、current 裡沒有工具）用 app 自己的資料夾
+    /// </summary>
+    public static string StableToolDirectory(string baseDirectory, string versionsDirectory, string currentDirectory, Func<string, bool> fileExists)
+    {
+        var dir = Path.TrimEndingDirectorySeparator(baseDirectory);
+        var parent = Path.GetDirectoryName(dir);
+        bool managed = parent != null && string.Equals(Path.TrimEndingDirectorySeparator(parent), Path.TrimEndingDirectorySeparator(versionsDirectory), StringComparison.OrdinalIgnoreCase);
+        return managed && fileExists(Path.Combine(currentDirectory, ToolFileName)) ? Path.TrimEndingDirectorySeparator(currentDirectory) : dir;
+    }
+
     /// <summary>已配對時附在給代理的說明後面（Claude 的 --append-system-prompt、Codex 的 developerInstructions…）</summary>
     public const string InstructionsHint =
         "\n\n這台電腦已和其他電腦配對。要在其他配對的電腦執行主控台指令，用 myriagent-remote（已在 PATH）：" +

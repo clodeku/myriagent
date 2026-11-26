@@ -247,6 +247,24 @@ public abstract class CodexAgentSessionTestsBase : IDisposable
                 if ($scenario -eq 'background_exit') { exit 0 }
                 Emit '{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"bg1","command":"npm test","cwd":"C:/w1","status":"completed","exitCode":1,"durationMs":26891,"aggregatedOutput":"1 failed","source":"unifiedExecStartup","processId":"12"},"threadId":"thread-fake","turnId":"turn-1"}}'
             }
+            'background_keep' {
+                # detach/attach (agent host H1): the background command outlives the turn by FAKE_BG_DELAY_MS, then the same
+                # process serves one more turn; token totals keep counting up across both turns
+                Emit '{"method":"item/started","params":{"item":{"type":"commandExecution","id":"bg1","command":"npm test","cwd":"C:/w1","status":"inProgress","source":"unifiedExecStartup","processId":"12"},"threadId":"thread-fake","turnId":"turn-1"}}'
+                Emit '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-fake","turnId":"turn-1","tokenUsage":{"total":{"totalTokens":120,"inputTokens":100,"cachedInputTokens":0,"outputTokens":20},"last":{"totalTokens":120,"inputTokens":100,"cachedInputTokens":0,"outputTokens":20}}}}'
+                Emit ('{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-final","text":"started"},"threadId":"thread-fake","turnId":"turn-1"}}')
+                Emit ('{"method":"turn/completed","params":{"threadId":"thread-fake","turn":{"id":"turn-1","items":[],"status":"completed","error":null}}}')
+                $bgDelay = 500
+                if ($env:FAKE_BG_DELAY_MS) { $bgDelay = [int]$env:FAKE_BG_DELAY_MS }
+                Start-Sleep -Milliseconds $bgDelay
+                Emit '{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"bg1","command":"npm test","cwd":"C:/w1","status":"completed","exitCode":0,"durationMs":4000,"aggregatedOutput":"all passed","source":"unifiedExecStartup","processId":"12"},"threadId":"thread-fake","turnId":"turn-1"}}'
+                $script:turnStarted = $false
+                while (-not $script:turnStarted) { $null = Pump }
+                Emit '{"method":"turn/started","params":{"threadId":"thread-fake","turn":{"id":"turn-1","status":"inProgress"}}}'
+                Emit '{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-fake","turnId":"turn-1","tokenUsage":{"total":{"totalTokens":180,"inputTokens":150,"cachedInputTokens":0,"outputTokens":30},"last":{"totalTokens":60,"inputTokens":50,"cachedInputTokens":0,"outputTokens":10}}}}'
+                Emit ('{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-2","text":"second:' + [string]::Join(',', $calls) + '"},"threadId":"thread-fake","turnId":"turn-1"}}')
+                Emit ('{"method":"turn/completed","params":{"threadId":"thread-fake","turn":{"id":"turn-1","items":[],"status":"completed","error":null}}}')
+            }
             'background_stop' {
                 # a unified_exec command still running when the turn completes; it only ends when the host stops it
                 Emit '{"method":"item/started","params":{"item":{"type":"commandExecution","id":"bg1","command":"npm test","cwd":"C:/w1","status":"inProgress","source":"unifiedExecStartup","processId":"12"},"threadId":"thread-fake","turnId":"turn-1"}}'

@@ -65,7 +65,8 @@ internal sealed partial class AgentHub
     /// 2026-10-28 使用者要求桌面版換版一直等到背景工作都完成）。對話另開的背景程式（AgentHub.BackgroundPrograms）不算：它們和 CLI 脫鉤，app 重啟不影響
     /// </summary>
     internal bool BackgroundWorkRunning
-        => conversations.Values.Any(c => !c.IsReplica && c.Session is { HasLiveBackgroundWork: true } && LiveProcess(c) && IsLive(c));
+        => conversations.Values.Any(c => !c.IsReplica && c.Session is { HasLiveBackgroundWork: true } && LiveProcess(c) && IsLive(c)
+                                         && !CanKeepBackgroundAcrossUpdate(c));
 
     /// <summary>
     /// 有沒有開著 Claude Remote Control 的對話可能正從 claude.ai 或 Claude App 在用（設計 9.1 條件 1；AppUpdateRestartRules.IsRemoteInUse）：
@@ -220,7 +221,8 @@ internal sealed partial class AgentHub
         var reattach = conversations.Values.Where(c => !c.IsDraft && c.Restart.Plan is { AppUpdate: true, RemoteControl: true }
             && AgentHubRules.ShouldReattachRemoteControl(c.LastActivity, now)).ToList();
         // 等背景工作、排空逾時被停掉背景工作的：沒有停下待接續的一輪（屏障不會就地接續它），照 running.json 就地接續
-        var stoppedBackground = conversations.Values.Where(c => c.RunMarkerStoppedByApp).ToList();
+        // （放開了程序的不算：背景工作還在主機那邊跑，FinishUpdateBarrier 會就地接回，接不回去才由 ReattachDetachedAsync 接續）
+        var stoppedBackground = conversations.Values.Where(c => c.RunMarkerStoppedByApp && !c.RunMarkerFrozen).ToList();
         foreach (var provider in AppUpdateProviders)
         {
             if (!barriers.TryGetValue(provider, out var barrier) || !barrier.AppUpdate)
@@ -285,6 +287,9 @@ internal sealed partial class AgentHub
                     CliVersion = plan.FromVersion,
                 });
             }
+            // 排空時放開的程序（背景工作照跑）：新版照這份狀態接回
+            if (c.Restart.Plan is { AppUpdate: true, Detached: { } detached } && !c.IsDraft)
+                file.Attached.Add(new ResumeAttached { Id = c.Meta.Id, State = detached, Cards = DetachedCards(c) });
             if (c.Restart.DeferredSend != null && !c.IsDraft)
                 file.DeferredSends.Add(c.Meta.Id);
             // 排空關掉或停下時開著 Remote Control 的：新版沒有自動接續、也沒有延後送出的就重開程序接回遠端工作階段。

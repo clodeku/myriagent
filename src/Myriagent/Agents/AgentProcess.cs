@@ -26,6 +26,14 @@ internal sealed partial class AgentProcess : IDisposable
     private int disposed;
     private long pipeBytes;
 
+    /// <summary>兩條讀取執行緒（BeginReading 之後才有）：放開程序時等它們把已收到的整行交完</summary>
+    private Task? stdoutReader;
+    private Task? stderrReader;
+
+    /// <summary>正在放開或已經放開（DetachAsync）：讀取結束不是程序結束，不回報 Exited</summary>
+    private int detaching;
+    private int exitReported;
+
     /// <summary>stdout 的每一行（在背景執行緒呼叫）</summary>
     public event Action<AgentProcess, string>? LineReceived;
 
@@ -49,7 +57,7 @@ internal sealed partial class AgentProcess : IDisposable
     /// 這個程序實例的識別（Guid N 格式）：每次啟動都不同，app 重開後也不會和存檔裡的舊值撞號（所以不用遞增的整數）。
     /// 會話以它當 IAgentSession.ProcessInstance；核准卡的有效範圍就是產生它的實例（AgentChatItem.ProcessInstance）
     /// </summary>
-    public string InstanceId { get; } = Guid.NewGuid().ToString("N");
+    public string InstanceId { get; private init; } = Guid.NewGuid().ToString("N");
 
     public bool HasExited => exited.Task.IsCompleted;
 
@@ -188,8 +196,66 @@ internal sealed partial class AgentProcess : IDisposable
     /// </summary>
     public void BeginReading()
     {
-        PipeReadThread.Start($"agent {ProcessId} stderr", ReadStderr);
-        PipeReadThread.Start($"agent {ProcessId} stdout", ReadStdout);
+        stderrReader = PipeReadThread.Start($"agent {ProcessId} stderr", ReadStderr);
+        stdoutReader = PipeReadThread.Start($"agent {ProcessId} stdout", ReadStdout);
+    }
+
+    /// <summary>這個程序放得開、之後接得回（經主機開的，而且主機會在 app 交棒後保留程序）</summary>
+    public bool CanDetach => backend is HostedBackend { Process.CanDetach: true } && !HasExited && Volatile.Read(ref disposed) == 0;
+
+    /// <summary>
+    /// 放開這個程序、不結束它（app 換版時留給新的 app 接回；設計 docs/plans/2026-11-26-agent-host.md 3.3）：請主機先不再送輸出，
+    /// 把已經收到的整行都交給 LineReceived 之後回傳接回要用的狀態。之後這個物件不能再用（不會發 Exited）。
+    /// 回 null＝放不開（不是經主機開的、主機是舊版、程序剛好結束、逾時）：這個物件照舊可用，呼叫端照原本的方式處理。
+    /// 呼叫端要確定沒有寫到一半的 stdin、這段期間也不再寫
+    /// </summary>
+    public async Task<AgentProcessDetachState?> DetachAsync(TimeSpan timeout)
+    {
+        if (backend is not HostedBackend hosted || !CanDetach || stdoutReader == null || stderrReader == null)
+            return null;
+        Volatile.Write(ref detaching, 1);
+        bool released = false;
+        try
+        {
+            released = await hosted.Process.DetachAsync(timeout).ConfigureAwait(false);
+            if (released)
+            {
+                // 兩條讀取執行緒把已收到的整行交完（行的處理者不該卡住；真的卡住就當成放開失敗，由呼叫端結束這個程序）
+                var drained = Task.WhenAll(stdoutReader, stderrReader);
+                if (await Task.WhenAny(drained, Task.Delay(timeout)).ConfigureAwait(false) != drained)
+                {
+                    Log.Warn($"放開程序 {ProcessId} 時輸出沒有在時限內處理完");
+                    Kill();
+                    return null;
+                }
+                Interlocked.Exchange(ref disposed, 1);
+                return new AgentProcessDetachState(hosted.Process.Handle, ProcessId, hosted.Process.Output.ConsumedOffset,
+                    hosted.Process.Error.ConsumedOffset, InstanceId, PipeBytes);
+            }
+            return null;
+        }
+        finally
+        {
+            if (!released)
+            {
+                // 沒放開：照常是這個程序的主人。這段期間讀取剛好因為程序結束而停下的，補報結束
+                Volatile.Write(ref detaching, 0);
+                if (stdoutReader.IsCompleted)
+                    _ = Task.Run(ReportExit);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 接回上一個 app 放開的程序（<see cref="DetachAsync"/> 的狀態）：實例代號沿用（核准卡的有效範圍認它），輸出從記下的位移接著讀。
+    /// 同 Start：事件掛好後呼叫 BeginReading。接不回去丟 <see cref="AgentHostUnavailableException"/>
+    /// </summary>
+    public static AgentProcess Attach(IAgentProcessHost host, AgentProcessDetachState state)
+    {
+        var hosted = host.Attach(state);
+        var attached = new AgentProcess(new HostedBackend(hosted)) { ProcessId = hosted.ProcessId, InstanceId = state.InstanceId };
+        Interlocked.Exchange(ref attached.pipeBytes, state.PipeBytes);
+        return attached;
     }
 
     private void ReadStdout()
@@ -225,6 +291,9 @@ internal sealed partial class AgentProcess : IDisposable
 
     private void ReportExit()
     {
+        // 放開的程序：讀取結束不是程序結束（它還在主機那裡跑）
+        if (Volatile.Read(ref detaching) != 0 || Interlocked.Exchange(ref exitReported, 1) != 0)
+            return;
         int? exitCode = backend.WaitForExit();
 
         exited.TrySetResult(exitCode);
@@ -475,16 +544,13 @@ internal sealed partial class AgentProcess : IDisposable
         private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
         private readonly HostedProcess hosted;
 
-        public HostedBackend(HostedProcess hosted)
-        {
-            this.hosted = hosted;
-            Output = new StreamReader(hosted.Output, Utf8, detectEncodingFromByteOrderMarks: false);
-            Error = new StreamReader(hosted.Error, Utf8, detectEncodingFromByteOrderMarks: false);
-        }
+        public HostedBackend(HostedProcess hosted) => this.hosted = hosted;
 
-        public TextReader Output { get; }
+        public HostedProcess Process => hosted;
 
-        public TextReader Error { get; }
+        public TextReader Output => hosted.Output;
+
+        public TextReader Error => hosted.Error;
 
         public Task WriteAsync(string text) => hosted.WriteAsync(Utf8.GetBytes(text));
 
@@ -502,7 +568,7 @@ internal sealed partial class AgentProcess : IDisposable
                 return;
             try
             {
-                using var process = Process.GetProcessById(hosted.ProcessId);
+                using var process = System.Diagnostics.Process.GetProcessById(hosted.ProcessId);
                 process.Kill(entireProcessTree: true);
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception or NotSupportedException)
