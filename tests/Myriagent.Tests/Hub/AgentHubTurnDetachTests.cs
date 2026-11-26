@@ -415,6 +415,39 @@ public sealed class AgentHubTurnDetachTests
     }
 
     [Fact]
+    public async Task 放不開的原因記進背景活動日誌_同一個原因只記一次()
+    {
+        // 2026-11-26 實機：0.2.1028 換 0.2.1030 時執行中的 Claude 對話沒有放開，日誌裡看不出為什麼
+        var (h, _) = await NewHarnessAsync();
+        using var _h = h;
+        var journal = new FakeJournal();
+        h.Ui.Invoke(() => h.Hub.AttachBackgroundJournal(journal));
+        var (id, s) = RunningTool(h, "c1");
+        s.DetachBlocked = true;
+        s.DetachBlockerText = "control:watch-3";
+
+        var prepare = Prepare(h);
+        await h.Ui.DrainAsync();
+        h.Ui.Invoke(() => h.Hub.RunMaintenance());
+        await h.Ui.DrainAsync();
+
+        var refused = journal.Of("restart.keep").Should().ContainSingle("同一個原因只記一次").Subject;
+        refused.Value<string>("conv").Should().Be(id);
+        refused.Value<bool>("keep").Should().BeFalse();
+        refused.Value<string>("why").Should().Be("control:watch-3");
+        refused.Value<string>("situation").Should().Be("ToolRunning");
+
+        // 原因變了：再記一筆
+        s.DetachBlockerText = "outputTooLarge";
+        h.Raise(s, new AgentToolOutputEvent("t1", "more"));
+        h.Ui.Invoke(() => h.Hub.RunMaintenance());
+        await h.Ui.DrainAsync();
+        journal.Of("restart.keep").Select(e => e.Value<string>("why")).Should().Equal("control:watch-3", "outputTooLarge");
+        h.Ui.Invoke(() => h.Hub.AbortAppUpdate("測試"));
+        (await prepare.WaitAsync(TimeSpan.FromSeconds(5))).Ready.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task 等你回應的對話放不開_照原本的規則停下()
     {
         var (h, _) = await NewHarnessAsync();

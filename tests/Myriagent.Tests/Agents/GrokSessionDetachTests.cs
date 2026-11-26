@@ -49,6 +49,7 @@ public sealed class GrokSessionDetachTests : GrokSessionFakeCliTestsBase
         firstText.Text.Should().Be("working");
         var instance = first.ProcessInstance;
         await WaitDetachableAsync(first);
+        first.DetachBlocker.Should().BeNull();
         first.IsRunning.Should().BeTrue();
         first.IsAtSafePoint.Should().BeFalse("指令在執行");
         part1.AddRange(Drain(events1, 200));
@@ -181,6 +182,7 @@ public sealed class GrokSessionDetachTests : GrokSessionFakeCliTestsBase
         var approval = (AgentApprovalEvent)(await TakeUntilAsync(events, e => e is AgentApprovalEvent)).Last();
         await Task.Delay(200);
         session.CanDetachProcess.Should().BeFalse("有等回應的請求：放開的話那個回覆沒有人收");
+        session.DetachBlocker.Should().Be("waitingUser");
         (await session.DetachProcessAsync()).Should().BeNull();
         session.HasLiveProcess.Should().BeTrue();
         await session.RespondApprovalAsync(approval.RequestKey, AgentApprovalChoice.Allow, null);
@@ -196,6 +198,7 @@ public sealed class GrokSessionDetachTests : GrokSessionFakeCliTestsBase
             await TurnAsync(direct, directEvents, directFake.Settings(), "你好");
             await Task.Delay(300);
             direct.CanDetachProcess.Should().BeFalse("不是經主機開的");
+            direct.DetachBlocker.Should().Be("notHosted");
             (await direct.DetachProcessAsync()).Should().BeNull();
             direct.HasLiveProcess.Should().BeTrue();
             await direct.CloseAsync();

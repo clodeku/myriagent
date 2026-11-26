@@ -287,7 +287,11 @@ internal sealed class HostedProcess
         if (floor >= 0)
         {
             if (outOffset - floor > MaxHeldOutput)
-                Interlocked.CompareExchange(ref ackFloor, -1, floor);   // 這一輪的輸出太多：不留了（接回時沒有檢查點可以重播）
+            {
+                // 這一輪的輸出太多：不留了（接回時沒有檢查點可以重播）
+                if (Interlocked.CompareExchange(ref ackFloor, -1, floor) == floor)
+                    Log.Info($"代理主機的程序 {Handle}：這一輪的輸出超過 {MaxHeldOutput / (1024 * 1024)} MB，不再留著（這一輪結束之前換版放不開，照原本的規則停下）");
+            }
             else
                 outOffset = Math.Min(outOffset, floor);
         }

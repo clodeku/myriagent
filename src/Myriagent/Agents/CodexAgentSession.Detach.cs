@@ -163,6 +163,53 @@ internal sealed partial class CodexAgentSession
         return HasCheckpointLocked() || IsQuiescentLocked();
     }
 
+    public string? DetachBlocker
+    {
+        get
+        {
+            lock (gate)
+                return DetachBlockerLocked();
+        }
+    }
+
+    /// <summary>同 <see cref="CanDetachLocked"/> 的順序，回第一個擋住的原因（放得開是 null）</summary>
+    private string? DetachBlockerLocked()
+    {
+        if (disposed)
+            return "disposed";
+        if (detaching)
+            return "detaching";
+        if (replay != null)
+            return "replaying";
+        if (process == null)
+            return "noProcess";
+        if (!process.CanDetach)
+            return "notHosted";
+        if (processHasDelegation)
+            return "delegation";
+        if (threadId == null)
+            return "noThread";
+        if (restart != null)
+            return "restarting";
+        if (preparing != null)
+            return "preparing";
+        if (suspendedThread != null)
+            return "suspended";
+        if (sandboxSetup != null)
+            return "sandboxSetup";
+        if (interruptRequested)
+            return "interrupting";
+        if (pendingRequests.Count > 0)
+            return "waitingUser";
+        if (!responses.IsEmpty)
+            return "rpc:" + string.Join(",", responses.Keys.Take(3));
+        if (stoppingCommands.Count > 0)
+            return "stoppingCommands";
+        if (HasCheckpointLocked() || IsQuiescentLocked())
+            return null;
+        return checkpoint == null ? "noCheckpoint" : "outputTooLarge";
+    }
+
     /// <summary>有等回覆或正在收尾的東西：放開的話那些回覆沒有人收</summary>
     private bool BlockedForDetachLocked()
         => restart != null || preparing != null || suspendedThread != null || sandboxSetup != null || interruptRequested

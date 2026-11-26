@@ -209,6 +209,56 @@ internal sealed partial class ClaudeAgentSession
         return HasCheckpointLocked() || IsQuiescentLocked();
     }
 
+    public string? DetachBlocker
+    {
+        get
+        {
+            lock (gate)
+                return DetachBlockerLocked();
+        }
+    }
+
+    /// <summary>同 <see cref="CanDetachLocked"/> 的順序，回第一個擋住的原因（放得開是 null）</summary>
+    private string? DetachBlockerLocked()
+    {
+        if (disposed)
+            return "disposed";
+        if (detaching)
+            return "detaching";
+        if (replay != null)
+            return "replaying";
+        if (process == null)
+            return "noProcess";
+        if (!process.CanDetach)
+            return "notHosted";
+        if (processSettings is not { DelegationMcpPipeName: null })
+            return "delegation";
+        if (restarting)
+            return "restarting";
+        if (payloadWriting)
+            return "payloadWriting";
+        if (autoTurn != null)
+            return "autoTurn";
+        if (reattachCompletion != null)
+            return "remoteControlReattach";
+        if (interruptRequested)
+            return "interrupting";
+        if (pendingRequests.Count > 0)
+            return "waitingUser";
+        if (controlWaiters.Count > 0)
+            return "control:" + string.Join(",", controlWaiters.Keys.Take(3));
+        if (pendingSteer != null)
+            return "steer";
+        if (remoteControlRequestId != null)
+            return "remoteControl";
+        if (running && !payloadSent)
+            return "notSent";
+        if (HasCheckpointLocked() || IsQuiescentLocked())
+            return null;
+        // 有過檢查點、主機卻沒在留：這一輪的輸出超過上限（AgentHostClient.MaxHeldOutput），被放掉了
+        return checkpoint == null ? "noCheckpoint" : "outputTooLarge";
+    }
+
     /// <summary>有寫到一半、等回覆或正在收尾的東西：放開的話那些回覆沒有人收</summary>
     private bool BlockedForDetachLocked()
         => restarting || payloadWriting || autoTurn != null || reattachCompletion != null || interruptRequested

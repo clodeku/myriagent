@@ -114,9 +114,9 @@
 | `restart.expired` | 等背景工作滿 30 分鐘，照立即套用停下 | `waitedSec`、`bg`、`programs` |
 | `restart.call` | 停下或重開一個對話的程序 | `stopOnly`、`reason`、`mode`、`autoContinue`、`noContinue`、`interrupted`（被打斷的工具）、`pending`（沒回應的請求）、`hadBackground`、`bg`（被停掉的背景工作）、`subagents`、`risk` |
 | `restart.result` | 停下或重開的結果 | `outcome`、`error` |
-| `restart.keep` | app 更新排空：這個對話記成（或不再記成）「交棒時放開」——放得開的執行中對話、等背景工作的對話不停也不等，排空的最後一步才放開程序 | `keep`、`running`、`situation`、`bgCount`；`keep` 是 false 時 `reason`（會話一直放不開、放開失敗）或 `situation`（情況變了：開始等你回應、這一輪結束而且沒有背景工作） |
+| `restart.keep` | app 更新排空：這個對話記成（或不再記成）「交棒時放開」——放得開的執行中對話、等背景工作的對話不停也不等，排空的最後一步才放開程序 | `keep`、`running`、`situation`、`bgCount`；`keep` 是 false 時 `reason`（會話一直放不開、放開失敗）或 `situation`（情況變了：開始等你回應、這一輪結束而且沒有背景工作），另帶 `why`：為什麼放不開（中樞的 waitingUser、noHost、delegation、stopRequested…，或會話的 notHosted、`control:<請求 id>`〔在途的控制請求〕、`rpc:…`、outputTooLarge〔這一輪的輸出超過主機留存的上限 32 MB〕、noCheckpoint…）；排空中沒記成交棒時放開的對話也記一筆（同一個原因只記一次） |
 | `restart.detach` | app 更新排空的最後一步放開一個對話的程序（代理主機：這一輪與背景工作照跑，不等也不停） | `running`（放開時一輪還在執行）、`bg`、`bgCount` |
-| `restart.detached` | 放開的結果 | `ok`（false＝放不開，照原本的規則到安全點停下或等背景工作）、`running` |
+| `restart.detached` | 放開的結果 | `ok`（false＝放不開，照原本的規則到安全點停下或等背景工作）、`running`、`outBytes`（這個程序到目前的輸出量）、`replayBytes`（接回時要從檢查點重播的量，Claude／Codex；接近 32 MB 的上限時這一輪換版會放不開） |
 | `restart.attach` | 接回放開的程序（新版啟動後、或放棄更新時就地） | `ok`（false＝接不回去：那個程序結束掉，照 running.json 接續被中斷的一輪或請代理確認背景工作）、`afterAppRestart`、`running`（接的是還在執行的一輪） |
 | `update.detached` | 排空的最後一步做完：放開了幾個程序（之後就交棒） | `count`、`started` |
 | `restart.snapshot` | 排空中每 2 分鐘記一次 | `barriers`；`conversations` 列出還在等的對話：`state`、`subject`、`waitedSec`、`bg` |

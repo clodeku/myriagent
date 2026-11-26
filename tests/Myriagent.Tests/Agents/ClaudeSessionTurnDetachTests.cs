@@ -43,6 +43,7 @@ public sealed class ClaudeSessionTurnDetachTests : ClaudeSessionFakeCliTestsBase
         first.IsRunning.Should().BeTrue();
         var instance = first.ProcessInstance;
         await WaitDetachableAsync(first);
+        first.DetachBlocker.Should().BeNull();
         part1.AddRange(log1.Drain(200));
 
         var state1 = await first.DetachProcessAsync();
@@ -159,6 +160,7 @@ public sealed class ClaudeSessionTurnDetachTests : ClaudeSessionFakeCliTestsBase
         await log.UntilAsync(e => e is AgentQuestionEvent);
         await Task.Delay(200);
         session.CanDetachProcess.Should().BeFalse("問卷的回覆要寫回這個程序：等使用者回應時不放");
+        session.DetachBlocker.Should().Be("waitingUser");
         (await session.DetachProcessAsync()).Should().BeNull();
         session.HasLiveProcess.Should().BeTrue();
         await session.CloseAsync();

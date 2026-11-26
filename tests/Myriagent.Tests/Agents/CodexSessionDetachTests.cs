@@ -130,6 +130,7 @@ public sealed class CodexSessionDetachTests : CodexAgentSessionTestsBase
             await TakeUntilAsync(directEvents, ev => ev is AgentTurnCompletedEvent);
             await Task.Delay(300);
             direct.CanDetachProcess.Should().BeFalse("不是經主機開的");
+            direct.DetachBlocker.Should().Be("notHosted");
             (await direct.DetachProcessAsync()).Should().BeNull();
             direct.HasLiveProcess.Should().BeTrue("放不開：程序照舊是這個會話的");
             direct.HasLiveBackgroundWork.Should().BeTrue();

@@ -219,6 +219,9 @@ internal sealed partial class AgentHub
         /// <summary>進行中的是放開程序（InFlight 也是 true）</summary>
         public bool Detaching;
 
+        /// <summary>這次排空上一次記進背景活動日誌的「放不開的原因」（一樣的不重記）</summary>
+        public string? DetachRefusal;
+
         /// <summary>這次排空試過放開、放不開：照原本的規則（到安全點停下、等背景工作），不再試</summary>
         public bool CannotDetach;
     }

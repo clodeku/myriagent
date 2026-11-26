@@ -78,8 +78,12 @@ internal sealed partial class AgentHub
             if (plan.DetachAtHandoff)
             {
                 plan.DetachAtHandoff = false;
-                Journal("restart.keep", c, new JObject { ["keep"] = false, ["situation"] = situation.ToString() });
+                Journal("restart.keep", c, new JObject { ["keep"] = false, ["situation"] = situation.ToString(), ["why"] = DetachRefusal(c, situation) });
                 MarkHeaderDirty(c);
+            }
+            else
+            {
+                NoteDetachRefusal(c, plan, situation);
             }
             return false;
         }
@@ -100,6 +104,43 @@ internal sealed partial class AgentHub
             MarkCliDirty();
         }
         return true;
+    }
+
+    /// <summary>
+    /// 這個對話為什麼放不開（診斷用，同 <see cref="CanDetachForAppUpdate"/> 的順序）：閒置沒背景工作、沒有程序的本來就照關程序，回 null 不記
+    /// </summary>
+    private string? DetachRefusal(ConversationState c, CliRestartSituation situation)
+    {
+        if (situation is CliRestartSituation.NoProcess or CliRestartSituation.Idle)
+            return null;
+        if (situation == CliRestartSituation.WaitingForUser)
+            return "waitingUser";
+        if (processHost == null)
+            return "noHost";
+        if (c.Session is not { } session)
+            return "noSession";
+        if (c.IsReplica || c.IsDraft)
+            return "replicaOrDraft";
+        if (c.Meta.Ephemeral == true)
+            return "ephemeral";
+        if (c.Meta.ParentConversationId != null || c.Meta.DelegatedAccountIds is { Count: > 0 })
+            return "delegation";
+        if (c.Running && !RunningTurnCanDetach(c))
+        {
+            return !c.Meta.SessionStarted ? "sessionNotStarted" : c.StopRequested ? "stopRequested" : c.PausingForQuestion ? "pausingForQuestion"
+                : c.SteeringMessage != null ? "steering" : c.PendingAccountSwitch != null ? "accountSwitch" : c.WaitingCount > 0 ? "waitingCard"
+                : c.Rewinding ? "rewinding" : c.MovingToBackground ? "movingToBackground" : "stoppingBackground";
+        }
+        return session.DetachBlocker;
+    }
+
+    /// <summary>排空時這個對話放不開：原因記進背景活動日誌（這次排空同一個原因只記一次）</summary>
+    private void NoteDetachRefusal(ConversationState c, RestartPlan plan, CliRestartSituation situation)
+    {
+        if (plan is not { AppUpdate: true, Drain: true } || DetachRefusal(c, situation) is not { } why || why == plan.DetachRefusal)
+            return;
+        plan.DetachRefusal = why;
+        Journal("restart.keep", c, new JObject { ["keep"] = false, ["situation"] = situation.ToString(), ["why"] = why });
     }
 
     /// <summary>記成交棒時放開、還沒放開的對話</summary>
@@ -180,8 +221,9 @@ internal sealed partial class AgentHub
         plan.CannotDetach = true;
         if (appUpdateForcedAt != null)
             plan.ApplyNow = true;
-        Log.Info($"app 更新：對話 {c.Meta.Id} 的程序放不開（{reason}），照原本的規則處理");
-        Journal("restart.keep", c, new JObject { ["keep"] = false, ["reason"] = reason });
+        var why = c.Session?.DetachBlocker;
+        Log.Info($"app 更新：對話 {c.Meta.Id} 的程序放不開（{reason}{(why == null ? string.Empty : "：" + why)}），照原本的規則處理");
+        Journal("restart.keep", c, new JObject { ["keep"] = false, ["reason"] = reason, ["why"] = why });
         EvaluateRestart(c);
     }
 
@@ -230,7 +272,16 @@ internal sealed partial class AgentHub
         var provider = c.Meta.Provider;
         if (IsLive(c) && ReferenceEquals(c.Session, session) && ReferenceEquals(c.Restart.Plan, plan))
         {
-            Journal("restart.detached", c, new JObject { ["ok"] = state != null, ["running"] = c.Running ? true : null });
+            // 這個程序到目前的輸出量、接回時要重播的量（Claude／Codex 從檢查點重播；主機留存的上限 AgentHostClient.MaxHeldOutput）
+            long? outBytes = state?["Process"]?["OutOffset"]?.Type == JTokenType.Integer ? state["Process"]!.Value<long>("OutOffset") : null;
+            long? replayFrom = state?["ReplayOut"]?.Type == JTokenType.Integer ? state.Value<long>("ReplayOut") : null;
+            Journal("restart.detached", c, new JObject
+            {
+                ["ok"] = state != null,
+                ["running"] = c.Running ? true : null,
+                ["outBytes"] = outBytes,
+                ["replayBytes"] = outBytes is { } o && replayFrom is { } r && r >= 0 && r <= o ? o - r : null,
+            });
             if (state != null)
             {
                 // 會話在放開之前發的事件都處理完了：這一輪在中樞的狀態現在記下（新版接回之前照它還原）

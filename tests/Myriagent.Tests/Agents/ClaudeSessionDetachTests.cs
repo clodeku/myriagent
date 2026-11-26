@@ -108,6 +108,7 @@ public sealed class ClaudeSessionDetachTests : ClaudeSessionFakeCliTestsBase
             using var directLog = new EventLog(direct);
             await Turn(direct, directLog, Settings("bgtask", env: new Dictionary<string, string> { ["FAKE_BG_DELAY_MS"] = "3000" }));
             direct.CanDetachProcess.Should().BeFalse("不是經主機開的");
+            direct.DetachBlocker.Should().Be("notHosted");
             (await direct.DetachProcessAsync()).Should().BeNull();
             direct.HasLiveProcess.Should().BeTrue("放不開：程序照舊是這個會話的");
             await direct.CloseAsync();

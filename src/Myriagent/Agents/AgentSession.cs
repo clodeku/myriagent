@@ -311,6 +311,12 @@ internal interface IAgentSession : IDisposable
     bool CanDetachProcess => false;
 
     /// <summary>
+    /// 現在為什麼放不開（診斷用：app 更新排空時記進背景活動日誌的 <c>restart.keep</c>，查「這個對話為什麼被停下而不是放開」）：
+    /// 放得開是 null；不支援放開的代理種類是 <c>unsupported</c>。各會話回一個短的代碼（notHosted、control:watch-3、outputTooLarge…）
+    /// </summary>
+    string? DetachBlocker => CanDetachProcess ? null : "unsupported";
+
+    /// <summary>
     /// 放開目前的程序、不結束它（app 換版時留給新的 app 接回，背景工作照跑）：回傳接回要用的狀態，之後這個會話沒有程序。
     /// 放不開回 null（程序照舊是這個會話的，呼叫端照原本的方式處理）。放開之後不發程序結束、背景工作清空的事件
     /// </summary>

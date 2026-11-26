@@ -463,6 +463,11 @@ internal sealed class FakeSession : IAgentSession
 
     public bool CanDetachProcess => Detachable && HasLiveProcess && !DetachBlocked && (!IsRunning || DetachableWhileRunning);
 
+    /// <summary>測試指定：放不開時回報的原因（null＝照 CanDetachProcess 回 null 或 unsupported）</summary>
+    public string? DetachBlockerText { get; set; }
+
+    public string? DetachBlocker => CanDetachProcess ? null : DetachBlockerText ?? "unsupported";
+
     private int detaches;
 
     public int Detaches => Volatile.Read(ref detaches);

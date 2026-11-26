@@ -84,6 +84,45 @@ internal sealed partial class AntigravityAcpSession
     private bool CanDetachLocked()
         => !disposed && !detaching && process is { CanDetach: true } && !BlockedForDetachLocked();
 
+    public string? DetachBlocker
+    {
+        get
+        {
+            lock (gate)
+                return DetachBlockerLocked();
+        }
+    }
+
+    /// <summary>同 <see cref="CanDetachLocked"/> 的順序，回第一個擋住的原因（放得開是 null）</summary>
+    private string? DetachBlockerLocked()
+    {
+        if (disposed)
+            return "disposed";
+        if (detaching)
+            return "detaching";
+        if (process == null)
+            return "noProcess";
+        if (!process.CanDetach)
+            return "notHosted";
+        if (restart != null)
+            return "restarting";
+        if (suspendedSession != null)
+            return "suspended";
+        if (preparing != null)
+            return "preparing";
+        if (interruptRequested)
+            return "interrupting";
+        if (pendingRequests.Count > 0)
+            return "waitingUser";
+        if (connection is not { HasPending: false })
+            return "rpc";
+        if (processSessionId == null)
+            return "noSession";
+        if (running && !(promptWritten && promptRequestId != null && ReferenceEquals(promptProcess, process)))
+            return "notSent";
+        return null;
+    }
+
     /// <summary>有等回覆或正在收尾的東西（放開的話那些回覆沒有人收），或這一輪的訊息還沒送出去（含在本機另外執行的斜線指令）</summary>
     private bool BlockedForDetachLocked()
         => restart != null || suspendedSession != null || preparing != null || interruptRequested

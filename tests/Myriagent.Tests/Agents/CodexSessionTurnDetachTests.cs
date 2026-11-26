@@ -52,6 +52,7 @@ public sealed class CodexSessionTurnDetachTests : CodexAgentSessionTestsBase
         tool.ToolId.Should().Be("c9");
         var instance = first.ProcessInstance;
         await WaitDetachableAsync(first);
+        first.DetachBlocker.Should().BeNull();
         first.IsRunning.Should().BeTrue();
         first.IsAtSafePoint.Should().BeFalse("指令在執行");
         part1.AddRange(Drain(events1, 200));
